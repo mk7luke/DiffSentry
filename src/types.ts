@@ -41,6 +41,7 @@ export interface PRContext {
   description: string;
   baseBranch: string;
   headBranch: string;
+  headSha: string;
   files: FileChange[];
 }
 
