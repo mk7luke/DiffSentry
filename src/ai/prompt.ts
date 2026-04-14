@@ -12,7 +12,7 @@ Your review should focus on:
 
 Guidelines:
 - Be concise and specific. Reference exact line numbers.
-- Suggest fixes, not just problems.
+- Suggest fixes, not just problems. When the fix is small enough to fit in a comment, include the exact code change as a GitHub suggestion block (\`\`\`suggestion ... \`\`\`).
 - Don't nitpick formatting or style unless it hurts readability.
 - Don't comment on things that are fine — only flag real issues.
 - If the code looks good, say so briefly.
