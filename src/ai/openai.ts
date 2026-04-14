@@ -19,9 +19,11 @@ export class OpenAIProvider implements AIProvider {
 
     log.info("Sending review request to OpenAI");
 
+    const tokenParam = this.model.startsWith("o") ? "max_completion_tokens" : "max_tokens";
+
     const response = await this.client.chat.completions.create({
       model: this.model,
-      max_tokens: 4096,
+      [tokenParam]: 4096,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
