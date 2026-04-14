@@ -65,7 +65,7 @@ npm start
 docker-compose up --build
 ```
 
-The server starts on port 3000 by default. The webhook endpoint is `POST /webhook` and a health check is available at `GET /health`.
+The server starts on port 3005 by default. The webhook endpoint is `POST /webhook` and a health check is available at `GET /health`.
 
 ## Configuration
 
@@ -80,7 +80,7 @@ The server starts on port 3000 by default. The webhook endpoint is `POST /webhoo
 | `ANTHROPIC_MODEL` | No | `claude-sonnet-4-20250514` | Anthropic model |
 | `OPENAI_API_KEY` | If openai | | OpenAI API key |
 | `OPENAI_MODEL` | No | `gpt-4o` | OpenAI model |
-| `PORT` | No | `3000` | Server port |
+| `PORT` | No | `3005` | Server port |
 | `MAX_FILES_PER_REVIEW` | No | `50` | Max files per review |
 | `IGNORED_PATTERNS` | No | | Comma-separated glob patterns to skip |
 
