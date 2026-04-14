@@ -53,6 +53,7 @@ export class GitHubClient {
       description: pr.data.body || "",
       baseBranch: pr.data.base.ref,
       headBranch: pr.data.head.ref,
+      headSha: pr.data.head.sha,
       files,
     };
   }
@@ -96,6 +97,7 @@ export class GitHubClient {
         owner: context.owner,
         repo: context.repo,
         pull_number: context.pullNumber,
+        commit_id: context.headSha,
         event: result.approval,
         body: result.summary,
         comments: validComments.map((c) => ({
@@ -121,6 +123,7 @@ export class GitHubClient {
           owner: context.owner,
           repo: context.repo,
           pull_number: context.pullNumber,
+          commit_id: context.headSha,
           event: result.approval,
           body: `${result.summary}\n\n---\n\n## Inline Comments\n\n${commentBlock}`,
         });
