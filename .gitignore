@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+private-key.pem
+*.pem
+
+# OS
+.DS_Store
+
+# Local tooling
+.claude/
+.codesurf/
+.contex/
+.omc/
+.mcp.json
