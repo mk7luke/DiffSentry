@@ -45,7 +45,7 @@ export function loadConfig(): Config {
   ];
 
   return {
-    port: parseInt(process.env.PORT || "3000", 10),
+    port: parseInt(process.env.PORT || "3005", 10),
     githubAppId: process.env.GITHUB_APP_ID,
     githubPrivateKey: privateKey,
     githubWebhookSecret: process.env.GITHUB_WEBHOOK_SECRET,
