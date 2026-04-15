@@ -320,11 +320,12 @@ export class GitHubClient {
         // Only resolve threads on files changed in this push
         if (!changedFiles.includes(thread.path)) continue;
 
-        // Only resolve threads started by a bot (GitHub App comments have login "name[bot]")
+        // Only resolve threads started by a GitHub App or bot
         const firstComment = thread.comments.nodes[0];
         if (!firstComment) continue;
-        const authorLogin = firstComment.author?.login || "";
-        if (!authorLogin.endsWith("[bot]")) continue;
+        const isAppAuthor = firstComment.authorAssociation === "APP" ||
+          firstComment.author?.login?.endsWith("[bot]");
+        if (!isAppAuthor) continue;
 
         try {
           await octokit.graphql(`
