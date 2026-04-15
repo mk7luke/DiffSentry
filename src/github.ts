@@ -390,8 +390,8 @@ export class GitHubClient {
             }
           `, { threadId: thread.id });
           resolved++;
-        } catch {
-          // Skip threads we can't resolve
+        } catch (err) {
+          log.warn({ err, threadId: thread.id }, "Failed to resolve thread");
         }
       }
       return resolved;
