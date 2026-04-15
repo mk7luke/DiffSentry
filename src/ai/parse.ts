@@ -71,7 +71,7 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
   } catch {
     log.warn({ raw: raw.slice(0, 500) }, "Failed to parse AI response as JSON, using as summary");
     return {
-      summary: raw.slice(0, 2000),
+      summary: raw.slice(0, 2000) || "Review complete (no structured response from AI).",
       comments: [],
       approval: "COMMENT",
     };

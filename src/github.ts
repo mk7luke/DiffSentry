@@ -95,6 +95,12 @@ export class GitHubClient {
     // Submit the new review
     const validComments = result.comments.filter((c) => c.line > 0 && c.path);
 
+    // GitHub rejects reviews with empty body and no comments (422)
+    if (!result.summary && validComments.length === 0) {
+      log.warn("Skipping review submission: no summary and no comments");
+      return;
+    }
+
     try {
       await octokit.pulls.createReview({
         owner: context.owner,
