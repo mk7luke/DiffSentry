@@ -134,7 +134,7 @@ export interface PRContext {
 
 // ─── AI Provider Interface ─────────────────────────────────────
 export interface AIProvider {
-  review(context: PRContext, repoConfig?: RepoConfig): Promise<ReviewResult>;
+  review(context: PRContext, repoConfig?: RepoConfig, learnings?: Learning[]): Promise<ReviewResult>;
   generateWalkthrough(context: PRContext, repoConfig?: RepoConfig): Promise<WalkthroughResult>;
   chat(context: PRContext, userMessage: string, repoConfig?: RepoConfig): Promise<string>;
 }

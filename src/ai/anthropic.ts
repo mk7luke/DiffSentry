@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { AIProvider, PRContext, ReviewResult, WalkthroughResult, RepoConfig } from "../types.js";
+import { AIProvider, PRContext, ReviewResult, WalkthroughResult, RepoConfig, Learning } from "../types.js";
 import { buildReviewPrompt, buildWalkthroughPrompt, buildChatPrompt } from "./prompt.js";
 import { parseReviewResponse, parseWalkthroughResponse } from "./parse.js";
 import { logger } from "../logger.js";
@@ -13,8 +13,8 @@ export class AnthropicProvider implements AIProvider {
     this.model = model;
   }
 
-  async review(context: PRContext, repoConfig?: RepoConfig): Promise<ReviewResult> {
-    const { system, user } = buildReviewPrompt(context, repoConfig);
+  async review(context: PRContext, repoConfig?: RepoConfig, learnings?: Learning[]): Promise<ReviewResult> {
+    const { system, user } = buildReviewPrompt(context, repoConfig, learnings);
     const log = logger.child({ provider: "anthropic", model: this.model });
 
     log.info("Sending review request to Anthropic");

@@ -181,7 +181,7 @@ export class Reviewer {
       const summaryEnabled = repoConfig.reviews?.high_level_summary !== false;
 
       const [reviewResult, walkthroughResult] = await Promise.all([
-        this.ai.review(context, repoConfig),
+        this.ai.review(context, repoConfig, relevantLearnings),
         walkthroughEnabled || summaryEnabled
           ? this.ai.generateWalkthrough(context, repoConfig)
           : Promise.resolve(null),
