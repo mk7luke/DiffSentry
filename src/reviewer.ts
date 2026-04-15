@@ -13,6 +13,7 @@ import { generateDocstrings, generateTests, simplifyCode, autofix } from "./fini
 import { logger } from "./logger.js";
 
 const WALKTHROUGH_MARKER = "<!-- DiffSentry Walkthrough -->";
+const STATUS_MARKER = "<!-- DiffSentry Status -->";
 
 // In-memory state per PR
 const pausedPRs = new Set<string>();
@@ -114,6 +115,19 @@ export class Reviewer {
         }
       }
 
+      // Post initial "in review" status comment
+      const statusBody = STATUS_MARKER + "\n" +
+        `> :eyes: **DiffSentry** is reviewing this ${mode === "full" ? "pull request" : "update"}... hang tight.`;
+      try {
+        await this.github.upsertComment(
+          installationId, owner, repo, pullNumber,
+          statusBody, STATUS_MARKER
+        );
+        log.info("Posted in-review status comment");
+      } catch (err) {
+        log.warn({ err }, "Failed to post in-review status comment");
+      }
+
       // Set pending commit status
       if (repoConfig.reviews?.commit_status !== false) {
         await this.github.setCommitStatus(
@@ -123,6 +137,21 @@ export class Reviewer {
       }
 
       if (abortController.signal.aborted) return;
+
+      // Auto-resolve addressed review threads on incremental reviews
+      if (mode === "incremental") {
+        const changedFiles = context.files.map((f) => f.filename);
+        try {
+          const resolved = await this.github.resolveAddressedThreads(
+            installationId, owner, repo, pullNumber, changedFiles
+          );
+          if (resolved > 0) {
+            log.info({ resolved }, "Auto-resolved addressed review threads");
+          }
+        } catch (err) {
+          log.warn({ err }, "Failed to auto-resolve review threads");
+        }
+      }
 
       // Apply path filters from repo config
       if (repoConfig.reviews?.path_filters) {
@@ -306,6 +335,23 @@ export class Reviewer {
         } catch (err) {
           log.warn({ err }, "Pre-merge checks failed");
         }
+      }
+
+      // Update status comment to show completion
+      const approvalEmoji = reviewResult.approval === "APPROVE" ? ":white_check_mark:"
+        : reviewResult.approval === "REQUEST_CHANGES" ? ":x:" : ":speech_balloon:";
+      const approvalText = reviewResult.approval === "APPROVE" ? "Looks good!"
+        : reviewResult.approval === "REQUEST_CHANGES" ? "Changes requested"
+        : "Review complete with comments";
+      const finalStatusBody = STATUS_MARKER + "\n" +
+        `> ${approvalEmoji} **DiffSentry** has completed the review — ${approvalText}`;
+      try {
+        await this.github.upsertComment(
+          installationId, owner, repo, pullNumber,
+          finalStatusBody, STATUS_MARKER
+        );
+      } catch (err) {
+        log.warn({ err }, "Failed to update status comment");
       }
 
       // Set final commit status

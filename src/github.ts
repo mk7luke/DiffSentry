@@ -265,13 +265,141 @@ export class GitHubClient {
     const octokit = await this.getInstallationOctokit(installationId);
     const log = logger.child({ owner, repo, pr: pullNumber });
 
-    await octokit.issues.createComment({
-      owner,
-      repo,
-      issue_number: pullNumber,
-      body: "All comments resolved by request.",
-    });
-    log.info("Posted resolve-all notice");
+    const resolved = await this.resolveReviewThreads(octokit, owner, repo, pullNumber);
+    log.info({ resolved }, "Resolved all review threads");
+  }
+
+  /**
+   * Resolve review threads on a PR where DiffSentry left comments on files
+   * that were modified in the latest push. Uses GraphQL since the REST API
+   * doesn't support resolving review threads.
+   */
+  async resolveAddressedThreads(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    changedFiles: string[]
+  ): Promise<number> {
+    const octokit = await this.getInstallationOctokit(installationId);
+    const log = logger.child({ owner, repo, pr: pullNumber });
+
+    try {
+      // Fetch all review threads via GraphQL
+      const query = `
+        query($owner: String!, $repo: String!, $pr: Int!) {
+          repository(owner: $owner, name: $repo) {
+            pullRequest(number: $pr) {
+              reviewThreads(first: 100) {
+                nodes {
+                  id
+                  isResolved
+                  path
+                  comments(first: 1) {
+                    nodes {
+                      author {
+                        login
+                      }
+                      authorAssociation
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const result: any = await octokit.graphql(query, { owner, repo, pr: pullNumber });
+      const threads = result.repository.pullRequest.reviewThreads.nodes;
+
+      let resolvedCount = 0;
+      for (const thread of threads) {
+        if (thread.isResolved) continue;
+
+        // Only resolve threads on files changed in this push
+        if (!changedFiles.includes(thread.path)) continue;
+
+        // Only resolve threads started by a GitHub App or bot
+        const firstComment = thread.comments.nodes[0];
+        if (!firstComment) continue;
+        const isAppAuthor = firstComment.authorAssociation === "APP" ||
+          firstComment.author?.login?.endsWith("[bot]");
+        if (!isAppAuthor) continue;
+
+        try {
+          await octokit.graphql(`
+            mutation($threadId: ID!) {
+              resolveReviewThread(input: { threadId: $threadId }) {
+                thread { id }
+              }
+            }
+          `, { threadId: thread.id });
+          resolvedCount++;
+        } catch (err) {
+          log.warn({ err, threadId: thread.id }, "Failed to resolve thread");
+        }
+      }
+
+      log.info({ resolvedCount, totalThreads: threads.length }, "Auto-resolved addressed review threads");
+      return resolvedCount;
+    } catch (err) {
+      log.warn({ err }, "Failed to auto-resolve review threads");
+      return 0;
+    }
+  }
+
+  /**
+   * Resolve all unresolved review threads on a PR (used by the "resolve" command).
+   */
+  private async resolveReviewThreads(
+    octokit: Octokit,
+    owner: string,
+    repo: string,
+    pullNumber: number
+  ): Promise<number> {
+    const log = logger.child({ owner, repo, pr: pullNumber });
+
+    try {
+      const query = `
+        query($owner: String!, $repo: String!, $pr: Int!) {
+          repository(owner: $owner, name: $repo) {
+            pullRequest(number: $pr) {
+              reviewThreads(first: 100) {
+                nodes {
+                  id
+                  isResolved
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const result: any = await octokit.graphql(query, { owner, repo, pr: pullNumber });
+      const threads = result.repository.pullRequest.reviewThreads.nodes;
+
+      let resolved = 0;
+      for (const thread of threads) {
+        if (thread.isResolved) continue;
+        try {
+          await octokit.graphql(`
+            mutation($threadId: ID!) {
+              resolveReviewThread(input: { threadId: $threadId }) {
+                thread { id }
+              }
+            }
+          `, { threadId: thread.id });
+          resolved++;
+        } catch (err) {
+          log.warn({ err, threadId: thread.id }, "Failed to resolve thread");
+        }
+      }
+      return resolved;
+    } catch (err) {
+      log.warn({ err }, "Failed to resolve review threads via GraphQL");
+      return 0;
+    }
   }
 
   // ─── Commit Status ──────────────────────────────────────────
