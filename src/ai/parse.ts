@@ -1,4 +1,4 @@
-import { PRContext, ReviewComment, ReviewResult } from "../types.js";
+import { PRContext, ReviewComment, ReviewResult, WalkthroughResult, CommentType, CommentSeverity } from "../types.js";
 import { logger } from "../logger.js";
 
 /**
@@ -16,12 +16,11 @@ function getDiffLines(patch: string): Set<number> {
       rightLine = parseInt(hunkMatch[1], 10);
       continue;
     }
-    if (line.startsWith("-")) continue; // removed line, don't advance right counter
+    if (line.startsWith("-")) continue;
     if (line.startsWith("+")) {
       lines.add(rightLine);
       rightLine++;
     } else {
-      // context line
       lines.add(rightLine);
       rightLine++;
     }
@@ -29,10 +28,38 @@ function getDiffLines(patch: string): Set<number> {
   return lines;
 }
 
+const VALID_TYPES: CommentType[] = ["issue", "suggestion", "nitpick"];
+const VALID_SEVERITIES: CommentSeverity[] = ["critical", "major", "minor", "trivial"];
+
+function formatCommentBody(body: string, type?: CommentType, severity?: CommentSeverity): string {
+  if (!type && !severity) return body;
+
+  const typeEmoji: Record<CommentType, string> = {
+    issue: "⚠️",
+    suggestion: "🛠️",
+    nitpick: "🧹",
+  };
+
+  const severityEmoji: Record<CommentSeverity, string> = {
+    critical: "🔴",
+    major: "🟠",
+    minor: "🟡",
+    trivial: "🔵",
+  };
+
+  const prefix = [
+    type ? `${typeEmoji[type]} **${type}**` : "",
+    severity ? `${severityEmoji[severity]} ${severity}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return prefix ? `${prefix}\n\n${body}` : body;
+}
+
 export function parseReviewResponse(raw: string, context: PRContext): ReviewResult {
   const log = logger.child({ step: "parse" });
 
-  // Strip markdown fences if the model wrapped the JSON
   let cleaned = raw.trim();
   if (cleaned.startsWith("```")) {
     cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?\s*```$/, "");
@@ -50,13 +77,11 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
     };
   }
 
-  // Build a map of valid diff lines per file
   const diffLinesByFile = new Map<string, Set<number>>();
   for (const f of context.files) {
     diffLinesByFile.set(f.filename, getDiffLines(f.patch));
   }
 
-  // Validate and clean comments
   const comments: ReviewComment[] = (parsed.comments || [])
     .filter((c: any) => {
       if (!c.path || !c.line || !c.body) return false;
@@ -72,12 +97,19 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
       }
       return true;
     })
-    .map((c: any) => ({
-      path: c.path,
-      line: c.line,
-      side: "RIGHT" as const,
-      body: c.body,
-    }));
+    .map((c: any) => {
+      const type = VALID_TYPES.includes(c.type) ? c.type as CommentType : undefined;
+      const severity = VALID_SEVERITIES.includes(c.severity) ? c.severity as CommentSeverity : undefined;
+
+      return {
+        path: c.path,
+        line: c.line,
+        side: "RIGHT" as const,
+        body: formatCommentBody(c.body, type, severity),
+        type,
+        severity,
+      };
+    });
 
   const approval = ["APPROVE", "REQUEST_CHANGES", "COMMENT"].includes(parsed.approval)
     ? parsed.approval
@@ -87,5 +119,41 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
     summary: parsed.summary || "Review complete.",
     comments,
     approval,
+  };
+}
+
+export function parseWalkthroughResponse(raw: string): WalkthroughResult {
+  const log = logger.child({ step: "parse-walkthrough" });
+
+  let cleaned = raw.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?\s*```$/, "");
+  }
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    log.warn("Failed to parse walkthrough response as JSON");
+    return {
+      summary: raw.slice(0, 2000),
+      fileDescriptions: [],
+    };
+  }
+
+  return {
+    summary: parsed.summary || "Walkthrough generated.",
+    fileDescriptions: (parsed.fileDescriptions || []).map((fd: any) => ({
+      filename: fd.filename || "",
+      status: fd.status || "modified",
+      changeDescription: fd.changeDescription || "",
+    })),
+    effortEstimate: typeof parsed.effortEstimate === "number"
+      ? Math.min(5, Math.max(1, Math.round(parsed.effortEstimate)))
+      : undefined,
+    sequenceDiagram: parsed.sequenceDiagram || undefined,
+    suggestedLabels: Array.isArray(parsed.suggestedLabels) ? parsed.suggestedLabels : undefined,
+    suggestedReviewers: Array.isArray(parsed.suggestedReviewers) ? parsed.suggestedReviewers : undefined,
+    poem: parsed.poem || undefined,
   };
 }

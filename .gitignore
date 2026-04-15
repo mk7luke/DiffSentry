@@ -4,6 +4,9 @@ dist/
 private-key.pem
 *.pem
 
+# Runtime data
+data/
+
 # OS
 .DS_Store
 
