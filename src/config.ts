@@ -56,5 +56,7 @@ export function loadConfig(): Config {
     openaiModel: process.env.OPENAI_MODEL || "gpt-4o",
     maxFilesPerReview: parseInt(process.env.MAX_FILES_PER_REVIEW || "50", 10),
     ignoredPatterns: [...defaultIgnored, ...ignoredPatterns],
+    botName: process.env.BOT_NAME || "diffsentry",
+    learningsDir: process.env.LEARNINGS_DIR || "./data/learnings",
   };
 }

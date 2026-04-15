@@ -14,7 +14,11 @@ export function createServer(config: Config) {
 
   // Health check
   app.get("/health", (_req, res) => {
-    res.json({ status: "ok", provider: config.aiProvider });
+    res.json({
+      status: "ok",
+      provider: config.aiProvider,
+      botName: config.botName,
+    });
   });
 
   // Webhook endpoint
@@ -38,34 +42,130 @@ export function createServer(config: Config) {
 
     const payload = JSON.parse(body.toString());
 
-    // Only handle PR opened and synchronized (new push) events
+    // ─── Pull Request Events ─────────────────────────────────
     if (event === "pull_request") {
       const action = payload.action;
-      if (action === "opened" || action === "synchronize") {
-        const { number } = payload.pull_request;
-        const owner = payload.repository.owner.login;
-        const repo = payload.repository.name;
-        const installationId = payload.installation?.id;
+      const { number } = payload.pull_request;
+      const owner = payload.repository.owner.login;
+      const repo = payload.repository.name;
+      const installationId = payload.installation?.id;
 
-        if (!installationId) {
-          logger.warn("No installation ID in webhook payload");
-          res.status(400).json({ error: "No installation ID" });
-          return;
-        }
+      if (!installationId) {
+        logger.warn("No installation ID in webhook payload");
+        res.status(400).json({ error: "No installation ID" });
+        return;
+      }
 
-        logger.info(
-          { owner, repo, pr: number, action },
-          "PR event received, queuing review"
-        );
-
-        // Respond immediately, process async
+      if (action === "opened") {
+        logger.info({ owner, repo, pr: number, action }, "PR opened, queuing full review");
         res.status(202).json({ status: "accepted" });
 
-        reviewer.handlePullRequest(installationId, owner, repo, number).catch((err) => {
+        reviewer.handlePullRequest(installationId, owner, repo, number, "full").catch((err) => {
           logger.error({ err, owner, repo, pr: number }, "Background review failed");
         });
         return;
       }
+
+      if (action === "synchronize") {
+        logger.info({ owner, repo, pr: number, action }, "PR updated, queuing incremental review");
+        res.status(202).json({ status: "accepted" });
+
+        reviewer.handlePullRequest(installationId, owner, repo, number, "incremental").catch((err) => {
+          logger.error({ err, owner, repo, pr: number }, "Background review failed");
+        });
+        return;
+      }
+
+      // closed — abort in-flight reviews
+      if (action === "closed") {
+        logger.info({ owner, repo, pr: number, action }, "PR closed, aborting any in-flight review");
+        reviewer.handlePRClose(owner, repo, number);
+        res.status(200).json({ status: "ok" });
+        return;
+      }
+
+      // ready_for_review — draft PR became ready
+      if (action === "ready_for_review") {
+        logger.info({ owner, repo, pr: number, action }, "PR ready for review, queuing full review");
+        res.status(202).json({ status: "accepted" });
+
+        reviewer.handlePullRequest(installationId, owner, repo, number, "full").catch((err) => {
+          logger.error({ err, owner, repo, pr: number }, "Background review failed");
+        });
+        return;
+      }
+    }
+
+    // ─── Issue Comment Events (Chat Commands) ────────────────
+    if (event === "issue_comment" && payload.action === "created") {
+      const comment = payload.comment;
+      const issue = payload.issue;
+      const owner = payload.repository.owner.login;
+      const repo = payload.repository.name;
+      const installationId = payload.installation?.id;
+
+      // Only process comments on pull requests (issues with pull_request field)
+      if (!issue.pull_request || !installationId) {
+        res.status(200).json({ status: "ignored" });
+        return;
+      }
+
+      const pullNumber = issue.number;
+      const commentBody = comment.body || "";
+      const commentId = comment.id;
+
+      // Check if our bot is mentioned
+      if (!commentBody.toLowerCase().includes(`@${config.botName.toLowerCase()}`)) {
+        res.status(200).json({ status: "ignored" });
+        return;
+      }
+
+      logger.info(
+        { owner, repo, pr: pullNumber, commentId },
+        "Bot mentioned in PR comment, processing command"
+      );
+      res.status(202).json({ status: "accepted" });
+
+      reviewer
+        .handleComment(installationId, owner, repo, pullNumber, commentBody, commentId)
+        .catch((err) => {
+          logger.error({ err, owner, repo, pr: pullNumber }, "Background comment handling failed");
+        });
+      return;
+    }
+
+    // ─── PR Review Comment Events (Reply to threads) ─────────
+    if (event === "pull_request_review_comment" && payload.action === "created") {
+      const comment = payload.comment;
+      const owner = payload.repository.owner.login;
+      const repo = payload.repository.name;
+      const pullNumber = payload.pull_request.number;
+      const installationId = payload.installation?.id;
+      const commentBody = comment.body || "";
+      const commentId = comment.id;
+
+      if (!installationId) {
+        res.status(200).json({ status: "ignored" });
+        return;
+      }
+
+      if (!commentBody.toLowerCase().includes(`@${config.botName.toLowerCase()}`)) {
+        res.status(200).json({ status: "ignored" });
+        return;
+      }
+
+      logger.info(
+        { owner, repo, pr: pullNumber, commentId },
+        "Bot mentioned in review comment, processing"
+      );
+      res.status(202).json({ status: "accepted" });
+
+      reviewer
+        .handleComment(installationId, owner, repo, pullNumber, commentBody, commentId)
+        .catch((err) => {
+          logger.error({ err, owner, repo, pr: pullNumber }, "Background review comment handling failed");
+        });
+      return;
     }
 
     res.status(200).json({ status: "ignored" });

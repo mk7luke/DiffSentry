@@ -1,0 +1,82 @@
+# DiffSentry Per-Repository Configuration
+# Place as .diffsentry.yaml in your repository root.
+# All settings are optional — sensible defaults are applied.
+
+# Review language (for AI response language)
+# language: "en-US"
+
+# Tone guidance for reviews (max 250 chars)
+# tone_instructions: "Be encouraging but thorough. Use a professional tone."
+
+reviews:
+  # Review profile: "chill" (critical issues only) or "assertive" (comprehensive)
+  profile: "chill"
+
+  # When true, DiffSentry uses REQUEST_CHANGES instead of COMMENT for issues
+  request_changes_workflow: false
+
+  # Inject an AI-generated summary into the PR description
+  high_level_summary: true
+
+  # Walkthrough comment settings
+  walkthrough:
+    enabled: true
+    collapse: true          # Wrap in <details> tag
+    changed_files_summary: true
+    sequence_diagrams: true
+    estimate_effort: true   # Show 1-5 effort rating
+    suggested_labels: true
+    suggested_reviewers: true
+    poem: false             # Generate a haiku/limerick
+
+  # Auto-review controls
+  auto_review:
+    enabled: true
+    drafts: false           # Review draft PRs
+    auto_incremental_review: true
+
+    # Only review PRs targeting these branches (regex)
+    # base_branches:
+    #   - "main"
+    #   - "develop"
+    #   - "release/.*"
+
+    # Label-based filtering (prefix with ! to exclude)
+    # labels:
+    #   - "!do-not-review"
+    #   - "!wip"
+
+    # Skip PRs with these title keywords (case-insensitive)
+    # ignore_title_keywords:
+    #   - "WIP"
+    #   - "DO NOT MERGE"
+    #   - "[skip review]"
+
+    # Skip PRs from these authors (exact match)
+    # ignore_usernames:
+    #   - "dependabot[bot]"
+    #   - "renovate[bot]"
+
+  # Path filters — control which files get reviewed
+  # Prefix with ! to exclude. Without prefix = include.
+  # path_filters:
+  #   - "!dist/**"
+  #   - "!**/*.generated.ts"
+  #   - "src/**"
+
+  # Path-specific review instructions
+  # path_instructions:
+  #   - path: "src/controllers/**"
+  #     instructions: |
+  #       Focus on authentication, authorization, and input validation.
+  #       Flag any direct database queries that bypass the ORM layer.
+  #   - path: "tests/**"
+  #     instructions: |
+  #       Ensure tests have descriptive names and cover edge cases.
+  #   - path: "src/api/**"
+  #     instructions: |
+  #       Check for proper error handling and response codes.
+  #       Verify backwards compatibility of API changes.
+
+chat:
+  auto_reply: true  # Respond to @mentions automatically
