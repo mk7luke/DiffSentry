@@ -128,48 +128,68 @@ export async function runPreMergeChecks(
 }
 
 /**
- * Format check results as a markdown comment body.
+ * Format check results as a CodeRabbit-style pre-merge checks block,
+ * suitable for embedding as a sibling <details> next to the walkthrough.
  */
 export function formatCheckResults(results: CheckResult[]): string {
-  if (results.length === 0) {
-    return "## Pre-Merge Checks\n\nNo checks configured.";
+  if (results.length === 0) return "";
+
+  const passed = results.filter((r) => r.passed);
+  const failed = results.filter((r) => !r.passed);
+  const passedCount = passed.length;
+  const failedCount = failed.length;
+
+  const summaryHeader = `🚥 Pre-merge checks | ✅ ${passedCount} | ❌ ${failedCount}`;
+
+  const sections: string[] = [];
+  sections.push(`<details>`);
+  sections.push(`<summary>${summaryHeader}</summary>`);
+  sections.push("");
+
+  if (failed.length > 0) {
+    const warnings = failed.filter((r) => r.mode === "warning").length;
+    const errors = failed.filter((r) => r.mode === "error").length;
+    const failedHeading = `### ❌ Failed checks (${[
+      errors > 0 ? `${errors} error${errors === 1 ? "" : "s"}` : "",
+      warnings > 0 ? `${warnings} warning${warnings === 1 ? "" : "s"}` : "",
+    ]
+      .filter(Boolean)
+      .join(", ")})`;
+    sections.push(failedHeading);
+    sections.push("");
+    sections.push("| Check name | Status | Explanation | Resolution |");
+    sections.push("|---|---|---|---|");
+    for (const r of failed) {
+      const status = r.mode === "warning" ? "⚠️ Warning" : "❌ Error";
+      const resolution = r.mode === "warning"
+        ? "Address before merging or downgrade to non-blocking."
+        : "Resolve the issue and re-trigger the check.";
+      sections.push(`| ${r.name} | ${status} | ${r.message} | ${resolution} |`);
+    }
+    sections.push("");
   }
 
-  const rows = results.map((r) => {
-    let status: string;
-    if (r.passed) {
-      status = "\u2705 Passed";
-    } else if (r.mode === "warning") {
-      status = "\u26a0\ufe0f Warning";
-    } else {
-      status = "\u274c Failed";
+  if (passed.length > 0) {
+    sections.push(`<details>`);
+    sections.push(`<summary>✅ Passed checks (${passedCount} passed)</summary>`);
+    sections.push("");
+    sections.push("| Check name | Status | Explanation |");
+    sections.push("|---|---|---|");
+    for (const r of passed) {
+      sections.push(`| ${r.name} | ✅ Passed | ${r.message} |`);
     }
-    return `| ${r.name} | ${status} | ${r.message} |`;
-  });
+    sections.push("");
+    sections.push(`</details>`);
+    sections.push("");
+  }
 
-  const passed = results.filter((r) => r.passed).length;
-  const warnings = results.filter(
-    (r) => !r.passed && r.mode === "warning"
-  ).length;
-  const failures = results.filter(
-    (r) => !r.passed && r.mode === "error"
-  ).length;
+  sections.push(
+    "<sub>✏️ Tip: You can configure your own custom pre-merge checks in your `.diffsentry.yaml`.</sub>",
+  );
+  sections.push("");
+  sections.push(`</details>`);
 
-  const summaryParts: string[] = [];
-  if (passed > 0) summaryParts.push(`\u2705 ${passed} passed`);
-  if (warnings > 0) summaryParts.push(`\u26a0\ufe0f ${warnings} warning`);
-  if (failures > 0) summaryParts.push(`\u274c ${failures} failed`);
-
-  return [
-    "## Pre-Merge Checks",
-    "",
-    "| Check | Status | Details |",
-    "|-------|--------|---------|",
-    ...rows,
-    "",
-    "### Summary",
-    summaryParts.join(" \u00b7 "),
-  ].join("\n");
+  return sections.join("\n");
 }
 
 /**

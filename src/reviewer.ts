@@ -22,6 +22,46 @@ function tipsFooter(botName: string): string {
   return `\n\n---\n\n<sub>Comment \`@${botName} help\` to get the list of available commands and usage tips.</sub>`;
 }
 
+function actionsPerformed(action: string, note?: string): string {
+  const inner = note ? `${action}\n\n> ${note}` : action;
+  return [
+    "<details>",
+    "<summary>✅ Actions performed</summary>",
+    "",
+    inner,
+    "",
+    "</details>",
+    "",
+    "<!-- This is an auto-generated reply by DiffSentry -->",
+  ].join("\n");
+}
+
+function pauseNotice(botName: string, reason: "manual" | "auto", threshold?: number): string {
+  const heading = "## Reviews paused";
+  const body = reason === "auto" && threshold
+    ? `It looks like this branch is under active development. To avoid overwhelming you with review comments, DiffSentry has automatically paused after ${threshold} reviewed commits. You can configure this behavior by changing the \`reviews.auto_review.auto_pause_after_reviewed_commits\` setting.`
+    : `Automatic reviews are paused for this PR.`;
+  return [
+    "> [!NOTE]",
+    `> ${heading}`,
+    "> ",
+    `> ${body}`,
+    "> ",
+    "> Use the following commands to manage reviews:",
+    `> - \`@${botName} resume\` to resume automatic reviews.`,
+    `> - \`@${botName} review\` to trigger a single review.`,
+  ].join("\n");
+}
+
+function resumeNotice(): string {
+  return [
+    "> [!NOTE]",
+    "> ## Reviews resumed",
+    "> ",
+    "> Automatic reviews have been re-enabled for this PR.",
+  ].join("\n");
+}
+
 // In-memory state per PR
 const pausedPRs = new Set<string>();
 const reviewCountByPR = new Map<string, number>();
@@ -116,7 +156,7 @@ export class Reviewer {
           pausedPRs.add(key);
           await this.github.postComment(
             installationId, owner, repo, pullNumber,
-            `Automatic reviews paused after ${pauseThreshold} reviewed commits. Use \`@${this.config.botName} resume\` to continue.`
+            pauseNotice(this.config.botName, "auto", pauseThreshold),
           );
           return;
         }
@@ -260,6 +300,39 @@ export class Reviewer {
         }
       }
 
+      // Run pre-merge checks ahead of the walkthrough so the result block can
+      // be embedded in the walkthrough comment as a sibling <details>.
+      let preMergeBlock = "";
+      let preMergeStatus: "pass" | "warning" | "fail" | null = null;
+      if (repoConfig.reviews?.pre_merge_checks) {
+        try {
+          const checkResults = await runPreMergeChecks(
+            context,
+            repoConfig.reviews.pre_merge_checks,
+            async (instruction, ctx) => {
+              const response = await this.ai.chat(
+                ctx,
+                `Pre-merge check: ${instruction}\n\nRespond with JSON: {"passed": true/false, "message": "reason"}`,
+              );
+              try {
+                const parsed = JSON.parse(
+                  response.replace(/^```json?\s*\n?/, "").replace(/\n?\s*```$/, ""),
+                );
+                return { passed: !!parsed.passed, message: parsed.message || "" };
+              } catch {
+                return { passed: true, message: "Could not evaluate" };
+              }
+            },
+          );
+          if (checkResults.length > 0) {
+            preMergeBlock = formatCheckResults(checkResults);
+            preMergeStatus = getOverallStatus(checkResults);
+          }
+        } catch (err) {
+          log.warn({ err }, "Pre-merge checks failed");
+        }
+      }
+
       // Post walkthrough comment
       if (walkthroughResult && walkthroughEnabled) {
         const walkthroughConfig = repoConfig.reviews?.walkthrough || {};
@@ -271,7 +344,12 @@ export class Reviewer {
         let walkthroughBody =
           WALKTHROUGH_MARKER + "\n" + WALKTHROUGH_START + "\n\n" + innerWithRelated + "\n\n" + WALKTHROUGH_END;
 
-        // Append linked issues section (sibling block, matches CodeRabbit pre-merge sibling pattern)
+        // Pre-merge checks block as sibling <details>
+        if (preMergeBlock) {
+          walkthroughBody += "\n\n" + preMergeBlock;
+        }
+
+        // Append linked issues section
         if (linkedIssues.length > 0) {
           walkthroughBody += "\n\n" + formatIssuesForWalkthrough(linkedIssues);
         }
@@ -288,6 +366,17 @@ export class Reviewer {
         } catch (err) {
           log.warn({ err }, "Failed to post walkthrough comment");
         }
+      }
+
+      // Pre-merge commit status (separate context from main DiffSentry status)
+      if (preMergeStatus && repoConfig.reviews?.commit_status !== false) {
+        const statusMap = { pass: "success" as const, warning: "success" as const, fail: "failure" as const };
+        await this.github.setCommitStatus(
+          installationId, owner, repo, context.headSha,
+          statusMap[preMergeStatus],
+          preMergeStatus === "fail" ? "Pre-merge checks failed" : "Pre-merge checks passed",
+          "DiffSentry / Pre-Merge"
+        ).catch(() => {});
       }
 
       // Inject summary into PR description
@@ -339,43 +428,6 @@ export class Reviewer {
         "Review complete, submitting to GitHub"
       );
       await this.github.submitReview(installationId, context, reviewResult);
-
-      // Run pre-merge checks
-      if (repoConfig.reviews?.pre_merge_checks) {
-        try {
-          const checkResults = await runPreMergeChecks(
-            context,
-            repoConfig.reviews.pre_merge_checks,
-            async (instruction, ctx) => {
-              const response = await this.ai.chat(ctx, `Pre-merge check: ${instruction}\n\nRespond with JSON: {"passed": true/false, "message": "reason"}`);
-              try {
-                const parsed = JSON.parse(response.replace(/^```json?\s*\n?/, "").replace(/\n?\s*```$/, ""));
-                return { passed: !!parsed.passed, message: parsed.message || "" };
-              } catch {
-                return { passed: true, message: "Could not evaluate" };
-              }
-            }
-          );
-
-          if (checkResults.length > 0) {
-            const checksComment = formatCheckResults(checkResults);
-            await this.github.postComment(installationId, owner, repo, pullNumber, checksComment);
-
-            const status = getOverallStatus(checkResults);
-            if (repoConfig.reviews?.commit_status !== false) {
-              const statusMap = { pass: "success" as const, warning: "success" as const, fail: "failure" as const };
-              await this.github.setCommitStatus(
-                installationId, owner, repo, context.headSha,
-                statusMap[status],
-                status === "fail" ? "Pre-merge checks failed" : "Pre-merge checks passed",
-                "DiffSentry / Pre-Merge"
-              ).catch(() => {});
-            }
-          }
-        } catch (err) {
-          log.warn({ err }, "Pre-merge checks failed");
-        }
-      }
 
       // Update status comment to show completion
       const approvalEmoji = reviewResult.approval === "APPROVE" ? ":white_check_mark:"
@@ -460,7 +512,7 @@ export class Reviewer {
         case "review": {
           await this.github.replyToComment(
             installationId, owner, repo, pullNumber, commentId,
-            "Starting incremental review..."
+            actionsPerformed("Review triggered.", "DiffSentry is an incremental review system and does not re-review already reviewed commits."),
           );
           await this.handlePullRequest(installationId, owner, repo, pullNumber, "incremental");
           break;
@@ -469,7 +521,7 @@ export class Reviewer {
         case "full_review": {
           await this.github.replyToComment(
             installationId, owner, repo, pullNumber, commentId,
-            "Starting full review..."
+            actionsPerformed("Full review triggered."),
           );
           await this.handlePullRequest(installationId, owner, repo, pullNumber, "full");
           break;
@@ -479,7 +531,7 @@ export class Reviewer {
           pausedPRs.add(key);
           await this.github.replyToComment(
             installationId, owner, repo, pullNumber, commentId,
-            `Automatic reviews **paused** for this PR. Use \`@${this.config.botName} resume\` to re-enable.`
+            pauseNotice(this.config.botName, "manual"),
           );
           break;
         }
@@ -489,7 +541,7 @@ export class Reviewer {
           reviewCountByPR.delete(key); // Reset count on resume
           await this.github.replyToComment(
             installationId, owner, repo, pullNumber, commentId,
-            "Automatic reviews **resumed** for this PR."
+            resumeNotice(),
           );
           break;
         }
@@ -498,7 +550,7 @@ export class Reviewer {
           await this.github.resolveAllComments(installationId, owner, repo, pullNumber);
           await this.github.replyToComment(
             installationId, owner, repo, pullNumber, commentId,
-            "All review comments have been marked as resolved."
+            actionsPerformed("All review comment threads marked as resolved."),
           );
           break;
         }
@@ -543,7 +595,9 @@ export class Reviewer {
           await this.learnings.addLearning(repoFullName, command.content);
           await this.github.replyToComment(
             installationId, owner, repo, pullNumber, commentId,
-            `Learning saved. I'll apply this in future reviews of **${owner}/${repo}**.`
+            actionsPerformed(
+              `Learning saved. I'll apply this in future reviews of **${owner}/${repo}**.\n\n> ${command.content}`,
+            ),
           );
           break;
         }
