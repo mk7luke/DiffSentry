@@ -127,11 +127,11 @@ Review this pull request and respond with JSON.`;
 
 // ─── Walkthrough Prompts ───────────────────────────────────────
 
-const WALKTHROUGH_SYSTEM = `You are an expert code reviewer generating a high-level walkthrough of a pull request.
+const WALKTHROUGH_SYSTEM = `You are an expert code reviewer generating a CodeRabbit-style high-level walkthrough of a pull request.
 
 You MUST respond with valid JSON matching this schema:
 {
-  "summary": "A 2-4 sentence high-level summary of what this PR does and why.",
+  "summary": "A 1-2 sentence high-level summary of what this PR does, written in past tense.",
   "fileDescriptions": [
     {
       "filename": "relative/file/path.ts",
@@ -139,20 +139,36 @@ You MUST respond with valid JSON matching this schema:
       "changeDescription": "Brief description of what changed in this file."
     }
   ],
+  "cohorts": [
+    {
+      "label": "Build & Distribution",
+      "files": ["package.json", "README.md"],
+      "summary": "Reworked npm scripts, added cross-env, updated electron-builder config."
+    }
+  ],
   "effortEstimate": 3,
-  "sequenceDiagram": "sequenceDiagram\\n    Actor User\\n    User->>Server: request\\n    Server-->>User: response",
+  "effortMinutes": 25,
+  "sequenceDiagrams": [
+    "sequenceDiagram\\n    participant User\\n    participant Server\\n    User->>Server: request\\n    Server-->>User: response"
+  ],
   "suggestedLabels": ["enhancement", "api"],
   "suggestedReviewers": [],
   "poem": ""
 }
 
 Rules:
-- "effortEstimate" is 1-5 where 1=trivial, 2=small, 3=medium, 4=large, 5=very large. Base on: lines changed, complexity, number of files, risk.
-- "sequenceDiagram" should be valid Mermaid syntax showing the key flow introduced or modified. Omit (empty string) if the changes don't involve a clear interaction flow.
-- "suggestedLabels" should be from common labels: bug, enhancement, refactor, docs, test, performance, security, breaking-change, dependencies. Only suggest what fits.
-- "suggestedReviewers" leave empty (we don't have team data).
-- "poem" should be a short (2-4 line) haiku or limerick about the PR. Can be empty string if not requested.
-- "fileDescriptions" must cover ALL changed files.
+- "summary" must be 1-2 short sentences in past tense (e.g. "Adds cross-platform build scripts and patches node-pty for Windows.").
+- "fileDescriptions" must cover ALL changed files (used as a fallback when cohorts omit a file).
+- "cohorts" groups changed files into 1-8 thematic clusters. Each cohort:
+  - "label": 2-5 word category in title case (no emoji). Examples: "Build & Distribution", "Native rebuild / postinstall", "UI zoom IPC & persistence".
+  - "files": array of file paths belonging to this cohort. Every changed file must appear in exactly one cohort.
+  - "summary": 1-2 sentence description of what changed across these files.
+- "effortEstimate": 1-5 where 1=Trivial, 2=Simple, 3=Moderate, 4=Complex, 5=Very Complex.
+- "effortMinutes": rough integer estimate of review minutes (e.g. 5, 15, 30, 60, 120).
+- "sequenceDiagrams": array of 0-3 Mermaid sequenceDiagram blocks showing key flows introduced/modified. Omit (empty array) if the changes don't involve a clear interaction flow. Each entry is a complete sequenceDiagram (without surrounding triple backticks).
+- "suggestedLabels": from common labels: bug, enhancement, refactor, docs, test, performance, security, breaking-change, dependencies. Only suggest what fits.
+- "suggestedReviewers": leave empty (no team data available).
+- "poem": short (4-6 line) poem starting with rabbit emoji. Each line ends with two trailing spaces. Empty string if not requested.
 - Return ONLY the JSON object, no markdown fences or extra text.`;
 
 export function buildWalkthroughPrompt(

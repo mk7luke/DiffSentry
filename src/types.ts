@@ -116,11 +116,21 @@ export interface ReviewResult {
 export interface WalkthroughResult {
   summary: string;
   fileDescriptions: FileDescription[];
+  cohorts?: ChangeCohort[];
   effortEstimate?: number; // 1-5
+  effortMinutes?: number;
+  sequenceDiagrams?: string[];
+  /** @deprecated use sequenceDiagrams */
   sequenceDiagram?: string;
   suggestedLabels?: string[];
   suggestedReviewers?: string[];
   poem?: string;
+}
+
+export interface ChangeCohort {
+  label: string;
+  files: string[];
+  summary: string;
 }
 
 export interface FileDescription {

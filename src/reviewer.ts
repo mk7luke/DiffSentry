@@ -14,7 +14,13 @@ import { formatReviewBody } from "./review-body.js";
 import { logger } from "./logger.js";
 
 const WALKTHROUGH_MARKER = "<!-- DiffSentry Walkthrough -->";
+const WALKTHROUGH_START = "<!-- walkthrough_start -->";
+const WALKTHROUGH_END = "<!-- walkthrough_end -->";
 const STATUS_MARKER = "<!-- DiffSentry Status -->";
+
+function tipsFooter(botName: string): string {
+  return `\n\n---\n\n<sub>Comment \`@${botName} help\` to get the list of available commands and usage tips.</sub>`;
+}
 
 // In-memory state per PR
 const pausedPRs = new Set<string>();
@@ -244,10 +250,10 @@ export class Reviewer {
             installationId, owner, repo, pullNumber, filenames
           );
           if (relatedPRs.length > 0) {
-            const rows = relatedPRs
-              .map((pr) => `| [#${pr.number}](${pr.url}) | ${pr.title} | ${pr.state} |`)
+            const bullets = relatedPRs
+              .map((pr) => `- [${owner}/${repo}#${pr.number}](${pr.url}) — ${pr.title}`)
               .join("\n");
-            relatedPRsSection = `\n\n## Related PRs\n\n| PR | Title | State |\n|---|-------|-------|\n${rows}`;
+            relatedPRsSection = `\n\n## Possibly related PRs\n\n${bullets}`;
           }
         } catch {
           // Best effort
@@ -257,20 +263,21 @@ export class Reviewer {
       // Post walkthrough comment
       if (walkthroughResult && walkthroughEnabled) {
         const walkthroughConfig = repoConfig.reviews?.walkthrough || {};
-        let walkthroughBody =
-          WALKTHROUGH_MARKER +
-          "\n" +
-          formatWalkthrough(walkthroughResult, walkthroughConfig);
+        const inner = formatWalkthrough(walkthroughResult, walkthroughConfig);
 
-        // Append linked issues section
+        // Append related PRs (inside the walkthrough block per CodeRabbit format)
+        const innerWithRelated = relatedPRsSection ? inner + relatedPRsSection : inner;
+
+        let walkthroughBody =
+          WALKTHROUGH_MARKER + "\n" + WALKTHROUGH_START + "\n\n" + innerWithRelated + "\n\n" + WALKTHROUGH_END;
+
+        // Append linked issues section (sibling block, matches CodeRabbit pre-merge sibling pattern)
         if (linkedIssues.length > 0) {
           walkthroughBody += "\n\n" + formatIssuesForWalkthrough(linkedIssues);
         }
 
-        // Append related PRs
-        if (relatedPRsSection) {
-          walkthroughBody += relatedPRsSection;
-        }
+        // Tips footer
+        walkthroughBody += tipsFooter(this.config.botName);
 
         try {
           await this.github.upsertComment(

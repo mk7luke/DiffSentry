@@ -31,6 +31,18 @@ module.exports = { add, divide };
       "📥 Commits",
       "📒 Files selected for processing",
     ],
+    walkthroughContains: [
+      "📝 Walkthrough",
+      "## Walkthrough",
+      "## Changes",
+      "🎯",
+      "minutes",
+      "walkthrough_start",
+      "walkthrough_end",
+    ],
+    issueCommentContains: [
+      "Comment `@diffsentry help`",
+    ],
     inlineCommentsContain: [
       {
         pathContains: "math.js",

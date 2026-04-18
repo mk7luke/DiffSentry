@@ -248,6 +248,26 @@ export function parseWalkthroughResponse(raw: string): WalkthroughResult {
     };
   }
 
+  const sequenceDiagrams: string[] | undefined = (() => {
+    if (Array.isArray(parsed.sequenceDiagrams)) {
+      return parsed.sequenceDiagrams.filter((s: any) => typeof s === "string" && s.trim().length > 0);
+    }
+    if (typeof parsed.sequenceDiagram === "string" && parsed.sequenceDiagram.trim().length > 0) {
+      return [parsed.sequenceDiagram];
+    }
+    return undefined;
+  })();
+
+  const cohorts = Array.isArray(parsed.cohorts)
+    ? parsed.cohorts
+        .filter((c: any) => c && typeof c.label === "string" && Array.isArray(c.files))
+        .map((c: any) => ({
+          label: c.label,
+          files: c.files.filter((f: any) => typeof f === "string"),
+          summary: typeof c.summary === "string" ? c.summary : "",
+        }))
+    : undefined;
+
   return {
     summary: parsed.summary || "Walkthrough generated.",
     fileDescriptions: (parsed.fileDescriptions || []).map((fd: any) => ({
@@ -255,10 +275,15 @@ export function parseWalkthroughResponse(raw: string): WalkthroughResult {
       status: fd.status || "modified",
       changeDescription: fd.changeDescription || "",
     })),
+    cohorts,
     effortEstimate: typeof parsed.effortEstimate === "number"
       ? Math.min(5, Math.max(1, Math.round(parsed.effortEstimate)))
       : undefined,
-    sequenceDiagram: parsed.sequenceDiagram || undefined,
+    effortMinutes: typeof parsed.effortMinutes === "number"
+      ? Math.max(1, Math.round(parsed.effortMinutes))
+      : undefined,
+    sequenceDiagrams,
+    sequenceDiagram: sequenceDiagrams?.[0],
     suggestedLabels: Array.isArray(parsed.suggestedLabels) ? parsed.suggestedLabels : undefined,
     suggestedReviewers: Array.isArray(parsed.suggestedReviewers) ? parsed.suggestedReviewers : undefined,
     poem: parsed.poem || undefined,

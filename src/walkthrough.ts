@@ -1,16 +1,55 @@
 import type { WalkthroughResult, WalkthroughConfig } from "./types.js";
 
-// ─── Helpers ──────────────────────────────────────────────────
+const EFFORT_LABELS: Record<number, string> = {
+  1: "Trivial",
+  2: "Simple",
+  3: "Moderate",
+  4: "Complex",
+  5: "Very Complex",
+};
 
-const FILLED_CIRCLE = "\u{1F535}";
-const EMPTY_CIRCLE = "\u26AA";
+const DEFAULT_EFFORT_MINUTES: Record<number, number> = {
+  1: 5,
+  2: 15,
+  3: 30,
+  4: 60,
+  5: 120,
+};
 
-function effortDots(level: number): string {
+function formatEffortLine(level: number, minutes?: number): string {
   const clamped = Math.max(1, Math.min(5, Math.round(level)));
-  return FILLED_CIRCLE.repeat(clamped) + EMPTY_CIRCLE.repeat(5 - clamped);
+  const word = EFFORT_LABELS[clamped] ?? "Moderate";
+  const mins = minutes && minutes > 0 ? minutes : DEFAULT_EFFORT_MINUTES[clamped];
+  return `🎯 ${clamped} (${word}) | ⏱️ ~${mins} minutes`;
 }
 
-// ─── formatWalkthrough ────────────────────────────────────────
+function renderChangesTable(result: WalkthroughResult): string | null {
+  const cohorts = result.cohorts;
+  if (cohorts && cohorts.length > 0) {
+    const header = "|Cohort / File(s)|Summary|\n|---|---|";
+    const rows = cohorts.map((c) => {
+      const files = c.files.map((f) => `\`${f}\``).join(", ");
+      const cell = `**${c.label}** <br> ${files}`;
+      const summary = c.summary.replace(/\|/g, "\\|");
+      return `|${cell}|${summary}|`;
+    });
+    return `## Changes\n\n${header}\n${rows.join("\n")}`;
+  }
+
+  if (result.fileDescriptions.length > 0) {
+    const header = "| File | Status | Summary |\n|------|--------|---------|";
+    const rows = result.fileDescriptions.map(
+      (f) => `| \`${f.filename}\` | ${f.status} | ${f.changeDescription} |`,
+    );
+    const table = `${header}\n${rows.join("\n")}`;
+    if (result.fileDescriptions.length > 10) {
+      return `## Changes\n\n<details>\n<summary>Changed files (${result.fileDescriptions.length})</summary>\n\n${table}\n\n</details>`;
+    }
+    return `## Changes\n\n${table}`;
+  }
+
+  return null;
+}
 
 export function formatWalkthrough(
   result: WalkthroughResult,
@@ -18,54 +57,35 @@ export function formatWalkthrough(
 ): string {
   const sections: string[] = [];
 
-  // Summary
   sections.push(`## Walkthrough\n\n${result.summary}`);
 
-  // Changes table
-  if (config.changed_files_summary !== false && result.fileDescriptions.length > 0) {
-    const tableHeader =
-      "| File | Status | Summary |\n|------|--------|---------|";
-    const rows = result.fileDescriptions
-      .map(
-        (f) =>
-          `| \`${f.filename}\` | ${f.status} | ${f.changeDescription} |`,
-      )
-      .join("\n");
-    const table = `${tableHeader}\n${rows}`;
-
-    let changesSection: string;
-    if (result.fileDescriptions.length > 10) {
-      changesSection = `## Changes\n\n<details>\n<summary>Changed files (${result.fileDescriptions.length})</summary>\n\n${table}\n\n</details>`;
-    } else {
-      changesSection = `## Changes\n\n${table}`;
-    }
-    sections.push(changesSection);
+  if (config.changed_files_summary !== false) {
+    const changes = renderChangesTable(result);
+    if (changes) sections.push(changes);
   }
 
-  // Effort estimate
-  if (
-    config.estimate_effort &&
-    result.effortEstimate !== undefined
-  ) {
+  const diagrams =
+    result.sequenceDiagrams && result.sequenceDiagrams.length > 0
+      ? result.sequenceDiagrams
+      : result.sequenceDiagram
+      ? [result.sequenceDiagram]
+      : [];
+  if (config.sequence_diagrams && diagrams.length > 0) {
+    const blocks = diagrams.map((d) => `\`\`\`mermaid\n${d}\n\`\`\``).join("\n\n");
+    sections.push(`## Sequence Diagram(s)\n\n${blocks}`);
+  }
+
+  if (config.estimate_effort && result.effortEstimate !== undefined) {
     sections.push(
-      `## Estimated Review Effort\n\n${effortDots(result.effortEstimate)} (${result.effortEstimate}/5)`,
+      `## Estimated code review effort\n\n${formatEffortLine(result.effortEstimate, result.effortMinutes)}`,
     );
   }
 
-  // Sequence diagram
-  if (config.sequence_diagrams && result.sequenceDiagram) {
-    sections.push(
-      `## Sequence Diagram\n\n\`\`\`mermaid\n${result.sequenceDiagram}\n\`\`\``,
-    );
-  }
-
-  // Suggested labels
   if (config.suggested_labels && result.suggestedLabels?.length) {
     const labels = result.suggestedLabels.map((l) => `\`${l}\``).join(", ");
     sections.push(`## Suggested Labels\n\n${labels}`);
   }
 
-  // Suggested reviewers
   if (config.suggested_reviewers && result.suggestedReviewers?.length) {
     const reviewers = result.suggestedReviewers
       .map((r) => (r.startsWith("@") ? r : `@${r}`))
@@ -73,21 +93,14 @@ export function formatWalkthrough(
     sections.push(`## Suggested Reviewers\n\n${reviewers}`);
   }
 
-  // Poem
   if (config.poem && result.poem) {
     sections.push(`## Poem\n\n${result.poem}`);
   }
 
-  // Footer
-  sections.push(
-    "---\n*Generated by [DiffSentry](https://github.com/mk7luke/DiffSentry)*",
-  );
-
   let body = sections.join("\n\n");
 
-  // Collapsible wrapper
   if (config.collapse) {
-    body = `<details>\n<summary>Walkthrough</summary>\n\n${body}\n\n</details>`;
+    body = `<details>\n<summary>📝 Walkthrough</summary>\n\n${body}\n\n</details>`;
   }
 
   return body;
