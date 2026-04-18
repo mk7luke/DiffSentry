@@ -20,7 +20,7 @@ export const scenario: Scenario = {
   waitFor: { walkthrough: true, review: true, timeoutMs: 240_000 },
   expect: {
     walkthroughContains: [
-      "## Related Issues",
+      "## Linked Issues",
       `#${ISSUE_NUMBER}`,
     ],
   },

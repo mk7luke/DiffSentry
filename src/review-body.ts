@@ -25,8 +25,18 @@ export type ReviewBodyMeta = {
 
 const REVIEW_BODY_MARKER = "<!-- This is an auto-generated comment by DiffSentry for review status -->";
 
+/**
+ * Bucket logic: only critical/major bugs and security findings are
+ * "actionable". Everything else (refactor suggestions, nitpicks,
+ * documentation hints, minor issues) goes into the Nitpicks collapse.
+ * Mirrors CodeRabbit's "Actionable comments posted" semantics.
+ */
 function isNitpick(c: ReviewComment): boolean {
-  return c.type === "nitpick" || c.severity === "trivial";
+  if (c.type === "nitpick" || c.type === "suggestion" || c.type === "documentation") {
+    return true;
+  }
+  if (c.severity === "trivial" || c.severity === "minor") return true;
+  return false;
 }
 
 function fileHeading(path: string, count: number): string {
