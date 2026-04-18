@@ -24,6 +24,13 @@ module.exports = { add, divide };
   expect: {
     reviewState: "CHANGES_REQUESTED",
     statusState: "failure",
+    reviewBodyContains: [
+      "**Actionable comments posted:",
+      "ℹ️ Review info",
+      "⚙️ Run configuration",
+      "📥 Commits",
+      "📒 Files selected for processing",
+    ],
     inlineCommentsContain: [
       {
         pathContains: "math.js",

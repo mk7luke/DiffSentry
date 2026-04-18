@@ -10,6 +10,7 @@ import { loadGuidelines, getRelevantGuidelines, formatGuidelinesForPrompt } from
 import { parseIssueReferences, fetchLinkedIssues, formatIssuesForPrompt, formatIssuesForWalkthrough } from "./issues.js";
 import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-merge.js";
 import { generateDocstrings, generateTests, simplifyCode, autofix } from "./finishing-touches.js";
+import { formatReviewBody } from "./review-body.js";
 import { logger } from "./logger.js";
 
 const WALKTHROUGH_MARKER = "<!-- DiffSentry Walkthrough -->";
@@ -153,10 +154,27 @@ export class Reviewer {
         }
       }
 
-      // Apply path filters from repo config
+      // Apply path filters from repo config — capture excluded paths for review-info reporting
+      const filesIgnoredByPathFilter: Array<{ path: string; reason: string }> = [];
       if (repoConfig.reviews?.path_filters) {
-        context.files = context.files.filter((f) => isPathIncluded(repoConfig, f.filename));
+        const filters = repoConfig.reviews.path_filters;
+        const next: typeof context.files = [];
+        for (const f of context.files) {
+          if (isPathIncluded(repoConfig, f.filename)) {
+            next.push(f);
+          } else {
+            const matched = filters.find((p) =>
+              p.startsWith("!") && new RegExp("^" + p.slice(1).replace(/\*\*/g, ".*").replace(/\*/g, "[^/]*") + "$").test(f.filename),
+            );
+            filesIgnoredByPathFilter.push({ path: f.filename, reason: matched ?? "path_filters" });
+          }
+        }
+        context.files = next;
       }
+
+      const filesNoReviewableChanges = context.files
+        .filter((f) => !f.patch || f.patch.trim().length === 0)
+        .map((f) => f.filename);
 
       if (context.files.length === 0) {
         log.info("No reviewable files in PR, skipping");
@@ -292,6 +310,21 @@ export class Reviewer {
           walkthroughResult.suggestedReviewers
         );
       }
+
+      // Compose CodeRabbit-style review body before submission
+      reviewResult.summary = formatReviewBody(reviewResult, {
+        profile: repoConfig.reviews?.profile ?? "chill",
+        baseSha: undefined,
+        headSha: context.headSha,
+        baseBranch: context.baseBranch,
+        headBranch: context.headBranch,
+        filesProcessed: context.files.map((f) => f.filename),
+        filesIgnoredByPathFilter,
+        filesNoReviewableChanges,
+        configUsed: rawConfig ? "`.diffsentry.yaml`" : "defaults",
+        plan: undefined,
+        botName: this.config.botName,
+      });
 
       // Submit the code review
       log.info(

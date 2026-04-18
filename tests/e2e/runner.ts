@@ -127,6 +127,20 @@ function evalExpectations(
     });
   }
 
+  if (exp.reviewBodyContains) {
+    const botBodies = fromBot(data.reviews)
+      .map((r) => r.body ?? "")
+      .filter(Boolean);
+    for (const needle of exp.reviewBodyContains) {
+      const ok = botBodies.some((b) => b.includes(needle));
+      results.push({
+        name: `review body contains "${needle}"`,
+        passed: ok,
+        detail: ok ? "found" : `not in ${botBodies.length} review body/bodies`,
+      });
+    }
+  }
+
   if (exp.walkthroughContains) {
     for (const needle of exp.walkthroughContains) {
       const ok = !!data.walkthrough && data.walkthrough.includes(needle);

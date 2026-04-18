@@ -24,6 +24,7 @@ export type Scenario = {
   };
   expect?: {
     reviewState?: "CHANGES_REQUESTED" | "COMMENTED" | "APPROVED";
+    reviewBodyContains?: string[];
     inlineCommentsContain?: Array<{ pathContains?: string; bodyContains: string[] }>;
     walkthroughContains?: string[];
     issueCommentContains?: string[];
