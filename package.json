@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "e2e": "tsx tests/e2e/cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

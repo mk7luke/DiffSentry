@@ -72,7 +72,12 @@ export interface ChatConfig {
 }
 
 // ─── Comment Categorization ────────────────────────────────────
-export type CommentType = "issue" | "suggestion" | "nitpick";
+export type CommentType =
+  | "issue"
+  | "suggestion"
+  | "nitpick"
+  | "documentation"
+  | "security";
 export type CommentSeverity = "critical" | "major" | "minor" | "trivial";
 
 // ─── File Change ───────────────────────────────────────────────
@@ -92,6 +97,12 @@ export interface ReviewComment {
   body: string;
   type?: CommentType;
   severity?: CommentSeverity;
+  // CodeRabbit-style metadata used by the renderer.
+  title?: string;
+  suggestion?: string;
+  suggestionLanguage?: "diff" | "suggestion";
+  aiAgentPrompt?: string;
+  fingerprint?: string;
 }
 
 // ─── Review Result ─────────────────────────────────────────────
