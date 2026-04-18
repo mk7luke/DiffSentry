@@ -114,6 +114,14 @@ export function createServer(config: Config) {
       const commentBody = comment.body || "";
       const commentId = comment.id;
 
+      // Ignore comments authored by bots (including ourselves) — prevents
+      // recursive self-triggering when our own walkthrough/tips text mentions
+      // the bot name.
+      if (comment.user?.type === "Bot") {
+        res.status(200).json({ status: "ignored" });
+        return;
+      }
+
       // Check if our bot is mentioned
       if (!commentBody.toLowerCase().includes(`@${config.botName.toLowerCase()}`)) {
         res.status(200).json({ status: "ignored" });
@@ -145,6 +153,11 @@ export function createServer(config: Config) {
       const commentId = comment.id;
 
       if (!installationId) {
+        res.status(200).json({ status: "ignored" });
+        return;
+      }
+
+      if (comment.user?.type === "Bot") {
         res.status(200).json({ status: "ignored" });
         return;
       }
