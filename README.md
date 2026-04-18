@@ -83,6 +83,7 @@ All finishing touches commit directly to the PR branch.
 - **Anthropic** (Claude) — default
 - **OpenAI** (GPT-4o, o3, etc.)
 - Configurable model per provider
+- **Custom base URLs** — point at any OpenAI or Anthropic-compatible endpoint (Azure OpenAI, Ollama, vLLM, LiteLLM, etc.)
 
 ## Setup
 
@@ -210,8 +211,10 @@ chat:
 | `AI_PROVIDER` | No | `anthropic` | `anthropic` or `openai` |
 | `ANTHROPIC_API_KEY` | If anthropic | | Anthropic API key |
 | `ANTHROPIC_MODEL` | No | `claude-sonnet-4-20250514` | Anthropic model |
+| `ANTHROPIC_BASE_URL` | No | | Custom Anthropic-compatible API endpoint |
 | `OPENAI_API_KEY` | If openai | | OpenAI API key |
 | `OPENAI_MODEL` | No | `gpt-4o` | OpenAI model |
+| `OPENAI_BASE_URL` | No | | Custom OpenAI-compatible API endpoint |
 | `PORT` | No | `3005` | Server port |
 | `LOG_LEVEL` | No | `info` | Logging level |
 | `MAX_FILES_PER_REVIEW` | No | `50` | Max files per review |

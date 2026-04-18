@@ -36,9 +36,9 @@ export class Reviewer {
     this.learnings = new LearningsStore(config.learningsDir);
 
     if (config.aiProvider === "anthropic") {
-      this.ai = new AnthropicProvider(config.anthropicApiKey!, config.anthropicModel);
+      this.ai = new AnthropicProvider(config.anthropicApiKey!, config.anthropicModel, config.anthropicBaseUrl);
     } else {
-      this.ai = new OpenAIProvider(config.openaiApiKey!, config.openaiModel);
+      this.ai = new OpenAIProvider(config.openaiApiKey!, config.openaiModel, config.openaiBaseUrl);
     }
   }
 

@@ -8,8 +8,8 @@ export class AnthropicProvider implements AIProvider {
   private client: Anthropic;
   private model: string;
 
-  constructor(apiKey: string, model: string) {
-    this.client = new Anthropic({ apiKey });
+  constructor(apiKey: string, model: string, baseURL?: string) {
+    this.client = new Anthropic({ apiKey, ...(baseURL && { baseURL }) });
     this.model = model;
   }
 

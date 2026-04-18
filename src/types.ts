@@ -6,7 +6,9 @@ export interface Config {
   githubWebhookSecret: string;
   aiProvider: "anthropic" | "openai";
   anthropicApiKey?: string;
+  anthropicBaseUrl?: string;
   openaiApiKey?: string;
+  openaiBaseUrl?: string;
   anthropicModel: string;
   openaiModel: string;
   maxFilesPerReview: number;
