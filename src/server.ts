@@ -96,6 +96,57 @@ export function createServer(config: Config) {
       }
     }
 
+    // ─── Issue Comment Edited (Finishing Touches checkbox) ───
+    if (event === "issue_comment" && payload.action === "edited") {
+      const comment = payload.comment;
+      const issue = payload.issue;
+      const owner = payload.repository.owner.login;
+      const repo = payload.repository.name;
+      const installationId = payload.installation?.id;
+      if (!issue.pull_request || !installationId) {
+        res.status(200).json({ status: "ignored" });
+        return;
+      }
+
+      const body: string = comment.body || "";
+      const prevBody: string = payload.changes?.body?.from || "";
+      // Only act on our own walkthrough comments (which carry the marker).
+      if (!body.includes("<!-- DiffSentry Walkthrough -->")) {
+        res.status(200).json({ status: "ignored" });
+        return;
+      }
+
+      const triggers = [
+        { label: "Create PR with unit tests", action: "generate_tests" as const },
+        { label: "Push docstring commit to this branch", action: "generate_docstrings" as const },
+        { label: "Push simplification commit to this branch", action: "simplify" as const },
+        { label: "Push autofix commit to this branch", action: "autofix" as const },
+      ];
+      const newlyChecked: typeof triggers = [];
+      for (const t of triggers) {
+        const checkedNow = new RegExp(`-\\s*\\[x\\][^\\n]*${t.label.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}`).test(body);
+        const checkedBefore = new RegExp(`-\\s*\\[x\\][^\\n]*${t.label.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}`).test(prevBody);
+        if (checkedNow && !checkedBefore) newlyChecked.push(t);
+      }
+
+      if (newlyChecked.length === 0) {
+        res.status(200).json({ status: "ignored" });
+        return;
+      }
+
+      logger.info({ owner, repo, pr: issue.number, actions: newlyChecked.map((t) => t.action) }, "Finishing touches checkbox triggered");
+      res.status(202).json({ status: "accepted", actions: newlyChecked.map((t) => t.action) });
+
+      const commentId = comment.id;
+      for (const t of newlyChecked) {
+        const fakeBody = `@${config.botName} ${t.action.replace(/_/g, " ")}`;
+        reviewer
+          .handleComment(installationId, owner, repo, issue.number, fakeBody, commentId)
+          .catch((err) => logger.error({ err, action: t.action }, "Finishing touches dispatch failed"));
+      }
+      return;
+    }
+
     // ─── Issue Comment Events (Chat Commands) ────────────────
     if (event === "issue_comment" && payload.action === "created") {
       const comment = payload.comment;

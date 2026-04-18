@@ -8,6 +8,8 @@ import { scenario as preMergeChecks } from "./pre-merge-checks.js";
 import { scenario as nitpickCollapse } from "./nitpick-collapse.js";
 import { scenario as chatPause } from "./chat-pause.js";
 import { scenario as poemWalkthrough } from "./poem-walkthrough.js";
+import { scenario as pathFilter } from "./path-filter.js";
+import { scenario as chatQuestion } from "./chat-question.js";
 
 export const ALL_SCENARIOS: Scenario[] = [
   divideByZero,
@@ -15,10 +17,12 @@ export const ALL_SCENARIOS: Scenario[] = [
   wipTitleSkip,
   chatHelp,
   chatPause,
+  chatQuestion,
   multiFileCohorts,
   preMergeChecks,
   nitpickCollapse,
   poemWalkthrough,
+  pathFilter,
 ];
 
 export function findScenario(name: string): Scenario | undefined {
