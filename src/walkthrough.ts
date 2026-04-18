@@ -51,7 +51,12 @@ function renderChangesTable(result: WalkthroughResult): string | null {
   return null;
 }
 
-export function formatWalkthrough(
+/**
+ * Render the inner body of the walkthrough (no collapse wrapper). The
+ * caller wraps in `<details>` and may inject extra sections (related PRs,
+ * linked issues) before wrapping.
+ */
+export function formatWalkthroughInner(
   result: WalkthroughResult,
   config: WalkthroughConfig,
 ): string {
@@ -97,13 +102,26 @@ export function formatWalkthrough(
     sections.push(`## Poem\n\n${result.poem}`);
   }
 
-  let body = sections.join("\n\n");
+  return sections.join("\n\n");
+}
 
-  if (config.collapse) {
-    body = `<details>\n<summary>📝 Walkthrough</summary>\n\n${body}\n\n</details>`;
-  }
+/**
+ * Wrap an arbitrary inner block in the walkthrough <details> collapse
+ * (or return as-is when collapse is disabled).
+ */
+export function wrapWalkthroughCollapse(inner: string, collapse: boolean): string {
+  if (!collapse) return inner;
+  return `<details>\n<summary>📝 Walkthrough</summary>\n\n${inner}\n\n</details>`;
+}
 
-  return body;
+/**
+ * Backward-compatible single-call form (no extra inner sections).
+ */
+export function formatWalkthrough(
+  result: WalkthroughResult,
+  config: WalkthroughConfig,
+): string {
+  return wrapWalkthroughCollapse(formatWalkthroughInner(result, config), config.collapse !== false);
 }
 
 // ─── formatPRSummary ──────────────────────────────────────────

@@ -4,7 +4,7 @@ import { AnthropicProvider } from "./ai/anthropic.js";
 import { OpenAIProvider } from "./ai/openai.js";
 import { GitHubClient } from "./github.js";
 import { loadRepoConfig, mergeWithDefaults, shouldReviewPR, isPathIncluded } from "./repo-config.js";
-import { formatWalkthrough, formatPRSummary, injectSummaryIntoPRBody } from "./walkthrough.js";
+import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary, injectSummaryIntoPRBody } from "./walkthrough.js";
 import { parseCommand, formatHelpMessage, formatConfigMessage } from "./commands.js";
 import { LearningsStore } from "./learnings.js";
 import { loadGuidelines, getRelevantGuidelines, formatGuidelinesForPrompt } from "./guidelines.js";
@@ -379,13 +379,18 @@ export class Reviewer {
       // Post walkthrough comment
       if (walkthroughResult && walkthroughEnabled) {
         const walkthroughConfig = repoConfig.reviews?.walkthrough || {};
-        const inner = formatWalkthrough(walkthroughResult, walkthroughConfig);
+        let inner = formatWalkthroughInner(walkthroughResult, walkthroughConfig);
 
-        // Append related PRs (inside the walkthrough block per CodeRabbit format)
-        const innerWithRelated = relatedPRsSection ? inner + relatedPRsSection : inner;
+        // Append related PRs and linked issues inside the walkthrough collapse
+        if (relatedPRsSection) inner += relatedPRsSection;
+        if (linkedIssues.length > 0) {
+          inner += "\n\n" + formatIssuesForWalkthrough(linkedIssues);
+        }
+
+        const wrapped = wrapWalkthroughCollapse(inner, walkthroughConfig.collapse !== false);
 
         let walkthroughBody =
-          WALKTHROUGH_MARKER + "\n" + WALKTHROUGH_START + "\n\n" + innerWithRelated + "\n\n" + WALKTHROUGH_END;
+          WALKTHROUGH_MARKER + "\n" + WALKTHROUGH_START + "\n\n" + wrapped + "\n\n" + WALKTHROUGH_END;
 
         // Pre-merge checks block as sibling <details>
         if (preMergeBlock) {
@@ -394,11 +399,6 @@ export class Reviewer {
 
         // Finishing touches checkboxes
         walkthroughBody += "\n\n" + finishingTouchesBlock();
-
-        // Append linked issues section
-        if (linkedIssues.length > 0) {
-          walkthroughBody += "\n\n" + formatIssuesForWalkthrough(linkedIssues);
-        }
 
         // Tips footer
         walkthroughBody += tipsFooter(this.config.botName);

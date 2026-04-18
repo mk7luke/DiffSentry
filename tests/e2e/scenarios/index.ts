@@ -10,6 +10,7 @@ import { scenario as chatPause } from "./chat-pause.js";
 import { scenario as poemWalkthrough } from "./poem-walkthrough.js";
 import { scenario as pathFilter } from "./path-filter.js";
 import { scenario as chatQuestion } from "./chat-question.js";
+import { scenario as linkedIssue } from "./linked-issue.js";
 
 export const ALL_SCENARIOS: Scenario[] = [
   divideByZero,
@@ -23,6 +24,7 @@ export const ALL_SCENARIOS: Scenario[] = [
   nitpickCollapse,
   poemWalkthrough,
   pathFilter,
+  linkedIssue,
 ];
 
 export function findScenario(name: string): Scenario | undefined {

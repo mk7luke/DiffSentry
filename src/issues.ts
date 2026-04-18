@@ -110,19 +110,18 @@ export function formatIssuesForPrompt(issues: LinkedIssue[]): string {
 }
 
 /**
- * Format issues as a markdown table for the walkthrough comment.
+ * Format issues as a CodeRabbit-style bullet list intended to be appended
+ * inside the walkthrough collapse (sibling to "Possibly related PRs").
  */
 export function formatIssuesForWalkthrough(issues: LinkedIssue[]): string {
   if (issues.length === 0) return "";
 
-  let output = `## Related Issues\n\n`;
-  output += `| Issue | Title | State |\n`;
-  output += `|-------|-------|-------|\n`;
+  const bullets = issues
+    .map((i) => {
+      const dot = i.state === "open" ? "🟢" : "🔴";
+      return `- [#${i.number}](${i.url}) — ${i.title} ${dot}`;
+    })
+    .join("\n");
 
-  for (const issue of issues) {
-    const stateIcon = issue.state === "open" ? "\u{1F7E2}" : "\u{1F534}";
-    output += `| [#${issue.number}](${issue.url}) | ${issue.title} | ${stateIcon} ${issue.state} |\n`;
-  }
-
-  return output;
+  return `## Linked Issues\n\n${bullets}`;
 }
