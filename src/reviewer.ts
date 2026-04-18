@@ -125,15 +125,16 @@ export class Reviewer {
     activeReviews.set(key, abortController);
 
     try {
-      // Load repo config
-      log.info("Loading repo configuration");
-      const octokit = await this.github.getInstallationOctokit(installationId);
-      const rawConfig = await loadRepoConfig(octokit, owner, repo, "HEAD");
-      const repoConfig = mergeWithDefaults(rawConfig);
-
-      // Fetch PR context
+      // Fetch PR context first so we can load .diffsentry.yaml from the PR's
+      // head ref — that way config changes inside the PR take effect for it.
       log.info("Fetching PR context");
+      const octokit = await this.github.getInstallationOctokit(installationId);
       const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
+
+      // Load repo config from the PR's head ref
+      log.info("Loading repo configuration");
+      const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+      const repoConfig = mergeWithDefaults(rawConfig);
 
       // Check auto-review controls
       if (!shouldReviewPR(repoConfig, {
@@ -562,7 +563,7 @@ export class Reviewer {
           );
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const rawConfig = await loadRepoConfig(octokit, owner, repo, "HEAD");
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
           const repoConfig = mergeWithDefaults(rawConfig);
 
           const walkthroughResult = await this.ai.generateWalkthrough(context, repoConfig);
@@ -579,7 +580,8 @@ export class Reviewer {
 
         case "configuration": {
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const rawConfig = await loadRepoConfig(octokit, owner, repo, "HEAD");
+          const ctxForCfg = await this.github.getPRContext(installationId, owner, repo, pullNumber);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, ctxForCfg.headSha);
           const repoConfig = mergeWithDefaults(rawConfig);
           const configMsg = formatConfigMessage(repoConfig, {
             aiProvider: this.config.aiProvider,
@@ -673,7 +675,7 @@ export class Reviewer {
         case "chat": {
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const rawConfig = await loadRepoConfig(octokit, owner, repo, "HEAD");
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
           const repoConfig = mergeWithDefaults(rawConfig);
           const response = await this.ai.chat(context, command.message, repoConfig);
           await this.github.replyToComment(installationId, owner, repo, pullNumber, commentId, response);
