@@ -39,6 +39,8 @@ module.exports = { add, divide };
       "minutes",
       "walkthrough_start",
       "walkthrough_end",
+      "✨ Finishing Touches",
+      "🧪 Generate unit tests",
     ],
     issueCommentContains: [
       "Comment `@diffsentry help`",

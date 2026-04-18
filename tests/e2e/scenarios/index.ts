@@ -7,6 +7,7 @@ import { scenario as multiFileCohorts } from "./multi-file-cohorts.js";
 import { scenario as preMergeChecks } from "./pre-merge-checks.js";
 import { scenario as nitpickCollapse } from "./nitpick-collapse.js";
 import { scenario as chatPause } from "./chat-pause.js";
+import { scenario as poemWalkthrough } from "./poem-walkthrough.js";
 
 export const ALL_SCENARIOS: Scenario[] = [
   divideByZero,
@@ -17,6 +18,7 @@ export const ALL_SCENARIOS: Scenario[] = [
   multiFileCohorts,
   preMergeChecks,
   nitpickCollapse,
+  poemWalkthrough,
 ];
 
 export function findScenario(name: string): Scenario | undefined {

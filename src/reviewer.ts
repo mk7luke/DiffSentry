@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Config, AIProvider, PRContext, RepoConfig } from "./types.js";
 import { AnthropicProvider } from "./ai/anthropic.js";
 import { OpenAIProvider } from "./ai/openai.js";
@@ -20,6 +21,47 @@ const STATUS_MARKER = "<!-- DiffSentry Status -->";
 
 function tipsFooter(botName: string): string {
   return `\n\n---\n\n<sub>Comment \`@${botName} help\` to get the list of available commands and usage tips.</sub>`;
+}
+
+function finishingTouchesBlock(): string {
+  const id1 = randomUUID();
+  const id2 = randomUUID();
+  const id3 = randomUUID();
+  const id4 = randomUUID();
+  return [
+    "<details>",
+    "<summary>✨ Finishing Touches</summary>",
+    "",
+    "<details>",
+    "<summary>🧪 Generate unit tests (beta)</summary>",
+    "",
+    `- [ ] <!-- {"checkboxId": "${id1}"} -->   Create PR with unit tests`,
+    "",
+    "</details>",
+    "",
+    "<details>",
+    "<summary>📝 Generate docstrings (beta)</summary>",
+    "",
+    `- [ ] <!-- {"checkboxId": "${id2}"} -->   Push docstring commit to this branch`,
+    "",
+    "</details>",
+    "",
+    "<details>",
+    "<summary>🧹 Simplify (beta)</summary>",
+    "",
+    `- [ ] <!-- {"checkboxId": "${id3}"} -->   Push simplification commit to this branch`,
+    "",
+    "</details>",
+    "",
+    "<details>",
+    "<summary>🪄 Autofix unresolved comments (beta)</summary>",
+    "",
+    `- [ ] <!-- {"checkboxId": "${id4}"} -->   Push autofix commit to this branch`,
+    "",
+    "</details>",
+    "",
+    "</details>",
+  ].join("\n");
 }
 
 function actionsPerformed(action: string, note?: string): string {
@@ -350,6 +392,9 @@ export class Reviewer {
           walkthroughBody += "\n\n" + preMergeBlock;
         }
 
+        // Finishing touches checkboxes
+        walkthroughBody += "\n\n" + finishingTouchesBlock();
+
         // Append linked issues section
         if (linkedIssues.length > 0) {
           walkthroughBody += "\n\n" + formatIssuesForWalkthrough(linkedIssues);
@@ -409,6 +454,7 @@ export class Reviewer {
       }
 
       // Compose CodeRabbit-style review body before submission
+      const hasYaml = rawConfig && Object.keys(rawConfig).length > 0;
       reviewResult.summary = formatReviewBody(reviewResult, {
         profile: repoConfig.reviews?.profile ?? "chill",
         baseSha: undefined,
@@ -418,7 +464,7 @@ export class Reviewer {
         filesProcessed: context.files.map((f) => f.filename),
         filesIgnoredByPathFilter,
         filesNoReviewableChanges,
-        configUsed: rawConfig ? "`.diffsentry.yaml`" : "defaults",
+        configUsed: hasYaml ? "`.diffsentry.yaml`" : "defaults",
         plan: undefined,
         botName: this.config.botName,
       });
