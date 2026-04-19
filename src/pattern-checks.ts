@@ -69,14 +69,16 @@ const BUILTIN_PATTERNS: Required<Pick<AntiPattern, "name" | "pattern" | "severit
       "Validate the source against a strict allowlist before passing it to `RegExp`, or escape with a helper like `escape-string-regexp`. Consider a pre-built RegExp literal where possible.",
   },
   {
-    name: "Math.random() used for token / id",
-    pattern: "Math\\.random\\s*\\([^)]*\\)[^\\n]{0,80}\\b(token|id|key|secret|salt|nonce|otp|seed)\\b",
+    name: "Math.random() used to build a string id",
+    // Detect the common ID-generation idioms: Math.random().toString(...)
+    // or Math.random() * 1eN — both shape randomness into token-like output.
+    pattern: "Math\\.random\\s*\\(\\s*\\)\\s*(?:\\.toString|\\*\\s*1e)",
     severity: "major",
     type: "security",
     message:
-      "`Math.random()` is not cryptographically secure — outputs are predictable enough to break tokens, IDs, OTPs, and similar secrets.",
+      "`Math.random()` is not cryptographically secure — outputs are predictable enough to forge tokens, session IDs, OTPs, and other secrets. Both `Math.random().toString(36)` and `Math.random() * 1eN` are common ID-generation shortcuts that should not be used for anything authentication-adjacent.",
     advice:
-      "Use `crypto.randomUUID()` (modern Node + browsers) or `crypto.randomBytes(n).toString('hex')` for keyed material.",
+      "Use `crypto.randomUUID()` for IDs or `crypto.randomBytes(n).toString('hex')` for keyed material.",
   },
   {
     name: "setTimeout / setInterval with string body",

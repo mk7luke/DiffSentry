@@ -28,7 +28,7 @@ export function tokenId(): string {
   expect: {
     inlineCommentsContain: [
       { pathContains: "hydrate.ts", bodyContains: ["async callback in .forEach"] },
-      { pathContains: "hydrate.ts", bodyContains: ["Math.random()"] },
+      { pathContains: "hydrate.ts", bodyContains: ["Math.random() used to build a string id"] },
     ],
   },
 };
