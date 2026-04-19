@@ -24,9 +24,17 @@ won't get from CodeRabbit.
 - **Internal-state blob** (base64-gzipped JSON inside an HTML comment) at the
   walkthrough tail. Survives bot restarts, enables true incremental review and
   `🚧 Files skipped from review as they are similar to previous changes` lists.
+  Also persists a 20-point risk-score history that powers the sticky comment's
+  sparkline.
 - **Chat replies** wrap action acknowledgements in `✅ Actions performed`
   collapses; pause/resume use `> [!NOTE]` blockquotes with a management-command
   list, matching CodeRabbit.
+- **📌 Sticky pinned status comment** — separate top-of-PR comment with
+  verdict, risk score + sparkline of recent runs, unresolved threads,
+  failing/pending checks, and files reviewed. Upserted every review pass.
+- **🧠 Prior discussions on this file** — inline comments append a collapse
+  linking to bot comments on the same path/near-line in prior merged PRs.
+  Builds institutional memory.
 
 ### Insights beyond CodeRabbit (in every walkthrough)
 - **🎯 Risk Assessment** — 0–100 score with weighted factors (critical findings,
@@ -48,6 +56,13 @@ won't get from CodeRabbit.
   missing a configured header.
 - **Suggested Reviewers** — pulled from `git blame` of the lines this PR
   modifies (not AI-guessed).
+- **👥 CODEOWNERS** — parses `.github/CODEOWNERS` (last-rule-wins) and lists
+  matching owners (users + teams) for the touched files.
+- **🔁 Changes since last reviewed** — for each non-bot reviewer, lists the
+  files modified since their last review timestamp. Quick way to know whose
+  approval is now stale.
+- **📊 Confidence breakdown** — when any AI finding is medium/low confidence,
+  shows the high/medium/low split so reviewers can triage hypotheses fast.
 - **💡 Suggested PR Split** — when cohorts span unrelated areas and the change
   is large, recommends a slice.
 
@@ -66,6 +81,9 @@ won't get from CodeRabbit.
   - `setTimeout`/`setInterval` with a string body — eval surface
   - Wide-open CORS (`origin: '*'`, `origin: true`)
   - `Object.assign({}, ...)` — prefer spread
+  - **JSX accessibility:** `<img>` without `alt`, empty `<button>` with no
+    `aria-label`, `onClick` on `<div>`/`<span>` without `role`
+  - **i18n:** hardcoded user-facing strings in JSX text (only on `**/*.{tsx,jsx}`)
 - **User-defined `anti_patterns`** in `.diffsentry.yaml` — name + regex +
   severity + advice + optional path glob.
 
@@ -90,6 +108,11 @@ won't get from CodeRabbit.
 | `@bot 5why <target>` | Recursive 5-Whys analysis to root-cause a behavior |
 | `@bot eli5` | Plain-English explanation for cross-team / non-engineer reviewers |
 | `@bot timeline` | Chronological event timeline for this PR |
+| `@bot bench` | Generate a micro-benchmark for the most performance-sensitive change |
+| `@bot changelog` | Keep-a-Changelog format entry for this PR |
+| `@bot release-notes` | Marketing-speak release notes for this PR |
+| `@bot diff <PR-number>` | Compare this PR with another for file overlap |
+| `@bot rewrite` | AI-rewritten title + description, applied to the PR via API |
 | `@bot help` | List every command |
 
 Anything else after `@bot` is treated as a free-form question about the PR.
@@ -196,18 +219,24 @@ GitHub webhook
       ├── learnings.ts            Per-repo learnings store
       ├── commands.ts             @mention command parsing + help text
       ├── walkthrough.ts          Walkthrough renderer (cohorts, effort, etc.)
-      ├── walkthrough-state.ts    Base64-gzip-JSON state blob round-trip
+      ├── walkthrough-state.ts    Base64-gzip-JSON state blob (file shas,
+      │                           fingerprints, risk history) round-trip
       ├── review-body.ts          CodeRabbit-style review summary composer
+      ├── sticky-status.ts        📌 pinned status comment + sparkline renderer
       ├── pre-merge.ts            Pre-merge checks (embedded sibling block)
       ├── finishing-touches.ts    docstring/test/simplify/autofix codegen
       ├── insights.ts             Risk Assessment, Test Coverage Signal,
+      │                           confidence aggregate, reviewer-delta,
       │                           PR Split heuristic
       ├── safety-scanner.ts       Secret + merge-marker detectors
-      ├── pattern-checks.ts       Built-in heuristics + user anti_patterns
+      ├── pattern-checks.ts       Built-in heuristics (perf, a11y, i18n) +
+      │                           user anti_patterns
       ├── dep-scanner.ts          Manifest diff parser (npm/py/rust/go/ruby)
       ├── drift.ts                Description drift, commit coach, title
       │                           coach, license header
       ├── blame-reviewers.ts      git-blame-based reviewer suggestions
+      ├── codeowners.ts           CODEOWNERS parser + per-file owner match
+      ├── cross-pr.ts             Cross-PR thread memory + diff-PR helper
       ├── ai/prompt.ts            Prompt engineering (review + walkthrough)
       ├── ai/parse.ts             AI response parsing + inline-comment renderer
       ├── ai/anthropic.ts         Claude provider
@@ -256,6 +285,13 @@ GitHub webhook
 **Auto-ignored files:** lock files (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`),
 minified assets (`*.min.js`, `*.min.css`), sourcemaps (`*.map`), build output
 (`dist/**`, `build/**`, `.next/**`).
+
+## Roadmap
+
+A read-only web dashboard for cross-repo / cross-PR analytics is fully
+scoped at [`docs/PRD-web-dashboard.md`](docs/PRD-web-dashboard.md) — storage
+schema, surfaces, tech choices, implementation order, and open questions.
+Estimated 2–3 days of focused work, no new infrastructure.
 
 ## License
 
