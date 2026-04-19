@@ -108,6 +108,19 @@ function renderAiAgentPromptBlock(prompt: string): string {
   return `<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n\`\`\`text\n${withPreamble}\n\`\`\`\n\n</details>`;
 }
 
+export function renderInlineCommentBody(comment: {
+  title?: string;
+  body: string;
+  type?: CommentType;
+  severity?: CommentSeverity;
+  suggestion?: string;
+  suggestionLanguage?: "diff" | "suggestion";
+  aiAgentPrompt?: string;
+  fingerprint?: string;
+}): string {
+  return formatCommentBody(comment);
+}
+
 function formatCommentBody(comment: {
   title?: string;
   body: string;

@@ -189,6 +189,9 @@ export type ChatCommand =
   | { type: "autofix" }
   | { type: "tldr" }
   | { type: "tour" }
+  | { type: "ship" }
+  | { type: "rubber_duck" }
+  | { type: "five_why"; target: string }
   | { type: "chat"; message: string };
 
 // ─── Pre-Merge Checks ──────────────────────────────────────────

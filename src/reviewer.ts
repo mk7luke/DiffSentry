@@ -15,6 +15,7 @@ import { formatReviewBody } from "./review-body.js";
 import { encodeState, extractState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
 import { assessRisk, renderRiskBlock, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion } from "./insights.js";
 import { suggestReviewersFromBlame, renderSuggestedReviewers } from "./blame-reviewers.js";
+import { runSafetyScanners } from "./safety-scanner.js";
 import { createHash } from "node:crypto";
 import { logger } from "./logger.js";
 
@@ -424,6 +425,18 @@ export class Reviewer {
           }
         } catch (err) {
           log.warn({ err }, "Pre-merge checks failed");
+        }
+      }
+
+      // Run safety scanners (secrets, merge markers) on the diff and merge
+      // findings into the review BEFORE risk assessment so they count.
+      const safetyFindings = runSafetyScanners(context.files);
+      if (safetyFindings.length > 0) {
+        log.info({ count: safetyFindings.length }, "Safety scanner produced findings");
+        reviewResult.comments = [...safetyFindings, ...reviewResult.comments];
+        // Any critical safety finding bumps the review to changes-requested
+        if (safetyFindings.some((c) => c.severity === "critical")) {
+          reviewResult.approval = "REQUEST_CHANGES";
         }
       }
 
@@ -915,6 +928,146 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
           await this.github.replyToComment(
             installationId, owner, repo, pullNumber, commentId,
             `# 🗺️ Code Tour\n\n${response.trim()}\n\n<sub>Suggested reading order from DiffSentry. Re-run with \`@${this.config.botName} tour\`.</sub>`,
+          );
+          break;
+        }
+
+        case "ship": {
+          const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
+          const octokit = await this.github.getInstallationOctokit(installationId);
+
+          // Fetch live state across surfaces in parallel
+          const [reviews, prComments, statusResp] = await Promise.all([
+            octokit.pulls.listReviews({ owner, repo, pull_number: pullNumber }),
+            octokit.pulls.listReviewComments({ owner, repo, pull_number: pullNumber, per_page: 100 }),
+            octokit.repos.getCombinedStatusForRef({ owner, repo, ref: context.headSha }).catch(() => null as any),
+          ]);
+
+          // Latest bot review state
+          const latestBotReview = [...reviews.data]
+            .reverse()
+            .find((r) => r.user?.type === "Bot" && r.user?.login?.toLowerCase().startsWith(this.config.botName.toLowerCase()));
+          const reviewState = latestBotReview?.state ?? "PENDING";
+
+          // Open inline threads via GraphQL
+          let unresolvedThreads = 0;
+          try {
+            const q = `
+              query($owner: String!, $repo: String!, $pr: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $pr) {
+                    reviewThreads(first: 100) { nodes { isResolved } }
+                  }
+                }
+              }`;
+            const r: any = await octokit.graphql(q, { owner, repo, pr: pullNumber });
+            unresolvedThreads = (r?.repository?.pullRequest?.reviewThreads?.nodes ?? []).filter((t: any) => !t.isResolved).length;
+          } catch {
+            // best effort
+          }
+
+          const statuses = (statusResp?.data?.statuses ?? []) as Array<{ context: string; state: string; description?: string | null }>;
+          const failingChecks = statuses.filter((s) => s.state === "failure" || s.state === "error");
+          const pendingChecks = statuses.filter((s) => s.state === "pending");
+
+          const blockers: string[] = [];
+          const warnings: string[] = [];
+          if (reviewState === "CHANGES_REQUESTED") blockers.push("DiffSentry has requested changes (latest review).");
+          if (unresolvedThreads > 0) warnings.push(`${unresolvedThreads} unresolved review thread${unresolvedThreads === 1 ? "" : "s"}.`);
+          if (failingChecks.length > 0) blockers.push(`${failingChecks.length} failing commit status check${failingChecks.length === 1 ? "" : "s"}: ${failingChecks.map((s) => `\`${s.context}\``).join(", ")}.`);
+          if (pendingChecks.length > 0) warnings.push(`${pendingChecks.length} pending check${pendingChecks.length === 1 ? "" : "s"}: ${pendingChecks.map((s) => `\`${s.context}\``).join(", ")}.`);
+
+          const verdict =
+            blockers.length === 0
+              ? warnings.length === 0
+                ? "🟢 **Ready to ship.** All blockers clear, no warnings."
+                : "🟡 **Probably safe to ship**, but address the warnings first."
+              : "🔴 **Not ready.** Address the blockers below before merging.";
+
+          const lines: string[] = [];
+          lines.push(`# 🚀 Ship Check`);
+          lines.push("");
+          lines.push(verdict);
+          lines.push("");
+          lines.push(`| Surface | Status |`);
+          lines.push(`|---|---|`);
+          lines.push(`| DiffSentry review | \`${reviewState}\` |`);
+          lines.push(`| Unresolved review threads | ${unresolvedThreads} |`);
+          lines.push(`| Failing commit statuses | ${failingChecks.length} |`);
+          lines.push(`| Pending commit statuses | ${pendingChecks.length} |`);
+
+          if (blockers.length > 0) {
+            lines.push("");
+            lines.push("## Blockers");
+            blockers.forEach((b) => lines.push(`- ❌ ${b}`));
+          }
+          if (warnings.length > 0) {
+            lines.push("");
+            lines.push("## Warnings");
+            warnings.forEach((w) => lines.push(`- ⚠️ ${w}`));
+          }
+
+          await this.github.replyToComment(
+            installationId, owner, repo, pullNumber, commentId,
+            lines.join("\n") + `\n\n<sub>Re-run with \`@${this.config.botName} ship\` after addressing.</sub>`,
+          );
+          break;
+        }
+
+        case "rubber_duck": {
+          const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
+          const octokit = await this.github.getInstallationOctokit(installationId);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const repoConfig = mergeWithDefaults(rawConfig);
+          const ask = `You are a Socratic rubber-duck reviewer. Pick the 3 most consequential design choices in this PR — one per section. For each, do NOT advocate or judge. Instead, ask 1-2 sharp questions that force the author to defend or reconsider the choice. End with one open-ended question about an aspect that wasn't addressed at all.
+
+Format:
+
+### 🦆 Question 1: <topic in 5-8 words>
+> <The question itself, in italics or as a blockquote.>
+**What this is probing:** <One sentence on what answer would resolve the doubt.>
+
+### 🦆 Question 2: <topic>
+...
+
+### 🦆 Question 3: <topic>
+...
+
+### 🦆 The unasked question
+> <Open-ended question about something the PR doesn't address but should.>`;
+          const response = await this.ai.chat(context, ask, repoConfig);
+          await this.github.replyToComment(
+            installationId, owner, repo, pullNumber, commentId,
+            `# 🦆 Rubber Duck\n\nPretend I'm a rubber duck. Walk me through your reasoning on these:\n\n${response.trim()}\n\n<sub>Socratic-mode review by DiffSentry. Re-run with \`@${this.config.botName} rubber-duck\`.</sub>`,
+          );
+          break;
+        }
+
+        case "five_why": {
+          const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
+          const octokit = await this.github.getInstallationOctokit(installationId);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const repoConfig = mergeWithDefaults(rawConfig);
+          const target = command.target.trim() || "the most consequential change in this PR";
+          const ask = `Apply the Toyota 5-Whys technique to: **${target}**.
+
+Output exactly 5 levels, each one a "Why?" deeper than the last:
+
+**Why 1?** <observation>
+- <reasoning>
+
+**Why 2?** <one-level-deeper question>
+- <reasoning>
+
+**Why 3?** ...
+**Why 4?** ...
+**Why 5?** <root-cause hypothesis>
+
+After Why 5, write a single paragraph **"## Root cause"** stating the structural issue or design pressure that shaped the change. Be specific to this PR and codebase, not generic advice.`;
+          const response = await this.ai.chat(context, ask, repoConfig);
+          await this.github.replyToComment(
+            installationId, owner, repo, pullNumber, commentId,
+            `# 🤔 Five Whys: ${target}\n\n${response.trim()}\n\n<sub>Re-run with \`@${this.config.botName} 5why <target>\`.</sub>`,
           );
           break;
         }

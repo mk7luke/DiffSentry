@@ -16,6 +16,11 @@ import { scenario as trivialSkip } from "./trivial-skip.js";
 import { scenario as riskAndCoverage } from "./risk-and-coverage.js";
 import { scenario as chatTldr } from "./chat-tldr.js";
 import { scenario as chatTour } from "./chat-tour.js";
+import { scenario as secretScanner } from "./secret-scanner.js";
+import { scenario as mergeMarker } from "./merge-marker.js";
+import { scenario as chatShip } from "./chat-ship.js";
+import { scenario as chatRubberDuck } from "./chat-rubber-duck.js";
+import { scenario as chatFiveWhy } from "./chat-five-why.js";
 
 export const ALL_SCENARIOS: Scenario[] = [
   divideByZero,
@@ -26,6 +31,9 @@ export const ALL_SCENARIOS: Scenario[] = [
   chatQuestion,
   chatTldr,
   chatTour,
+  chatShip,
+  chatRubberDuck,
+  chatFiveWhy,
   multiFileCohorts,
   preMergeChecks,
   nitpickCollapse,
@@ -35,6 +43,8 @@ export const ALL_SCENARIOS: Scenario[] = [
   trivialSkip,
   incrementalReview,
   riskAndCoverage,
+  secretScanner,
+  mergeMarker,
 ];
 
 export function findScenario(name: string): Scenario | undefined {

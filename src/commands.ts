@@ -27,6 +27,9 @@ export function parseCommand(
     autofix: { type: "autofix" },
     tldr: { type: "tldr" },
     tour: { type: "tour" },
+    ship: { type: "ship" },
+    "rubber-duck": { type: "rubber_duck" },
+    rubberduck: { type: "rubber_duck" },
   };
 
   const lower = afterMention.toLowerCase();
@@ -47,6 +50,12 @@ export function parseCommand(
     const keyword = lower.startsWith("learn") ? "learn" : "remember";
     const content = afterMention.slice(keyword.length).trim();
     return { type: "learn", content };
+  }
+
+  // 5why <target> — Toyota-style recursive why analysis
+  if (lower.startsWith("5why") || lower.startsWith("5-why") || lower.startsWith("5 why")) {
+    const target = afterMention.replace(/^5[- ]?why/i, "").trim();
+    return { type: "five_why", target };
   }
 
   // Check single-word commands
@@ -82,6 +91,9 @@ export function formatHelpMessage(botName: string): string {
 | \`@${botName} autofix\` | Apply fixes from review comments and commit to branch |
 | \`@${botName} tldr\` | One-paragraph TL;DR of the PR |
 | \`@${botName} tour\` | Suggested reading order with reasoning per file |
+| \`@${botName} ship\` | Pre-flight verdict — is this PR ready to merge? |
+| \`@${botName} rubber-duck\` | Socratic questions to challenge the design |
+| \`@${botName} 5why <target>\` | Recursive 5-whys analysis of a behavior or decision |
 
 You can also ask questions or request explanations by mentioning \`@${botName}\` followed by your question.`;
 }
