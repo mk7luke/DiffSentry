@@ -19,7 +19,7 @@ export const scenario: Scenario = {
   waitFor: {
     walkthrough: true,
     review: false,
-    botIssueCommentsAtLeast: 3,
+    botIssueCommentsAtLeast: 4,
     timeoutMs: 180_000,
   },
   expect: {
