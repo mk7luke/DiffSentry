@@ -933,9 +933,10 @@ export class Reviewer {
     repo: string,
     pullNumber: number,
     commentBody: string,
-    commentId: number
+    commentId: number,
+    commentKind: "issue" | "review_thread" = "issue"
   ): Promise<void> {
-    const log = logger.child({ owner, repo, pr: pullNumber, commentId });
+    const log = logger.child({ owner, repo, pr: pullNumber, commentId, commentKind });
     const key = prKey(owner, repo, pullNumber);
 
     const command = parseCommand(commentBody, this.config.botName);
@@ -946,17 +947,22 @@ export class Reviewer {
 
     log.info({ commandType: command.type }, "Processing command");
 
+    // Local helper so every reply in this handler lands in the right place
+    // (inside the review thread when the trigger came from one, otherwise
+    // as a top-level issue comment).
+    const reply = (body: string): Promise<void> =>
+      this.github.replyToComment(installationId, owner, repo, pullNumber, commentId, body, commentKind);
+
     try {
       switch (command.type) {
         case "help": {
           const helpText = formatHelpMessage(this.config.botName);
-          await this.github.replyToComment(installationId, owner, repo, pullNumber, commentId, helpText);
+          await reply( helpText);
           break;
         }
 
         case "review": {
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             actionsPerformed("Review triggered.", "DiffSentry is an incremental review system and does not re-review already reviewed commits."),
           );
           await this.handlePullRequest(installationId, owner, repo, pullNumber, "incremental");
@@ -964,8 +970,7 @@ export class Reviewer {
         }
 
         case "full_review": {
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             actionsPerformed("Full review triggered."),
           );
           await this.handlePullRequest(installationId, owner, repo, pullNumber, "full");
@@ -974,8 +979,7 @@ export class Reviewer {
 
         case "pause": {
           pausedPRs.add(key);
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             pauseNotice(this.config.botName, "manual"),
           );
           break;
@@ -984,8 +988,7 @@ export class Reviewer {
         case "resume": {
           pausedPRs.delete(key);
           reviewCountByPR.delete(key); // Reset count on resume
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             resumeNotice(),
           );
           break;
@@ -993,16 +996,14 @@ export class Reviewer {
 
         case "resolve": {
           await this.github.resolveAllComments(installationId, owner, repo, pullNumber);
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             actionsPerformed("All review comment threads marked as resolved."),
           );
           break;
         }
 
         case "summary": {
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             "Regenerating summary..."
           );
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
@@ -1032,15 +1033,14 @@ export class Reviewer {
             maxFilesPerReview: this.config.maxFilesPerReview,
             botName: this.config.botName,
           });
-          await this.github.replyToComment(installationId, owner, repo, pullNumber, commentId, configMsg);
+          await reply( configMsg);
           break;
         }
 
         case "learn": {
           const repoFullName = `${owner}/${repo}`;
           await this.learnings.addLearning(repoFullName, command.content);
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             actionsPerformed(
               `Learning saved. I'll apply this in future reviews of **${owner}/${repo}**.\n\n> ${command.content}`,
             ),
@@ -1049,15 +1049,13 @@ export class Reviewer {
         }
 
         case "generate_docstrings": {
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             "Generating docstrings for changed files..."
           );
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
           const result = await generateDocstrings(octokit, context, this.ai);
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             result.filesChanged > 0
               ? `Added docstrings to ${result.filesChanged} file(s). Commit: \`${result.commitSha?.slice(0, 7)}\``
               : "No files needed docstring updates."
@@ -1066,15 +1064,13 @@ export class Reviewer {
         }
 
         case "generate_tests": {
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             "Generating unit tests for changed files..."
           );
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
           const result = await generateTests(octokit, context, this.ai);
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             result.filesChanged > 0
               ? `Generated tests in ${result.filesChanged} file(s). Commit: \`${result.commitSha?.slice(0, 7)}\``
               : "Could not generate tests for these changes."
@@ -1083,15 +1079,13 @@ export class Reviewer {
         }
 
         case "simplify": {
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             "Analyzing changed code for simplification opportunities..."
           );
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
           const result = await simplifyCode(octokit, context, this.ai);
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             result.filesChanged > 0
               ? `Simplified ${result.filesChanged} file(s). Commit: \`${result.commitSha?.slice(0, 7)}\``
               : "No simplification opportunities found."
@@ -1100,15 +1094,13 @@ export class Reviewer {
         }
 
         case "autofix": {
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             "Applying fixes from review comments..."
           );
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
           const result = await autofix(octokit, context, this.ai);
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             result.filesChanged > 0
               ? `Applied fixes to ${result.filesChanged} file(s). Commit: \`${result.commitSha?.slice(0, 7)}\``
               : "No actionable fixes found in review comments."
@@ -1130,8 +1122,7 @@ Output exactly:
 
 Skip the benchmark code if no changed function is plausibly perf-sensitive — say so instead.`;
           const response = await this.ai.chat(context, ask, repoConfig);
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             `# 🧪 Bench\n\n${response.trim()}\n\n<sub>Generated by DiffSentry on demand. Re-run with \`@${this.config.botName} bench\`.</sub>`,
           );
           break;
@@ -1157,8 +1148,7 @@ Skip the benchmark code if no changed function is plausibly perf-sensitive — s
 
 Only include sections that have entries. Each bullet is one short past-tense sentence describing user-visible impact (not internal refactors). End with the PR number on the last bullet of each section as \`(#${pullNumber})\` if relevant.`;
           const response = await this.ai.chat(context, ask, repoConfig);
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             `# 📓 Changelog Entry\n\n${response.trim()}\n\n<sub>Drop into your CHANGELOG.md. Re-run with \`@${this.config.botName} changelog\`.</sub>`,
           );
           break;
@@ -1187,8 +1177,7 @@ Format:
 
 Skip sections with no content. No code blocks, no acronyms without expansion, no internal jargon ("refactored", "unblocked", "leveraged").`;
           const response = await this.ai.chat(context, ask, repoConfig);
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             `# 📣 Release Notes\n\n${response.trim()}\n\n<sub>Marketing-speak version of this PR. Re-run with \`@${this.config.botName} release-notes\`.</sub>`,
           );
           break;
@@ -1197,8 +1186,7 @@ Skip sections with no content. No code blocks, no acronyms without expansion, no
         case "diff_pr": {
           const targetNum = parseInt(command.target.replace(/^#/, "").trim(), 10);
           if (!Number.isFinite(targetNum) || targetNum <= 0) {
-            await this.github.replyToComment(
-              installationId, owner, repo, pullNumber, commentId,
+            await reply(
               `Couldn't parse a PR number from \`${command.target}\`. Try \`@${this.config.botName} diff 42\`.`,
             );
             break;
@@ -1208,13 +1196,11 @@ Skip sections with no content. No code blocks, no acronyms without expansion, no
             const result = await diffWithOtherPR({
               octokit, owner, repo, thisPrNumber: pullNumber, otherPrNumber: targetNum,
             });
-            await this.github.replyToComment(
-              installationId, owner, repo, pullNumber, commentId,
+            await reply(
               renderDiffPRReply(pullNumber, result, this.config.botName),
             );
           } catch (err: any) {
-            await this.github.replyToComment(
-              installationId, owner, repo, pullNumber, commentId,
+            await reply(
               `Couldn't compare with #${targetNum}: ${err?.message ?? "unknown error"}.`,
             );
           }
@@ -1239,8 +1225,7 @@ Output ONLY valid JSON (no fences, no prose):
           try {
             proposal = JSON.parse(cleaned);
           } catch {
-            await this.github.replyToComment(
-              installationId, owner, repo, pullNumber, commentId,
+            await reply(
               `Couldn't parse a rewrite from the AI response. Try again, or paste the desired text yourself.`,
             );
             break;
@@ -1248,21 +1233,18 @@ Output ONLY valid JSON (no fences, no prose):
           const newTitle = (proposal.title ?? "").trim();
           const newBody = (proposal.body ?? "").trim();
           if (!newTitle || !newBody) {
-            await this.github.replyToComment(
-              installationId, owner, repo, pullNumber, commentId,
+            await reply(
               `AI returned an empty title or body — declining to apply.`,
             );
             break;
           }
           try {
             await octokit.pulls.update({ owner, repo, pull_number: pullNumber, title: newTitle, body: newBody });
-            await this.github.replyToComment(
-              installationId, owner, repo, pullNumber, commentId,
+            await reply(
               `<details>\n<summary>✅ Actions performed</summary>\n\nApplied AI-rewritten title + description.\n\n**New title:** ${newTitle}\n\n</details>\n\n<!-- This is an auto-generated reply by DiffSentry -->`,
             );
           } catch (err: any) {
-            await this.github.replyToComment(
-              installationId, owner, repo, pullNumber, commentId,
+            await reply(
               `Couldn't apply the rewrite: ${err?.message ?? "unknown error"}.`,
             );
           }
@@ -1275,7 +1257,7 @@ Output ONLY valid JSON (no fences, no prose):
           const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
           const repoConfig = mergeWithDefaults(rawConfig);
           const response = await this.ai.chat(context, command.message, repoConfig);
-          await this.github.replyToComment(installationId, owner, repo, pullNumber, commentId, response);
+          await reply( response);
           break;
         }
 
@@ -1289,8 +1271,7 @@ Output ONLY valid JSON (no fences, no prose):
             "Lead with WHAT it does, then WHY, then any one notable caveat. " +
             "No headings, no bullet lists, no code blocks. Conversational tone for a busy reviewer.";
           const response = await this.ai.chat(context, ask, repoConfig);
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             `## TL;DR\n\n${response.trim()}\n\n<sub>Generated by DiffSentry on demand. Re-run with \`@${this.config.botName} tldr\`.</sub>`,
           );
           break;
@@ -1313,8 +1294,7 @@ After the per-file sections, end with a **"## Final Check"** section: 1-3 cross-
 
 Order by priority for review (highest-risk / load-bearing first), not alphabetically.`;
           const response = await this.ai.chat(context, ask, repoConfig);
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             `# 🗺️ Code Tour\n\n${response.trim()}\n\n<sub>Suggested reading order from DiffSentry. Re-run with \`@${this.config.botName} tour\`.</sub>`,
           );
           break;
@@ -1422,8 +1402,7 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
             warnings.forEach((w) => lines.push(`- ⚠️ ${w}`));
           }
 
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             lines.join("\n") + `\n\n<sub>Re-run with \`@${this.config.botName} ship\` after addressing.</sub>`,
           );
           break;
@@ -1451,8 +1430,7 @@ Format:
 ### 🦆 The unasked question
 > <Open-ended question about something the PR doesn't address but should.>`;
           const response = await this.ai.chat(context, ask, repoConfig);
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             `# 🦆 Rubber Duck\n\nPretend I'm a rubber duck. Walk me through your reasoning on these:\n\n${response.trim()}\n\n<sub>Socratic-mode review by DiffSentry. Re-run with \`@${this.config.botName} rubber-duck\`.</sub>`,
           );
           break;
@@ -1541,7 +1519,7 @@ Format:
           lines.push("");
           lines.push(`<sub>${events.length} event(s) reconstructed from GitHub. Re-run with \`@${this.config.botName} timeline\`.</sub>`);
 
-          await this.github.replyToComment(installationId, owner, repo, pullNumber, commentId, lines.join("\n"));
+          await reply( lines.join("\n"));
           break;
         }
 
@@ -1568,8 +1546,7 @@ Format:
 
 Hard rules: no code blocks, no acronyms without expansion, no "leverage"/"utilize"/"orchestrate" jargon. Short sentences.`;
           const response = await this.ai.chat(context, ask, repoConfig);
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             `# 🧒 ELI5\n\n${response.trim()}\n\n<sub>Plain-English mode by DiffSentry. Re-run with \`@${this.config.botName} eli5\`.</sub>`,
           );
           break;
@@ -1597,8 +1574,7 @@ Output exactly 5 levels, each one a "Why?" deeper than the last:
 
 After Why 5, write a single paragraph **"## Root cause"** stating the structural issue or design pressure that shaped the change. Be specific to this PR and codebase, not generic advice.`;
           const response = await this.ai.chat(context, ask, repoConfig);
-          await this.github.replyToComment(
-            installationId, owner, repo, pullNumber, commentId,
+          await reply(
             `# 🤔 Five Whys: ${target}\n\n${response.trim()}\n\n<sub>Re-run with \`@${this.config.botName} 5why <target>\`.</sub>`,
           );
           break;
@@ -1607,8 +1583,7 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
     } catch (err) {
       log.error({ err, commandType: command.type }, "Command handling failed");
       try {
-        await this.github.replyToComment(
-          installationId, owner, repo, pullNumber, commentId,
+        await reply(
           "Sorry, I encountered an error processing your request. Please try again."
         );
       } catch {

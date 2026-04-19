@@ -291,11 +291,30 @@ export class GitHubClient {
     owner: string,
     repo: string,
     pullNumber: number,
-    _commentId: number,
-    body: string
+    commentId: number,
+    body: string,
+    kind: "issue" | "review_thread" = "issue"
   ): Promise<void> {
     const octokit = await this.getInstallationOctokit(installationId);
-    // Post as an issue comment — works for both issue_comment and review_comment triggers
+    if (kind === "review_thread") {
+      // Reply inside the existing review thread so the conversation stays
+      // collapsed under the diff hunk instead of fragmenting into a new
+      // top-level issue comment.
+      try {
+        await octokit.pulls.createReplyForReviewComment({
+          owner,
+          repo,
+          pull_number: pullNumber,
+          comment_id: commentId,
+          body,
+        });
+        return;
+      } catch (err) {
+        logger.warn({ err, commentId }, "createReplyForReviewComment failed, falling back to issue comment");
+        // fall through to issue-comment fallback
+      }
+    }
+    // Post as an issue comment (default + fallback)
     await octokit.issues.createComment({
       owner,
       repo,

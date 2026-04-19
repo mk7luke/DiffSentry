@@ -272,7 +272,7 @@ export function createServer(config: Config) {
       res.status(202).json({ status: "accepted", implicit: isImplicitReply });
 
       reviewer
-        .handleComment(installationId, owner, repo, pullNumber, dispatchBody, commentId)
+        .handleComment(installationId, owner, repo, pullNumber, dispatchBody, commentId, "review_thread")
         .catch((err) => {
           logger.error({ err, owner, repo, pr: pullNumber }, "Background review comment handling failed");
         });
