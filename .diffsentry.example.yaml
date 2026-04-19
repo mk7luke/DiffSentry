@@ -1,6 +1,8 @@
 # DiffSentry Per-Repository Configuration
 # Place as .diffsentry.yaml in your repository root.
 # All settings are optional — sensible defaults are applied.
+# Loaded from the PR's HEAD ref so config edits take effect on the PR
+# that introduces them.
 
 # Review language (for AI response language)
 # language: "en-US"
@@ -24,16 +26,18 @@ reviews:
     collapse: true          # Wrap in <details> tag
     changed_files_summary: true
     sequence_diagrams: true
-    estimate_effort: true   # Show 1-5 effort rating
+    estimate_effort: true   # 🎯 N (Word) | ⏱️ ~M minutes line
     suggested_labels: true
     suggested_reviewers: true
-    poem: false             # Generate a haiku/limerick
+    poem: false             # 🐇 4-6 line poem about the PR
 
   # Auto-review controls
   auto_review:
     enabled: true
     drafts: false           # Review draft PRs
     auto_incremental_review: true
+    # Pause auto-review after N reviewed commits on this PR
+    # auto_pause_after_reviewed_commits: 10
 
     # Only review PRs targeting these branches (regex)
     # base_branches:
@@ -57,8 +61,9 @@ reviews:
     #   - "dependabot[bot]"
     #   - "renovate[bot]"
 
-  # Path filters — control which files get reviewed
-  # Prefix with ! to exclude. Without prefix = include.
+  # Path filters — control which files get reviewed.
+  # Excluded files are still listed in the review-info "Files ignored due to
+  # path filters" section.
   # path_filters:
   #   - "!dist/**"
   #   - "!**/*.generated.ts"
@@ -77,6 +82,53 @@ reviews:
   #     instructions: |
   #       Check for proper error handling and response codes.
   #       Verify backwards compatibility of API changes.
+
+  # Pre-merge checks — embedded as a sibling block in the walkthrough comment.
+  # pre_merge_checks:
+  #   title:
+  #     mode: "warning"   # "off" | "warning" | "error"
+  #     requirements: "Imperative verb, under 72 chars, no trailing period."
+  #   description:
+  #     mode: "warning"
+  #     requirements: "Must explain WHAT and WHY in at least one full sentence."
+  #   custom_checks:
+  #     - name: "No console.log"
+  #       mode: "warning"
+  #       instructions: "Fail if any changed file contains console.log statements."
+
+  # Built-in performance / footgun pattern checks. Default true.
+  # When enabled, DiffSentry flags:
+  #   - .forEach(async ...) — silently swallows promise errors
+  #   - JSON.parse(JSON.stringify(...)) — lossy deep clone
+  #   - child_process.exec with template literal — shell injection
+  #   - setInterval without a stored handle — timer leak
+  #   - new RegExp(<variable>) — ReDoS / regex injection
+  #   - Math.random() shaped into a token/id — cryptographically insecure
+  #   - setTimeout/setInterval with string body — eval surface
+  #   - Wide-open CORS — origin: '*' / origin: true
+  #   - Object.assign({}, ...) — prefer object spread
+  # builtin_patterns: true
+
+  # Project-specific anti-pattern rules. Findings render as inline review
+  # comments alongside AI findings. `severity` defaults to "minor",
+  # `type` to "suggestion".
+  # anti_patterns:
+  #   - name: "Stray console.log"
+  #     pattern: 'console\\.log\\('
+  #     severity: "major"
+  #     type: "issue"
+  #     message: "We standardised on the structured logger; console.log skips levels and formatters."
+  #     advice: "Use logger.debug / logger.info instead, with a context object."
+  #     path: "src/**"           # optional glob
+
+  # License header check. Only newly-ADDED source files are checked
+  # (modifying an existing file shouldn't demand a retrofit).
+  # license_header:
+  #   required: |
+  #     // Copyright 2026 Acme. Apache-2.0 license.
+  #   paths:
+  #     - "src/**/*.ts"
+  #     - "lib/**/*.ts"
 
 chat:
   auto_reply: true  # Respond to @mentions automatically

@@ -1,313 +1,261 @@
 # DiffSentry
 
-Self-hosted AI-powered GitHub pull request review bot. A comprehensive CodeRabbit alternative you own and control.
+Self-hosted AI-powered GitHub pull-request review bot. CodeRabbit-shape comments
+plus a layer of opinionated insights, scanners, and Socratic chat commands you
+won't get from CodeRabbit.
 
-## Features
+## What it does
 
-### Core Review
-- **Automatic PR reviews** on open, push, and ready-for-review events
-- **Inline comments** on specific lines with suggested fixes (`suggestion` blocks)
-- **Comment categorization** — issues, suggestions, and nitpicks with severity levels (critical/major/minor/trivial)
-- **Review profiles** — `chill` (critical issues only) or `assertive` (comprehensive feedback)
-- **Incremental reviews** — only re-review new changes on subsequent pushes
-- **Commit status checks** — sets GitHub commit status reflecting review state
-- **Stale review dismissal** — auto-dismisses previous bot reviews
+### Comment shape (CodeRabbit-style)
+- **Walkthrough comment** with a cohort-grouped Changes table, sequence diagram(s),
+  effort estimate (`🎯 N (Word) | ⏱️ ~M minutes`), tips footer, and stable
+  per-section HTML markers.
+- **Inline review comments** with a `_⚠️ Potential issue_ | _🟠 Major_` header,
+  bold one-line title, optional `🔧 Proposed fix` collapse with a diff or
+  suggestion block, mandatory `🤖 Prompt for AI Agents` block, fingerprint
+  hash for dedup, and trailing auto-gen marker.
+- **Review summary body** with `**Actionable comments posted: N**`, per-file
+  `🧹 Nitpick comments` collapse, bulk AI-agents prompt, `🪄 Autofix (Beta)`
+  checkboxes, and a full `ℹ️ Review info` block (config, profile, run id,
+  commits range, files processed / ignored / skipped lists).
+- **Pre-merge checks** rendered as a sibling `<details>` inside the walkthrough.
+- **Finishing Touches** checkboxes embedded in the walkthrough, with
+  click-to-trigger handlers for generate tests / docstrings / simplify / autofix.
+- **Internal-state blob** (base64-gzipped JSON inside an HTML comment) at the
+  walkthrough tail. Survives bot restarts, enables true incremental review and
+  `🚧 Files skipped from review as they are similar to previous changes` lists.
+- **Chat replies** wrap action acknowledgements in `✅ Actions performed`
+  collapses; pause/resume use `> [!NOTE]` blockquotes with a management-command
+  list, matching CodeRabbit.
 
-### Walkthrough & Summary
-- **PR Walkthrough comment** — structured overview with:
-  - Changed files table with AI-generated descriptions
-  - Estimated review effort (1-5 scale)
-  - Mermaid sequence diagrams
-  - Suggested labels and reviewers
-  - Related issues and PRs
-  - Optional poem
-- **PR description summary** — injects AI summary into the PR body (idempotent)
-- **Auto-apply labels** — automatically applies suggested labels
-- **Auto-assign reviewers** — automatically requests suggested reviewers
+### Insights beyond CodeRabbit (in every walkthrough)
+- **🎯 Risk Assessment** — 0–100 score with weighted factors (critical findings,
+  major findings, high-risk paths like `auth/`, `payment/`, `migrations/`,
+  change size, effort estimate, missing-tests signal). Color-coded badge.
+- **🧪 Test Coverage Signal** — counts production vs test file additions,
+  flags when production code lands without test changes.
+- **📦 Dependency Changes** — parses package.json, requirements.txt,
+  pyproject.toml, Cargo.toml, go.mod, Gemfile diffs and shows added /
+  removed / version-changed packages.
+- **🧭 Description Drift** — AI compares PR description claims to actual diff
+  and flags mismatches.
+- **✍️ Commit Message Coach** — checks each commit subject for length,
+  weak/empty wording, capitalization, trailing period. Skips Conventional
+  Commits prefixes.
+- **🏷️ PR Title Coach** — vague title / past-tense verb / trailing period
+  detection.
+- **📜 Missing License Headers** — opt-in: lists newly-added source files
+  missing a configured header.
+- **Suggested Reviewers** — pulled from `git blame` of the lines this PR
+  modifies (not AI-guessed).
+- **💡 Suggested PR Split** — when cohorts span unrelated areas and the change
+  is large, recommends a slice.
 
-### Interactive Chat
-Mention `@diffsentry` (or your configured bot name) in any PR comment:
+### Pre-AI safety scanners (zero LLM cost)
+- **Secret leak detection** for AWS keys, GitHub tokens, OpenAI/Anthropic
+  keys, Slack tokens, Stripe keys, Google API keys, PEM private keys, JWTs,
+  generic bearer tokens. Critical findings → CHANGES_REQUESTED.
+- **Stray merge marker detection** (`<<<<<<<`, `=======`, `>>>>>>>`).
+- **Built-in performance / footgun heuristics**:
+  - `.forEach(async ...)` — promises silently swallowed
+  - `JSON.parse(JSON.stringify(...))` — lossy deep clone (use `structuredClone`)
+  - `child_process.exec` with a template literal — shell-injection foothold
+  - `setInterval` with no captured handle — timer leak
+  - `new RegExp(<variable>)` — ReDoS / regex injection
+  - `Math.random()` shaped into an ID/token (`.toString(36)`, `* 1eN`)
+  - `setTimeout`/`setInterval` with a string body — eval surface
+  - Wide-open CORS (`origin: '*'`, `origin: true`)
+  - `Object.assign({}, ...)` — prefer spread
+- **User-defined `anti_patterns`** in `.diffsentry.yaml` — name + regex +
+  severity + advice + optional path glob.
 
+### Chat commands
 | Command | Description |
-|---------|-------------|
+|---|---|
 | `@bot review` | Trigger an incremental review |
-| `@bot full review` | Trigger a full review of all files |
-| `@bot pause` | Pause automatic reviews on this PR |
-| `@bot resume` | Resume automatic reviews |
-| `@bot resolve` | Resolve all review comment threads |
-| `@bot summary` | Regenerate the walkthrough and PR summary |
-| `@bot configuration` | Show active configuration |
-| `@bot help` | Show all available commands |
+| `@bot full review` | Re-review every file from scratch |
+| `@bot pause` / `resume` | Pause/resume automatic reviews on this PR |
+| `@bot resolve` | Resolve every review thread |
+| `@bot summary` | Regenerate the walkthrough + PR description summary |
+| `@bot configuration` | Show the active configuration |
 | `@bot learn <text>` | Save a learning for future reviews |
-| `@bot generate docstrings` | Add missing docstrings and commit to branch |
-| `@bot generate tests` | Generate unit tests and commit to branch |
-| `@bot simplify` | Simplify changed code and commit to branch |
-| `@bot autofix` | Apply fixes from review comments and commit |
+| `@bot generate docstrings` | Add missing docstrings and commit to the branch |
+| `@bot generate tests` | Generate unit tests and commit to the branch |
+| `@bot simplify` | Simplify changed code and commit to the branch |
+| `@bot autofix` | Apply fixes from review comments and commit to the branch |
+| `@bot tldr` | One-paragraph plain-English summary for skimming reviewers |
+| `@bot tour` | File-by-file reading-order guide with a Final Check section |
+| `@bot ship` | Pre-flight verdict — is this PR ready to merge? |
+| `@bot rubber-duck` | Socratic questions challenging the design + the unasked question |
+| `@bot 5why <target>` | Recursive 5-Whys analysis to root-cause a behavior |
+| `@bot eli5` | Plain-English explanation for cross-team / non-engineer reviewers |
+| `@bot timeline` | Chronological event timeline for this PR |
+| `@bot help` | List every command |
 
-Any other `@bot` mention is treated as a free-form question about the PR.
+Anything else after `@bot` is treated as a free-form question about the PR.
 
-### Finishing Touches (Code Generation)
-- **Generate docstrings** — scans for undocumented functions, generates language-appropriate docstrings
-- **Generate unit tests** — produces comprehensive tests with edge cases
-- **Simplify code** — reduces complexity while preserving public APIs
-- **Autofix** — implements fixes from unresolved review comments
-
-All finishing touches commit directly to the PR branch.
-
-### Knowledge Base
-- **Learnings** — persistent per-repo memory from `@bot learn` commands, injected into future reviews
-- **Code guidelines auto-detection** — automatically reads and applies:
-  - `CLAUDE.md`, `AGENTS.md`, `AGENT.md`, `GEMINI.md`
-  - `.cursorrules`, `.windsurfrules`
-  - `.github/copilot-instructions.md`, `.github/instructions/*.instructions.md`
-  - `.cursor/rules/*`, `.clinerules/*`, `.rules/*`
-- **Linked issue context** — detects `fixes #123` / `closes #123` / `resolves #123` in PR descriptions, fetches issue content, and injects it into the review
-- **Related PRs** — finds open PRs that touch the same files
-
-### Pre-Merge Checks
-- **PR title validation** — configurable requirements with warning/error modes
-- **PR description validation** — ensures descriptions meet template requirements
-- **Custom checks** — define validation rules in natural language, evaluated by AI
-- Results posted as a comment and reflected in commit status
-
-### Auto-Review Controls
-- Filter by base branches (regex patterns)
-- Filter by PR labels (with `!` prefix for exclusion)
-- Skip draft PRs
-- Ignore specific title keywords (e.g., `WIP`, `DO NOT MERGE`)
-- Ignore specific authors (e.g., `dependabot[bot]`)
-- Auto-pause after N reviewed commits
-- Abort review when PR is closed
-
-### Multi-Provider AI
-- **Anthropic** (Claude) — default
-- **OpenAI** (GPT-4o, o3, etc.)
-- Configurable model per provider
-- **Custom base URLs** — point at any OpenAI or Anthropic-compatible endpoint (Azure OpenAI, Ollama, vLLM, LiteLLM, etc.)
+### Quality of life
+- **Confidence-tagged findings** — AI marks each finding `high` / `medium` / `low`;
+  uncertain ones render with a `🤔` blockquote so reviewers can triage.
+- **Whitespace-insensitive fingerprints** — comments survive re-indenting and
+  trivial reflows; titles normalize before hashing so re-wording doesn't break
+  cross-review dedup.
+- **Recursive comment guard** — bot ignores its own comments at the webhook
+  layer so the tips footer mentioning `@bot` doesn't trigger a self-reply loop.
+- **Config from PR head** — `.diffsentry.yaml` is loaded from the PR's HEAD,
+  not the default branch. Config edits take effect on the PR that introduces
+  them.
 
 ## Setup
 
 ### 1. Create a GitHub App
-
-1. Go to **Settings > Developer settings > GitHub Apps > New GitHub App**
-2. Set the **Webhook URL** to `https://yourdomain.com/webhook`
-3. Set a **Webhook secret** (e.g. `openssl rand -hex 20`)
-4. Under **Permissions > Repository permissions**:
-   - **Pull requests**: Read & write
-   - **Contents**: Read & write (needed for finishing touches, config loading)
-   - **Issues**: Read & write (needed for linked issues, comments)
-   - **Commit statuses**: Read & write
-5. Under **Subscribe to events**: check **Pull request**, **Issue comment**, **Pull request review comment**
-6. Click **Create GitHub App**, note the **App ID**
-7. Under **Private keys**, generate and save the `.pem` file
+1. **Settings → Developer settings → GitHub Apps → New GitHub App**.
+2. Webhook URL: `https://yourdomain.com/webhook`.
+3. Webhook secret: `openssl rand -hex 20`.
+4. **Repository permissions**:
+   - Pull requests: Read & write
+   - Contents: Read & write
+   - Issues: Read & write
+   - Commit statuses: Read & write
+5. **Subscribe to events**: Pull request, Issue comment, Pull request review comment.
+6. Create the App, note the App ID, generate a private key (`.pem`).
 
 ### 2. Install the App
+Open the App's page → Install App → select the repos you want reviewed.
 
-Go to your GitHub App's settings, click **Install App**, and select your repositories.
-
-### 3. Configure Environment
+### 3. Configure environment
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your values. See the [Environment Variables](#environment-variables) section below.
+Edit `.env`. See the table at the bottom of this README.
 
 ### 4. Run
 
-**With Node.js:**
 ```bash
 npm install
 npm run build
 npm start
 ```
 
-**With Docker:**
+Or with Docker:
+
 ```bash
-docker-compose up --build
+docker compose up --build -d
 ```
 
-The server starts on port 3005 by default. Health check: `GET /health`. Webhook: `POST /webhook`.
+Health check: `GET /health`. Webhook endpoint: `POST /webhook`. Default port `3005`.
 
-## Per-Repository Configuration
+## Per-repo configuration
 
-Create a `.diffsentry.yaml` in your repository root. See `.diffsentry.example.yaml` for a fully documented template.
+Drop a `.diffsentry.yaml` in your repo root. The full template lives in
+`.diffsentry.example.yaml` — every option is documented inline, including
+`anti_patterns`, `license_header`, and the built-in pattern toggle. The file
+is loaded from the PR's HEAD ref, so config changes self-test on the PR
+that introduces them.
 
-```yaml
-# Review profile: "chill" (critical only) or "assertive" (comprehensive)
-reviews:
-  profile: "assertive"
-  high_level_summary: true
-  commit_status: true
-  auto_apply_labels: true
-  auto_assign_reviewers: false
+## End-to-end test harness
 
-  walkthrough:
-    enabled: true
-    collapse: true
-    changed_files_summary: true
-    sequence_diagrams: true
-    estimate_effort: true
-    poem: false
+`tests/e2e/` is a real-PR harness. Each scenario opens a PR on a sandbox
+repo, polls for the bot's output, captures every review / inline comment /
+status / issue comment, and writes a transcript.
 
-  auto_review:
-    enabled: true
-    drafts: false
-    auto_incremental_review: true
-    auto_pause_after_reviewed_commits: 10
-    base_branches:
-      - "main"
-      - "develop"
-    ignore_title_keywords:
-      - "WIP"
-      - "[skip review]"
-    ignore_usernames:
-      - "dependabot[bot]"
-    labels:
-      - "!do-not-review"
-
-  path_filters:
-    - "!dist/**"
-    - "!**/*.generated.ts"
-    - "src/**"
-
-  path_instructions:
-    - path: "src/api/**"
-      instructions: |
-        Focus on authentication, input validation, and error handling.
-    - path: "tests/**"
-      instructions: |
-        Ensure test coverage for edge cases and error paths.
-
-  pre_merge_checks:
-    title:
-      mode: "warning"
-      requirements: "Start with an imperative verb; keep under 72 characters."
-    description:
-      mode: "error"
-    custom_checks:
-      - name: "No console.log"
-        mode: "warning"
-        instructions: "Fail if any changed file contains console.log statements."
-
-# Review language (affects AI response language)
-language: "en-US"
-
-# Tone customization
-tone_instructions: "Be encouraging but thorough."
-
-chat:
-  auto_reply: true
+```bash
+npm run e2e -- --list           # list scenarios
+npm run e2e -- divide-by-zero   # one scenario
+npm run e2e -- --all            # full suite
 ```
 
-## Environment Variables
+Reports land in `tests/e2e/runs/<timestamp>_<scenario>/transcript.md`.
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `GITHUB_APP_ID` | Yes | | GitHub App ID |
-| `GITHUB_PRIVATE_KEY_PATH` | Yes* | `./private-key.pem` | Path to private key file |
-| `GITHUB_PRIVATE_KEY` | Yes* | | Private key as string (alternative) |
-| `GITHUB_WEBHOOK_SECRET` | Yes | | Webhook signature secret |
-| `AI_PROVIDER` | No | `anthropic` | `anthropic` or `openai` |
-| `ANTHROPIC_API_KEY` | If anthropic | | Anthropic API key |
-| `ANTHROPIC_MODEL` | No | `claude-sonnet-4-20250514` | Anthropic model |
-| `ANTHROPIC_BASE_URL` | No | | Custom Anthropic-compatible API endpoint |
-| `OPENAI_API_KEY` | If openai | | OpenAI API key |
-| `OPENAI_MODEL` | No | `gpt-4o` | OpenAI model |
-| `OPENAI_BASE_URL` | No | | Custom OpenAI-compatible API endpoint |
-| `PORT` | No | `3005` | Server port |
-| `LOG_LEVEL` | No | `info` | Logging level |
-| `MAX_FILES_PER_REVIEW` | No | `50` | Max files per review |
-| `IGNORED_PATTERNS` | No | | Comma-separated glob patterns to skip |
-| `BOT_NAME` | No | `diffsentry` | Bot mention name for chat commands |
-| `LEARNINGS_DIR` | No | `./data/learnings` | Directory for learnings storage |
-
-\* One of `GITHUB_PRIVATE_KEY_PATH` or `GITHUB_PRIVATE_KEY` is required.
-
-**Auto-ignored files:** lock files (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`), minified assets (`*.min.js`, `*.min.css`), sourcemaps (`*.map`), build output (`dist/**`, `build/**`, `.next/**`).
+Reference data captured from CodeRabbit (`jasonkneen/codesurf#5`) lives in
+`tests/e2e/reference/` along with `CODERABBIT-FORMAT.md`, the parity rubric
+that maps each CR surface to the DiffSentry source location that produces it.
 
 ## Architecture
 
 ```
-GitHub Webhook
-      |
-      v
-  server.ts          ─── Express app, webhook routing, signature verification
-      |
-      v
-  reviewer.ts        ─── Orchestrator: config, gates, knowledge, AI, posting
-      |
-      ├── repo-config.ts    ─── .diffsentry.yaml loading & defaults
-      ├── guidelines.ts     ─── Auto-detect CLAUDE.md, AGENTS.md, etc.
-      ├── issues.ts         ─── Parse & fetch linked GitHub issues
-      ├── learnings.ts      ─── Per-repo learning storage
-      ├── commands.ts       ─── @mention command parsing
-      ├── walkthrough.ts    ─── Walkthrough comment formatting
-      ├── pre-merge.ts      ─── Pre-merge validation checks
-      ├── finishing-touches.ts ─── Docstrings, tests, simplify, autofix
-      |
-      ├── ai/prompt.ts      ─── Prompt engineering (profiles, paths, knowledge)
-      ├── ai/parse.ts       ─── Response parsing & validation
-      ├── ai/anthropic.ts   ─── Claude provider
-      └── ai/openai.ts      ─── OpenAI provider
-      |
-      v
-  github.ts          ─── GitHub API client (reviews, comments, statuses, labels)
+GitHub webhook
+      │
+      ▼
+  server.ts            Express, signature verification, webhook routing,
+                       bot-author filtering, Finishing-Touches checkbox
+                       click handler.
+      │
+      ▼
+  reviewer.ts          Orchestrator. Loads config from PR HEAD, fetches
+                       PR context, runs safety + pattern scanners, calls
+                       AI for review + walkthrough, computes insights,
+                       composes the walkthrough + review-body, posts
+                       everything, persists state in the walkthrough blob.
+      │
+      ├── repo-config.ts          .diffsentry.yaml loading + defaults
+      ├── guidelines.ts           CLAUDE.md / AGENTS.md / .cursorrules auto-detect
+      ├── issues.ts               'fixes #N' parsing + linked-issue fetch
+      ├── learnings.ts            Per-repo learnings store
+      ├── commands.ts             @mention command parsing + help text
+      ├── walkthrough.ts          Walkthrough renderer (cohorts, effort, etc.)
+      ├── walkthrough-state.ts    Base64-gzip-JSON state blob round-trip
+      ├── review-body.ts          CodeRabbit-style review summary composer
+      ├── pre-merge.ts            Pre-merge checks (embedded sibling block)
+      ├── finishing-touches.ts    docstring/test/simplify/autofix codegen
+      ├── insights.ts             Risk Assessment, Test Coverage Signal,
+      │                           PR Split heuristic
+      ├── safety-scanner.ts       Secret + merge-marker detectors
+      ├── pattern-checks.ts       Built-in heuristics + user anti_patterns
+      ├── dep-scanner.ts          Manifest diff parser (npm/py/rust/go/ruby)
+      ├── drift.ts                Description drift, commit coach, title
+      │                           coach, license header
+      ├── blame-reviewers.ts      git-blame-based reviewer suggestions
+      ├── ai/prompt.ts            Prompt engineering (review + walkthrough)
+      ├── ai/parse.ts             AI response parsing + inline-comment renderer
+      ├── ai/anthropic.ts         Claude provider
+      └── ai/openai.ts            OpenAI provider
+      │
+      ▼
+  github.ts            GitHub API client (REST + GraphQL)
 ```
 
-## Webhook Events Handled
+## Webhook events handled
 
 | Event | Action | Behavior |
-|-------|--------|----------|
+|---|---|---|
 | `pull_request` | `opened` | Full review + walkthrough |
-| `pull_request` | `synchronize` | Incremental review |
-| `pull_request` | `ready_for_review` | Full review (draft became ready) |
-| `pull_request` | `closed` | Abort in-flight reviews |
-| `issue_comment` | `created` | Chat commands (`@bot ...`) |
-| `pull_request_review_comment` | `created` | Chat commands on review threads |
+| `pull_request` | `synchronize` | Incremental review (uses state blob to skip unchanged files) |
+| `pull_request` | `ready_for_review` | Full review (draft → ready) |
+| `pull_request` | `closed` | Abort in-flight review |
+| `issue_comment` | `created` | `@bot` chat commands |
+| `issue_comment` | `edited` | Finishing-Touches checkbox click handler |
+| `pull_request_review_comment` | `created` | `@bot` chat commands on review threads |
 
-## Comparison with CodeRabbit
+## Environment variables
 
-| Feature | CodeRabbit | DiffSentry |
-|---------|-----------|------------|
-| Automatic PR reviews | Yes | Yes |
-| Inline comments with fixes | Yes | Yes |
-| Review profiles (chill/assertive) | Yes | Yes |
-| Walkthrough comment | Yes | Yes |
-| PR description summary | Yes | Yes |
-| Sequence diagrams | Yes | Yes |
-| Effort estimate | Yes | Yes |
-| Suggested labels/reviewers | Yes | Yes |
-| Auto-apply labels | Yes | Yes |
-| Interactive chat commands | Yes | Yes |
-| YAML per-repo config | Yes | Yes |
-| Path filters & instructions | Yes | Yes |
-| Auto-review controls | Yes | Yes |
-| Incremental reviews | Yes | Yes |
-| Linked issue context | Yes | Yes |
-| Related PRs | Yes | Yes |
-| Code guidelines detection | Yes | Yes |
-| Learnings/memory | Yes | Yes |
-| Pre-merge checks | Yes | Yes |
-| Commit status checks | Yes | Yes |
-| Generate docstrings | Yes | Yes |
-| Generate unit tests | Yes | Yes |
-| Code simplification | Yes | Yes |
-| Autofix review comments | Yes | Yes |
-| Abort on PR close | Yes | Yes |
-| Auto-pause after N commits | Yes | Yes |
-| Comment severity levels | Yes | Yes |
-| Multi-provider AI | Anthropic/OpenAI | Anthropic/OpenAI |
-| 50+ static analysis tools | Yes | No (AI-only) |
-| AST-grep rules | Yes | No |
-| Jira/Linear integration | Yes | No |
-| GitLab/Azure/Bitbucket | Yes | GitHub only |
-| Web dashboard | Yes | No |
-| Merge conflict resolution | Yes | No |
-| Custom recipes | Yes | No |
-| Self-hosted | Enterprise only | Always |
-| Data ownership | SaaS | Full control |
-| Cost | $19+/user/mo | Your AI API costs |
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `GITHUB_APP_ID` | Yes | | GitHub App ID |
+| `GITHUB_PRIVATE_KEY_PATH` | Yes* | `./private-key.pem` | Path to the private key file |
+| `GITHUB_PRIVATE_KEY` | Yes* | | Private key contents (alternative to PATH) |
+| `GITHUB_WEBHOOK_SECRET` | Yes | | Webhook signature secret |
+| `AI_PROVIDER` | No | `anthropic` | `anthropic` or `openai` |
+| `ANTHROPIC_API_KEY` | If anthropic | | Anthropic API key |
+| `ANTHROPIC_MODEL` | No | `claude-sonnet-4-20250514` | Anthropic model |
+| `ANTHROPIC_BASE_URL` | No | | Override Anthropic API base URL |
+| `OPENAI_API_KEY` | If openai | | OpenAI API key |
+| `OPENAI_MODEL` | No | `gpt-4o` | OpenAI model |
+| `OPENAI_BASE_URL` | No | | Override OpenAI API base URL |
+| `PORT` | No | `3005` | Server port |
+| `LOG_LEVEL` | No | `info` | Logging level |
+| `MAX_FILES_PER_REVIEW` | No | `50` | Max files per review |
+| `IGNORED_PATTERNS` | No | | Comma-separated globs to skip |
+| `BOT_NAME` | No | `diffsentry` | Bot mention name for chat commands |
+| `LEARNINGS_DIR` | No | `./data/learnings` | Per-repo learnings storage |
+
+\* One of `GITHUB_PRIVATE_KEY_PATH` or `GITHUB_PRIVATE_KEY` is required.
+
+**Auto-ignored files:** lock files (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`),
+minified assets (`*.min.js`, `*.min.css`), sourcemaps (`*.map`), build output
+(`dist/**`, `build/**`, `.next/**`).
 
 ## License
 
