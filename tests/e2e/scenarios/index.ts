@@ -25,6 +25,8 @@ import { scenario as depChanges } from "./dep-changes.js";
 import { scenario as commitCoach } from "./commit-coach.js";
 import { scenario as descriptionDrift } from "./description-drift.js";
 import { scenario as chatEli5 } from "./chat-eli5.js";
+import { scenario as builtinPattern } from "./builtin-pattern.js";
+import { scenario as customPattern } from "./custom-pattern.js";
 
 export const ALL_SCENARIOS: Scenario[] = [
   divideByZero,
@@ -53,6 +55,8 @@ export const ALL_SCENARIOS: Scenario[] = [
   depChanges,
   commitCoach,
   descriptionDrift,
+  builtinPattern,
+  customPattern,
 ];
 
 export function findScenario(name: string): Scenario | undefined {

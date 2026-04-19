@@ -38,6 +38,29 @@ export interface ReviewsConfig {
   path_filters?: string[];
   path_instructions?: PathInstruction[];
   pre_merge_checks?: PreMergeConfig;
+  /** Built-in performance / footgun pattern checks. Default true. */
+  builtin_patterns?: boolean;
+  /** User-defined plain-English/regex pattern checks. */
+  anti_patterns?: AntiPattern[];
+}
+
+export interface AntiPattern {
+  /** Short label shown in the comment header. */
+  name: string;
+  /** Regex source (string). Tested against added lines, multiline=false. */
+  pattern: string;
+  /** Optional regex flags (defaults to no flags). */
+  flags?: string;
+  /** Severity of the finding (defaults to "minor"). */
+  severity?: CommentSeverity;
+  /** Comment type (defaults to "suggestion"). */
+  type?: CommentType;
+  /** Plain-English explanation appended to the comment body. */
+  message?: string;
+  /** Optional advice / fix recipe. */
+  advice?: string;
+  /** Optional path glob restricting where this pattern applies. */
+  path?: string;
 }
 
 export interface WalkthroughConfig {

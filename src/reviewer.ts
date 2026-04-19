@@ -16,6 +16,7 @@ import { encodeState, extractState, isTrivialPatch, WalkthroughState } from "./w
 import { assessRisk, renderRiskBlock, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion } from "./insights.js";
 import { suggestReviewersFromBlame, renderSuggestedReviewers } from "./blame-reviewers.js";
 import { runSafetyScanners } from "./safety-scanner.js";
+import { runPatternChecks } from "./pattern-checks.js";
 import { scanDependencyChanges, renderDepBlock } from "./dep-scanner.js";
 import { detectDescriptionDrift, renderDriftBlock, reviewCommitMessages, renderCommitCoachBlock } from "./drift.js";
 import { createHash } from "node:crypto";
@@ -439,6 +440,21 @@ export class Reviewer {
         // Any critical safety finding bumps the review to changes-requested
         if (safetyFindings.some((c) => c.severity === "critical")) {
           reviewResult.approval = "REQUEST_CHANGES";
+        }
+      }
+
+      // Run anti-pattern + built-in heuristic checks
+      const patternFindings = runPatternChecks(context.files, repoConfig);
+      if (patternFindings.length > 0) {
+        log.info({ count: patternFindings.length }, "Pattern checks produced findings");
+        reviewResult.comments = [...patternFindings, ...reviewResult.comments];
+        if (patternFindings.some((c) => c.severity === "critical")) {
+          reviewResult.approval = "REQUEST_CHANGES";
+        } else if (
+          reviewResult.approval === "APPROVE" &&
+          patternFindings.some((c) => c.severity === "major")
+        ) {
+          reviewResult.approval = "COMMENT";
         }
       }
 
