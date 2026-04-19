@@ -1,4 +1,4 @@
-import type { FileChange, ReviewResult } from "./types.js";
+import type { Confidence, FileChange, ReviewResult } from "./types.js";
 
 // ─── Risk score ─────────────────────────────────────────────────
 
@@ -195,6 +195,63 @@ export function shouldSuggestSplit(opts: {
   if (opts.cohortCount >= 5 && opts.totalChangedLines >= 300) return true;
   if (opts.effortEstimate === 5 && opts.fileCount >= 8) return true;
   return false;
+}
+
+// ─── Confidence aggregate ───────────────────────────────────────
+
+export function renderConfidenceAggregate(review: ReviewResult): string {
+  if (review.comments.length === 0) return "";
+  const counts: Record<Confidence, number> = { high: 0, medium: 0, low: 0 };
+  for (const c of review.comments) {
+    counts[(c.confidence ?? "high") as Confidence] += 1;
+  }
+  if (counts.medium === 0 && counts.low === 0) return "";
+  const total = review.comments.length;
+  return `## 📊 Confidence breakdown\n\n${total} finding${total === 1 ? "" : "s"} — 🟢 ${counts.high} high · 🟡 ${counts.medium} medium · 🔴 ${counts.low} low. Treat the medium / low ones as hypotheses to verify.`;
+}
+
+// ─── Reviewer-delta block (what changed since each reviewer last looked) ──
+
+export type ReviewerDelta = {
+  reviewer: string;
+  filesChanged: number;
+  paths: string[];
+};
+
+export function computeReviewerDeltas(opts: {
+  reviewerLastReviewed: Array<{ login: string; submittedAt: string }>;
+  files: Array<{ filename: string; latestCommitAt?: string }>;
+  excludeBots?: boolean;
+}): ReviewerDelta[] {
+  const out: ReviewerDelta[] = [];
+  for (const r of opts.reviewerLastReviewed) {
+    if (opts.excludeBots && r.login.toLowerCase().endsWith("[bot]")) continue;
+    const reviewedAt = new Date(r.submittedAt).getTime();
+    const changed = opts.files.filter((f) => {
+      if (!f.latestCommitAt) return true;
+      return new Date(f.latestCommitAt).getTime() > reviewedAt;
+    });
+    if (changed.length === 0) continue;
+    out.push({
+      reviewer: r.login,
+      filesChanged: changed.length,
+      paths: changed.map((f) => f.filename),
+    });
+  }
+  return out;
+}
+
+export function renderReviewerDeltaBlock(deltas: ReviewerDelta[]): string {
+  if (deltas.length === 0) return "";
+  const lines: string[] = [];
+  lines.push("## 🔁 Changes since last reviewed");
+  lines.push("");
+  for (const d of deltas) {
+    lines.push(`- @${d.reviewer}: ${d.filesChanged} file(s) changed since their last review`);
+    for (const p of d.paths.slice(0, 5)) lines.push(`  - \`${p}\``);
+    if (d.paths.length > 5) lines.push(`  - _…and ${d.paths.length - 5} more_`);
+  }
+  return lines.join("\n");
 }
 
 export function renderSplitSuggestion(cohorts: Array<{ label: string; files: string[] }>): string {

@@ -15,7 +15,9 @@ import { renderInlineCommentBody } from "./ai/parse.js";
  * positives are a trust killer. Each entry produces an inline review
  * comment when matched on an added line.
  */
-const BUILTIN_PATTERNS: Required<Pick<AntiPattern, "name" | "pattern" | "severity" | "type" | "message" | "advice">>[] = [
+type BuiltinPattern = Required<Pick<AntiPattern, "name" | "pattern" | "severity" | "type" | "message" | "advice">> & { path?: string };
+
+const BUILTIN_PATTERNS: BuiltinPattern[] = [
   {
     name: "async callback in .forEach",
     // arr.forEach(async (...) => ...)   .forEach(async function ...)
@@ -108,6 +110,48 @@ const BUILTIN_PATTERNS: Required<Pick<AntiPattern, "name" | "pattern" | "severit
     type: "nitpick",
     message: "`Object.assign({}, ...)` can be expressed more concisely as a spread.",
     advice: "Replace with `{ ...a, ...b }` for readability and to keep prototypes/getters consistent.",
+  },
+
+  // ─── Accessibility (JSX/TSX) ──────────────────────────────────
+  {
+    name: "<img> without alt attribute",
+    pattern: "<img(?![^>]*\\salt\\s*=)[^>]*/?>",
+    severity: "minor",
+    type: "issue",
+    message: "Images without an `alt` attribute are invisible to screen readers and can fail accessibility audits.",
+    advice: "Add `alt=\"\"` for purely decorative images, or a descriptive string for meaningful ones.",
+  },
+  {
+    name: "<button> with no accessible name",
+    // <button>...</button> with no text content AND no aria-label/aria-labelledby
+    pattern: "<button(?![^>]*\\b(?:aria-label|aria-labelledby)\\s*=)[^>]*>\\s*<\\/button>",
+    severity: "minor",
+    type: "issue",
+    message: "An empty `<button>` with no `aria-label` is unlabeled to assistive tech and unusable via keyboard navigation.",
+    advice: "Add `aria-label=\"...\"` or visible text content describing the action.",
+  },
+  {
+    name: "onClick on non-interactive element",
+    // <div onClick=... or <span onClick=... lacking role/keyboard handlers
+    pattern: "<(?:div|span)(?![^>]*\\brole\\s*=)[^>]*\\bonClick\\s*=",
+    severity: "minor",
+    type: "issue",
+    message: "Click handlers on `<div>` / `<span>` aren't focusable and don't fire on keyboard activation. Screen reader and keyboard users can't reach them.",
+    advice: "Use a `<button>` (preferred) or add `role=\"button\"`, `tabIndex={0}`, and a matching `onKeyDown` handler.",
+  },
+
+  // ─── i18n / localization ──────────────────────────────────────
+  {
+    name: "Hardcoded user-facing string in JSX text",
+    // >Plain English< inside JSX, not wrapped in {t(...)} or {i18n.*}
+    // Heuristic: > ... < containing 2+ words and a lowercase letter,
+    // not interpolated and not whitespace-only.
+    pattern: ">\\s*[A-Z][A-Za-z][A-Za-z0-9 ,!\\?'-]{8,}\\s*<",
+    severity: "minor",
+    type: "documentation",
+    message: "Hardcoded strings inside JSX bypass the translation pipeline and break for non-English users.",
+    advice: "Wrap in your i18n helper, e.g. `{t('users.greeting', { name })}` instead of literal text.",
+    path: "**/*.{tsx,jsx}",
   },
 ];
 

@@ -230,6 +230,11 @@ export type ChatCommand =
   | { type: "five_why"; target: string }
   | { type: "eli5" }
   | { type: "timeline" }
+  | { type: "bench" }
+  | { type: "changelog" }
+  | { type: "release_notes" }
+  | { type: "diff_pr"; target: string }
+  | { type: "rewrite_description" }
   | { type: "chat"; message: string };
 
 // ─── Pre-Merge Checks ──────────────────────────────────────────

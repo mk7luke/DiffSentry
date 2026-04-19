@@ -32,6 +32,12 @@ export function parseCommand(
     rubberduck: { type: "rubber_duck" },
     eli5: { type: "eli5" },
     timeline: { type: "timeline" },
+    bench: { type: "bench" },
+    benchmark: { type: "bench" },
+    changelog: { type: "changelog" },
+    "release-notes": { type: "release_notes" },
+    releasenotes: { type: "release_notes" },
+    rewrite: { type: "rewrite_description" },
   };
 
   const lower = afterMention.toLowerCase();
@@ -58,6 +64,12 @@ export function parseCommand(
   if (lower.startsWith("5why") || lower.startsWith("5-why") || lower.startsWith("5 why")) {
     const target = afterMention.replace(/^5[- ]?why/i, "").trim();
     return { type: "five_why", target };
+  }
+
+  // diff <pr-number> — compare with another PR
+  if (lower.startsWith("diff")) {
+    const target = afterMention.replace(/^diff\s+/i, "").trim();
+    if (target) return { type: "diff_pr", target };
   }
 
   // Check single-word commands
@@ -98,6 +110,11 @@ export function formatHelpMessage(botName: string): string {
 | \`@${botName} 5why <target>\` | Recursive 5-whys analysis of a behavior or decision |
 | \`@${botName} eli5\` | Explain the PR like the reviewer is 5 (great for cross-team review) |
 | \`@${botName} timeline\` | Chronological event timeline for this PR |
+| \`@${botName} bench\` | Generate a micro-benchmark for the most performance-sensitive change |
+| \`@${botName} changelog\` | Keep-a-Changelog format entry for this PR |
+| \`@${botName} release-notes\` | Marketing-speak release notes for this PR |
+| \`@${botName} diff <PR-number>\` | Compare this PR with another for file overlap |
+| \`@${botName} rewrite\` | AI-suggested replacement for the PR title + description |
 
 You can also ask questions or request explanations by mentioning \`@${botName}\` followed by your question.`;
 }

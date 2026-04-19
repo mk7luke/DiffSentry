@@ -30,6 +30,13 @@ import { scenario as customPattern } from "./custom-pattern.js";
 import { scenario as titleCoach } from "./title-coach.js";
 import { scenario as licenseHeader } from "./license-header.js";
 import { scenario as chatTimeline } from "./chat-timeline.js";
+import { scenario as stickyStatus } from "./sticky-status.js";
+import { scenario as chatBench } from "./chat-bench.js";
+import { scenario as chatChangelog } from "./chat-changelog.js";
+import { scenario as chatReleaseNotes } from "./chat-release-notes.js";
+import { scenario as chatRewrite } from "./chat-rewrite.js";
+import { scenario as chatDiffPr } from "./chat-diff-pr.js";
+import { scenario as a11yPattern } from "./a11y-pattern.js";
 
 export const ALL_SCENARIOS: Scenario[] = [
   divideByZero,
@@ -63,6 +70,13 @@ export const ALL_SCENARIOS: Scenario[] = [
   titleCoach,
   licenseHeader,
   chatTimeline,
+  stickyStatus,
+  chatBench,
+  chatChangelog,
+  chatReleaseNotes,
+  chatRewrite,
+  chatDiffPr,
+  a11yPattern,
 ];
 
 export function findScenario(name: string): Scenario | undefined {

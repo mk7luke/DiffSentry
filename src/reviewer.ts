@@ -13,8 +13,11 @@ import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-m
 import { generateDocstrings, generateTests, simplifyCode, autofix } from "./finishing-touches.js";
 import { formatReviewBody } from "./review-body.js";
 import { encodeState, extractState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
-import { assessRisk, renderRiskBlock, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion } from "./insights.js";
+import { assessRisk, renderRiskBlock, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion, renderConfidenceAggregate, computeReviewerDeltas, renderReviewerDeltaBlock } from "./insights.js";
 import { suggestReviewersFromBlame, renderSuggestedReviewers } from "./blame-reviewers.js";
+import { loadCodeowners, ownersForFiles, renderCodeownersBlock } from "./codeowners.js";
+import { findPriorBotThreadsForPaths, renderPriorDiscussionsBlock, diffWithOtherPR, renderDiffPRReply } from "./cross-pr.js";
+import { renderStickyStatus, STICKY_MARKER } from "./sticky-status.js";
 import { runSafetyScanners } from "./safety-scanner.js";
 import { runPatternChecks } from "./pattern-checks.js";
 import { scanDependencyChanges, renderDepBlock } from "./dep-scanner.js";
@@ -510,6 +513,86 @@ export class Reviewer {
         }
       }
 
+      // CODEOWNERS-aware reviewer routing
+      let codeownersOwners: Awaited<ReturnType<typeof ownersForFiles>> = [];
+      try {
+        const rules = await loadCodeowners(octokit, owner, repo, context.headSha);
+        codeownersOwners = ownersForFiles(rules, context.files.map((f) => f.filename), [
+          context.author ?? "",
+          this.config.botName,
+          `${this.config.botName}[bot]`,
+        ]);
+      } catch (err) {
+        log.debug({ err }, "CODEOWNERS load failed");
+      }
+
+      // Cross-PR thread memory — find prior bot inline comments on the
+      // same paths so we can link them under each new finding.
+      let priorByPath: Map<string, Awaited<ReturnType<typeof findPriorBotThreadsForPaths>>> | Awaited<ReturnType<typeof findPriorBotThreadsForPaths>> = new Map();
+      try {
+        priorByPath = await findPriorBotThreadsForPaths({
+          octokit,
+          owner,
+          repo,
+          currentPrNumber: pullNumber,
+          paths: context.files.map((f) => f.filename),
+          botLogin: `${this.config.botName}[bot]`,
+          maxPerPath: 3,
+          scanLastN: 25,
+        });
+      } catch (err) {
+        log.debug({ err }, "Cross-PR memory lookup failed");
+      }
+
+      // Append prior-discussions footer to each AI/safety/pattern finding
+      if (priorByPath instanceof Map && priorByPath.size > 0) {
+        for (const c of reviewResult.comments) {
+          const tail = renderPriorDiscussionsBlock(c.path, c.line, priorByPath as Map<string, any>);
+          if (tail) c.body = c.body + tail;
+        }
+      }
+
+      // Reviewer-delta block: which non-bot reviewers' work has been
+      // invalidated by the latest changes to the files they reviewed.
+      let reviewerDeltas: ReturnType<typeof computeReviewerDeltas> = [];
+      try {
+        const reviews = await octokit.pulls.listReviews({ owner, repo, pull_number: pullNumber });
+        const lastByLogin = new Map<string, string>();
+        for (const r of reviews.data) {
+          if (!r.user || !r.submitted_at) continue;
+          if (r.user.type === "Bot") continue;
+          lastByLogin.set(r.user.login, r.submitted_at);
+        }
+        const reviewerLastReviewed = Array.from(lastByLogin.entries()).map(([login, submittedAt]) => ({ login, submittedAt }));
+
+        // For each file, find latest commit timestamp that modified it (within this PR)
+        const prCommits = await octokit.paginate(octokit.pulls.listCommits, { owner, repo, pull_number: pullNumber, per_page: 100 });
+        const latestCommitByFile = new Map<string, string>();
+        for (const commit of prCommits) {
+          const ts = commit.commit?.author?.date ?? commit.commit?.committer?.date ?? "";
+          if (!ts) continue;
+          try {
+            const detail = await octokit.repos.getCommit({ owner, repo, ref: commit.sha });
+            for (const f of detail.data.files ?? []) {
+              const prev = latestCommitByFile.get(f.filename);
+              if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
+                latestCommitByFile.set(f.filename, ts);
+              }
+            }
+          } catch {
+            // skip
+          }
+        }
+        const fileMeta = context.files.map((f) => ({ filename: f.filename, latestCommitAt: latestCommitByFile.get(f.filename) }));
+        reviewerDeltas = computeReviewerDeltas({
+          reviewerLastReviewed,
+          files: fileMeta,
+          excludeBots: true,
+        });
+      } catch (err) {
+        log.debug({ err }, "Reviewer-delta computation failed");
+      }
+
       // Post walkthrough comment
       if (walkthroughResult && walkthroughEnabled) {
         const walkthroughConfig = repoConfig.reviews?.walkthrough || {};
@@ -536,6 +619,12 @@ export class Reviewer {
         if (licenseBlock) inner += "\n\n" + licenseBlock;
         const reviewersBlock = renderSuggestedReviewers(blameReviewers);
         if (reviewersBlock) inner += "\n\n" + reviewersBlock;
+        const ownersBlock = renderCodeownersBlock(codeownersOwners);
+        if (ownersBlock) inner += "\n\n" + ownersBlock;
+        const deltaBlock = renderReviewerDeltaBlock(reviewerDeltas);
+        if (deltaBlock) inner += "\n\n" + deltaBlock;
+        const confBlock = renderConfidenceAggregate(reviewResult);
+        if (confBlock) inner += "\n\n" + confBlock;
 
         // PR splitting heuristic
         const cohorts = walkthroughResult.cohorts ?? [];
@@ -582,6 +671,8 @@ export class Reviewer {
           "\n\n<!-- tips_start -->" + tipsFooter(this.config.botName) + "\n\n<!-- tips_end -->";
 
         // Internal state blob (base64(gzip(JSON))) for incremental review.
+        const riskHistory = (priorState?.riskHistory ?? []).slice(-19);
+        riskHistory.push(risk.score);
         const newState: WalkthroughState = {
           v: 1,
           lastReviewedSha: context.headSha,
@@ -596,6 +687,7 @@ export class Reviewer {
           filesSkippedSimilar,
           filesSkippedTrivial,
           updatedAt: new Date().toISOString(),
+          riskHistory,
         };
         walkthroughBody +=
           "\n\n<!-- internal_state_start -->\n" + encodeState(newState) + "\n<!-- internal_state_end -->";
@@ -691,6 +783,46 @@ export class Reviewer {
         "Review complete, submitting to GitHub"
       );
       await this.github.submitReview(installationId, context, reviewResult);
+
+      // Upsert the sticky pinned status comment (separate from the
+      // walkthrough — short, scannable snapshot of current PR state).
+      try {
+        let unresolvedThreads = 0;
+        let failingChecks = 0;
+        let pendingChecks = 0;
+        try {
+          const q = `query($owner: String!, $repo: String!, $pr: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $pr) { reviewThreads(first: 100) { nodes { isResolved } } } } }`;
+          const r: any = await octokit.graphql(q, { owner, repo, pr: pullNumber });
+          unresolvedThreads = (r?.repository?.pullRequest?.reviewThreads?.nodes ?? []).filter((t: any) => !t.isResolved).length;
+        } catch {
+          // best effort
+        }
+        try {
+          const s = await octokit.repos.getCombinedStatusForRef({ owner, repo, ref: context.headSha });
+          for (const st of s.data.statuses) {
+            if (st.state === "failure" || st.state === "error") failingChecks++;
+            else if (st.state === "pending") pendingChecks++;
+          }
+        } catch {
+          // best effort
+        }
+        const stickyBody = renderStickyStatus({
+          reviewState: reviewResult.approval as any,
+          risk,
+          unresolvedThreads,
+          failingChecks,
+          pendingChecks,
+          filesProcessed: context.files.length,
+          filesSkipped: filesSkippedSimilar.length + filesSkippedTrivial.length,
+          lastReviewedAt: new Date().toISOString().replace("T", " ").slice(0, 16) + "Z",
+          lastReviewedSha: context.headSha,
+          botName: this.config.botName,
+          riskHistory: (priorState?.riskHistory ?? []).concat(risk.score).slice(-20),
+        });
+        await this.github.upsertComment(installationId, owner, repo, pullNumber, stickyBody, STICKY_MARKER);
+      } catch (err) {
+        log.warn({ err }, "Failed to upsert sticky status comment");
+      }
 
       // Update status comment to show completion
       const approvalEmoji = reviewResult.approval === "APPROVE" ? ":white_check_mark:"
@@ -931,6 +1063,159 @@ export class Reviewer {
               ? `Applied fixes to ${result.filesChanged} file(s). Commit: \`${result.commitSha?.slice(0, 7)}\``
               : "No actionable fixes found in review comments."
           );
+          break;
+        }
+
+        case "bench": {
+          const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
+          const octokit = await this.github.getInstallationOctokit(installationId);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const repoConfig = mergeWithDefaults(rawConfig);
+          const ask = `Identify the single most performance-sensitive function added or modified in this PR. Then write a self-contained micro-benchmark for it.
+
+Output exactly:
+1. A one-paragraph rationale: which function and why it's perf-sensitive.
+2. A code block (with language fence) containing a complete benchmark file the user can drop into their repo. Use vitest's \`bench\` API for TS/JS, \`go test -bench\` for Go, \`pytest-benchmark\` for Python, or the idiomatic equivalent for the file's language.
+3. A one-line note on how to run it.
+
+Skip the benchmark code if no changed function is plausibly perf-sensitive — say so instead.`;
+          const response = await this.ai.chat(context, ask, repoConfig);
+          await this.github.replyToComment(
+            installationId, owner, repo, pullNumber, commentId,
+            `# 🧪 Bench\n\n${response.trim()}\n\n<sub>Generated by DiffSentry on demand. Re-run with \`@${this.config.botName} bench\`.</sub>`,
+          );
+          break;
+        }
+
+        case "changelog": {
+          const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
+          const octokit = await this.github.getInstallationOctokit(installationId);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const repoConfig = mergeWithDefaults(rawConfig);
+          const ask = `Write a CHANGELOG.md entry for this PR in the Keep-a-Changelog format. Output a single Markdown code block:
+
+\`\`\`markdown
+### Added
+- ...
+### Changed
+- ...
+### Fixed
+- ...
+### Removed
+- ...
+\`\`\`
+
+Only include sections that have entries. Each bullet is one short past-tense sentence describing user-visible impact (not internal refactors). End with the PR number on the last bullet of each section as \`(#${pullNumber})\` if relevant.`;
+          const response = await this.ai.chat(context, ask, repoConfig);
+          await this.github.replyToComment(
+            installationId, owner, repo, pullNumber, commentId,
+            `# 📓 Changelog Entry\n\n${response.trim()}\n\n<sub>Drop into your CHANGELOG.md. Re-run with \`@${this.config.botName} changelog\`.</sub>`,
+          );
+          break;
+        }
+
+        case "release_notes": {
+          const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
+          const octokit = await this.github.getInstallationOctokit(installationId);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const repoConfig = mergeWithDefaults(rawConfig);
+          const ask = `Write public release notes for this PR. Audience: end users / customers, not engineers.
+
+Format:
+
+### ✨ What's new
+<2-3 bullets of user-visible improvements in plain English. Lead with the benefit, not the implementation.>
+
+### 🛠 Improvements
+<bullets — performance, reliability, polish>
+
+### 🐛 Fixes
+<bullets — only include when there are real fixes>
+
+### 💔 Breaking changes
+<only when actually breaking; otherwise omit the section>
+
+Skip sections with no content. No code blocks, no acronyms without expansion, no internal jargon ("refactored", "unblocked", "leveraged").`;
+          const response = await this.ai.chat(context, ask, repoConfig);
+          await this.github.replyToComment(
+            installationId, owner, repo, pullNumber, commentId,
+            `# 📣 Release Notes\n\n${response.trim()}\n\n<sub>Marketing-speak version of this PR. Re-run with \`@${this.config.botName} release-notes\`.</sub>`,
+          );
+          break;
+        }
+
+        case "diff_pr": {
+          const targetNum = parseInt(command.target.replace(/^#/, "").trim(), 10);
+          if (!Number.isFinite(targetNum) || targetNum <= 0) {
+            await this.github.replyToComment(
+              installationId, owner, repo, pullNumber, commentId,
+              `Couldn't parse a PR number from \`${command.target}\`. Try \`@${this.config.botName} diff 42\`.`,
+            );
+            break;
+          }
+          const octokit = await this.github.getInstallationOctokit(installationId);
+          try {
+            const result = await diffWithOtherPR({
+              octokit, owner, repo, thisPrNumber: pullNumber, otherPrNumber: targetNum,
+            });
+            await this.github.replyToComment(
+              installationId, owner, repo, pullNumber, commentId,
+              renderDiffPRReply(pullNumber, result, this.config.botName),
+            );
+          } catch (err: any) {
+            await this.github.replyToComment(
+              installationId, owner, repo, pullNumber, commentId,
+              `Couldn't compare with #${targetNum}: ${err?.message ?? "unknown error"}.`,
+            );
+          }
+          break;
+        }
+
+        case "rewrite_description": {
+          const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
+          const octokit = await this.github.getInstallationOctokit(installationId);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const repoConfig = mergeWithDefaults(rawConfig);
+          const ask = `Propose a clearer replacement for this PR's title and description.
+
+Output ONLY valid JSON (no fences, no prose):
+{
+  "title": "Imperative-mood title under 72 chars, no trailing period",
+  "body": "Multi-paragraph Markdown body. Lead with WHAT, then WHY, then any caveats. Reference filenames in backticks. Include a short bulleted list of changes if it helps."
+}`;
+          const raw = await this.ai.chat(context, ask, repoConfig);
+          const cleaned = raw.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
+          let proposal: { title?: string; body?: string } = {};
+          try {
+            proposal = JSON.parse(cleaned);
+          } catch {
+            await this.github.replyToComment(
+              installationId, owner, repo, pullNumber, commentId,
+              `Couldn't parse a rewrite from the AI response. Try again, or paste the desired text yourself.`,
+            );
+            break;
+          }
+          const newTitle = (proposal.title ?? "").trim();
+          const newBody = (proposal.body ?? "").trim();
+          if (!newTitle || !newBody) {
+            await this.github.replyToComment(
+              installationId, owner, repo, pullNumber, commentId,
+              `AI returned an empty title or body — declining to apply.`,
+            );
+            break;
+          }
+          try {
+            await octokit.pulls.update({ owner, repo, pull_number: pullNumber, title: newTitle, body: newBody });
+            await this.github.replyToComment(
+              installationId, owner, repo, pullNumber, commentId,
+              `<details>\n<summary>✅ Actions performed</summary>\n\nApplied AI-rewritten title + description.\n\n**New title:** ${newTitle}\n\n</details>\n\n<!-- This is an auto-generated reply by DiffSentry -->`,
+            );
+          } catch (err: any) {
+            await this.github.replyToComment(
+              installationId, owner, repo, pullNumber, commentId,
+              `Couldn't apply the rewrite: ${err?.message ?? "unknown error"}.`,
+            );
+          }
           break;
         }
 

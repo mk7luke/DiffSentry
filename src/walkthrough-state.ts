@@ -32,6 +32,8 @@ export interface WalkthroughState {
   preMergeCounts?: { passed: number; failed: number };
   /** ISO timestamp of when state was last persisted. */
   updatedAt?: string;
+  /** Trailing risk score history (most-recent last, capped to 20). */
+  riskHistory?: number[];
 }
 
 export function encodeState(state: WalkthroughState): string {
