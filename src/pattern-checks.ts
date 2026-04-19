@@ -17,15 +17,15 @@ import { renderInlineCommentBody } from "./ai/parse.js";
  */
 const BUILTIN_PATTERNS: Required<Pick<AntiPattern, "name" | "pattern" | "severity" | "type" | "message" | "advice">>[] = [
   {
-    name: "Sequential await in a for-of loop",
-    // for (const x of arr) { await ... }   or   for (... of arr) await ...
-    pattern: "for\\s*\\(\\s*(?:const|let|var)\\s+\\w+\\s+of\\b[^)]*\\)\\s*\\{?[^}]*\\bawait\\b",
-    severity: "minor",
-    type: "suggestion",
+    name: "async callback in .forEach",
+    // arr.forEach(async (...) => ...)   .forEach(async function ...)
+    pattern: "\\.forEach\\s*\\(\\s*async\\b",
+    severity: "major",
+    type: "issue",
     message:
-      "This loop awaits each iteration sequentially. If the awaited calls are independent, the total latency grows linearly with the array size.",
+      "`Array.prototype.forEach` ignores the promises returned by an async callback. Errors are silently swallowed and ordering / completion is not awaited — `forEach` returns before the work finishes.",
     advice:
-      "Use `await Promise.all(arr.map(async (x) => ...))` for independent calls, or `for await (const r of pLimit(...))` if you need a concurrency cap.",
+      "Use `for (const x of arr) { await ... }` if order matters, or `await Promise.all(arr.map(async (x) => ...))` for parallel execution.",
   },
   {
     name: "Deep clone via JSON.parse(JSON.stringify(...))",
