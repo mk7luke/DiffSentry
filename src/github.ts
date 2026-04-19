@@ -159,6 +159,26 @@ export class GitHubClient {
     });
   }
 
+  async listPRCommits(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+  ): Promise<Array<{ sha: string; message: string; author?: string }>> {
+    const octokit = await this.getInstallationOctokit(installationId);
+    const commits = await octokit.paginate(octokit.pulls.listCommits, {
+      owner,
+      repo,
+      pull_number: pullNumber,
+      per_page: 100,
+    });
+    return commits.map((c: any) => ({
+      sha: c.sha,
+      message: c.commit?.message ?? "",
+      author: c.commit?.author?.name,
+    }));
+  }
+
   async findCommentByMarker(
     installationId: number,
     owner: string,

@@ -16,6 +16,8 @@ import { encodeState, extractState, isTrivialPatch, WalkthroughState } from "./w
 import { assessRisk, renderRiskBlock, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion } from "./insights.js";
 import { suggestReviewersFromBlame, renderSuggestedReviewers } from "./blame-reviewers.js";
 import { runSafetyScanners } from "./safety-scanner.js";
+import { scanDependencyChanges, renderDepBlock } from "./dep-scanner.js";
+import { detectDescriptionDrift, renderDriftBlock, reviewCommitMessages, renderCommitCoachBlock } from "./drift.js";
 import { createHash } from "node:crypto";
 import { logger } from "./logger.js";
 
@@ -442,6 +444,26 @@ export class Reviewer {
 
       // Compute insights (risk, coverage, split suggestion) before posting
       const coverage = assessCoverage(context.files);
+
+      // Dependency change detection (sync, no AI)
+      const depDeltas = scanDependencyChanges(context.files);
+
+      // Commit-message coach (sync, no AI)
+      let commitFindings: ReturnType<typeof reviewCommitMessages> = [];
+      try {
+        const commits = await this.github.listPRCommits(installationId, owner, repo, pullNumber);
+        commitFindings = reviewCommitMessages(commits);
+      } catch (err) {
+        log.debug({ err }, "listPRCommits failed");
+      }
+
+      // Description drift detection (one extra AI call, best-effort)
+      let driftFindings: Awaited<ReturnType<typeof detectDescriptionDrift>> = [];
+      try {
+        driftFindings = await detectDescriptionDrift({ ai: this.ai, context });
+      } catch (err) {
+        log.debug({ err }, "Drift detection failed");
+      }
       const risk = assessRisk({
         files: context.files,
         review: reviewResult,
@@ -481,6 +503,12 @@ export class Reviewer {
         inner += "\n\n" + renderRiskBlock(risk);
         const covBlock = renderCoverageBlock(coverage);
         if (covBlock) inner += "\n\n" + covBlock;
+        const depBlock = renderDepBlock(depDeltas);
+        if (depBlock) inner += "\n\n" + depBlock;
+        const driftBlock = renderDriftBlock(driftFindings);
+        if (driftBlock) inner += "\n\n" + driftBlock;
+        const coachBlock = renderCommitCoachBlock(commitFindings);
+        if (coachBlock) inner += "\n\n" + coachBlock;
         const reviewersBlock = renderSuggestedReviewers(blameReviewers);
         if (reviewersBlock) inner += "\n\n" + reviewersBlock;
 
@@ -1039,6 +1067,36 @@ Format:
           await this.github.replyToComment(
             installationId, owner, repo, pullNumber, commentId,
             `# 🦆 Rubber Duck\n\nPretend I'm a rubber duck. Walk me through your reasoning on these:\n\n${response.trim()}\n\n<sub>Socratic-mode review by DiffSentry. Re-run with \`@${this.config.botName} rubber-duck\`.</sub>`,
+          );
+          break;
+        }
+
+        case "eli5": {
+          const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
+          const octokit = await this.github.getInstallationOctokit(installationId);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const repoConfig = mergeWithDefaults(rawConfig);
+          const ask = `Explain this PR as if the reader is intelligent but unfamiliar with the codebase, the language, and the domain. Audience: a stakeholder, designer, or cross-team engineer.
+
+Format:
+
+### What this PR is about
+<2-3 plain-English sentences. Use analogies. No jargon.>
+
+### What changes for users / the system
+<1-2 sentences on observable impact.>
+
+### Why this approach
+<1-2 sentences on the choice. Compare to the obvious alternative.>
+
+### What could still go wrong
+<1-2 sentences naming a real risk in plain language.>
+
+Hard rules: no code blocks, no acronyms without expansion, no "leverage"/"utilize"/"orchestrate" jargon. Short sentences.`;
+          const response = await this.ai.chat(context, ask, repoConfig);
+          await this.github.replyToComment(
+            installationId, owner, repo, pullNumber, commentId,
+            `# 🧒 ELI5\n\n${response.trim()}\n\n<sub>Plain-English mode by DiffSentry. Re-run with \`@${this.config.botName} eli5\`.</sub>`,
           );
           break;
         }

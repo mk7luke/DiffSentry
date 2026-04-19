@@ -192,6 +192,7 @@ export type ChatCommand =
   | { type: "ship" }
   | { type: "rubber_duck" }
   | { type: "five_why"; target: string }
+  | { type: "eli5" }
   | { type: "chat"; message: string };
 
 // ─── Pre-Merge Checks ──────────────────────────────────────────

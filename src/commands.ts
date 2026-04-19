@@ -30,6 +30,7 @@ export function parseCommand(
     ship: { type: "ship" },
     "rubber-duck": { type: "rubber_duck" },
     rubberduck: { type: "rubber_duck" },
+    eli5: { type: "eli5" },
   };
 
   const lower = afterMention.toLowerCase();
@@ -94,6 +95,7 @@ export function formatHelpMessage(botName: string): string {
 | \`@${botName} ship\` | Pre-flight verdict — is this PR ready to merge? |
 | \`@${botName} rubber-duck\` | Socratic questions to challenge the design |
 | \`@${botName} 5why <target>\` | Recursive 5-whys analysis of a behavior or decision |
+| \`@${botName} eli5\` | Explain the PR like the reviewer is 5 (great for cross-team review) |
 
 You can also ask questions or request explanations by mentioning \`@${botName}\` followed by your question.`;
 }
