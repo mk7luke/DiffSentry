@@ -124,8 +124,8 @@ export function reviewCommitMessages(commits: Array<{ sha: string; message: stri
       level = "bad";
     }
 
-    if (subject && !/^[A-Z]/.test(subject) && !/^[a-z]+(\([^)]+\))?:/.test(subject)) {
-      // allow conventional-commits prefix; otherwise expect capitalization
+    if (subject && !/^[A-Z]/.test(subject) && !/^[a-z][a-z0-9_-]*(\([^)]+\))?!?:\s/.test(subject)) {
+      // Allow Conventional Commits prefix (e.g. `feat:`, `fix(scope)!:`); otherwise expect capitalization.
       reasons.push("Subject doesn't start with a capital letter or a Conventional Commits prefix (e.g. `feat:`).");
       level = level === "ok" ? "weak" : level;
     }

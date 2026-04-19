@@ -21,6 +21,7 @@ export type Scenario = {
     review?: boolean;
     botIssueCommentsAtLeast?: number;
     inlineCommentsAtLeast?: number;
+    reviewsAtLeast?: number;
     timeoutMs?: number;
   };
   expect?: {

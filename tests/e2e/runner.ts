@@ -74,6 +74,8 @@ async function pollUntil(
 
     const walkthroughOK = !wantWalkthrough || !!findWalkthrough(issueComments);
     const reviewOK = !wantReview || botReviews.length > 0;
+    const reviewsCountOK =
+      want.reviewsAtLeast === undefined || botReviews.length >= want.reviewsAtLeast;
     const inlineOK =
       want.inlineCommentsAtLeast === undefined ||
       botInline.length >= want.inlineCommentsAtLeast;
@@ -85,7 +87,7 @@ async function pollUntil(
       !expectedStatus ||
       statuses.some((s) => s.context === "DiffSentry" && s.state === expectedStatus);
 
-    if (walkthroughOK && reviewOK && inlineOK && issueOK && statusOK) break;
+    if (walkthroughOK && reviewOK && reviewsCountOK && inlineOK && issueOK && statusOK) break;
     await sleep(POLL_INTERVAL_MS);
   }
 

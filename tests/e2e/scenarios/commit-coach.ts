@@ -25,7 +25,9 @@ export const scenario: Scenario = {
       ],
     },
   ],
-  waitFor: { walkthrough: true, review: true, timeoutMs: 360_000 },
+  // Wait for the second review (post-push) so the walkthrough has both
+  // commits in its coach block.
+  waitFor: { walkthrough: true, review: true, reviewsAtLeast: 2, timeoutMs: 420_000 },
   expect: {
     walkthroughContains: [
       "✍️ Commit Message Coach",
