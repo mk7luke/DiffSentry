@@ -15,6 +15,6 @@ export const scenario: Scenario = {
     { type: "wait", ms: 30_000 },
     { type: "comment", body: "@diffsentry bench" },
   ],
-  waitFor: { walkthrough: true, review: true, botIssueCommentsAtLeast: 4, timeoutMs: 240_000 },
+  waitFor: { walkthrough: true, review: true, replyContains: ["🧪 Bench"], timeoutMs: 240_000 },
   expect: { issueCommentContains: ["🧪 Bench"] },
 };

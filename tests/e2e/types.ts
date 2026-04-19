@@ -22,6 +22,12 @@ export type Scenario = {
     botIssueCommentsAtLeast?: number;
     inlineCommentsAtLeast?: number;
     reviewsAtLeast?: number;
+    /**
+     * Wait until at least one bot issue-comment posted AFTER the harness
+     * fired its first chat command contains EVERY needle in this array.
+     * Replaces fragile per-count gating for chat-reply scenarios.
+     */
+    replyContains?: string[];
     timeoutMs?: number;
   };
   expect?: {

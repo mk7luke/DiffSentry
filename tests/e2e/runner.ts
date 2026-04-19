@@ -43,6 +43,7 @@ async function pollUntil(
   prNumber: number,
   branch: string,
   scenario: Scenario,
+  firstChatPostedAt: string | null,
 ): Promise<{
   reviews: CapturedReview[];
   inlineComments: CapturedInlineComment[];
@@ -87,7 +88,15 @@ async function pollUntil(
       !expectedStatus ||
       statuses.some((s) => s.context === "DiffSentry" && s.state === expectedStatus);
 
-    if (walkthroughOK && reviewOK && reviewsCountOK && inlineOK && issueOK && statusOK) break;
+    const replyContains = want.replyContains;
+    let replyOK = true;
+    if (replyContains && replyContains.length > 0) {
+      const cutoff = firstChatPostedAt ? new Date(firstChatPostedAt).getTime() : 0;
+      const candidates = botIssue.filter((c) => new Date(c.created_at).getTime() > cutoff);
+      replyOK = candidates.some((c) => replyContains.every((needle) => c.body.includes(needle)));
+    }
+
+    if (walkthroughOK && reviewOK && reviewsCountOK && inlineOK && issueOK && statusOK && replyOK) break;
     await sleep(POLL_INTERVAL_MS);
   }
 
@@ -279,12 +288,14 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioRun> {
   let cleanupError: unknown = null;
 
   try {
+    let firstChatPostedAt: string | null = null;
     if (scenario.postPrActions) {
       // Wait briefly for initial walkthrough/review trigger before injecting comments
       await sleep(5_000);
       for (const action of scenario.postPrActions) {
         if (action.type === "comment") {
           console.log(`[${scenario.name}] posting comment: ${action.body.slice(0, 60)}`);
+          if (!firstChatPostedAt) firstChatPostedAt = new Date().toISOString();
           await postIssueComment(prNumber, action.body);
         } else if (action.type === "wait") {
           await sleep(action.ms);
@@ -300,7 +311,7 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioRun> {
     }
 
     console.log(`[${scenario.name}] polling for bot activity`);
-    const data = await pollUntil(prNumber, branch, scenario);
+    const data = await pollUntil(prNumber, branch, scenario, firstChatPostedAt);
     const walkthrough = findWalkthrough(data.issueComments);
 
     const expectations = evalExpectations(scenario, { walkthrough, ...data });

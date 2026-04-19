@@ -18,7 +18,7 @@ export const scenario: Scenario = {
   waitFor: {
     walkthrough: true,
     review: false,
-    botIssueCommentsAtLeast: 4,
+    replyContains: ["DiffSentry Commands", "@diffsentry pause"],
     timeoutMs: 180_000,
   },
   expect: {

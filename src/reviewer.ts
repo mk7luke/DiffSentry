@@ -14,10 +14,11 @@ import { generateDocstrings, generateTests, simplifyCode, autofix } from "./fini
 import { formatReviewBody } from "./review-body.js";
 import { encodeState, extractState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
 import { assessRisk, renderRiskBlock, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion, renderConfidenceAggregate, computeReviewerDeltas, renderReviewerDeltaBlock } from "./insights.js";
-import { suggestReviewersFromBlame, renderSuggestedReviewers } from "./blame-reviewers.js";
+import { suggestReviewersFromBlame, renderSuggestedReviewers, combineReviewers, renderCombinedReviewers } from "./blame-reviewers.js";
 import { loadCodeowners, ownersForFiles, renderCodeownersBlock } from "./codeowners.js";
 import { findPriorBotThreadsForPaths, renderPriorDiscussionsBlock, diffWithOtherPR, renderDiffPRReply } from "./cross-pr.js";
 import { renderStickyStatus, STICKY_MARKER } from "./sticky-status.js";
+import { recordRepo, recordPR, recordReview, recordFindings, recordPatternHits } from "./storage/dao.js";
 import { runSafetyScanners } from "./safety-scanner.js";
 import { runPatternChecks } from "./pattern-checks.js";
 import { scanDependencyChanges, renderDepBlock } from "./dep-scanner.js";
@@ -617,10 +618,14 @@ export class Reviewer {
           repoConfig.reviews?.license_header?.required ?? "",
         );
         if (licenseBlock) inner += "\n\n" + licenseBlock;
-        const reviewersBlock = renderSuggestedReviewers(blameReviewers);
+        // Single ranked Suggested Reviewers block: blame weight + CODEOWNERS,
+        // each row tagged with its source(s). Falls back to the blame-only
+        // renderer when CODEOWNERS isn't present.
+        const combined = combineReviewers(blameReviewers, codeownersOwners, 5);
+        const reviewersBlock = combined.length > 0
+          ? renderCombinedReviewers(combined)
+          : renderSuggestedReviewers(blameReviewers);
         if (reviewersBlock) inner += "\n\n" + reviewersBlock;
-        const ownersBlock = renderCodeownersBlock(codeownersOwners);
-        if (ownersBlock) inner += "\n\n" + ownersBlock;
         const deltaBlock = renderReviewerDeltaBlock(reviewerDeltas);
         if (deltaBlock) inner += "\n\n" + deltaBlock;
         const confBlock = renderConfidenceAggregate(reviewResult);
@@ -774,6 +779,46 @@ export class Reviewer {
             return false;
           }
           return true;
+        });
+      }
+
+      // Persist this review to SQLite (best-effort; no-op if DB disabled).
+      // Done before GitHub submission so an API failure doesn't lose the data.
+      recordRepo({ owner, repo, installationId });
+      recordPR(context, { state: "open" });
+      const reviewId = recordReview({
+        ctx: context,
+        result: reviewResult,
+        risk,
+        profile: repoConfig.reviews?.profile ?? "chill",
+        filesProcessed: context.files.length,
+        filesSkippedSimilar: filesSkippedSimilar.length,
+        filesSkippedTrivial: filesSkippedTrivial.length,
+      });
+      if (reviewId !== null) {
+        recordFindings(reviewId, reviewResult.comments, (c) => {
+          // Tag source by which producer emitted the finding. Safety-scanner
+          // findings carry "security"/"issue" + "critical" for secrets/markers,
+          // and have a fingerprint shape we already use; pattern-checks produce
+          // anti-pattern findings. Map heuristically — close enough for the
+          // dashboard's source filter.
+          if (c.fingerprint && c.body?.includes("DiffSentry's safety scanner")) return "safety";
+          if (c.body?.includes("DiffSentry built-in pattern check")) return "builtin";
+          if (c.body?.includes("Project anti-pattern")) return "custom";
+          return "ai";
+        });
+        recordPatternHits({
+          owner,
+          repo,
+          reviewId,
+          hits: [
+            ...safetyFindings.map((f) => ({ ruleName: f.title ?? "safety", source: "safety" as const, fingerprint: f.fingerprint })),
+            ...patternFindings.map((f) => ({
+              ruleName: f.title ?? "pattern",
+              source: (f.body?.includes("Project anti-pattern") ? "custom" : "builtin") as "builtin" | "custom",
+              fingerprint: f.fingerprint,
+            })),
+          ],
         });
       }
 
@@ -1275,10 +1320,11 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
           const octokit = await this.github.getInstallationOctokit(installationId);
 
           // Fetch live state across surfaces in parallel
-          const [reviews, prComments, statusResp] = await Promise.all([
+          const [reviews, prComments, statusResp, ownerRules] = await Promise.all([
             octokit.pulls.listReviews({ owner, repo, pull_number: pullNumber }),
             octokit.pulls.listReviewComments({ owner, repo, pull_number: pullNumber, per_page: 100 }),
             octokit.repos.getCombinedStatusForRef({ owner, repo, ref: context.headSha }).catch(() => null as any),
+            loadCodeowners(octokit, owner, repo, context.headSha).catch(() => []),
           ]);
 
           // Latest bot review state
@@ -1314,6 +1360,32 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
           if (unresolvedThreads > 0) warnings.push(`${unresolvedThreads} unresolved review thread${unresolvedThreads === 1 ? "" : "s"}.`);
           if (failingChecks.length > 0) blockers.push(`${failingChecks.length} failing commit status check${failingChecks.length === 1 ? "" : "s"}: ${failingChecks.map((s) => `\`${s.context}\``).join(", ")}.`);
           if (pendingChecks.length > 0) warnings.push(`${pendingChecks.length} pending check${pendingChecks.length === 1 ? "" : "s"}: ${pendingChecks.map((s) => `\`${s.context}\``).join(", ")}.`);
+
+          // CODEOWNERS gate: if the repo has a CODEOWNERS file and any of
+          // the touched files have owners, require at least one APPROVED
+          // human review from a matching owner before clearing the gate.
+          if (ownerRules.length > 0) {
+            const owners = ownersForFiles(ownerRules, context.files.map((f) => f.filename), [
+              context.author ?? "",
+              this.config.botName,
+              `${this.config.botName}[bot]`,
+            ]);
+            if (owners.length > 0) {
+              const ownerSet = new Set(owners.map((o) => o.login.toLowerCase()));
+              const ownerApprovals = reviews.data
+                .filter((r) => r.state === "APPROVED" && r.user?.login)
+                .map((r) => r.user!.login.toLowerCase())
+                .filter((login) => ownerSet.has(login));
+              if (ownerApprovals.length === 0) {
+                blockers.push(
+                  `No CODEOWNERS approval yet — needs review from one of: ${owners
+                    .slice(0, 5)
+                    .map((o) => `@${o.login}`)
+                    .join(", ")}.`,
+                );
+              }
+            }
+          }
 
           const verdict =
             blockers.length === 0

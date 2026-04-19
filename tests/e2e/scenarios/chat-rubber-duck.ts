@@ -24,7 +24,7 @@ export const scenario: Scenario = {
   waitFor: {
     walkthrough: true,
     review: true,
-    botIssueCommentsAtLeast: 4,
+    replyContains: ["🦆 Rubber Duck"],
     timeoutMs: 240_000,
   },
   expect: {

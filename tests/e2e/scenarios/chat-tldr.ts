@@ -34,7 +34,7 @@ export function setCached(key: string, value: unknown): void {
   waitFor: {
     walkthrough: true,
     review: true,
-    botIssueCommentsAtLeast: 4,
+    replyContains: ["## TL;DR"],
     timeoutMs: 240_000,
   },
   expect: {

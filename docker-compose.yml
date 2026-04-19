@@ -7,4 +7,8 @@ services:
       - .env
     volumes:
       - ./private-key.pem:/app/private-key.pem:ro
+      - diffsentry-data:/app/data
     restart: unless-stopped
+
+volumes:
+  diffsentry-data:

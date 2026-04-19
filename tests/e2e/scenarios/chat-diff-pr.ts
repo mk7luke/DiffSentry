@@ -18,6 +18,6 @@ export const scenario: Scenario = {
     { type: "wait", ms: 30_000 },
     { type: "comment", body: "@diffsentry diff 1" },
   ],
-  waitFor: { walkthrough: true, review: true, botIssueCommentsAtLeast: 4, timeoutMs: 240_000 },
+  waitFor: { walkthrough: true, review: true, replyContains: ["🔀 Diff vs"], timeoutMs: 240_000 },
   expect: { issueCommentContains: ["🔀 Diff vs"] },
 };

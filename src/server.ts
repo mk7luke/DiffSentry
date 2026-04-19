@@ -3,6 +3,7 @@ import { Webhooks } from "@octokit/webhooks";
 import { Config } from "./types.js";
 import { Reviewer } from "./reviewer.js";
 import { logger } from "./logger.js";
+import { recordEvent } from "./storage/dao.js";
 
 export function createServer(config: Config) {
   const app = express();
@@ -41,6 +42,19 @@ export function createServer(config: Config) {
     }
 
     const payload = JSON.parse(body.toString());
+
+    // Persistent event log (best-effort; no-op when DB disabled).
+    try {
+      const owner = payload.repository?.owner?.login;
+      const repo = payload.repository?.name;
+      const number =
+        payload.pull_request?.number ?? payload.issue?.number ?? null;
+      if (owner && repo) {
+        recordEvent({ owner, repo, number, kind: `${event}.${payload.action ?? ""}`.replace(/\.$/, "") });
+      }
+    } catch {
+      // best effort
+    }
 
     // ─── Pull Request Events ─────────────────────────────────
     if (event === "pull_request") {

@@ -150,3 +150,70 @@ export function renderSuggestedReviewers(reviewers: ReviewerCandidate[]): string
     .join("\n");
   return `## Suggested Reviewers\n\nBased on \`git blame\` of the lines this PR modifies:\n\n${bullets}`;
 }
+
+/**
+ * Combine blame-derived reviewers with CODEOWNERS matches into a single
+ * ranked list with per-row source tags. Score = blame lines + 5 * owned
+ * files (CODEOWNERS rows weighted because they're explicit ownership).
+ */
+export type CombinedReviewerRow = {
+  login: string;
+  blameLines: number;
+  blameFiles: number;
+  ownedFiles: number;
+  isTeam: boolean;
+  sources: Array<"blame" | "owner">;
+};
+
+export function combineReviewers(
+  blame: ReviewerCandidate[],
+  owners: Array<{ login: string; filesOwned: number; teams: boolean }>,
+  topN = 5,
+): CombinedReviewerRow[] {
+  const merged = new Map<string, CombinedReviewerRow>();
+  for (const b of blame) {
+    merged.set(b.login, {
+      login: b.login,
+      blameLines: b.changedLinesAuthored,
+      blameFiles: b.filesAuthored,
+      ownedFiles: 0,
+      isTeam: false,
+      sources: ["blame"],
+    });
+  }
+  for (const o of owners) {
+    const cur = merged.get(o.login);
+    if (cur) {
+      cur.ownedFiles = o.filesOwned;
+      cur.isTeam = o.teams;
+      if (!cur.sources.includes("owner")) cur.sources.push("owner");
+    } else {
+      merged.set(o.login, {
+        login: o.login,
+        blameLines: 0,
+        blameFiles: 0,
+        ownedFiles: o.filesOwned,
+        isTeam: o.teams,
+        sources: ["owner"],
+      });
+    }
+  }
+  return Array.from(merged.values())
+    .sort((a, b) => b.blameLines + 5 * b.ownedFiles - (a.blameLines + 5 * a.ownedFiles))
+    .slice(0, topN);
+}
+
+export function renderCombinedReviewers(rows: CombinedReviewerRow[]): string {
+  if (rows.length === 0) return "";
+  const bullets = rows
+    .map((r) => {
+      const tags = r.sources.map((s) => `\`${s}\``).join(" + ");
+      const teamSuffix = r.isTeam ? " (team)" : "";
+      const detailParts: string[] = [];
+      if (r.blameLines > 0) detailParts.push(`${r.blameLines} touched line(s)`);
+      if (r.ownedFiles > 0) detailParts.push(`owns ${r.ownedFiles} file(s)`);
+      return `- @${r.login}${teamSuffix} — ${tags}${detailParts.length ? ` — ${detailParts.join(", ")}` : ""}`;
+    })
+    .join("\n");
+  return `## 👤 Suggested Reviewers\n\nRanked by \`git blame\` weight on the touched lines + CODEOWNERS overlap.\n\n${bullets}`;
+}

@@ -19,7 +19,7 @@ export const scenario: Scenario = {
   waitFor: {
     walkthrough: true,
     review: true,
-    botIssueCommentsAtLeast: 4,
+    replyContains: ["🕒 PR Timeline"],
     timeoutMs: 240_000,
   },
   expect: {
