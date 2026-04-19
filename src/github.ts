@@ -52,6 +52,7 @@ export class GitHubClient {
       title: pr.data.title,
       description: pr.data.body || "",
       baseBranch: pr.data.base.ref,
+      baseSha: pr.data.base.sha,
       headBranch: pr.data.head.ref,
       headSha: pr.data.head.sha,
       files,

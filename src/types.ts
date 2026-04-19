@@ -147,6 +147,7 @@ export interface PRContext {
   title: string;
   description: string;
   baseBranch: string;
+  baseSha?: string;
   headBranch: string;
   headSha: string;
   files: FileChange[];
@@ -186,6 +187,8 @@ export type ChatCommand =
   | { type: "generate_tests" }
   | { type: "simplify" }
   | { type: "autofix" }
+  | { type: "tldr" }
+  | { type: "tour" }
   | { type: "chat"; message: string };
 
 // ─── Pre-Merge Checks ──────────────────────────────────────────

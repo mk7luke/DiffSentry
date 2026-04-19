@@ -13,6 +13,9 @@ import { scenario as chatQuestion } from "./chat-question.js";
 import { scenario as linkedIssue } from "./linked-issue.js";
 import { scenario as incrementalReview } from "./incremental-review.js";
 import { scenario as trivialSkip } from "./trivial-skip.js";
+import { scenario as riskAndCoverage } from "./risk-and-coverage.js";
+import { scenario as chatTldr } from "./chat-tldr.js";
+import { scenario as chatTour } from "./chat-tour.js";
 
 export const ALL_SCENARIOS: Scenario[] = [
   divideByZero,
@@ -21,6 +24,8 @@ export const ALL_SCENARIOS: Scenario[] = [
   chatHelp,
   chatPause,
   chatQuestion,
+  chatTldr,
+  chatTour,
   multiFileCohorts,
   preMergeChecks,
   nitpickCollapse,
@@ -29,6 +34,7 @@ export const ALL_SCENARIOS: Scenario[] = [
   linkedIssue,
   trivialSkip,
   incrementalReview,
+  riskAndCoverage,
 ];
 
 export function findScenario(name: string): Scenario | undefined {

@@ -25,6 +25,8 @@ export function parseCommand(
     summary: { type: "summary" },
     simplify: { type: "simplify" },
     autofix: { type: "autofix" },
+    tldr: { type: "tldr" },
+    tour: { type: "tour" },
   };
 
   const lower = afterMention.toLowerCase();
@@ -78,6 +80,8 @@ export function formatHelpMessage(botName: string): string {
 | \`@${botName} generate tests\` | Generate unit tests and commit to branch |
 | \`@${botName} simplify\` | Simplify changed code and commit to branch |
 | \`@${botName} autofix\` | Apply fixes from review comments and commit to branch |
+| \`@${botName} tldr\` | One-paragraph TL;DR of the PR |
+| \`@${botName} tour\` | Suggested reading order with reasoning per file |
 
 You can also ask questions or request explanations by mentioning \`@${botName}\` followed by your question.`;
 }

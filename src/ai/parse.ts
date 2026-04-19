@@ -68,9 +68,22 @@ const SEVERITY_ICON: Record<CommentSeverity, string> = {
   trivial: "🟢",
 };
 
+function normalizeForFingerprint(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 12)
+    .join(" ");
+}
+
 function fingerprintFor(path: string, line: number, title: string): string {
+  // Hash off the normalized title (lowercased, alphanum, first 12 tokens) so
+  // re-wording the same finding doesn't break dedup. The path is kept raw
+  // so true cross-file findings still distinguish.
   return createHash("sha1")
-    .update(`${path}:${line}:${title}`)
+    .update(`${path}:${line}:${normalizeForFingerprint(title)}`)
     .digest("hex")
     .slice(0, 12);
 }

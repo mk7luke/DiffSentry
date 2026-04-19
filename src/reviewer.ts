@@ -13,11 +13,25 @@ import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-m
 import { generateDocstrings, generateTests, simplifyCode, autofix } from "./finishing-touches.js";
 import { formatReviewBody } from "./review-body.js";
 import { encodeState, extractState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
+import { assessRisk, renderRiskBlock, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion } from "./insights.js";
+import { suggestReviewersFromBlame, renderSuggestedReviewers } from "./blame-reviewers.js";
 import { createHash } from "node:crypto";
 import { logger } from "./logger.js";
 
+function normalizePatchForHash(patch: string): string {
+  // Strip metadata lines + leading +/- markers, collapse all whitespace,
+  // drop blanks. Patch hash now survives re-indenting and trivial reflows.
+  return patch
+    .split("\n")
+    .filter((l) => !l.startsWith("@@") && !l.startsWith("---") && !l.startsWith("+++"))
+    .map((l) => l.replace(/^[+-]/, ""))
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .filter((l) => l.length > 0)
+    .join("\n");
+}
+
 function patchHash(patch: string): string {
-  return createHash("sha256").update(patch).digest("hex").slice(0, 16);
+  return createHash("sha256").update(normalizePatchForHash(patch)).digest("hex").slice(0, 16);
 }
 
 const WALKTHROUGH_MARKER = "<!-- DiffSentry Walkthrough -->";
@@ -413,10 +427,64 @@ export class Reviewer {
         }
       }
 
+      // Compute insights (risk, coverage, split suggestion) before posting
+      const coverage = assessCoverage(context.files);
+      const risk = assessRisk({
+        files: context.files,
+        review: reviewResult,
+        effortEstimate: walkthroughResult?.effortEstimate,
+        hasNewTests: coverage.testAdditions > 0,
+      });
+
+      // Suggested reviewers from git blame (best-effort, falls back silently)
+      let blameReviewers: Awaited<ReturnType<typeof suggestReviewersFromBlame>> = [];
+      if (context.baseSha) {
+        try {
+          blameReviewers = await suggestReviewersFromBlame({
+            octokit,
+            owner,
+            repo,
+            baseSha: context.baseSha,
+            files: context.files,
+            excludeLogins: [
+              context.author ?? "",
+              this.config.botName,
+              `${this.config.botName}[bot]`,
+              "diffsentry[bot]",
+            ],
+            topN: 3,
+          });
+        } catch (err) {
+          log.debug({ err }, "Blame-based reviewer suggestion failed");
+        }
+      }
+
       // Post walkthrough comment
       if (walkthroughResult && walkthroughEnabled) {
         const walkthroughConfig = repoConfig.reviews?.walkthrough || {};
         let inner = formatWalkthroughInner(walkthroughResult, walkthroughConfig);
+
+        // Insight blocks inside the walkthrough collapse
+        inner += "\n\n" + renderRiskBlock(risk);
+        const covBlock = renderCoverageBlock(coverage);
+        if (covBlock) inner += "\n\n" + covBlock;
+        const reviewersBlock = renderSuggestedReviewers(blameReviewers);
+        if (reviewersBlock) inner += "\n\n" + reviewersBlock;
+
+        // PR splitting heuristic
+        const cohorts = walkthroughResult.cohorts ?? [];
+        const totalLines = context.files.reduce((s, f) => s + f.additions + f.deletions, 0);
+        if (
+          cohorts.length > 0 &&
+          shouldSuggestSplit({
+            cohortCount: cohorts.length,
+            effortEstimate: walkthroughResult.effortEstimate,
+            fileCount: context.files.length,
+            totalChangedLines: totalLines,
+          })
+        ) {
+          inner += "\n\n" + renderSplitSuggestion(cohorts);
+        }
 
         // Append related PRs and linked issues inside the walkthrough collapse
         if (relatedPRsSection) inner += relatedPRsSection;
@@ -807,6 +875,47 @@ export class Reviewer {
           const repoConfig = mergeWithDefaults(rawConfig);
           const response = await this.ai.chat(context, command.message, repoConfig);
           await this.github.replyToComment(installationId, owner, repo, pullNumber, commentId, response);
+          break;
+        }
+
+        case "tldr": {
+          const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
+          const octokit = await this.github.getInstallationOctokit(installationId);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const repoConfig = mergeWithDefaults(rawConfig);
+          const ask =
+            "Write a single plain-English paragraph (3-5 sentences max) describing this PR. " +
+            "Lead with WHAT it does, then WHY, then any one notable caveat. " +
+            "No headings, no bullet lists, no code blocks. Conversational tone for a busy reviewer.";
+          const response = await this.ai.chat(context, ask, repoConfig);
+          await this.github.replyToComment(
+            installationId, owner, repo, pullNumber, commentId,
+            `## TL;DR\n\n${response.trim()}\n\n<sub>Generated by DiffSentry on demand. Re-run with \`@${this.config.botName} tldr\`.</sub>`,
+          );
+          break;
+        }
+
+        case "tour": {
+          const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
+          const octokit = await this.github.getInstallationOctokit(installationId);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const repoConfig = mergeWithDefaults(rawConfig);
+          const ask = `You are guiding a reviewer through this PR file by file in the order they should read.
+
+For each changed file (most important first), output one Markdown section:
+
+### N. \`path/to/file\`
+**Why this first:** <one sentence>
+**What to look at:** <1-3 sentences pointing to specific lines/symbols>
+
+After the per-file sections, end with a **"## Final Check"** section: 1-3 cross-cutting things to verify after reading every file.
+
+Order by priority for review (highest-risk / load-bearing first), not alphabetically.`;
+          const response = await this.ai.chat(context, ask, repoConfig);
+          await this.github.replyToComment(
+            installationId, owner, repo, pullNumber, commentId,
+            `# 🗺️ Code Tour\n\n${response.trim()}\n\n<sub>Suggested reading order from DiffSentry. Re-run with \`@${this.config.botName} tour\`.</sub>`,
+          );
           break;
         }
       }
