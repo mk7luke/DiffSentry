@@ -12,15 +12,15 @@ export const scenario: Scenario = {
       content: `import fs from "node:fs";\n\nexport function loadConfig(path: string): Record<string, unknown> {\n  return JSON.parse(fs.readFileSync(path, "utf8"));\n}\n`,
     },
     {
-      path: "src/header-only.ts",
-      content: `// Updated: header comment was tweaked, no logic change.\n// This module currently exports nothing.\nexport {};\n`,
+      path: "src/notes.js",
+      content: `// Notes: housekeeping comments only.\n// Updated wording, no logic change.\n// More room for further notes below.\n`,
     },
   ],
   waitFor: { walkthrough: true, review: true, timeoutMs: 240_000 },
   expect: {
     reviewBodyContains: [
       "✅ Files skipped from review due to trivial changes",
-      "src/header-only.ts",
+      "src/notes.js",
     ],
   },
 };

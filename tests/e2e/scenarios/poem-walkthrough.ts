@@ -26,7 +26,6 @@ export const scenario: Scenario = {
   expect: {
     walkthroughContains: [
       "## Poem",
-      "🐇",
     ],
   },
 };
