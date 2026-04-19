@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { pushScenarioBranch } from "./git.js";
+import { pushScenarioBranch, pushSecondCommit } from "./git.js";
 import {
   BOT_LOGIN,
   closePR,
@@ -286,6 +286,13 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioRun> {
           await postIssueComment(prNumber, action.body);
         } else if (action.type === "wait") {
           await sleep(action.ms);
+        } else if (action.type === "push") {
+          console.log(`[${scenario.name}] pushing follow-up commit (${action.files.length} files)`);
+          await pushSecondCommit({
+            scenarioName: scenario.name,
+            files: action.files,
+            commitMessage: action.commitMessage ?? `e2e: follow-up push for ${scenario.name}`,
+          });
         }
       }
     }

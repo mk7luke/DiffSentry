@@ -158,6 +158,27 @@ export class GitHubClient {
     });
   }
 
+  async findCommentByMarker(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    marker: string,
+  ): Promise<{ id: number; body: string } | null> {
+    const octokit = await this.getInstallationOctokit(installationId);
+    const comments = await octokit.paginate(octokit.issues.listComments, {
+      owner,
+      repo,
+      issue_number: pullNumber,
+      per_page: 100,
+    });
+    const existing = comments.find(
+      (c) => c.user?.type === "Bot" && c.body?.includes(marker),
+    );
+    if (!existing) return null;
+    return { id: existing.id, body: existing.body ?? "" };
+  }
+
   async upsertComment(
     installationId: number,
     owner: string,

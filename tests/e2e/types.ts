@@ -5,7 +5,8 @@ export type FileChange = {
 
 export type PostAction =
   | { type: "comment"; body: string }
-  | { type: "wait"; ms: number };
+  | { type: "wait"; ms: number }
+  | { type: "push"; files: FileChange[]; commitMessage?: string };
 
 export type Scenario = {
   name: string;

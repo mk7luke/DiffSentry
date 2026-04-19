@@ -21,6 +21,8 @@ export type ReviewBodyMeta = {
   configUsed?: string;
   plan?: string;
   botName: string;
+  /** When set, this is an incremental review and lastReviewedSha was the previous head. */
+  incrementalFromSha?: string;
 };
 
 const REVIEW_BODY_MARKER = "<!-- This is an auto-generated comment by DiffSentry for review status -->";
@@ -209,7 +211,9 @@ function renderReviewInfo(meta: ReviewBodyMeta, runId: string): string {
     .filter(Boolean)
     .join("\n\n");
 
-  const commits = meta.baseSha
+  const commits = meta.incrementalFromSha
+    ? `Reviewing files that changed from \`${meta.incrementalFromSha}\` to \`${meta.headSha}\`. Previously-reviewed commits are not re-reviewed.`
+    : meta.baseSha
     ? `Reviewing files that changed from the base of the PR and between \`${meta.baseSha}\` and \`${meta.headSha}\`.`
     : `Reviewing files at \`${meta.headSha}\` (base SHA unavailable).`;
 

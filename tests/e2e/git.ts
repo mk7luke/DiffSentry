@@ -6,13 +6,17 @@ import type { FileChange } from "./types.js";
 
 const WORK_ROOT = path.resolve(process.cwd(), "tests/e2e/.work");
 
+export function workDirFor(scenarioName: string): string {
+  return path.join(WORK_ROOT, scenarioName);
+}
+
 export async function pushScenarioBranch(opts: {
   scenarioName: string;
   branch: string;
   files: FileChange[];
   commitMessage: string;
 }): Promise<void> {
-  const workDir = path.join(WORK_ROOT, opts.scenarioName);
+  const workDir = workDirFor(opts.scenarioName);
   await rm(workDir, { recursive: true, force: true });
   await mkdir(workDir, { recursive: true });
 
@@ -31,4 +35,20 @@ export async function pushScenarioBranch(opts: {
   await shx("git", ["-C", workDir, "add", "-A"]);
   await shx("git", ["-C", workDir, "commit", "-m", opts.commitMessage]);
   await shx("git", ["-C", workDir, "push", "-u", "origin", opts.branch]);
+}
+
+export async function pushSecondCommit(opts: {
+  scenarioName: string;
+  files: FileChange[];
+  commitMessage: string;
+}): Promise<void> {
+  const workDir = workDirFor(opts.scenarioName);
+  for (const f of opts.files) {
+    const fullPath = path.join(workDir, f.path);
+    await mkdir(path.dirname(fullPath), { recursive: true });
+    await writeFile(fullPath, f.content);
+  }
+  await shx("git", ["-C", workDir, "add", "-A"]);
+  await shx("git", ["-C", workDir, "commit", "-m", opts.commitMessage]);
+  await shx("git", ["-C", workDir, "push"]);
 }

@@ -11,6 +11,8 @@ import { scenario as poemWalkthrough } from "./poem-walkthrough.js";
 import { scenario as pathFilter } from "./path-filter.js";
 import { scenario as chatQuestion } from "./chat-question.js";
 import { scenario as linkedIssue } from "./linked-issue.js";
+import { scenario as incrementalReview } from "./incremental-review.js";
+import { scenario as trivialSkip } from "./trivial-skip.js";
 
 export const ALL_SCENARIOS: Scenario[] = [
   divideByZero,
@@ -25,6 +27,8 @@ export const ALL_SCENARIOS: Scenario[] = [
   poemWalkthrough,
   pathFilter,
   linkedIssue,
+  trivialSkip,
+  incrementalReview,
 ];
 
 export function findScenario(name: string): Scenario | undefined {

@@ -12,7 +12,13 @@ import { parseIssueReferences, fetchLinkedIssues, formatIssuesForPrompt, formatI
 import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-merge.js";
 import { generateDocstrings, generateTests, simplifyCode, autofix } from "./finishing-touches.js";
 import { formatReviewBody } from "./review-body.js";
+import { encodeState, extractState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
+import { createHash } from "node:crypto";
 import { logger } from "./logger.js";
+
+function patchHash(patch: string): string {
+  return createHash("sha256").update(patch).digest("hex").slice(0, 16);
+}
 
 const WALKTHROUGH_MARKER = "<!-- DiffSentry Walkthrough -->";
 const WALKTHROUGH_START = "<!-- walkthrough_start -->";
@@ -265,6 +271,37 @@ export class Reviewer {
         .filter((f) => !f.patch || f.patch.trim().length === 0)
         .map((f) => f.filename);
 
+      // Recover state from any previously-posted walkthrough comment so the
+      // bot can do real incremental reviews after a restart and surface
+      // skipped-file lists in the review-info block.
+      const priorComment = await this.github
+        .findCommentByMarker(installationId, owner, repo, pullNumber, WALKTHROUGH_MARKER)
+        .catch(() => null);
+      const priorState = priorComment ? extractState(priorComment.body) : null;
+      const priorFingerprints = new Set(priorState?.postedFingerprints ?? []);
+
+      // Classify each file against prior state
+      const currentFileShas: Record<string, string> = {};
+      const filesSkippedSimilar: string[] = [];
+      const filesSkippedTrivial: string[] = [];
+      const filesToReview: typeof context.files = [];
+      for (const f of context.files) {
+        const ph = patchHash(f.patch);
+        currentFileShas[f.filename] = ph;
+        if (isTrivialPatch(f.patch)) {
+          filesSkippedTrivial.push(f.filename);
+          continue;
+        }
+        if (mode === "incremental" && priorState?.fileShas?.[f.filename] === ph) {
+          filesSkippedSimilar.push(f.filename);
+          continue;
+        }
+        filesToReview.push(f);
+      }
+      // Replace context.files with the trimmed set so the AI prompt + review
+      // submission only operate on what actually changed.
+      context.files = filesToReview;
+
       if (context.files.length === 0) {
         log.info("No reviewable files in PR, skipping");
         if (repoConfig.reviews?.commit_status !== false) {
@@ -394,14 +431,40 @@ export class Reviewer {
 
         // Pre-merge checks block as sibling <details>
         if (preMergeBlock) {
-          walkthroughBody += "\n\n" + preMergeBlock;
+          walkthroughBody +=
+            "\n\n<!-- pre_merge_checks_walkthrough_start -->\n\n" +
+            preMergeBlock +
+            "\n\n<!-- pre_merge_checks_walkthrough_end -->";
         }
 
         // Finishing touches checkboxes
-        walkthroughBody += "\n\n" + finishingTouchesBlock();
+        walkthroughBody +=
+          "\n\n<!-- finishing_touch_checkbox_start -->\n\n" +
+          finishingTouchesBlock() +
+          "\n\n<!-- finishing_touch_checkbox_end -->";
 
         // Tips footer
-        walkthroughBody += tipsFooter(this.config.botName);
+        walkthroughBody +=
+          "\n\n<!-- tips_start -->" + tipsFooter(this.config.botName) + "\n\n<!-- tips_end -->";
+
+        // Internal state blob (base64(gzip(JSON))) for incremental review.
+        const newState: WalkthroughState = {
+          v: 1,
+          lastReviewedSha: context.headSha,
+          fileShas: { ...(priorState?.fileShas ?? {}), ...currentFileShas },
+          postedFingerprints: Array.from(
+            new Set([
+              ...(priorState?.postedFingerprints ?? []),
+              ...reviewResult.comments.map((c) => c.fingerprint).filter((x): x is string => !!x),
+            ]),
+          ),
+          filesProcessed: context.files.map((f) => f.filename),
+          filesSkippedSimilar,
+          filesSkippedTrivial,
+          updatedAt: new Date().toISOString(),
+        };
+        walkthroughBody +=
+          "\n\n<!-- internal_state_start -->\n" + encodeState(newState) + "\n<!-- internal_state_end -->";
 
         try {
           await this.github.upsertComment(
@@ -464,10 +527,29 @@ export class Reviewer {
         filesProcessed: context.files.map((f) => f.filename),
         filesIgnoredByPathFilter,
         filesNoReviewableChanges,
+        filesSkippedSimilar,
+        filesSkippedTrivial,
+        incrementalFromSha:
+          mode === "incremental" && priorState?.lastReviewedSha
+            ? priorState.lastReviewedSha
+            : undefined,
         configUsed: hasYaml ? "`.diffsentry.yaml`" : "defaults",
         plan: undefined,
         botName: this.config.botName,
       });
+
+      // Filter out review comments whose fingerprint was already posted
+      // (cross-review dedup). Anthropic + state survive bot restarts.
+      if (priorFingerprints.size > 0) {
+        reviewResult.comments = reviewResult.comments.filter((c) => {
+          const fp = c.fingerprint;
+          if (fp && priorFingerprints.has(fp)) {
+            log.debug({ fp, path: c.path, line: c.line }, "Dropping previously-posted comment");
+            return false;
+          }
+          return true;
+        });
+      }
 
       // Submit the code review
       log.info(
