@@ -42,6 +42,15 @@ export interface ReviewsConfig {
   builtin_patterns?: boolean;
   /** User-defined plain-English/regex pattern checks. */
   anti_patterns?: AntiPattern[];
+  /** License header check. */
+  license_header?: LicenseHeaderConfig;
+}
+
+export interface LicenseHeaderConfig {
+  /** Required header text — checked against the first ~10 lines of new source files. */
+  required: string;
+  /** Globs for files this applies to. Defaults to common source extensions. */
+  paths?: string[];
 }
 
 export interface AntiPattern {
@@ -113,6 +122,8 @@ export interface FileChange {
 }
 
 // ─── Review Comment ────────────────────────────────────────────
+export type Confidence = "high" | "medium" | "low";
+
 export interface ReviewComment {
   path: string;
   line: number;
@@ -126,6 +137,8 @@ export interface ReviewComment {
   suggestionLanguage?: "diff" | "suggestion";
   aiAgentPrompt?: string;
   fingerprint?: string;
+  /** AI's self-rated confidence in this finding (default high). */
+  confidence?: Confidence;
 }
 
 // ─── Review Result ─────────────────────────────────────────────
@@ -216,6 +229,7 @@ export type ChatCommand =
   | { type: "rubber_duck" }
   | { type: "five_why"; target: string }
   | { type: "eli5" }
+  | { type: "timeline" }
   | { type: "chat"; message: string };
 
 // ─── Pre-Merge Checks ──────────────────────────────────────────

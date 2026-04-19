@@ -27,6 +27,9 @@ import { scenario as descriptionDrift } from "./description-drift.js";
 import { scenario as chatEli5 } from "./chat-eli5.js";
 import { scenario as builtinPattern } from "./builtin-pattern.js";
 import { scenario as customPattern } from "./custom-pattern.js";
+import { scenario as titleCoach } from "./title-coach.js";
+import { scenario as licenseHeader } from "./license-header.js";
+import { scenario as chatTimeline } from "./chat-timeline.js";
 
 export const ALL_SCENARIOS: Scenario[] = [
   divideByZero,
@@ -57,6 +60,9 @@ export const ALL_SCENARIOS: Scenario[] = [
   descriptionDrift,
   builtinPattern,
   customPattern,
+  titleCoach,
+  licenseHeader,
+  chatTimeline,
 ];
 
 export function findScenario(name: string): Scenario | undefined {

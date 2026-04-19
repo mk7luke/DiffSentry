@@ -1,4 +1,5 @@
-import type { AIProvider, FileChange, PRContext } from "./types.js";
+import type { AIProvider, FileChange, LicenseHeaderConfig, PRContext } from "./types.js";
+import { minimatch } from "minimatch";
 
 /**
  * Compares the PR description's claims against the actual diff, asks the
@@ -172,4 +173,169 @@ export function renderCommitCoachBlock(findings: CommitFinding[]): string {
 
 function escapeCell(s: string): string {
   return s.replace(/\|/g, "\\|").replace(/\n/g, " ");
+}
+
+// ─── PR title coach ─────────────────────────────────────────────
+
+const VAGUE_TITLE_PATTERNS = [
+  /^(update|fix|change|tweak|cleanup|refactor)s?$/i,
+  /^wip\b/i,
+  /^(misc|minor|small)( changes?| fixes?| updates?)?$/i,
+];
+
+const IMPERATIVE_VERBS = [
+  "add",
+  "remove",
+  "fix",
+  "rename",
+  "move",
+  "extract",
+  "introduce",
+  "replace",
+  "support",
+  "drop",
+  "split",
+  "merge",
+  "wire",
+  "expose",
+  "harden",
+  "switch",
+  "bump",
+  "upgrade",
+  "downgrade",
+  "deprecate",
+  "convert",
+  "migrate",
+  "enable",
+  "disable",
+  "implement",
+  "guard",
+  "log",
+  "document",
+  "polish",
+  "refactor",
+  "simplify",
+  "make",
+  "use",
+  "skip",
+  "show",
+  "hide",
+  "load",
+  "save",
+];
+
+const CONVENTIONAL_PREFIX_RE = /^[a-z][a-z0-9_-]*(\([^)]+\))?!?:\s/;
+
+export type TitleFinding = {
+  level: "ok" | "weak" | "bad";
+  reasons: string[];
+};
+
+export function reviewPRTitle(title: string): TitleFinding {
+  const reasons: string[] = [];
+  let level: TitleFinding["level"] = "ok";
+  const t = title.trim();
+
+  if (t.length === 0) {
+    return { level: "bad", reasons: ["Title is empty."] };
+  }
+  if (t.length < 10) {
+    reasons.push(`Title is only ${t.length} characters — too short to convey intent.`);
+    level = "bad";
+  }
+  if (t.length > 80) {
+    reasons.push(`Title is ${t.length} characters — keep under 80 for readability in lists and notification subjects.`);
+    level = level === "ok" ? "weak" : level;
+  }
+  if (VAGUE_TITLE_PATTERNS.some((re) => re.test(t))) {
+    reasons.push(`Title "${t}" doesn't say what changed. Use an imperative verb plus the thing being changed.`);
+    level = "bad";
+  }
+  if (t.endsWith(".")) {
+    reasons.push("Title ends with a period — drop it (titles aren't sentences).");
+    level = level === "ok" ? "weak" : level;
+  }
+  // Imperative-verb check (only if not Conventional Commits prefixed)
+  if (!CONVENTIONAL_PREFIX_RE.test(t)) {
+    const firstWord = t.replace(/^["'`(]+/, "").split(/\s|[:,.]/)[0]?.toLowerCase() ?? "";
+    if (firstWord && !IMPERATIVE_VERBS.includes(firstWord)) {
+      // Past-tense smell: "Added X", "Fixed Y" — common but worth flagging.
+      if (/(ed|ing)$/i.test(firstWord)) {
+        reasons.push(`Title starts with "${firstWord}" — prefer imperative mood (e.g. "Add ..." not "Added ..." / "Adding ...").`);
+        level = level === "ok" ? "weak" : level;
+      }
+    }
+  }
+  return { level, reasons };
+}
+
+export function renderTitleCoachBlock(title: string, finding: TitleFinding): string {
+  if (finding.level === "ok") return "";
+  const icon = finding.level === "bad" ? "🔴" : "🟡";
+  const lines: string[] = [];
+  lines.push("## 🏷️ PR Title Coach");
+  lines.push("");
+  lines.push(`${icon} **${title}**`);
+  lines.push("");
+  for (const r of finding.reasons) lines.push(`- ${r}`);
+  lines.push("");
+  lines.push(
+    "<sub>Tip: imperative verb + concrete object, under 80 chars, no trailing period. `feat:` / `fix:` prefixes are also fine.</sub>",
+  );
+  return lines.join("\n");
+}
+
+// ─── License header scanner ─────────────────────────────────────
+
+const DEFAULT_LICENSE_PATHS = [
+  "src/**/*.{ts,tsx,js,jsx,mjs,cjs,py,go,rs,java,kt,cs,rb,php,swift,scala}",
+  "lib/**/*.{ts,tsx,js,jsx,mjs,cjs,py,go,rs,java,kt,cs,rb,php,swift,scala}",
+];
+
+export function scanLicenseHeaders(
+  files: FileChange[],
+  config: LicenseHeaderConfig | undefined,
+): string[] {
+  if (!config?.required) return [];
+  const required = config.required.trim();
+  if (!required) return [];
+  const paths = config.paths ?? DEFAULT_LICENSE_PATHS;
+
+  // Only "added" files get checked — modifying an existing file shouldn't
+  // demand a header retrofit.
+  const offenders: string[] = [];
+  for (const f of files) {
+    if (f.status !== "added") continue;
+    if (!paths.some((p) => minimatch(f.filename, p, { dot: true }))) continue;
+    // Reconstruct the new file's first ~10 lines from the patch
+    const headLines: string[] = [];
+    for (const raw of f.patch.split("\n")) {
+      if (raw.startsWith("@@") || raw.startsWith("---") || raw.startsWith("+++")) continue;
+      if (!raw.startsWith("+")) continue;
+      headLines.push(raw.slice(1));
+      if (headLines.length >= 12) break;
+    }
+    const head = headLines.join("\n").trim();
+    if (!head.includes(required.split("\n")[0].trim())) {
+      offenders.push(f.filename);
+    }
+  }
+  return offenders;
+}
+
+export function renderLicenseHeaderBlock(offenders: string[], required: string): string {
+  if (offenders.length === 0) return "";
+  const lines: string[] = [];
+  lines.push("## 📜 Missing License Headers");
+  lines.push("");
+  lines.push(`${offenders.length} new source file${offenders.length === 1 ? "" : "s"} missing the required header:`);
+  lines.push("");
+  for (const p of offenders) lines.push(`- \`${p}\``);
+  lines.push("");
+  lines.push("Required header (first line):");
+  lines.push("");
+  lines.push("```");
+  lines.push(required.split("\n")[0]);
+  lines.push("```");
+  return lines.join("\n");
 }

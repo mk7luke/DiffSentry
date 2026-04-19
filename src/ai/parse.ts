@@ -1,6 +1,14 @@
 import { createHash } from "node:crypto";
-import { PRContext, ReviewComment, ReviewResult, WalkthroughResult, CommentType, CommentSeverity } from "../types.js";
+import { PRContext, ReviewComment, ReviewResult, WalkthroughResult, CommentType, CommentSeverity, Confidence } from "../types.js";
 import { logger } from "../logger.js";
+
+const VALID_CONFIDENCE: Confidence[] = ["high", "medium", "low"];
+
+const CONFIDENCE_TAG: Record<Confidence, string> = {
+  high: "",
+  medium: "🤔 _Medium confidence_ — verify against intent before acting.",
+  low: "🤔 _Low confidence_ — flagging as a hypothesis; may not apply.",
+};
 
 /**
  * Parse a unified diff patch and return the set of line numbers visible
@@ -117,6 +125,7 @@ export function renderInlineCommentBody(comment: {
   suggestionLanguage?: "diff" | "suggestion";
   aiAgentPrompt?: string;
   fingerprint?: string;
+  confidence?: Confidence;
 }): string {
   return formatCommentBody(comment);
 }
@@ -130,6 +139,7 @@ function formatCommentBody(comment: {
   suggestionLanguage?: "diff" | "suggestion";
   aiAgentPrompt?: string;
   fingerprint?: string;
+  confidence?: Confidence;
 }): string {
   const parts: string[] = [];
 
@@ -146,6 +156,11 @@ function formatCommentBody(comment: {
   if (comment.title) {
     const cleanTitle = comment.title.trim().replace(/\*\*/g, "");
     parts.push(`**${cleanTitle}**`);
+  }
+
+  if (comment.confidence && comment.confidence !== "high") {
+    const tag = CONFIDENCE_TAG[comment.confidence];
+    if (tag) parts.push(`> ${tag}`);
   }
 
   parts.push(comment.body.trim());
@@ -218,6 +233,7 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
       const aiAgentPrompt = typeof c.aiAgentPrompt === "string" && c.aiAgentPrompt.trim()
         ? c.aiAgentPrompt
         : undefined;
+      const confidence = VALID_CONFIDENCE.includes(c.confidence) ? (c.confidence as Confidence) : "high";
       const fingerprint = fingerprintFor(c.path, c.line, title || c.body.slice(0, 80));
 
       return {
@@ -233,6 +249,7 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
           suggestionLanguage,
           aiAgentPrompt,
           fingerprint,
+          confidence,
         }),
         type,
         severity,
@@ -241,6 +258,7 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
         suggestionLanguage,
         aiAgentPrompt,
         fingerprint,
+        confidence,
       };
     });
 

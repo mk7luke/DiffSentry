@@ -18,7 +18,7 @@ import { suggestReviewersFromBlame, renderSuggestedReviewers } from "./blame-rev
 import { runSafetyScanners } from "./safety-scanner.js";
 import { runPatternChecks } from "./pattern-checks.js";
 import { scanDependencyChanges, renderDepBlock } from "./dep-scanner.js";
-import { detectDescriptionDrift, renderDriftBlock, reviewCommitMessages, renderCommitCoachBlock } from "./drift.js";
+import { detectDescriptionDrift, renderDriftBlock, reviewCommitMessages, renderCommitCoachBlock, reviewPRTitle, renderTitleCoachBlock, scanLicenseHeaders, renderLicenseHeaderBlock } from "./drift.js";
 import { createHash } from "node:crypto";
 import { logger } from "./logger.js";
 
@@ -525,6 +525,15 @@ export class Reviewer {
         if (driftBlock) inner += "\n\n" + driftBlock;
         const coachBlock = renderCommitCoachBlock(commitFindings);
         if (coachBlock) inner += "\n\n" + coachBlock;
+        const titleFinding = reviewPRTitle(context.title);
+        const titleBlock = renderTitleCoachBlock(context.title, titleFinding);
+        if (titleBlock) inner += "\n\n" + titleBlock;
+        const licenseOffenders = scanLicenseHeaders(context.files, repoConfig.reviews?.license_header);
+        const licenseBlock = renderLicenseHeaderBlock(
+          licenseOffenders,
+          repoConfig.reviews?.license_header?.required ?? "",
+        );
+        if (licenseBlock) inner += "\n\n" + licenseBlock;
         const reviewersBlock = renderSuggestedReviewers(blameReviewers);
         if (reviewersBlock) inner += "\n\n" + reviewersBlock;
 
@@ -1084,6 +1093,93 @@ Format:
             installationId, owner, repo, pullNumber, commentId,
             `# 🦆 Rubber Duck\n\nPretend I'm a rubber duck. Walk me through your reasoning on these:\n\n${response.trim()}\n\n<sub>Socratic-mode review by DiffSentry. Re-run with \`@${this.config.botName} rubber-duck\`.</sub>`,
           );
+          break;
+        }
+
+        case "timeline": {
+          const octokit = await this.github.getInstallationOctokit(installationId);
+          // Fetch the surfaces in parallel
+          const [commits, reviews, issueComments, prComments, statusResp, prData] =
+            await Promise.all([
+              octokit.paginate(octokit.pulls.listCommits, { owner, repo, pull_number: pullNumber, per_page: 100 }),
+              octokit.pulls.listReviews({ owner, repo, pull_number: pullNumber }),
+              octokit.paginate(octokit.issues.listComments, { owner, repo, issue_number: pullNumber, per_page: 100 }),
+              octokit.paginate(octokit.pulls.listReviewComments, { owner, repo, pull_number: pullNumber, per_page: 100 }),
+              octokit.repos.getCombinedStatusForRef({ owner, repo, ref: (await octokit.pulls.get({ owner, repo, pull_number: pullNumber })).data.head.sha }).catch(() => null as any),
+              octokit.pulls.get({ owner, repo, pull_number: pullNumber }),
+            ]);
+
+          type Event = { ts: string; icon: string; line: string };
+          const events: Event[] = [];
+
+          events.push({
+            ts: prData.data.created_at,
+            icon: "🟦",
+            line: `PR opened by **${prData.data.user?.login ?? "unknown"}**: _${prData.data.title}_`,
+          });
+
+          for (const c of commits) {
+            const ts = c.commit?.author?.date ?? c.commit?.committer?.date ?? "";
+            const subject = (c.commit?.message ?? "").split("\n")[0];
+            events.push({
+              ts: ts || prData.data.created_at,
+              icon: "🟢",
+              line: `Commit \`${c.sha.slice(0, 7)}\` by **${c.commit?.author?.name ?? "?"}**: ${subject}`,
+            });
+          }
+
+          for (const r of reviews.data) {
+            const ts = r.submitted_at ?? "";
+            const who = r.user?.login ?? "?";
+            const stateIcon = r.state === "APPROVED" ? "✅" : r.state === "CHANGES_REQUESTED" ? "❌" : "💬";
+            events.push({ ts, icon: stateIcon, line: `Review **${r.state}** by @${who}` });
+          }
+
+          for (const c of issueComments) {
+            if (!c.user) continue;
+            if (c.user.login?.toLowerCase().includes(this.config.botName.toLowerCase())) continue;
+            const summary = (c.body ?? "").split("\n")[0].slice(0, 80);
+            events.push({ ts: c.created_at, icon: "💬", line: `Comment by @${c.user.login}: _${summary}_` });
+          }
+
+          for (const c of prComments) {
+            if (!c.user) continue;
+            if (c.user.login?.toLowerCase().includes(this.config.botName.toLowerCase())) continue;
+            events.push({
+              ts: c.created_at,
+              icon: "🔍",
+              line: `Inline comment by @${c.user.login} on \`${c.path}:${c.line ?? c.original_line ?? "?"}\``,
+            });
+          }
+
+          if (prData.data.merged_at) {
+            events.push({ ts: prData.data.merged_at, icon: "🟣", line: `Merged by **${prData.data.merged_by?.login ?? "?"}**` });
+          } else if (prData.data.closed_at) {
+            events.push({ ts: prData.data.closed_at, icon: "⚫", line: `Closed without merge` });
+          }
+
+          for (const s of statusResp?.data?.statuses ?? []) {
+            const stateIcon = s.state === "success" ? "✅" : s.state === "failure" ? "❌" : s.state === "pending" ? "⏳" : "⚠️";
+            events.push({
+              ts: s.updated_at ?? "",
+              icon: stateIcon,
+              line: `Status \`${s.context}\` → **${s.state}**${s.description ? ` — ${s.description}` : ""}`,
+            });
+          }
+
+          events.sort((a, b) => a.ts.localeCompare(b.ts));
+
+          const lines: string[] = [];
+          lines.push(`# 🕒 PR Timeline`);
+          lines.push("");
+          for (const e of events) {
+            const t = e.ts ? new Date(e.ts).toISOString().replace("T", " ").slice(0, 16) + "Z" : "?";
+            lines.push(`- \`${t}\` ${e.icon} ${e.line}`);
+          }
+          lines.push("");
+          lines.push(`<sub>${events.length} event(s) reconstructed from GitHub. Re-run with \`@${this.config.botName} timeline\`.</sub>`);
+
+          await this.github.replyToComment(installationId, owner, repo, pullNumber, commentId, lines.join("\n"));
           break;
         }
 

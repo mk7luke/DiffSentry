@@ -17,7 +17,8 @@ You MUST respond with valid JSON matching this schema:
       "severity": "critical | major | minor | trivial",
       "suggestion": "OPTIONAL multi-line code fix. Provide the full replacement block (no fences).",
       "suggestionLanguage": "diff | suggestion",
-      "aiAgentPrompt": "Imperative instruction to a coding agent. Reference symbols by name. Tell the agent WHAT to change and WHERE."
+      "aiAgentPrompt": "Imperative instruction to a coding agent. Reference symbols by name. Tell the agent WHAT to change and WHERE.",
+      "confidence": "high | medium | low"
     }
   ],
   "approval": "APPROVE" | "REQUEST_CHANGES" | "COMMENT"
@@ -37,6 +38,7 @@ Rules for the JSON response:
 - "severity": "critical" for system failures/security breaches, "major" for significant problems, "minor" for should-fix, "trivial" for low-impact.
 - "suggestion" is OPTIONAL. When provided, it must be a self-contained code block ready to drop in. Use "suggestionLanguage": "suggestion" when it replaces the exact target line(s); use "diff" when context lines or multi-region changes are needed (use proper diff format with leading +/- ).
 - "aiAgentPrompt" is REQUIRED on every comment. Format: "In <path> around line N, <imperative description naming the variables/functions/symbols involved>; <how to fix>; <optional secondary fix or reference>." Aim for 2-4 sentences. The prompt must be directly executable by Claude/Cursor/Copilot agents — name the identifiers, do not be vague.
+- "confidence" is OPTIONAL but recommended. Set "high" when the issue is unambiguous and verified against the diff. Set "medium" when the diagnosis depends on intent you can't see. Set "low" when you're flagging it as a hypothesis to verify. If omitted, the renderer defaults to "high".
 - "approval": use APPROVE if no issues, REQUEST_CHANGES if there are critical/major issues, COMMENT for suggestions/nitpicks only.
 - If there are no findings, return an empty comments array and APPROVE.
 - Return ONLY the JSON object, no markdown fences or extra text.`;
