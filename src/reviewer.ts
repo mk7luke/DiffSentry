@@ -159,6 +159,11 @@ export class Reviewer {
     }
   }
 
+  // ─── Public helper for server.ts (parent-comment lookup) ───
+  async getInstallationOctokit(installationId: number) {
+    return this.github.getInstallationOctokit(installationId);
+  }
+
   // ─── Abort on PR Close ───────────────────────────────────────
   handlePRClose(owner: string, repo: string, pullNumber: number): void {
     const key = prKey(owner, repo, pullNumber);

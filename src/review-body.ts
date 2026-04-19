@@ -211,11 +211,12 @@ function renderReviewInfo(meta: ReviewBodyMeta, runId: string): string {
     .filter(Boolean)
     .join("\n\n");
 
+  const shortSha = (s: string) => s.slice(0, 7);
   const commits = meta.incrementalFromSha
-    ? `Reviewing files that changed from \`${meta.incrementalFromSha}\` to \`${meta.headSha}\`. Previously-reviewed commits are not re-reviewed.`
+    ? `Reviewing files that changed from \`${shortSha(meta.incrementalFromSha)}\` to \`${shortSha(meta.headSha)}\`. Previously-reviewed commits are not re-reviewed.`
     : meta.baseSha
-    ? `Reviewing files that changed from the base of the PR and between \`${meta.baseSha}\` and \`${meta.headSha}\`.`
-    : `Reviewing files at \`${meta.headSha}\` (base SHA unavailable).`;
+    ? `Reviewing files that changed from the base of the PR and between \`${shortSha(meta.baseSha)}\` and \`${shortSha(meta.headSha)}\`.`
+    : `Reviewing files at \`${shortSha(meta.headSha)}\` (base SHA unavailable).`;
 
   return [
     `<details>`,

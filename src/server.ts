@@ -227,19 +227,52 @@ export function createServer(config: Config) {
         return;
       }
 
-      if (!commentBody.toLowerCase().includes(`@${config.botName.toLowerCase()}`)) {
+      // Treat any reply on a thread our bot started as an implicit @mention
+      // — mirrors CodeRabbit. Detected via in_reply_to_id on the comment
+      // and a lookup of the parent comment's author through the installation
+      // Octokit (works on private repos, respects auth + rate limits).
+      let isImplicitReply = false;
+      const replyToId = comment.in_reply_to_id;
+      if (replyToId) {
+        try {
+          const octokit = await reviewer.getInstallationOctokit(installationId);
+          const parent = await octokit.pulls.getReviewComment({
+            owner,
+            repo,
+            comment_id: replyToId,
+          });
+          const parentLogin = (parent.data.user?.login ?? "").toLowerCase();
+          if (
+            parent.data.user?.type === "Bot" &&
+            parentLogin.includes(config.botName.toLowerCase())
+          ) {
+            isImplicitReply = true;
+          }
+        } catch (err) {
+          logger.debug({ err, replyToId }, "Failed to fetch parent review comment");
+        }
+      }
+
+      const isMention = commentBody.toLowerCase().includes(`@${config.botName.toLowerCase()}`);
+      if (!isMention && !isImplicitReply) {
         res.status(200).json({ status: "ignored" });
         return;
       }
 
+      // For implicit replies, prepend the mention so parseCommand routes
+      // free-form text to the chat handler instead of returning null.
+      const dispatchBody = isImplicitReply && !isMention
+        ? `@${config.botName} ${commentBody}`
+        : commentBody;
+
       logger.info(
-        { owner, repo, pr: pullNumber, commentId },
-        "Bot mentioned in review comment, processing"
+        { owner, repo, pr: pullNumber, commentId, implicit: isImplicitReply },
+        "Processing review-thread comment",
       );
-      res.status(202).json({ status: "accepted" });
+      res.status(202).json({ status: "accepted", implicit: isImplicitReply });
 
       reviewer
-        .handleComment(installationId, owner, repo, pullNumber, commentBody, commentId)
+        .handleComment(installationId, owner, repo, pullNumber, dispatchBody, commentId)
         .catch((err) => {
           logger.error({ err, owner, repo, pr: pullNumber }, "Background review comment handling failed");
         });
