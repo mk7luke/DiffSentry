@@ -4,6 +4,7 @@ import { Config } from "./types.js";
 import { Reviewer } from "./reviewer.js";
 import { logger } from "./logger.js";
 import { recordEvent } from "./storage/dao.js";
+import { createDashboardRouter } from "./dashboard/routes.js";
 
 export function createServer(config: Config) {
   const app = express();
@@ -12,6 +13,9 @@ export function createServer(config: Config) {
 
   // Parse raw body for webhook signature verification
   app.use("/webhook", express.raw({ type: "application/json" }));
+
+  // Read-only dashboard (SQLite-backed — see docs/PRD-web-dashboard.md).
+  app.use("/dashboard", createDashboardRouter());
 
   // Health check
   app.get("/health", (_req, res) => {
