@@ -7,7 +7,9 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
-    "e2e": "tsx tests/e2e/cli.ts"
+    "e2e": "tsx tests/e2e/cli.ts",
+    "backfill": "tsx scripts/backfill.ts",
+    "smoke:dashboard": "tsx scripts/smoke-dashboard.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

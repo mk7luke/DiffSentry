@@ -295,12 +295,55 @@ iterating on bot behavior — it covers the local-only files you need to
 create (`scripts/local/redeploy.sh`), how the harness exercises real PRs,
 and the gotchas that have bitten us.
 
-## Roadmap
+## Web dashboard
 
-A read-only web dashboard for cross-repo / cross-PR analytics is fully
-scoped at [`docs/PRD-web-dashboard.md`](docs/PRD-web-dashboard.md) — storage
-schema, surfaces, tech choices, implementation order, and open questions.
-Estimated 2–3 days of focused work, no new infrastructure.
+A read-only, server-rendered dashboard ships in-process alongside the webhook
+server. Same container, same port. Scoped in
+[`docs/PRD-web-dashboard.md`](docs/PRD-web-dashboard.md).
+
+**Pages**
+
+- `/dashboard` — repos overview (open PRs reviewed, 7d findings, 7d critical,
+  last review), sortable.
+- `/dashboard/repo/:owner/:repo` — 90-day risk sparkline, hot paths, top
+  firing pattern rules, recent reviews, active `@bot learn` learnings, and
+  the live `.diffsentry.yaml` for the repo.
+- `/dashboard/repo/:owner/:repo/pr/:number` — latest review snapshot, full
+  findings table, all-reviews list, events timeline, link back to GitHub.
+- `/dashboard/findings` — cross-repo filterable explorer (severity, source,
+  repo, free-text, age) with a "recurring fingerprints" group.
+- `/dashboard/patterns` — every pattern-rule hit with 30d + all-time counts.
+- `/dashboard/settings` — runtime + storage health, recent warn/error log
+  tail captured via an in-process pino ring buffer.
+
+**Enabling**
+
+The dashboard is off by default. Set `ENABLE_DASHBOARD=1` to mount it, then
+configure OAuth so it isn't publicly reachable:
+
+```
+ENABLE_DASHBOARD=1
+DASHBOARD_URL=https://diffsentry.example.com/dashboard
+GITHUB_OAUTH_CLIENT_ID=…   # from the GitHub App's OAuth config
+GITHUB_OAUTH_CLIENT_SECRET=…
+DASHBOARD_ALLOWED_ORGS=your-org
+# DASHBOARD_SESSION_SECRET — optional, defaults to GITHUB_WEBHOOK_SECRET
+```
+
+With `ENABLE_DASHBOARD=1` but no OAuth vars, the dashboard mounts in
+"open" mode and logs a warning. Don't deploy that to a reachable server.
+
+**Backfill**
+
+Use `npm run backfill` to seed `prs` + events from existing PRs in every
+installed repo so the dashboard isn't empty on first run. Accepts
+`--repo owner/name` and `--limit N`.
+
+**Smoke test**
+
+`npm run smoke:dashboard` spins the dashboard against a temp SQLite and
+verifies every route end-to-end (overview, repo detail, PR detail, findings
+filters, patterns, settings, auth redirect).
 
 ## License
 

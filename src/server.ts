@@ -4,6 +4,8 @@ import { Config } from "./types.js";
 import { Reviewer } from "./reviewer.js";
 import { logger } from "./logger.js";
 import { recordEvent } from "./storage/dao.js";
+import { createDashboardRouter } from "./dashboard/routes.js";
+import { createAuth, loadAuthConfigFromEnv } from "./dashboard/auth.js";
 
 export function createServer(config: Config) {
   const app = express();
@@ -12,6 +14,31 @@ export function createServer(config: Config) {
 
   // Parse raw body for webhook signature verification
   app.use("/webhook", express.raw({ type: "application/json" }));
+
+  // Read-only dashboard (SQLite-backed — see docs/PRD-web-dashboard.md).
+  // Gated off by default: the dashboard currently has no auth, so it must be
+  // opted into explicitly with ENABLE_DASHBOARD=1. Auth lands in PRD step 6.
+  if (process.env.ENABLE_DASHBOARD === "1") {
+    const authCfg = loadAuthConfigFromEnv();
+    const auth = createAuth(authCfg);
+    app.use(
+      "/dashboard",
+      createDashboardRouter({
+        learningsDir: config.learningsDir,
+        getInstallationOctokit: (id) => reviewer.getInstallationOctokit(id),
+        auth,
+      }),
+    );
+    logger.info(
+      { authEnabled: !!auth, orgs: authCfg?.allowedOrgs ?? [] },
+      "Dashboard mounted at /dashboard (ENABLE_DASHBOARD=1)",
+    );
+    if (!auth) {
+      logger.warn(
+        "Dashboard is mounted WITHOUT OAuth. Set GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET, DASHBOARD_ALLOWED_ORGS, DASHBOARD_URL to enable auth.",
+      );
+    }
+  }
 
   // Health check
   app.get("/health", (_req, res) => {
