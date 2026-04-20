@@ -128,6 +128,37 @@ ssh <user>@<host> 'docker exec <container-name> node -e "const db=require(\"bett
 
 Disable persistence locally with `DB_PATH=""` in the env.
 
+## Dashboard
+
+The read-only dashboard at `/dashboard` is off by default. To enable on the
+live server:
+
+```
+ENABLE_DASHBOARD=1
+DASHBOARD_URL=https://<your-host>/dashboard
+GITHUB_OAUTH_CLIENT_ID=<from the App's General tab>
+GITHUB_OAUTH_CLIENT_SECRET=<generated on the App's General tab>
+DASHBOARD_ALLOWED_LOGINS=<your-github-login>       # or
+DASHBOARD_ALLOWED_ORGS=<your-org-slug>
+```
+
+Add `https://<your-host>/dashboard/auth/callback` to the App's **Callback
+URLs**. Then `scripts/local/redeploy.sh` and visit `/dashboard`.
+
+Seed history so the overview isn't empty on first run:
+
+```bash
+ssh <user>@<host> 'docker exec <container-name> npm run backfill'
+```
+
+Smoke-test locally (no server / no auth, spins a temp SQLite):
+
+```bash
+npm run smoke:dashboard
+```
+
+Full design doc: [`docs/PRD-web-dashboard.md`](PRD-web-dashboard.md).
+
 ## Things to never commit
 
 - `scripts/local/**` (whole dir is gitignored — keep deploy targets,

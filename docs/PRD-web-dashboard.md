@@ -1,5 +1,13 @@
 # PRD: DiffSentry Web Dashboard
 
+> **Status:** Shipped. Steps 1–8 in the implementation order below are
+> delivered (see merged PRs on `main`). Mount the dashboard with
+> `ENABLE_DASHBOARD=1` plus the OAuth env set documented in the main README.
+> OAuth is login-allowlist + org-allowlist (either grants access) instead
+> of the org-only scheme originally drafted — personal installs need this.
+> This document is kept as the design reference; the deferred open
+> questions at the bottom are still open.
+
 ## Why
 DiffSentry currently surfaces everything inside the GitHub PR itself. That's
 fine when you're reading one PR, but loses signal as soon as you want to

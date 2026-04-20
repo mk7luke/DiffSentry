@@ -117,6 +117,26 @@ won't get from CodeRabbit.
 
 Anything else after `@bot` is treated as a free-form question about the PR.
 
+### Web dashboard (read-only, optional)
+- **Cross-repo overview** at `/dashboard` — PRs reviewed, 7d/critical finding
+  counts, last review time per repo, sortable.
+- **Repo detail** with a 90-day risk sparkline, hot paths, top firing pattern
+  rules, recent reviews, active `@bot learn` learnings, and the live
+  `.diffsentry.yaml` fetched via the installation.
+- **PR detail** with the latest review snapshot, every finding, the events
+  timeline, and all prior reviews.
+- **Findings explorer** at `/dashboard/findings` with severity/source/repo/age
+  filters and a recurring-fingerprint group view.
+- **Pattern analytics** at `/dashboard/patterns` — per-(repo, rule) 30-day +
+  all-time hit counts to spot noisy rules.
+- **Operator settings** at `/dashboard/settings` — runtime + storage health +
+  a live warn/error log tail captured via an in-process pino ring buffer.
+- **GitHub OAuth gating** — the dashboard is opt-in via `ENABLE_DASHBOARD=1`
+  and requires a GitHub login matching one of `DASHBOARD_ALLOWED_LOGINS` or
+  org membership in `DASHBOARD_ALLOWED_ORGS`.
+- **Backfill CLI** — `npm run backfill` seeds `repos` + `prs` from every
+  installed repo so the dashboard isn't empty on first run.
+
 ### Quality of life
 - **Confidence-tagged findings** — AI marks each finding `high` / `medium` / `low`;
   uncertain ones render with a `🤔` blockquote so reviewers can triage.
@@ -279,8 +299,18 @@ GitHub webhook
 | `IGNORED_PATTERNS` | No | | Comma-separated globs to skip |
 | `BOT_NAME` | No | `diffsentry` | Bot mention name for chat commands |
 | `LEARNINGS_DIR` | No | `./data/learnings` | Per-repo learnings storage |
+| `DB_PATH` | No | `./data/diffsentry.db` | SQLite file. Set to `""` to disable persistence (dashboard becomes empty). |
+| `ENABLE_DASHBOARD` | No | | Set to `1` to mount the read-only dashboard at `/dashboard`. Off by default. |
+| `DASHBOARD_URL` | If dashboard auth | | Full URL the dashboard is reachable at (e.g. `https://diffsentry.example.com/dashboard`). Used to build the OAuth callback. |
+| `GITHUB_OAUTH_CLIENT_ID` | If dashboard auth | | GitHub App's OAuth client ID (on the App's General tab). |
+| `GITHUB_OAUTH_CLIENT_SECRET` | If dashboard auth | | GitHub App's OAuth client secret. |
+| `DASHBOARD_ALLOWED_LOGINS` | One of logins/orgs required | | Comma-separated GitHub user logins allowed to sign in. |
+| `DASHBOARD_ALLOWED_ORGS` | One of logins/orgs required | | Comma-separated GitHub org slugs whose members may sign in. |
+| `DASHBOARD_SESSION_SECRET` | No | `GITHUB_WEBHOOK_SECRET` | HMAC key for the dashboard session cookie. |
 
 \* One of `GITHUB_PRIVATE_KEY_PATH` or `GITHUB_PRIVATE_KEY` is required.
+
+\*\* `ENABLE_DASHBOARD=1` alone runs the dashboard with no auth and logs a loud warning — only acceptable when the server is not internet-reachable. For public deployments all four dashboard-auth rows must be set, and at least one of `DASHBOARD_ALLOWED_LOGINS` / `DASHBOARD_ALLOWED_ORGS` must be non-empty.
 
 **Auto-ignored files:** lock files (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`),
 minified assets (`*.min.js`, `*.min.css`), sourcemaps (`*.map`), build output
