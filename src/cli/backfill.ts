@@ -18,10 +18,10 @@
 import "dotenv/config";
 import { Octokit } from "@octokit/rest";
 import { createAppAuth } from "@octokit/auth-app";
-import { loadConfig } from "../src/config.js";
-import { openDatabase } from "../src/storage/db.js";
-import { recordEvent, recordPR, recordRepo } from "../src/storage/dao.js";
-import { logger } from "../src/logger.js";
+import { loadConfig } from "../config.js";
+import { openDatabase } from "../storage/db.js";
+import { recordEvent, recordPR, recordRepo } from "../storage/dao.js";
+import { logger } from "../logger.js";
 
 interface Args {
   repo?: string;
