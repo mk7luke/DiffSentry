@@ -15,7 +15,12 @@ export function createServer(config: Config) {
   app.use("/webhook", express.raw({ type: "application/json" }));
 
   // Read-only dashboard (SQLite-backed — see docs/PRD-web-dashboard.md).
-  app.use("/dashboard", createDashboardRouter());
+  // Gated off by default: the dashboard currently has no auth, so it must be
+  // opted into explicitly with ENABLE_DASHBOARD=1. Auth lands in PRD step 6.
+  if (process.env.ENABLE_DASHBOARD === "1") {
+    app.use("/dashboard", createDashboardRouter());
+    logger.info("Dashboard mounted at /dashboard (ENABLE_DASHBOARD=1)");
+  }
 
   // Health check
   app.get("/health", (_req, res) => {
