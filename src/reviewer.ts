@@ -164,6 +164,27 @@ export class Reviewer {
     return this.github.getInstallationOctokit(installationId);
   }
 
+  // ─── Push-driven auto-resolve (runs even when reviews are paused) ─────
+  async autoResolveOnPush(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number
+  ): Promise<void> {
+    const log = logger.child({ owner, repo, pr: pullNumber });
+    try {
+      const ctx = await this.github.getPRContext(installationId, owner, repo, pullNumber);
+      const changedFiles = ctx.files.map((f) => f.filename);
+      if (changedFiles.length === 0) return;
+      const resolved = await this.github.resolveAddressedThreads(
+        installationId, owner, repo, pullNumber, changedFiles
+      );
+      if (resolved > 0) log.info({ resolved }, "Push auto-resolve: closed addressed threads");
+    } catch (err) {
+      log.warn({ err }, "Push auto-resolve failed");
+    }
+  }
+
   // ─── Abort on PR Close ───────────────────────────────────────
   handlePRClose(owner: string, repo: string, pullNumber: number): void {
     const key = prKey(owner, repo, pullNumber);
@@ -261,20 +282,9 @@ export class Reviewer {
 
       if (abortController.signal.aborted) return;
 
-      // Auto-resolve addressed review threads on incremental reviews
-      if (mode === "incremental") {
-        const changedFiles = context.files.map((f) => f.filename);
-        try {
-          const resolved = await this.github.resolveAddressedThreads(
-            installationId, owner, repo, pullNumber, changedFiles
-          );
-          if (resolved > 0) {
-            log.info({ resolved }, "Auto-resolved addressed review threads");
-          }
-        } catch (err) {
-          log.warn({ err }, "Failed to auto-resolve review threads");
-        }
-      }
+      // Note: push-driven auto-resolve now runs from server.ts on synchronize
+      // *before* this gated path, so paused/draft/ignored PRs still resolve
+      // addressed threads.
 
       // Apply path filters from repo config — capture excluded paths for review-info reporting
       const filesIgnoredByPathFilter: Array<{ path: string; reason: string }> = [];
@@ -1261,7 +1271,49 @@ Output ONLY valid JSON (no fences, no prose):
           const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
           const repoConfig = mergeWithDefaults(rawConfig);
           const response = await this.ai.chat(context, command.message, repoConfig);
-          await reply( response);
+          await reply(response);
+
+          // If the user replied inside a bot-started review thread, ask the AI
+          // whether the exchange resolves the original suggestion (either by
+          // acknowledging it as a false positive or by explaining it's already
+          // addressed). If yes, mark the thread resolved.
+          if (commentKind === "review_thread") {
+            try {
+              const thread = await this.github.findThreadByCommentId(
+                installationId, owner, repo, pullNumber, commentId
+              );
+              if (thread && !thread.isResolved) {
+                const judgePrompt = [
+                  "You are judging whether a review-thread exchange resolves the bot's original suggestion.",
+                  "Reply with EXACTLY one token: YES or NO. No explanation, no punctuation.",
+                  "",
+                  "Resolve (YES) when the human credibly explains why the suggestion is unnecessary, a false positive, ",
+                  "out of scope, or already handled — AND the bot's reply agrees / acknowledges / verifies that.",
+                  "Do NOT resolve (NO) if the bot pushes back, asks for more info, or the human is just asking a question.",
+                  "",
+                  "## Original bot suggestion",
+                  thread.originalBody || "(unavailable)",
+                  "",
+                  "## Human reply",
+                  command.message,
+                  "",
+                  "## Bot reply",
+                  response,
+                ].join("\n");
+                const verdict = (await this.ai.chat(context, judgePrompt, repoConfig)).trim().toUpperCase();
+                if (verdict.startsWith("YES")) {
+                  const ok = await this.github.resolveThreadById(
+                    installationId, owner, repo, pullNumber, thread.threadId
+                  );
+                  if (ok) log.info({ threadId: thread.threadId }, "Auto-resolved thread after acknowledged reply");
+                } else {
+                  log.debug({ verdict }, "Judge declined to resolve thread");
+                }
+              }
+            } catch (err) {
+              log.warn({ err }, "Thread-reply auto-resolve failed");
+            }
+          }
           break;
         }
 

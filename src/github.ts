@@ -3,6 +3,18 @@ import { Octokit } from "@octokit/rest";
 import { Config, FileChange, PRContext, ReviewResult } from "./types.js";
 import { logger } from "./logger.js";
 
+function isOurBotThread(thread: any, botLogin: string): boolean {
+  const first = thread.comments?.nodes?.[0];
+  if (!first) return false;
+  const author = first.author;
+  if (!author) return false;
+  if (author.__typename !== "Bot") return false;
+  const login = (author.login ?? "").toLowerCase();
+  // Exact match against our app login first; fall back to suffix so older
+  // deployments under a different bot name can still self-resolve their threads.
+  return login === botLogin || login.endsWith("[bot]");
+}
+
 export class GitHubClient {
   private config: Config;
 
@@ -350,49 +362,17 @@ export class GitHubClient {
   ): Promise<number> {
     const octokit = await this.getInstallationOctokit(installationId);
     const log = logger.child({ owner, repo, pr: pullNumber });
+    const botLogin = `${this.config.botName}[bot]`.toLowerCase();
+    const changed = new Set(changedFiles);
 
     try {
-      // Fetch all review threads via GraphQL
-      const query = `
-        query($owner: String!, $repo: String!, $pr: Int!) {
-          repository(owner: $owner, name: $repo) {
-            pullRequest(number: $pr) {
-              reviewThreads(first: 100) {
-                nodes {
-                  id
-                  isResolved
-                  path
-                  comments(first: 1) {
-                    nodes {
-                      author {
-                        login
-                      }
-                      authorAssociation
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      `;
-
-      const result: any = await octokit.graphql(query, { owner, repo, pr: pullNumber });
-      const threads = result.repository.pullRequest.reviewThreads.nodes;
+      const threads = await this.fetchAllReviewThreads(octokit, owner, repo, pullNumber);
 
       let resolvedCount = 0;
       for (const thread of threads) {
         if (thread.isResolved) continue;
-
-        // Only resolve threads on files changed in this push
-        if (!changedFiles.includes(thread.path)) continue;
-
-        // Only resolve threads started by a GitHub App or bot
-        const firstComment = thread.comments.nodes[0];
-        if (!firstComment) continue;
-        const isAppAuthor = firstComment.authorAssociation === "APP" ||
-          firstComment.author?.login?.endsWith("[bot]");
-        if (!isAppAuthor) continue;
+        if (!changed.has(thread.path)) continue;
+        if (!isOurBotThread(thread, botLogin)) continue;
 
         try {
           await octokit.graphql(`
@@ -417,6 +397,106 @@ export class GitHubClient {
   }
 
   /**
+   * Resolve a single review thread by its node id. Returns true on success.
+   */
+  async resolveThreadById(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    threadId: string
+  ): Promise<boolean> {
+    const octokit = await this.getInstallationOctokit(installationId);
+    const log = logger.child({ owner, repo, pr: pullNumber, threadId });
+    try {
+      await octokit.graphql(`
+        mutation($threadId: ID!) {
+          resolveReviewThread(input: { threadId: $threadId }) {
+            thread { id }
+          }
+        }
+      `, { threadId });
+      return true;
+    } catch (err) {
+      log.warn({ err }, "Failed to resolve thread by id");
+      return false;
+    }
+  }
+
+  /**
+   * Look up the thread node id that contains a given review-comment id, plus
+   * the body of the original (first) comment in that thread. Returns null if
+   * the comment isn't part of any thread the App can see.
+   */
+  async findThreadByCommentId(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    commentId: number
+  ): Promise<{ threadId: string; originalBody: string; isResolved: boolean } | null> {
+    const octokit = await this.getInstallationOctokit(installationId);
+    const log = logger.child({ owner, repo, pr: pullNumber, commentId });
+    try {
+      const threads = await this.fetchAllReviewThreads(octokit, owner, repo, pullNumber, /*includeAllComments*/ true);
+      for (const thread of threads) {
+        const commentNodes = thread.comments?.nodes ?? [];
+        const hit = commentNodes.find((c: any) => c.databaseId === commentId);
+        if (hit) {
+          return {
+            threadId: thread.id,
+            originalBody: commentNodes[0]?.body ?? "",
+            isResolved: !!thread.isResolved,
+          };
+        }
+      }
+      return null;
+    } catch (err) {
+      log.warn({ err }, "Failed to look up thread by comment id");
+      return null;
+    }
+  }
+
+  private async fetchAllReviewThreads(
+    octokit: Octokit,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    includeAllComments = false
+  ): Promise<any[]> {
+    const commentsBlock = includeAllComments
+      ? `comments(first: 100) { nodes { databaseId body author { login __typename } } }`
+      : `comments(first: 1) { nodes { author { login __typename } } }`;
+    const query = `
+      query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $pr) {
+            reviewThreads(first: 100, after: $cursor) {
+              pageInfo { hasNextPage endCursor }
+              nodes {
+                id
+                isResolved
+                path
+                ${commentsBlock}
+              }
+            }
+          }
+        }
+      }
+    `;
+    const all: any[] = [];
+    let cursor: string | null = null;
+    while (true) {
+      const result: any = await octokit.graphql(query, { owner, repo, pr: pullNumber, cursor });
+      const block = result.repository.pullRequest.reviewThreads;
+      all.push(...block.nodes);
+      if (!block.pageInfo.hasNextPage) break;
+      cursor = block.pageInfo.endCursor;
+    }
+    return all;
+  }
+
+  /**
    * Resolve all unresolved review threads on a PR (used by the "resolve" command).
    */
   private async resolveReviewThreads(
@@ -428,23 +508,7 @@ export class GitHubClient {
     const log = logger.child({ owner, repo, pr: pullNumber });
 
     try {
-      const query = `
-        query($owner: String!, $repo: String!, $pr: Int!) {
-          repository(owner: $owner, name: $repo) {
-            pullRequest(number: $pr) {
-              reviewThreads(first: 100) {
-                nodes {
-                  id
-                  isResolved
-                }
-              }
-            }
-          }
-        }
-      `;
-
-      const result: any = await octokit.graphql(query, { owner, repo, pr: pullNumber });
-      const threads = result.repository.pullRequest.reviewThreads.nodes;
+      const threads = await this.fetchAllReviewThreads(octokit, owner, repo, pullNumber);
 
       let resolved = 0;
       for (const thread of threads) {

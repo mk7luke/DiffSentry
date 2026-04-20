@@ -111,6 +111,12 @@ export function createServer(config: Config) {
         logger.info({ owner, repo, pr: number, action }, "PR updated, queuing incremental review");
         res.status(202).json({ status: "accepted" });
 
+        // Run push-driven auto-resolve unconditionally (not gated by pause/draft/auto-review),
+        // so threads close even on PRs the bot won't re-review.
+        reviewer.autoResolveOnPush(installationId, owner, repo, number).catch((err) => {
+          logger.error({ err, owner, repo, pr: number }, "Push auto-resolve failed");
+        });
+
         reviewer.handlePullRequest(installationId, owner, repo, number, "incremental").catch((err) => {
           logger.error({ err, owner, repo, pr: number }, "Background review failed");
         });
