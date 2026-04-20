@@ -191,7 +191,8 @@ try {
       auth: createAuth({
         clientId: "cid",
         clientSecret: "csecret",
-        allowedOrgs: ["mk7luke"],
+        allowedLogins: ["mk7luke"],
+        allowedOrgs: [],
         sessionSecret: "smoke-secret",
         baseUrl: "http://localhost/dashboard",
       }),
