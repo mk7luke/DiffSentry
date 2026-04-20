@@ -221,7 +221,12 @@ function renderReviewInfo(meta: ReviewBodyMeta, runId: string): string {
     ? `Reviewing files that changed from the base of the PR and between ${commitLink(meta.baseSha)} and ${commitLink(meta.headSha)}.`
     : `Reviewing files at ${commitLink(meta.headSha)} (base SHA unavailable).`;
 
-  return [
+  // Optional file-list blocks return "" when the list is empty — drop those
+  // entries (only those entries) so we don't emit double blank lines. The
+  // OTHER blank lines in this array are load-bearing: GitHub's markdown
+  // parser only parses content inside <details> when it's preceded by a
+  // blank line after <summary>. Without them, [text](url) renders literally.
+  const sections = [
     `<details>`,
     `<summary>ℹ️ Review info</summary>`,
     "",
@@ -240,23 +245,25 @@ function renderReviewInfo(meta: ReviewBodyMeta, runId: string): string {
     `</details>`,
     "",
     renderFileListWithReason("Files ignored due to path filters", meta.filesIgnoredByPathFilter, "⛔"),
-    "",
     renderFileList("Files selected for processing", meta.filesProcessed, "📒"),
-    "",
     renderFileList("Files with no reviewable changes", meta.filesNoReviewableChanges, "💤"),
-    "",
     renderFileList("Files skipped from review due to trivial changes", meta.filesSkippedTrivial, "✅"),
-    "",
     renderFileList(
       "Files skipped from review as they are similar to previous changes",
       meta.filesSkippedSimilar,
       "🚧",
     ),
-    "",
     `</details>`,
-  ]
-    .filter((s) => s !== "")
-    .join("\n");
+  ];
+  // Stitch with single newlines but interleave blank lines between non-empty
+  // file-list blocks so each one keeps its own <summary>-then-blank pattern.
+  const out: string[] = [];
+  for (let i = 0; i < sections.length; i++) {
+    const s = sections[i];
+    if (s === "" && out[out.length - 1] === "") continue; // collapse double blanks
+    out.push(s);
+  }
+  return out.join("\n");
 }
 
 export function formatReviewBody(
