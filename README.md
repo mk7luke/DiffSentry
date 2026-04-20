@@ -286,6 +286,15 @@ GitHub webhook
 minified assets (`*.min.js`, `*.min.css`), sourcemaps (`*.map`), build output
 (`dist/**`, `build/**`, `.next/**`).
 
+## Development workflow
+
+The full edit → push → redeploy → test loop (sandbox repo, redeploy
+script, e2e harness, persistent SQLite inspection) is documented at
+[`docs/E2E-DEPLOY-LOOP.md`](docs/E2E-DEPLOY-LOOP.md). Use that doc when
+iterating on bot behavior — it covers the local-only files you need to
+create (`scripts/local/redeploy.sh`), how the harness exercises real PRs,
+and the gotchas that have bitten us.
+
 ## Roadmap
 
 A read-only web dashboard for cross-repo / cross-PR analytics is fully
