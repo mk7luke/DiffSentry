@@ -1,3 +1,19 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
+export interface RequestContext {
+  user: { login: string } | null;
+}
+
+const als = new AsyncLocalStorage<RequestContext>();
+
+export function runWithRequestContext<T>(ctx: RequestContext, fn: () => T): T {
+  return als.run(ctx, fn);
+}
+
+export function getRequestContext(): RequestContext {
+  return als.getStore() ?? { user: null };
+}
+
 /** Tiny HTML escape for untrusted string interpolation. */
 export function esc(s: unknown): string {
   return String(s ?? "")
@@ -13,8 +29,13 @@ export interface Crumb {
   href?: string;
 }
 
-export function renderLayout(opts: { title: string; crumbs?: Crumb[]; body: string }): string {
+export interface CurrentUser {
+  login: string;
+}
+
+export function renderLayout(opts: { title: string; crumbs?: Crumb[]; body: string; user?: CurrentUser | null }): string {
   const crumbs = opts.crumbs ?? [];
+  const user = opts.user ?? getRequestContext().user;
   const crumbHtml = crumbs.length
     ? `<nav class="text-sm text-slate-500 mb-4">${crumbs
         .map((c, i) => {
@@ -46,7 +67,15 @@ export function renderLayout(opts: { title: string; crumbs?: Crumb[]; body: stri
         <a href="/dashboard/patterns" class="hover:text-slate-900">Patterns</a>
         <a href="/dashboard/settings" class="hover:text-slate-900">Settings</a>
       </nav>
-      <span class="ml-auto text-xs text-slate-400 font-mono">read-only</span>
+      <div class="ml-auto flex items-center gap-3 text-xs">
+        <span class="text-slate-400 font-mono">read-only</span>
+        ${
+          user
+            ? `<span class="text-slate-500">@${esc(user.login)}</span>
+               <a href="/dashboard/auth/logout" class="text-slate-500 hover:text-slate-900">logout</a>`
+            : ""
+        }
+      </div>
     </div>
   </header>
   <main class="max-w-7xl mx-auto px-6 py-6">

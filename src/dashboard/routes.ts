@@ -1,11 +1,16 @@
 import express from "express";
-import { logger } from "../logger.js";
-import { esc, relativeTime, renderLayout, riskBadge, severityBadge } from "./layout.js";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { getRecentLogs, logger, type LogEntry } from "../logger.js";
+import type { Learning } from "../types.js";
+import { esc, relativeTime, renderLayout, riskBadge, runWithRequestContext, severityBadge } from "./layout.js";
+import { getCurrentUser } from "./auth.js";
 import {
   getEvents,
   getFindings,
   getHealthCounts,
   getHotPaths,
+  getInstallationId,
   getPR,
   getPRReviews,
   getPatternRules,
@@ -24,8 +29,28 @@ import {
   type SparklinePoint,
 } from "./queries.js";
 
-export function createDashboardRouter(): express.Router {
+export interface DashboardDeps {
+  learningsDir: string;
+  /** Returns an octokit scoped to the given installation. Optional — config viewer disabled when null. */
+  getInstallationOctokit?: (installationId: number) => Promise<import("@octokit/rest").Octokit>;
+  /** Optional OAuth runtime — when present, all non-/auth routes require a session. */
+  auth?: import("./auth.js").AuthRuntime | null;
+}
+
+export function createDashboardRouter(deps: DashboardDeps): express.Router {
   const router = express.Router();
+  if (deps.auth) {
+    deps.auth.routes(router);
+    router.use(deps.auth.middleware);
+  }
+
+  // Bind request context (current user) for the duration of each request so
+  // renderLayout can surface it in the header without threading through every
+  // render function.
+  router.use((req, _res, next) => {
+    const user = getCurrentUser(req);
+    runWithRequestContext({ user: user ? { login: user.login } : null }, next);
+  });
 
   router.get("/", (req, res) => {
     try {
@@ -38,7 +63,7 @@ export function createDashboardRouter(): express.Router {
     }
   });
 
-  router.get("/repo/:owner/:repo", (req, res) => {
+  router.get("/repo/:owner/:repo", async (req, res) => {
     const owner = req.params.owner;
     const repo = req.params.repo;
     try {
@@ -50,7 +75,11 @@ export function createDashboardRouter(): express.Router {
       const hotPaths = getHotPaths(owner, repo);
       const topRules = getTopRules(owner, repo);
       const reviews = getRecentReviews(owner, repo, 50);
-      res.type("html").send(renderRepoDetail({ owner, repo, sparkline, hotPaths, topRules, reviews }));
+      const learnings = await loadLearningsSafe(deps.learningsDir, owner, repo);
+      const configYaml = await loadRepoConfigSafe(deps, owner, repo);
+      res.type("html").send(
+        renderRepoDetail({ owner, repo, sparkline, hotPaths, topRules, reviews, learnings, configYaml }),
+      );
     } catch (err) {
       logger.error({ err, owner, repo }, "dashboard repo detail failed");
       res.status(500).type("html").send(renderError("Failed to load repo detail."));
@@ -82,7 +111,8 @@ export function createDashboardRouter(): express.Router {
   router.get("/settings", (_req, res) => {
     try {
       const counts = getHealthCounts();
-      res.type("html").send(renderSettings(counts));
+      const logs = getRecentLogs(100);
+      res.type("html").send(renderSettings(counts, logs));
     } catch (err) {
       logger.error({ err }, "dashboard /settings failed");
       res.status(500).type("html").send(renderError("Failed to load settings."));
@@ -187,6 +217,48 @@ interface RepoDetailArgs {
   hotPaths: ReturnType<typeof getHotPaths>;
   topRules: ReturnType<typeof getTopRules>;
   reviews: ReturnType<typeof getRecentReviews>;
+  learnings: Learning[];
+  configYaml: string | null;
+}
+
+async function loadLearningsSafe(baseDir: string, owner: string, repo: string): Promise<Learning[]> {
+  try {
+    const fp = path.join(baseDir, owner, `${repo}.json`);
+    const raw = await fs.readFile(fp, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed as Learning[];
+  } catch {
+    return [];
+  }
+}
+
+const configCache = new Map<string, { yaml: string | null; ts: number }>();
+const CONFIG_TTL_MS = 5 * 60 * 1000;
+
+async function loadRepoConfigSafe(deps: DashboardDeps, owner: string, repo: string): Promise<string | null> {
+  const key = `${owner}/${repo}`;
+  const now = Date.now();
+  const cached = configCache.get(key);
+  if (cached && now - cached.ts < CONFIG_TTL_MS) return cached.yaml;
+  if (!deps.getInstallationOctokit) return null;
+  const id = getInstallationId(owner, repo);
+  if (id == null) return null;
+  try {
+    const octokit = await deps.getInstallationOctokit(id);
+    const { data } = await octokit.repos.getContent({ owner, repo, path: ".diffsentry.yaml" });
+    if (Array.isArray(data) || data.type !== "file" || !data.content) {
+      configCache.set(key, { yaml: null, ts: now });
+      return null;
+    }
+    const content = Buffer.from(data.content, "base64").toString("utf-8");
+    configCache.set(key, { yaml: content, ts: now });
+    return content;
+  } catch (err) {
+    logger.debug({ err, owner, repo }, "dashboard: failed to fetch .diffsentry.yaml");
+    configCache.set(key, { yaml: null, ts: now });
+    return null;
+  }
 }
 
 function renderSparkline(points: SparklinePoint[]): string {
@@ -330,6 +402,10 @@ function renderRepoDetail(a: RepoDetailArgs): string {
         <h2 class="text-sm font-semibold text-slate-700 px-4 py-3 border-b border-slate-200">Recent reviews</h2>
         ${reviewsHtml}
       </section>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        ${renderLearningsCard(a.learnings)}
+        ${renderConfigCard(a.configYaml)}
+      </div>
     </div>
   `;
 
@@ -341,6 +417,41 @@ function renderRepoDetail(a: RepoDetailArgs): string {
     ],
     body,
   });
+}
+
+function renderLearningsCard(learnings: Learning[]): string {
+  const body = learnings.length === 0
+    ? `<div class="text-slate-400 text-sm">No learnings recorded for this repo. Use <span class="font-mono">@bot learn …</span> on a PR to add one.</div>`
+    : `<ul class="divide-y divide-slate-100 text-sm max-h-80 overflow-auto">
+         ${learnings
+           .map(
+             (l) => `<li class="py-2 flex items-start gap-3">
+               <span class="text-xs text-slate-400 whitespace-nowrap">${esc(relativeTime(l.createdAt))}</span>
+               <div class="flex-1 min-w-0">
+                 ${l.path ? `<div class="text-xs font-mono text-slate-500 truncate">${esc(l.path)}</div>` : ""}
+                 <div class="text-slate-700 break-words">${esc(l.content)}</div>
+               </div>
+             </li>`,
+           )
+           .join("")}
+       </ul>`;
+  return `<section class="bg-white border border-slate-200 rounded-lg p-4">
+    <h2 class="text-sm font-semibold text-slate-700 mb-3">Learnings (${learnings.length})</h2>
+    ${body}
+  </section>`;
+}
+
+function renderConfigCard(yaml: string | null): string {
+  if (yaml === null) {
+    return `<section class="bg-white border border-slate-200 rounded-lg p-4">
+      <h2 class="text-sm font-semibold text-slate-700 mb-3">.diffsentry.yaml</h2>
+      <div class="text-slate-400 text-sm">No config file in this repo (defaults in use) — or the dashboard could not reach the GitHub API.</div>
+    </section>`;
+  }
+  return `<section class="bg-white border border-slate-200 rounded-lg p-4">
+    <h2 class="text-sm font-semibold text-slate-700 mb-3">.diffsentry.yaml</h2>
+    <pre class="text-xs font-mono text-slate-700 bg-slate-50 border border-slate-200 rounded p-3 max-h-80 overflow-auto whitespace-pre">${esc(yaml)}</pre>
+  </section>`;
 }
 
 // ─── PR detail ─────────────────────────────────────────────────────
@@ -788,7 +899,7 @@ function bytesHuman(n: number | null): string {
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
 }
 
-function renderSettings(c: HealthCounts): string {
+function renderSettings(c: HealthCounts, logs: LogEntry[] = []): string {
   const providerCard = `
     <section class="bg-white border border-slate-200 rounded-lg p-4">
       <h2 class="text-sm font-semibold text-slate-700 mb-3">Runtime</h2>
@@ -823,10 +934,34 @@ function renderSettings(c: HealthCounts): string {
       <div>This dashboard is gated behind <span class="font-mono">ENABLE_DASHBOARD=1</span>. OAuth gating lands in PRD step 6 — until then, do not expose this server to the internet.</div>
     </section>`;
 
+  const logCard = `
+    <section class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-slate-700">Recent warnings &amp; errors</h2>
+        <span class="text-xs text-slate-400">${logs.length} entries · newest last</span>
+      </div>
+      ${
+        logs.length === 0
+          ? `<div class="px-4 py-6 text-slate-400 text-sm text-center">No warn/error log entries captured since startup.</div>`
+          : `<ul class="divide-y divide-slate-100 text-sm max-h-96 overflow-auto">
+               ${logs
+                 .map((e) => {
+                   const lvl = e.level === "error" || e.level === "fatal" ? "text-red-700" : "text-amber-700";
+                   return `<li class="px-4 py-2 flex items-start gap-3">
+                     <span class="text-xs text-slate-400 font-mono whitespace-nowrap">${esc(e.ts.slice(11, 19))}</span>
+                     <span class="text-xs font-semibold uppercase ${lvl}">${esc(e.level)}</span>
+                     <span class="text-slate-700 break-words">${esc(e.msg)}</span>
+                   </li>`;
+                 })
+                 .join("")}
+             </ul>`
+      }
+    </section>`;
+
   return renderLayout({
     title: "Settings",
     crumbs: [{ label: "Repos", href: "/dashboard" }, { label: "Settings" }],
     body: `<h1 class="text-xl font-semibold mb-4">Settings</h1>
-           <div class="grid grid-cols-1 gap-4">${note}${providerCard}${dbCard}</div>`,
+           <div class="grid grid-cols-1 gap-4">${note}${providerCard}${dbCard}${logCard}</div>`,
   });
 }

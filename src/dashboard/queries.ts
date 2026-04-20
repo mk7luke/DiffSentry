@@ -66,6 +66,16 @@ export interface RecentReviewRow {
   author: string | null;
 }
 
+/** Look up the most recent installation id for a repo, or null. */
+export function getInstallationId(owner: string, repo: string): number | null {
+  const db = openDatabase();
+  if (!db) return null;
+  const row = db
+    .prepare(`SELECT installation_id FROM repos WHERE owner = ? AND repo = ? LIMIT 1`)
+    .get(owner, repo) as { installation_id?: number } | undefined;
+  return row?.installation_id ?? null;
+}
+
 /** Is this (owner, repo) known? */
 export function repoExists(owner: string, repo: string): boolean {
   const db = openDatabase();
