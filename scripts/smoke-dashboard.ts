@@ -62,8 +62,18 @@ insertEvent.run("mk7luke", "diffsentry-sandbox", 42, hoursAgo(10), "pull_request
 insertEvent.run("mk7luke", "diffsentry-sandbox", 42, hoursAgo(9), "pull_request_review.submitted", null);
 insertEvent.run("mk7luke", "diffsentry-sandbox", 42, hoursAgo(5), "pull_request.synchronize", null);
 
+const learningsDir = path.join(os.tmpdir(), `ds-smoke-learnings-${Date.now()}`);
+fs.mkdirSync(path.join(learningsDir, "mk7luke"), { recursive: true });
+fs.writeFileSync(
+  path.join(learningsDir, "mk7luke", "diffsentry-sandbox.json"),
+  JSON.stringify([
+    { id: "l1", repo: "mk7luke/diffsentry-sandbox", content: "Prefer async/await over raw promises.", createdAt: hoursAgo(240) },
+    { id: "l2", repo: "mk7luke/diffsentry-sandbox", content: "Tests must hit a real DB (see /tests/e2e).", path: "tests/**", createdAt: hoursAgo(48) },
+  ]),
+);
+
 const app = express();
-app.use("/dashboard", createDashboardRouter());
+app.use("/dashboard", createDashboardRouter({ learningsDir }));
 const server = app.listen(0);
 const port = (server.address() as { port: number }).port;
 
@@ -115,6 +125,9 @@ try {
     "no-console",
     "Add rate limiter",
     "<svg",
+    "Learnings (2)",
+    "Prefer async/await",
+    ".diffsentry.yaml",
   ]);
 
   const prDetail = await fetch("/dashboard/repo/mk7luke/diffsentry-sandbox/pr/42");
@@ -166,6 +179,39 @@ try {
   const badPR = await fetch("/dashboard/repo/mk7luke/diffsentry-sandbox/pr/abc");
   if (badPR.status !== 400) throw new Error(`expected 400, got ${badPR.status}`);
   console.log("  ✓ bad PR number → 400");
+
+  // Auth scenario — spin up a second app with auth enabled and check
+  // that an unauthenticated request to / is redirected to /auth/login.
+  const { createAuth } = await import("../src/dashboard/auth.js");
+  const authedApp = express();
+  authedApp.use(
+    "/dashboard",
+    createDashboardRouter({
+      learningsDir,
+      auth: createAuth({
+        clientId: "cid",
+        clientSecret: "csecret",
+        allowedOrgs: ["mk7luke"],
+        sessionSecret: "smoke-secret",
+        baseUrl: "http://localhost/dashboard",
+      }),
+    }),
+  );
+  const authedServer = authedApp.listen(0);
+  const authedPort = (authedServer.address() as { port: number }).port;
+  const authResp = await new Promise<{ status: number; location: string | null }>((resolve, reject) => {
+    http
+      .get({ hostname: "127.0.0.1", port: authedPort, path: "/dashboard" }, (r) => {
+        r.resume();
+        resolve({ status: r.statusCode ?? 0, location: (r.headers.location as string) ?? null });
+      })
+      .on("error", reject);
+  });
+  authedServer.close();
+  if (authResp.status !== 302 || !(authResp.location ?? "").startsWith("/dashboard/auth/login")) {
+    throw new Error(`expected redirect to /dashboard/auth/login, got ${authResp.status} -> ${authResp.location}`);
+  }
+  console.log("  ✓ auth: unauthenticated → redirect to /dashboard/auth/login");
 
   console.log("\nall smoke checks passed ✓");
 } finally {
