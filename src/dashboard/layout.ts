@@ -118,6 +118,80 @@ const BASE_STYLES = `
   .text-orange-200 { color: #fed7aa; }
   .text-orange-300 { color: #fdba74; }
 
+  /* GitHub-like rendered markdown container — scoped so it never leaks
+     into the chrome. Used for review summaries and finding bodies. */
+  .md-body { color: #e4e4e8; font-size: 0.875rem; line-height: 1.55; word-wrap: break-word; }
+  .md-body > :first-child { margin-top: 0; }
+  .md-body > :last-child { margin-bottom: 0; }
+  .md-body h1, .md-body h2, .md-body h3, .md-body h4, .md-body h5, .md-body h6 {
+    color: #f2f2f4; font-weight: 600; line-height: 1.25;
+    margin: 1.25em 0 0.6em; letter-spacing: -0.005em;
+  }
+  .md-body h1 { font-size: 1.2rem; padding-bottom: 0.3em; border-bottom: 1px solid #2f2f38; }
+  .md-body h2 { font-size: 1.05rem; padding-bottom: 0.2em; border-bottom: 1px solid #2f2f38; }
+  .md-body h3 { font-size: 0.95rem; }
+  .md-body h4 { font-size: 0.875rem; }
+  .md-body h5, .md-body h6 { font-size: 0.8125rem; color: #c9c9d0; }
+  .md-body p { margin: 0.5em 0 0.75em; }
+  .md-body a { color: #8ecdff; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  .md-body a:hover { color: #bce0ff; }
+  .md-body strong { color: #f2f2f4; font-weight: 600; }
+  .md-body em { color: #d9d9de; }
+  .md-body code {
+    background: #22222a; padding: 0.15em 0.4em; border-radius: 4px;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.85em; color: #f2f2f4; white-space: break-spaces;
+  }
+  .md-body pre {
+    background: #0d0d12; border: 1px solid #2f2f38; border-radius: 6px;
+    padding: 0.75em 1em; overflow-x: auto; margin: 0.75em 0;
+    font-size: 0.75rem; line-height: 1.5;
+  }
+  .md-body pre code { background: transparent; padding: 0; border-radius: 0; font-size: inherit; white-space: pre; }
+  .md-body blockquote {
+    border-left: 3px solid #338dff; padding: 0.15em 1em;
+    color: #c9c9d0; margin: 0.75em 0; background: rgba(51,141,255,0.04);
+  }
+  .md-body ul, .md-body ol { margin: 0.5em 0 0.75em; padding-left: 1.75em; }
+  .md-body li { margin: 0.2em 0; }
+  .md-body li > p { margin: 0.25em 0; }
+  .md-body ul ul, .md-body ol ol, .md-body ul ol, .md-body ol ul { margin: 0.15em 0; }
+  .md-body details {
+    border: 1px solid #2f2f38; border-radius: 6px;
+    padding: 0.5em 0.9em; margin: 0.6em 0; background: #16161c;
+  }
+  .md-body details[open] { background: #1c1c23; }
+  .md-body summary {
+    cursor: pointer; color: #c9c9d0; font-weight: 500;
+    margin: 0; list-style: none; user-select: none;
+  }
+  .md-body summary::-webkit-details-marker { display: none; }
+  .md-body summary::before { content: "▸ "; color: #6e6e7a; }
+  .md-body details[open] > summary::before { content: "▾ "; color: #59b0ff; }
+  .md-body summary:hover { color: #f2f2f4; }
+  .md-body details[open] > summary { margin-bottom: 0.5em; padding-bottom: 0.5em; border-bottom: 1px solid #2f2f38; }
+  .md-body table {
+    width: 100%; border-collapse: collapse;
+    margin: 0.75em 0; font-size: 0.8125rem;
+  }
+  .md-body table th, .md-body table td {
+    text-align: left; padding: 0.4em 0.75em; border: 1px solid #2f2f38;
+  }
+  .md-body table th { background: #1c1c23; color: #f2f2f4; font-weight: 600; }
+  .md-body table tr:nth-child(even) { background: rgba(47,47,56,0.2); }
+  .md-body hr { border: 0; border-top: 1px solid #2f2f38; margin: 1.25em 0; }
+  .md-body img { max-width: 100%; border-radius: 4px; }
+  .md-body input[type="checkbox"] {
+    margin-right: 0.4em; accent-color: #338dff;
+    vertical-align: middle; width: 0.9em; height: 0.9em;
+  }
+  .md-body .task-list-item { list-style: none; margin-left: -1.5em; }
+
+  /* Raw/rendered markdown toggle wrapper (used on the PR summary card) */
+  [data-md-wrap] .md-raw { display: none !important; }
+  [data-md-wrap].show-raw .md-rendered { display: none !important; }
+  [data-md-wrap].show-raw .md-raw { display: block !important; }
+
   /* Compact layout helpers that also don't depend on Tailwind */
   .muted-dim { color: #6e6e7a; }
   .num-crit { color: #fca5a5; font-weight: 600; }

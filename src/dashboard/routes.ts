@@ -5,6 +5,7 @@ import { getRecentLogs, logger, type LogEntry } from "../logger.js";
 import type { Learning } from "../types.js";
 import { esc, pageHeader, relativeTime, renderLayout, riskBadge, runWithRequestContext, severityBadge } from "./layout.js";
 import { getCurrentUser } from "./auth.js";
+import { renderMarkdown } from "./markdown.js";
 import {
   getEvents,
   getFindings,
@@ -546,8 +547,14 @@ function renderPRDetail(a: PRDetailArgs): string {
            ${
              a.latest.summary
                ? `<div class="mt-4 pt-4 border-t border-surface-800">
-                    <div class="text-[11px] uppercase tracking-wider text-surface-400 font-semibold mb-2">Summary</div>
-                    <pre class="text-xs whitespace-pre-wrap font-sans text-surface-100 leading-relaxed max-h-80 overflow-auto">${esc(a.latest.summary)}</pre>
+                    <div class="flex items-center justify-between mb-2">
+                      <div class="text-[11px] uppercase tracking-wider text-surface-400 font-semibold">Summary</div>
+                      <button type="button" class="text-[11px] text-surface-500 hover:text-surface-200" onclick="var m=this.closest('[data-md-wrap]'); m.classList.toggle('show-raw');">toggle raw</button>
+                    </div>
+                    <div data-md-wrap>
+                      <div class="md-body md-rendered max-h-80 overflow-auto">${renderMarkdown(a.latest.summary)}</div>
+                      <pre class="md-raw text-xs whitespace-pre-wrap font-mono text-surface-200 leading-relaxed max-h-80 overflow-auto" style="display:none;">${esc(a.latest.summary)}</pre>
+                    </div>
                   </div>`
                : ""
            }
@@ -569,7 +576,7 @@ function renderPRDetail(a: PRDetailArgs): string {
                  <td class="font-mono text-xs">${esc(f.path ?? "")}${f.line ? `<span class="text-surface-500">:${f.line}</span>` : ""}</td>
                  <td>
                    <div class="text-surface-100 font-medium">${esc(f.title ?? "—")}</div>
-                   ${f.body ? `<details class="mt-1"><summary class="text-[11px] text-surface-400 cursor-pointer hover:text-surface-200">show body</summary><pre class="text-xs whitespace-pre-wrap font-sans text-surface-200 mt-2 leading-relaxed">${esc(f.body.slice(0, 4000))}</pre></details>` : ""}
+                   ${f.body ? `<details class="mt-1"><summary class="text-[11px] text-surface-400 cursor-pointer hover:text-surface-200">Show rendered body</summary><div class="md-body mt-2 pl-3 border-l border-surface-800">${renderMarkdown(f.body.slice(0, 4000))}</div></details>` : ""}
                  </td>
                  <td class="text-xs muted">${esc(f.source ?? "—")}</td>
                </tr>`,

@@ -21,6 +21,7 @@
     "dotenv": "^17.4.2",
     "express": "^4.21.2",
     "js-yaml": "^4.1.1",
+    "marked": "^18.0.2",
     "minimatch": "^10.2.5",
     "openai": "^4.85.4",
     "parse-diff": "^0.11.1",
