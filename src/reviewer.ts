@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Config, AIProvider, PRContext, RepoConfig } from "./types.js";
 import { AnthropicProvider } from "./ai/anthropic.js";
 import { OpenAIProvider } from "./ai/openai.js";
+import { OpenAICompatibleProvider } from "./ai/openai-compatible.js";
 import { GitHubClient } from "./github.js";
 import { loadRepoConfig, mergeWithDefaults, shouldReviewPR, isPathIncluded } from "./repo-config.js";
 import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary, injectSummaryIntoPRBody } from "./walkthrough.js";
@@ -154,6 +155,13 @@ export class Reviewer {
 
     if (config.aiProvider === "anthropic") {
       this.ai = new AnthropicProvider(config.anthropicApiKey!, config.anthropicModel, config.anthropicBaseUrl);
+    } else if (config.aiProvider === "openai-compatible") {
+      this.ai = new OpenAICompatibleProvider({
+        baseURL: config.localAiBaseUrl!,
+        model: config.localAiModel,
+        apiKey: config.localAiApiKey,
+        jsonMode: config.localAiJsonMode,
+      });
     } else {
       this.ai = new OpenAIProvider(config.openaiApiKey!, config.openaiModel, config.openaiBaseUrl);
     }
