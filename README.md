@@ -257,10 +257,12 @@ GitHub webhook
       ├── blame-reviewers.ts      git-blame-based reviewer suggestions
       ├── codeowners.ts           CODEOWNERS parser + per-file owner match
       ├── cross-pr.ts             Cross-PR thread memory + diff-PR helper
-      ├── ai/prompt.ts            Prompt engineering (review + walkthrough)
-      ├── ai/parse.ts             AI response parsing + inline-comment renderer
-      ├── ai/anthropic.ts         Claude provider
-      └── ai/openai.ts            OpenAI provider
+      ├── ai/prompt.ts               Prompt engineering (review + walkthrough)
+      ├── ai/parse.ts                AI response parsing + inline-comment renderer
+      ├── ai/anthropic.ts            Claude provider
+      ├── ai/openai.ts               OpenAI provider
+      └── ai/openai-compatible.ts    Local / self-hosted OpenAI-compatible provider
+                                     (Ollama, LM Studio, vLLM, llama.cpp, LocalAI, ...)
       │
       ▼
   github.ts            GitHub API client (REST + GraphQL)
@@ -286,13 +288,17 @@ GitHub webhook
 | `GITHUB_PRIVATE_KEY_PATH` | Yes* | `./private-key.pem` | Path to the private key file |
 | `GITHUB_PRIVATE_KEY` | Yes* | | Private key contents (alternative to PATH) |
 | `GITHUB_WEBHOOK_SECRET` | Yes | | Webhook signature secret |
-| `AI_PROVIDER` | No | `anthropic` | `anthropic` or `openai` |
+| `AI_PROVIDER` | No | `anthropic` | `anthropic`, `openai`, or `openai-compatible` |
 | `ANTHROPIC_API_KEY` | If anthropic | | Anthropic API key |
 | `ANTHROPIC_MODEL` | No | `claude-sonnet-4-20250514` | Anthropic model |
 | `ANTHROPIC_BASE_URL` | No | | Override Anthropic API base URL |
 | `OPENAI_API_KEY` | If openai | | OpenAI API key |
 | `OPENAI_MODEL` | No | `gpt-4o` | OpenAI model |
 | `OPENAI_BASE_URL` | No | | Override OpenAI API base URL |
+| `LOCAL_AI_BASE_URL` | If openai-compatible | | OpenAI-compatible endpoint (e.g. `http://localhost:11434/v1` for Ollama). See [Using local models](#using-local-models-ollama-lm-studio-vllm-llamacpp-localai). |
+| `LOCAL_AI_MODEL` | If openai-compatible | | Model name as exposed by the local server (e.g. `llama3.1:70b`, `qwen2.5-coder:32b`, `Qwen/Qwen2.5-Coder-32B-Instruct`). |
+| `LOCAL_AI_API_KEY` | No | `not-needed` | API key. Most local servers ignore it; set it only when your backend enforces one (e.g. a hosted vLLM gateway). |
+| `LOCAL_AI_JSON_MODE` | No | `true` | Send `response_format: json_object`. Set to `false` if your backend rejects the field (some older llama.cpp / vLLM builds). |
 | `PORT` | No | `3005` | Server port |
 | `LOG_LEVEL` | No | `info` | Logging level |
 | `MAX_FILES_PER_REVIEW` | No | `50` | Max files per review |
@@ -315,6 +321,118 @@ GitHub webhook
 **Auto-ignored files:** lock files (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`),
 minified assets (`*.min.js`, `*.min.css`), sourcemaps (`*.map`), build output
 (`dist/**`, `build/**`, `.next/**`).
+
+## Using local models (Ollama, LM Studio, vLLM, llama.cpp, LocalAI)
+
+DiffSentry can talk to any server that exposes an **OpenAI-compatible
+`/v1/chat/completions` endpoint**. In practice that covers every popular local
+inference runtime. Set `AI_PROVIDER=openai-compatible` and point
+`LOCAL_AI_BASE_URL` at the server.
+
+**Model guidance.** DiffSentry's reviewer prompt asks for a structured JSON
+object with inline comments bound to diff lines. That rules out small/chatty
+models. Use a capable instruction-tuned model (32B+ params) that handles JSON
+output well — e.g. Llama 3.1 70B Instruct, Qwen2.5-Coder 32B, DeepSeek-Coder
+V2, Mixtral 8x22B. If comments come back empty or malformed, your model is
+too small or ignoring the JSON instruction.
+
+### Ollama
+
+```bash
+# 1. Install and pull a model
+ollama pull llama3.1:70b
+
+# 2. DiffSentry env
+AI_PROVIDER=openai-compatible
+LOCAL_AI_BASE_URL=http://localhost:11434/v1
+LOCAL_AI_MODEL=llama3.1:70b
+# LOCAL_AI_API_KEY and LOCAL_AI_JSON_MODE can be left default
+```
+
+Ollama honors `response_format: json_object` on recent versions — leave
+`LOCAL_AI_JSON_MODE=true`. If you're running DiffSentry in Docker against an
+Ollama instance on the host, use `http://host.docker.internal:11434/v1` (macOS
+/ Windows) or the host's LAN IP on Linux.
+
+### LM Studio
+
+1. In LM Studio, load a model and click **Start Server** (default port `1234`).
+2. DiffSentry env:
+   ```bash
+   AI_PROVIDER=openai-compatible
+   LOCAL_AI_BASE_URL=http://localhost:1234/v1
+   LOCAL_AI_MODEL=<the model id shown in LM Studio's server panel>
+   ```
+LM Studio exposes the model's full local identifier — copy it verbatim from
+the server page. JSON mode works on LM Studio ≥ 0.3; if you see HTTP 400 from
+`response_format`, set `LOCAL_AI_JSON_MODE=false`.
+
+### vLLM
+
+```bash
+# Serve any HF model with an OpenAI-compatible API
+python -m vllm.entrypoints.openai.api_server \
+  --model Qwen/Qwen2.5-Coder-32B-Instruct \
+  --port 8000
+```
+
+```bash
+AI_PROVIDER=openai-compatible
+LOCAL_AI_BASE_URL=http://localhost:8000/v1
+LOCAL_AI_MODEL=Qwen/Qwen2.5-Coder-32B-Instruct   # must match --model exactly
+# LOCAL_AI_API_KEY=...   # only needed if you launched vLLM with --api-key
+```
+
+vLLM supports `response_format: json_object` via its `--guided-decoding-backend`
+flag on recent builds. Older builds may reject the field — set
+`LOCAL_AI_JSON_MODE=false` in that case; DiffSentry's response parser
+tolerates raw / fenced JSON.
+
+### llama.cpp server (`llama-server`)
+
+```bash
+llama-server -m /path/to/model.gguf --host 0.0.0.0 --port 8080 \
+  --chat-template llama3   # pick the template that matches your model
+```
+
+```bash
+AI_PROVIDER=openai-compatible
+LOCAL_AI_BASE_URL=http://localhost:8080/v1
+LOCAL_AI_MODEL=local                             # llama.cpp ignores model name
+LOCAL_AI_JSON_MODE=false                         # llama-server uses grammars instead
+```
+
+`llama-server` historically ignores `response_format`; DiffSentry's tolerant
+JSON parser handles the plain-text JSON it returns. If your model drifts from
+pure JSON, lower `temperature` via the server's CLI flags.
+
+### LocalAI
+
+```bash
+AI_PROVIDER=openai-compatible
+LOCAL_AI_BASE_URL=http://localhost:8080/v1
+LOCAL_AI_MODEL=<model name from your LocalAI models.yaml>
+```
+
+### Any other OpenAI-compatible provider
+
+The same settings work for Together, Groq, Fireworks, OpenRouter, DeepInfra,
+Azure OpenAI's v1 endpoint, self-hosted proxies, etc. Set
+`LOCAL_AI_BASE_URL` to the `/v1` URL, `LOCAL_AI_MODEL` to the provider's
+model name, and `LOCAL_AI_API_KEY` if the provider requires one.
+
+### Troubleshooting
+
+- **HTTP 400 on reviews, 200 on chat** — your backend is rejecting
+  `response_format: json_object`. Set `LOCAL_AI_JSON_MODE=false`.
+- **Review summary renders but no inline comments** — the model isn't returning
+  a `comments: [...]` array. Either the model is too small, or it's wrapping
+  JSON in prose; try a stronger model or lower temperature.
+- **`ECONNREFUSED` from Docker** — the container can't reach `localhost`. Use
+  `host.docker.internal` (Desktop) or the host's LAN IP (Linux).
+- **Very slow first review** — local models are slower than hosted ones. Use
+  `MAX_FILES_PER_REVIEW` to cap per-PR cost, and consider a smaller model for
+  chat (currently not independently configurable — PRs welcome).
 
 ## Development workflow
 

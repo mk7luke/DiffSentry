@@ -4,13 +4,19 @@ export interface Config {
   githubAppId: string;
   githubPrivateKey: string;
   githubWebhookSecret: string;
-  aiProvider: "anthropic" | "openai";
+  aiProvider: "anthropic" | "openai" | "openai-compatible";
   anthropicApiKey?: string;
   anthropicBaseUrl?: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   anthropicModel: string;
   openaiModel: string;
+  // OpenAI-compatible local/self-hosted providers (Ollama, LM Studio, vLLM,
+  // llama.cpp server, LocalAI, etc.). Only used when aiProvider === "openai-compatible".
+  localAiBaseUrl?: string;
+  localAiApiKey?: string;
+  localAiModel: string;
+  localAiJsonMode: boolean;
   maxFilesPerReview: number;
   ignoredPatterns: string[];
   botName: string;
