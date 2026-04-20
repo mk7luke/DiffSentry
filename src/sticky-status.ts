@@ -17,6 +17,8 @@ export function renderStickyStatus(opts: {
   filesSkipped: number;
   lastReviewedAt: string;
   lastReviewedSha: string;
+  owner: string;
+  repo: string;
   botName: string;
   riskHistory?: number[];
 }): string {
@@ -32,7 +34,8 @@ export function renderStickyStatus(opts: {
   const lines: string[] = [];
   lines.push(STICKY_MARKER);
   lines.push("");
-  lines.push(`# 📌 Status — last updated <code>${opts.lastReviewedSha.slice(0, 7)}</code>`);
+  const headLink = `[\`${opts.lastReviewedSha.slice(0, 7)}\`](https://github.com/${opts.owner}/${opts.repo}/commit/${opts.lastReviewedSha})`;
+  lines.push(`# 📌 Status — last updated ${headLink}`);
   lines.push("");
   lines.push(verdict);
   lines.push("");

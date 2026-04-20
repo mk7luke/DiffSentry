@@ -756,6 +756,8 @@ export class Reviewer {
       const hasYaml = rawConfig && Object.keys(rawConfig).length > 0;
       reviewResult.summary = formatReviewBody(reviewResult, {
         profile: repoConfig.reviews?.profile ?? "chill",
+        owner,
+        repo,
         baseSha: undefined,
         headSha: context.headSha,
         baseBranch: context.baseBranch,
@@ -866,6 +868,8 @@ export class Reviewer {
           filesSkipped: filesSkippedSimilar.length + filesSkippedTrivial.length,
           lastReviewedAt: new Date().toISOString().replace("T", " ").slice(0, 16) + "Z",
           lastReviewedSha: context.headSha,
+          owner,
+          repo,
           botName: this.config.botName,
           riskHistory: (priorState?.riskHistory ?? []).concat(risk.score).slice(-20),
         });
