@@ -38,9 +38,15 @@ export function renderLayout(opts: { title: string; crumbs?: Crumb[]; body: stri
 </head>
 <body class="bg-slate-50 text-slate-900">
   <header class="border-b border-slate-200 bg-white">
-    <div class="max-w-7xl mx-auto px-6 py-3 flex items-center gap-4">
+    <div class="max-w-7xl mx-auto px-6 py-3 flex items-center gap-6">
       <a href="/dashboard" class="font-semibold text-slate-900 hover:text-slate-700">DiffSentry</a>
-      <span class="text-xs text-slate-400 font-mono">read-only</span>
+      <nav class="flex items-center gap-4 text-sm text-slate-600">
+        <a href="/dashboard" class="hover:text-slate-900">Repos</a>
+        <a href="/dashboard/findings" class="hover:text-slate-900">Findings</a>
+        <a href="/dashboard/patterns" class="hover:text-slate-900">Patterns</a>
+        <a href="/dashboard/settings" class="hover:text-slate-900">Settings</a>
+      </nav>
+      <span class="ml-auto text-xs text-slate-400 font-mono">read-only</span>
     </div>
   </header>
   <main class="max-w-7xl mx-auto px-6 py-6">

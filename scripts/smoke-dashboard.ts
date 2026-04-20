@@ -128,6 +128,37 @@ try {
     `https://github.com/mk7luke/diffsentry-sandbox/pull/42`,
   ]);
 
+  const findings = await fetch("/dashboard/findings");
+  if (findings.status !== 200) throw new Error(`findings status ${findings.status}`);
+  assertContains("findings (unfiltered)", findings.body, [
+    "Findings",
+    "Race condition",
+    "Secret in code",
+    "Apply",
+    "Severity",
+  ]);
+
+  const findingsFiltered = await fetch("/dashboard/findings?severity=critical&source=safety");
+  if (findingsFiltered.status !== 200) throw new Error(`findings filtered status ${findingsFiltered.status}`);
+  assertContains("findings (filtered)", findingsFiltered.body, [
+    "Secret in code",
+  ]);
+  if (findingsFiltered.body.includes("Extract helper")) {
+    throw new Error("[findings filtered] severity filter did not exclude minor finding");
+  }
+
+  const findingsByFp = await fetch("/dashboard/findings?fingerprint=fp1");
+  if (findingsByFp.status !== 200) throw new Error(`findings fp status ${findingsByFp.status}`);
+  assertContains("findings (fingerprint)", findingsByFp.body, ["fp1", "Race condition"]);
+
+  const patterns = await fetch("/dashboard/patterns");
+  if (patterns.status !== 200) throw new Error(`patterns status ${patterns.status}`);
+  assertContains("patterns", patterns.body, ["no-console", "todo-comment", "Hits · 30d"]);
+
+  const settings = await fetch("/dashboard/settings");
+  if (settings.status !== 200) throw new Error(`settings status ${settings.status}`);
+  assertContains("settings", settings.body, ["Runtime", "Storage", "ENABLE_DASHBOARD"]);
+
   const notFound = await fetch("/dashboard/repo/unknown/unknown");
   if (notFound.status !== 404) throw new Error(`expected 404, got ${notFound.status}`);
   console.log("  ✓ unknown repo → 404");

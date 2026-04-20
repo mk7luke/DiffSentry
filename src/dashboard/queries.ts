@@ -248,6 +248,129 @@ export function getFindings(reviewId: number): FindingRow[] {
     .all(reviewId) as FindingRow[];
 }
 
+// ─── Findings explorer ─────────────────────────────────────────────
+
+export interface FindingExplorerRow {
+  id: number;
+  owner: string;
+  repo: string;
+  number: number;
+  created_at: string;
+  path: string | null;
+  line: number | null;
+  severity: string | null;
+  title: string | null;
+  source: string | null;
+  fingerprint: string | null;
+  type: string | null;
+}
+
+export interface FindingFilters {
+  severity?: string;
+  source?: string;
+  repo?: string; // "owner/repo"
+  q?: string; // substring on path + title
+  fingerprint?: string;
+  ageDays?: number; // only findings from reviews created within N days
+  limit?: number;
+  offset?: number;
+}
+
+export interface FindingExplorerResult {
+  rows: FindingExplorerRow[];
+  total: number;
+}
+
+function buildFindingsWhere(f: FindingFilters): { clause: string; params: unknown[] } {
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (f.severity) {
+    clauses.push("fi.severity = ?");
+    params.push(f.severity);
+  }
+  if (f.source) {
+    clauses.push("fi.source = ?");
+    params.push(f.source);
+  }
+  if (f.repo && f.repo.includes("/")) {
+    const [o, r] = f.repo.split("/", 2);
+    clauses.push("rv.owner = ? AND rv.repo = ?");
+    params.push(o, r);
+  }
+  if (f.fingerprint) {
+    clauses.push("fi.fingerprint = ?");
+    params.push(f.fingerprint);
+  }
+  if (f.q) {
+    clauses.push("(COALESCE(fi.path,'') LIKE ? OR COALESCE(fi.title,'') LIKE ?)");
+    const like = `%${f.q}%`;
+    params.push(like, like);
+  }
+  if (typeof f.ageDays === "number" && f.ageDays > 0) {
+    const cutoff = new Date(Date.now() - f.ageDays * 24 * 60 * 60 * 1000).toISOString();
+    clauses.push("rv.created_at >= ?");
+    params.push(cutoff);
+  }
+  const clause = clauses.length === 0 ? "" : `WHERE ${clauses.join(" AND ")}`;
+  return { clause, params };
+}
+
+export function queryFindings(filters: FindingFilters): FindingExplorerResult {
+  const db = openDatabase();
+  if (!db) return { rows: [], total: 0 };
+  const { clause, params } = buildFindingsWhere(filters);
+  const limit = Math.min(Math.max(filters.limit ?? 100, 1), 500);
+  const offset = Math.max(filters.offset ?? 0, 0);
+  const total = (db
+    .prepare(`SELECT COUNT(*) AS n FROM findings fi JOIN reviews rv ON rv.id = fi.review_id ${clause}`)
+    .get(...params) as { n: number }).n;
+  const rows = db
+    .prepare(
+      `SELECT fi.id, rv.owner, rv.repo, rv.number, rv.created_at,
+              fi.path, fi.line, fi.severity, fi.title, fi.source, fi.fingerprint, fi.type
+       FROM findings fi
+       JOIN reviews rv ON rv.id = fi.review_id
+       ${clause}
+       ORDER BY rv.created_at DESC, fi.id DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(...params, limit, offset) as FindingExplorerRow[];
+  return { rows, total };
+}
+
+export interface FingerprintGroupRow {
+  fingerprint: string;
+  title: string | null;
+  severity: string | null;
+  occurrences: number;
+  repos: number;
+  last_seen: string;
+}
+
+/** Group findings by fingerprint — "this finding raised on N PRs". */
+export function queryFingerprintGroups(filters: FindingFilters, limit = 50): FingerprintGroupRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  const { clause, params } = buildFindingsWhere(filters);
+  return db
+    .prepare(
+      `SELECT fi.fingerprint,
+              MAX(fi.title) AS title,
+              MAX(fi.severity) AS severity,
+              COUNT(*) AS occurrences,
+              COUNT(DISTINCT rv.owner || '/' || rv.repo) AS repos,
+              MAX(rv.created_at) AS last_seen
+       FROM findings fi
+       JOIN reviews rv ON rv.id = fi.review_id
+       ${clause ? clause + " AND " : "WHERE "} fi.fingerprint IS NOT NULL AND fi.fingerprint <> ''
+       GROUP BY fi.fingerprint
+       HAVING occurrences >= 2
+       ORDER BY occurrences DESC, last_seen DESC
+       LIMIT ?`,
+    )
+    .all(...params, limit) as FingerprintGroupRow[];
+}
+
 export function getEvents(owner: string, repo: string, number: number, limit = 100): EventRow[] {
   const db = openDatabase();
   if (!db) return [];
@@ -260,4 +383,79 @@ export function getEvents(owner: string, repo: string, number: number, limit = 1
        LIMIT ?`,
     )
     .all(owner, repo, number, limit) as EventRow[];
+}
+
+// ─── Settings / health ─────────────────────────────────────────────
+
+export interface HealthCounts {
+  repos: number;
+  prs: number;
+  reviews: number;
+  findings: number;
+  events: number;
+  pattern_hits: number;
+  db_bytes: number | null;
+  oldest_review: string | null;
+  newest_review: string | null;
+}
+
+export function getHealthCounts(): HealthCounts {
+  const db = openDatabase();
+  if (!db) {
+    return {
+      repos: 0, prs: 0, reviews: 0, findings: 0, events: 0, pattern_hits: 0,
+      db_bytes: null, oldest_review: null, newest_review: null,
+    };
+  }
+  const one = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
+  let dbBytes: number | null = null;
+  try {
+    const row = db.prepare("SELECT page_count * page_size AS bytes FROM pragma_page_count(), pragma_page_size()").get() as { bytes?: number };
+    dbBytes = row?.bytes ?? null;
+  } catch {
+    // ignore — older SQLite may not expose pragma_* as tables
+  }
+  const range = db.prepare("SELECT MIN(created_at) AS mn, MAX(created_at) AS mx FROM reviews").get() as { mn: string | null; mx: string | null };
+  return {
+    repos: one("SELECT COUNT(*) AS n FROM repos"),
+    prs: one("SELECT COUNT(*) AS n FROM prs"),
+    reviews: one("SELECT COUNT(*) AS n FROM reviews"),
+    findings: one("SELECT COUNT(*) AS n FROM findings"),
+    events: one("SELECT COUNT(*) AS n FROM events"),
+    pattern_hits: one("SELECT COUNT(*) AS n FROM pattern_hits"),
+    db_bytes: dbBytes,
+    oldest_review: range.mn,
+    newest_review: range.mx,
+  };
+}
+
+// ─── Pattern analytics ─────────────────────────────────────────────
+
+export interface PatternRuleRow {
+  owner: string;
+  repo: string;
+  rule_name: string;
+  source: string;
+  hits_total: number;
+  hits_30d: number;
+  last_hit: string | null;
+}
+
+export function getPatternRules(limit = 100): PatternRuleRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  const thirty = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  return db
+    .prepare(
+      `SELECT ph.owner, ph.repo, ph.rule_name, ph.source,
+              COUNT(*) AS hits_total,
+              SUM(CASE WHEN rv.created_at >= ? THEN 1 ELSE 0 END) AS hits_30d,
+              MAX(rv.created_at) AS last_hit
+       FROM pattern_hits ph
+       LEFT JOIN reviews rv ON rv.id = ph.review_id
+       GROUP BY ph.owner, ph.repo, ph.rule_name, ph.source
+       ORDER BY hits_30d DESC, hits_total DESC
+       LIMIT ?`,
+    )
+    .all(thirty, limit) as PatternRuleRow[];
 }
