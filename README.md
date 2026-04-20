@@ -326,6 +326,8 @@ ENABLE_DASHBOARD=1
 DASHBOARD_URL=https://diffsentry.example.com/dashboard
 GITHUB_OAUTH_CLIENT_ID=…   # from the GitHub App's OAuth config
 GITHUB_OAUTH_CLIENT_SECRET=…
+# At least one of the two allowlists. Either grants access.
+DASHBOARD_ALLOWED_LOGINS=your-gh-login
 DASHBOARD_ALLOWED_ORGS=your-org
 # DASHBOARD_SESSION_SECRET — optional, defaults to GITHUB_WEBHOOK_SECRET
 ```

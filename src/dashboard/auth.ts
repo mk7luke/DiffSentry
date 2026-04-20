@@ -6,6 +6,10 @@ import { esc, renderLayout } from "./layout.js";
 export interface AuthConfig {
   clientId: string;
   clientSecret: string;
+  /** Access is granted if the authenticated user's login matches one of these,
+   * OR they are an active member of one of `allowedOrgs`. Either list may be
+   * empty, but at least one of the two must be non-empty for auth to enable. */
+  allowedLogins: string[];
   allowedOrgs: string[];
   sessionSecret: string;
   /** Full URL the dashboard is mounted at — used to build the OAuth callback. */
@@ -26,10 +30,22 @@ export function loadAuthConfigFromEnv(): AuthConfig | null {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  const logins = (process.env.DASHBOARD_ALLOWED_LOGINS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const baseUrl = process.env.DASHBOARD_URL ?? "";
   const sessionSecret = process.env.DASHBOARD_SESSION_SECRET || process.env.GITHUB_WEBHOOK_SECRET || "";
-  if (!clientId || !clientSecret || orgs.length === 0 || !baseUrl || !sessionSecret) return null;
-  return { clientId, clientSecret, allowedOrgs: orgs, sessionSecret, baseUrl: baseUrl.replace(/\/$/, "") };
+  if (!clientId || !clientSecret || !baseUrl || !sessionSecret) return null;
+  if (orgs.length === 0 && logins.length === 0) return null;
+  return {
+    clientId,
+    clientSecret,
+    allowedLogins: logins,
+    allowedOrgs: orgs,
+    sessionSecret,
+    baseUrl: baseUrl.replace(/\/$/, ""),
+  };
 }
 
 const SESSION_COOKIE = "ds_session";
@@ -234,13 +250,27 @@ export function createAuth(cfg: AuthConfig | null): AuthRuntime | null {
         res.status(502).type("html").send(renderLoginPage({ baseUrl: cfg.baseUrl, error: "Could not read your GitHub profile." }));
         return;
       }
-      const matchingOrg = await userInAnyOrg(token, user.login, cfg.allowedOrgs);
-      if (!matchingOrg) {
-        logger.warn({ login: user.login, allowed: cfg.allowedOrgs }, "Dashboard login denied — not an org member");
+      const loginMatch = cfg.allowedLogins.some(
+        (l) => l.toLowerCase() === user.login.toLowerCase(),
+      );
+      const matchingOrg = loginMatch
+        ? null
+        : cfg.allowedOrgs.length > 0
+          ? await userInAnyOrg(token, user.login, cfg.allowedOrgs)
+          : null;
+      if (!loginMatch && !matchingOrg) {
+        logger.warn(
+          { login: user.login, allowedLogins: cfg.allowedLogins, allowedOrgs: cfg.allowedOrgs },
+          "Dashboard login denied — login not on allowlist and not an org member",
+        );
+        const allowedList = [
+          ...cfg.allowedLogins.map((l) => `@${l}`),
+          ...cfg.allowedOrgs.map((o) => `org:${o}`),
+        ].join(", ");
         res.status(403).type("html").send(
           renderLoginPage({
             baseUrl: cfg.baseUrl,
-            error: `@${user.login} is not a member of any authorized org (${cfg.allowedOrgs.join(", ")}).`,
+            error: `@${user.login} is not on the dashboard allowlist (${allowedList}).`,
           }),
         );
         return;
@@ -251,7 +281,10 @@ export function createAuth(cfg: AuthConfig | null): AuthRuntime | null {
         exp: Math.floor(Date.now() / 1000) + SESSION_MAX_AGE_SECS,
       };
       setCookie(res, SESSION_COOKIE, makeSessionCookie(cfg.sessionSecret, session), SESSION_MAX_AGE_SECS);
-      logger.info({ login: user.login, org: matchingOrg }, "Dashboard login");
+      logger.info(
+        { login: user.login, via: loginMatch ? "login-allowlist" : `org:${matchingOrg}` },
+        "Dashboard login",
+      );
       const nextUrl = parsedState.next && parsedState.next.startsWith("/dashboard") ? parsedState.next : "/dashboard";
       res.redirect(nextUrl);
     });
