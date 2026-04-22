@@ -1429,7 +1429,7 @@ export function riskLine(points: { created_at: string; risk_score: number | null
         : "#4ade80";
       const leftPct = n === 1 ? 0 : (x / w) * 100;
       const topPct = (y / h) * 100;
-      return `<div class="dot-marker" style="left:${leftPct.toFixed(2)}%;top:${topPct.toFixed(2)}%;background:${color}" title="#${p.number} · risk ${score} · ${p.created_at.slice(0, 10)}"></div>`;
+      return `<div class="dot-marker" style="left:${leftPct.toFixed(2)}%;top:${topPct.toFixed(2)}%;background:${color}" title="#${p.number} · risk ${score} · ${esc(p.created_at.slice(0, 10))}"></div>`;
     })
     .join("");
   const axis = [0, 25, 50, 75, 100]
