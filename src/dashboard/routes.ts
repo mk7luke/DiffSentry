@@ -3,10 +3,32 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { getRecentLogs, logger, type LogEntry } from "../logger.js";
 import type { Learning } from "../types.js";
-import { esc, pageHeader, relativeTime, renderLayout, riskBadge, runWithRequestContext, severityBadge } from "./layout.js";
+import {
+  approvalBadge,
+  buildDaySeries,
+  card,
+  donut,
+  esc,
+  hbar,
+  ICON,
+  metric,
+  miniSparkbar,
+  pageHeader,
+  relativeTime,
+  renderLayout,
+  repoHealth,
+  riskBadge,
+  riskLine,
+  runWithRequestContext,
+  severityBadge,
+  stackedSeverityBar,
+  type DayBin,
+} from "./layout.js";
 import { getCurrentUser } from "./auth.js";
 import { renderMarkdown } from "./markdown.js";
 import {
+  getApprovalMix,
+  getDailyActivity,
   getEvents,
   getFindings,
   getHealthCounts,
@@ -22,6 +44,7 @@ import {
   queryFindings,
   queryFingerprintGroups,
   repoExists,
+  type DailyActivityRow,
   type FindingFilters,
   type FingerprintGroupRow,
   type HealthCounts,
@@ -45,9 +68,6 @@ export function createDashboardRouter(deps: DashboardDeps): express.Router {
     router.use(deps.auth.middleware);
   }
 
-  // Bind request context (current user) for the duration of each request so
-  // renderLayout can surface it in the header without threading through every
-  // render function.
   router.use((req, _res, next) => {
     const user = getCurrentUser(req);
     runWithRequestContext({ user: user ? { login: user.login } : null, pathname: req.originalUrl ?? "" }, next);
@@ -58,7 +78,9 @@ export function createDashboardRouter(deps: DashboardDeps): express.Router {
       const sort = typeof req.query.sort === "string" ? req.query.sort : "last_review";
       const showInactive = req.query.inactive === "1";
       const rows = sortRepos(getRepoOverview(), sort);
-      res.type("html").send(renderReposOverview(rows, sort, showInactive));
+      const activity = getDailyActivity(null, null, 14);
+      const activityByRepo = groupActivityByRepo(activity);
+      res.type("html").send(renderReposOverview(rows, sort, showInactive, activityByRepo));
     } catch (err) {
       logger.error({ err }, "dashboard / failed");
       res.status(500).type("html").send(renderError("Failed to load repos overview."));
@@ -77,10 +99,12 @@ export function createDashboardRouter(deps: DashboardDeps): express.Router {
       const hotPaths = getHotPaths(owner, repo);
       const topRules = getTopRules(owner, repo);
       const reviews = getRecentReviews(owner, repo, 50);
+      const activity = buildDaySeries(toDayBins(getDailyActivity(owner, repo, 30)), 30);
+      const approvalMix = getApprovalMix(owner, repo, 30);
       const learnings = await loadLearningsSafe(deps.learningsDir, owner, repo);
       const configYaml = await loadRepoConfigSafe(deps, owner, repo);
       res.type("html").send(
-        renderRepoDetail({ owner, repo, sparkline, hotPaths, topRules, reviews, learnings, configYaml }),
+        renderRepoDetail({ owner, repo, sparkline, hotPaths, topRules, reviews, activity, approvalMix, learnings, configYaml }),
       );
     } catch (err) {
       logger.error({ err, owner, repo }, "dashboard repo detail failed");
@@ -149,7 +173,31 @@ export function createDashboardRouter(deps: DashboardDeps): express.Router {
   return router;
 }
 
-// ─── Repos overview ────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────
+
+function toDayBins(rows: DailyActivityRow[]): DayBin[] {
+  return rows.map((r) => ({
+    day: r.day,
+    reviews: r.reviews,
+    critical: r.critical,
+    major: r.major,
+    minor: r.minor,
+    nit: r.nit,
+  }));
+}
+
+function groupActivityByRepo(rows: DailyActivityRow[]): Map<string, DayBin[]> {
+  const out = new Map<string, DayBin[]>();
+  for (const r of rows) {
+    const key = `${r.owner}/${r.repo}`;
+    const arr = out.get(key) ?? [];
+    arr.push({ day: r.day, reviews: r.reviews, critical: r.critical, major: r.major, minor: r.minor, nit: r.nit });
+    out.set(key, arr);
+  }
+  return out;
+}
+
+// ─── Repos overview ──────────────────────────────────────────────────
 
 function sortRepos(rows: RepoOverviewRow[], key: string): RepoOverviewRow[] {
   const cmp: Record<string, (a: RepoOverviewRow, b: RepoOverviewRow) => number> = {
@@ -163,14 +211,19 @@ function sortRepos(rows: RepoOverviewRow[], key: string): RepoOverviewRow[] {
   return [...rows].sort(fn);
 }
 
-function sortHeader(label: string, key: string, current: string, extraParams = ""): string {
+function sortLink(label: string, key: string, current: string, extraParams = ""): string {
   const active = key === current;
-  const cls = active ? "text-white" : "text-surface-400 hover:text-white";
-  const arrow = active ? ' <span class="text-brand-400">↓</span>' : "";
-  return `<a href="/dashboard?sort=${esc(key)}${extraParams}" class="${cls} transition-colors">${esc(label)}${arrow}</a>`;
+  const arrow = active ? ' <span style="color:var(--accent-bright)">↓</span>' : "";
+  const style = active ? "color:var(--text)" : "color:var(--text-3)";
+  return `<a href="/dashboard?sort=${esc(key)}${extraParams}" class="btn btn-link" style="${style}">${esc(label)}${arrow}</a>`;
 }
 
-function renderReposOverview(rows: RepoOverviewRow[], sort: string, showInactive: boolean): string {
+function renderReposOverview(
+  rows: RepoOverviewRow[],
+  sort: string,
+  showInactive: boolean,
+  activityByRepo: Map<string, DayBin[]>,
+): string {
   const visibleRows = showInactive ? rows : rows.filter((r) => r.prs_reviewed > 0);
   const totals = rows.reduce(
     (acc, r) => {
@@ -184,82 +237,116 @@ function renderReposOverview(rows: RepoOverviewRow[], sort: string, showInactive
     { repos: 0, active: 0, prs: 0, findings: 0, critical: 0 },
   );
 
-  const stat = (label: string, value: string, accent = false) => `
-    <div class="panel p-3.5">
-      <div class="text-[11px] uppercase tracking-wider text-surface-400 font-semibold mb-1">${esc(label)}</div>
-      <div class="text-2xl font-semibold tabular-nums ${accent ? "text-red-300" : "text-white"}">${esc(value)}</div>
-    </div>`;
+  // Aggregate 14-day series across all repos for the hero chart
+  const aggregate: DayBin[] = buildDaySeries([], 14);
+  for (const bins of activityByRepo.values()) {
+    for (const b of bins) {
+      const i = aggregate.findIndex((a) => a.day === b.day);
+      if (i >= 0) {
+        aggregate[i].reviews += b.reviews;
+        aggregate[i].critical += b.critical;
+        aggregate[i].major += b.major;
+        aggregate[i].minor += b.minor;
+        aggregate[i].nit += b.nit;
+      }
+    }
+  }
 
   const toggleSuffix = showInactive ? "" : "&inactive=1";
+  const inactiveCount = totals.repos - totals.active;
   const filterLink = showInactive
-    ? `<a href="/dashboard?sort=${esc(sort)}" class="btn btn-ghost">Hide inactive (${totals.repos - totals.active})</a>`
-    : `<a href="/dashboard?sort=${esc(sort)}&inactive=1" class="btn btn-ghost">Show inactive (${totals.repos - totals.active})</a>`;
+    ? `<a href="/dashboard?sort=${esc(sort)}" class="btn btn-ghost">Hide inactive (${inactiveCount})</a>`
+    : `<a href="/dashboard?sort=${esc(sort)}&inactive=1" class="btn btn-ghost">Show inactive (${inactiveCount})</a>`;
 
-  const table = visibleRows.length === 0
-    ? `<div class="panel">
-         <div class="panel-body text-center text-surface-400 py-8">
-           ${rows.length === 0
-             ? "No repos recorded yet. Open a PR in an installed repo to populate the database."
-             : "No repos with reviewed PRs yet."}
-         </div>
-       </div>`
-    : `<div class="panel panel-body-flush">
-         <div class="overflow-x-auto">
-           <table class="dash-table">
-             <thead>
-               <tr>
-                 <th>${sortHeader("Repo", "repo", sort, toggleSuffix)}</th>
-                 <th class="num">${sortHeader("PRs reviewed", "prs_reviewed", sort, toggleSuffix)}</th>
-                 <th class="num">${sortHeader("Findings · 7d", "findings_7d", sort, toggleSuffix)}</th>
-                 <th class="num">${sortHeader("Critical · 7d", "critical_7d", sort, toggleSuffix)}</th>
-                 <th class="right">${sortHeader("Last review", "last_review", sort, toggleSuffix)}</th>
-               </tr>
-             </thead>
-             <tbody>
-               ${visibleRows
-                 .map((r) => {
-                   const href = `/dashboard/repo/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.repo)}`;
-                   const zero = r.prs_reviewed === 0;
-                   const prsCls = zero ? "zero" : "";
-                   const findCls = r.findings_7d === 0 ? "zero" : "";
-                   const critCls = r.critical_7d > 0 ? "num-crit" : r.critical_7d === 0 ? "text-surface-500" : "";
-                   return `<tr>
-                     <td>
-                       <a href="${esc(href)}" class="link font-medium">${esc(r.owner)}/${esc(r.repo)}</a>
-                     </td>
-                     <td class="num ${prsCls}">${r.prs_reviewed}</td>
-                     <td class="num ${findCls}">${r.findings_7d}</td>
-                     <td class="num ${critCls}">${r.critical_7d}</td>
-                     <td class="right muted">${esc(relativeTime(r.last_review)) || "—"}</td>
-                   </tr>`;
-                 })
-                 .join("")}
-             </tbody>
-           </table>
-         </div>
-       </div>`;
+  const sortControls = `
+    <div style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-3)">
+      <span style="margin-right:4px">Sort:</span>
+      ${sortLink("Last review", "last_review", sort, toggleSuffix)}
+      ${sortLink("Critical", "critical_7d", sort, toggleSuffix)}
+      ${sortLink("Findings", "findings_7d", sort, toggleSuffix)}
+      ${sortLink("PRs", "prs_reviewed", sort, toggleSuffix)}
+      ${sortLink("Name", "repo", sort, toggleSuffix)}
+    </div>`;
+
+  const repoGrid = visibleRows.length === 0
+    ? `<div class="card"><div class="empty">
+         <div class="title">${rows.length === 0 ? "No repos recorded yet" : "No repos with reviewed PRs yet"}</div>
+         <div>${rows.length === 0 ? "Open a PR in an installed repo to populate the database." : "Click “Show inactive” to see dormant installations."}</div>
+       </div></div>`
+    : `<div class="grid two">${visibleRows
+        .map((r) => {
+          const href = `/dashboard/repo/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.repo)}`;
+          const health = repoHealth(r.prs_reviewed, r.findings_7d, r.critical_7d);
+          const series = buildDaySeries(activityByRepo.get(`${r.owner}/${r.repo}`) ?? [], 14);
+          const idleCls = r.prs_reviewed === 0 ? " idle" : "";
+          const critStat = r.critical_7d > 0
+            ? `<span class="stat"><span class="n crit">${r.critical_7d}</span> critical · 7d</span>`
+            : `<span class="stat"><span class="n zero">0</span> critical · 7d</span>`;
+          const findStat = r.findings_7d > 0
+            ? `<span class="stat"><span class="n">${r.findings_7d}</span> findings · 7d</span>`
+            : `<span class="stat"><span class="n zero">0</span> findings · 7d</span>`;
+          const prStat = `<span class="stat"><span class="n${r.prs_reviewed === 0 ? " zero" : ""}">${r.prs_reviewed}</span> PRs reviewed</span>`;
+          return `<a class="repo-card health-${health}${idleCls}" href="${esc(href)}">
+            <div>
+              <div class="title"><span class="owner">${esc(r.owner)}/</span>${esc(r.repo)}</div>
+              <div class="meta">${prStat}${findStat}${critStat}</div>
+            </div>
+            <div class="right">
+              <div class="when">${esc(relativeTime(r.last_review)) || "never"}</div>
+            </div>
+            ${miniSparkbar(series)}
+          </a>`;
+        })
+        .join("")}</div>`;
+
+  const heroLeft = card({
+    title: "Activity · last 14 days",
+    subtitle: `${aggregate.reduce((n, d) => n + d.critical + d.major + d.minor + d.nit, 0)} findings across all repos`,
+    bodyClass: "chart",
+    body: stackedSeverityBar(aggregate),
+  });
+
+  const heroRight = `<div class="grid stack">
+    ${metric({
+      label: "Critical · 7D",
+      value: totals.critical,
+      tone: totals.critical > 0 ? "danger" : undefined,
+      hero: true,
+      foot: totals.critical > 0
+        ? `<span class="chip danger uppercase"><span class="dot"></span>needs attention</span>`
+        : `<span class="chip good uppercase"><span class="dot"></span>clean</span>`,
+    })}
+    <div class="grid three" style="gap:10px">
+      ${metric({ label: "Active repos", value: totals.active })}
+      ${metric({ label: "PRs reviewed", value: totals.prs })}
+      ${metric({ label: "Findings · 7D", value: totals.findings })}
+    </div>
+  </div>`;
 
   return renderLayout({
-    title: "Repos",
+    title: "Overview",
     crumbs: [{ label: "Repos" }],
+    active: "overview",
     body: `
       ${pageHeader({
-        title: "Repos",
+        title: "Overview",
         subtitle: `${totals.active} active · ${totals.repos} installed · rolling 7-day stats`,
         right: filterLink,
       })}
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        ${stat("Active repos", String(totals.active))}
-        ${stat("PRs reviewed", String(totals.prs))}
-        ${stat("Findings · 7d", String(totals.findings))}
-        ${stat("Critical · 7d", String(totals.critical), totals.critical > 0)}
+      <div class="grid hero" style="margin-bottom:20px">
+        ${heroLeft}
+        ${heroRight}
       </div>
-      ${table}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 2px 12px">
+        <h2 style="font-size:13px;font-weight:600;color:var(--text);letter-spacing:-0.005em">Repositories</h2>
+        ${sortControls}
+      </div>
+      ${repoGrid}
     `,
   });
 }
 
-// ─── Repo detail ───────────────────────────────────────────────────
+// ─── Repo detail ─────────────────────────────────────────────────────
 
 interface RepoDetailArgs {
   owner: string;
@@ -268,6 +355,8 @@ interface RepoDetailArgs {
   hotPaths: ReturnType<typeof getHotPaths>;
   topRules: ReturnType<typeof getTopRules>;
   reviews: ReturnType<typeof getRecentReviews>;
+  activity: DayBin[];
+  approvalMix: ReturnType<typeof getApprovalMix>;
   learnings: Learning[];
   configYaml: string | null;
 }
@@ -312,77 +401,32 @@ async function loadRepoConfigSafe(deps: DashboardDeps, owner: string, repo: stri
   }
 }
 
-function renderSparkline(points: SparklinePoint[]): string {
-  if (points.length < 2) {
-    return `<div class="text-surface-400 text-sm py-6 text-center">Not enough reviews yet for a 90-day chart.</div>`;
-  }
-  const w = 720;
-  const h = 90;
-  const pad = 6;
-  const max = 100; // risk_score is 0..100
-  const n = points.length;
-  const coords = points.map((p, i) => {
-    const x = pad + (i * (w - 2 * pad)) / Math.max(1, n - 1);
-    const score = typeof p.risk_score === "number" ? p.risk_score : 0;
-    const y = h - pad - (score / max) * (h - 2 * pad);
-    return [x, y, p] as const;
-  });
-  const polyline = coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
-  const areaPoly = `${pad},${h - pad} ` + polyline + ` ${(w - pad).toFixed(1)},${h - pad}`;
-  const dots = coords
-    .map(([x, y, p]) => {
-      const score = typeof p.risk_score === "number" ? p.risk_score : 0;
-      const color = score >= 75 ? "#fca5a5" : score >= 55 ? "#fdba74" : score >= 35 ? "#fcd34d" : score >= 15 ? "#fde68a" : "#86efac";
-      const title = `#${p.number} · ${score} · ${p.created_at.slice(0, 10)}`;
-      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" fill="${color}" stroke="#0d0d12" stroke-width="1"><title>${esc(title)}</title></circle>`;
-    })
-    .join("");
-  return `<svg viewBox="0 0 ${w} ${h}" class="w-full h-24" preserveAspectRatio="none">
-    <defs>
-      <linearGradient id="sparkFill" x1="0" x2="0" y1="0" y2="1">
-        <stop offset="0%" stop-color="#338dff" stop-opacity="0.25"/>
-        <stop offset="100%" stop-color="#338dff" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-    <polygon points="${areaPoly}" fill="url(#sparkFill)" />
-    <polyline points="${polyline}" fill="none" stroke="#59b0ff" stroke-width="1.4" />
-    ${dots}
-  </svg>`;
-}
-
-const GH_ICON = `<svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>`;
-
-function panelHead(title: string, right = ""): string {
-  return `<div class="panel-head"><h2>${esc(title)}</h2>${right ? `<div class="panel-sub">${right}</div>` : ""}</div>`;
-}
-
 function renderRepoDetail(a: RepoDetailArgs): string {
   const title = `${a.owner}/${a.repo}`;
-  const sparklineHtml = renderSparkline(a.sparkline);
+  const latestReview = a.reviews[0] ?? null;
+  const latestRisk = latestReview ? riskBadge(latestReview.risk_level, latestReview.risk_score) : "";
+  const findingsTotal = a.activity.reduce((n, d) => n + d.critical + d.major + d.minor + d.nit, 0);
 
-  const hotPathsHtml = a.hotPaths.length === 0
-    ? `<div class="panel-body text-surface-400 text-sm">No critical or major findings in the last 90 days.</div>`
-    : `<div class="panel-body-flush"><table class="dash-table">
-         <thead><tr>
-           <th>Path</th><th class="num">Critical</th><th class="num">Major</th><th class="num">Total</th>
-         </tr></thead>
-         <tbody>
-           ${a.hotPaths
-             .map(
-               (p) => `<tr>
-                 <td class="font-mono text-xs truncate max-w-md">${esc(p.path)}</td>
-                 <td class="num ${p.critical > 0 ? "num-crit" : "zero"}">${p.critical}</td>
-                 <td class="num ${p.major > 0 ? "num-strong" : "zero"}">${p.major}</td>
-                 <td class="num muted">${p.total}</td>
-               </tr>`,
-             )
-             .join("")}
-         </tbody>
-       </table></div>`;
+  // Hot paths as horizontal bars — single chart
+  const hotPathsMax = Math.max(1, ...a.hotPaths.map((p) => p.total));
+  const hotPathsBody = a.hotPaths.length === 0
+    ? `<div class="empty"><div class="title">No hot paths</div><div>No critical or major findings in the last 90 days.</div></div>`
+    : a.hotPaths
+        .map((p) =>
+          hbar({
+            label: p.path,
+            critical: p.critical,
+            major: p.major,
+            total: p.total,
+            max: hotPathsMax,
+          }),
+        )
+        .join("");
 
-  const topRulesHtml = a.topRules.length === 0
-    ? `<div class="panel-body text-surface-400 text-sm">No pattern-rule hits recorded.</div>`
-    : `<div class="panel-body-flush"><table class="dash-table">
+  // Top firing rules as compact list
+  const topRulesBody = a.topRules.length === 0
+    ? `<div class="empty"><div class="title">No rule hits</div><div>Pattern rules haven't matched anything here yet.</div></div>`
+    : `<table class="tbl">
          <thead><tr>
            <th>Rule</th><th>Source</th><th class="num">Hits</th><th class="right">Example</th>
          </tr></thead>
@@ -390,75 +434,126 @@ function renderRepoDetail(a: RepoDetailArgs): string {
            ${a.topRules
              .map(
                (r) => `<tr>
-                 <td class="font-mono text-xs">${esc(r.rule_name)}</td>
-                 <td class="muted text-xs">${esc(r.source)}</td>
-                 <td class="num num-strong">${r.hits}</td>
+                 <td class="mono">${esc(r.rule_name)}</td>
+                 <td class="muted">${esc(r.source)}</td>
+                 <td class="num strong">${r.hits}</td>
                  <td class="right">${
                    r.example_pr
-                     ? `<a class="link" href="/dashboard/repo/${encodeURIComponent(a.owner)}/${encodeURIComponent(a.repo)}/pr/${r.example_pr}">#${r.example_pr}</a>`
-                     : `<span class="text-surface-500">—</span>`
+                     ? `<a class="link mono" href="/dashboard/repo/${encodeURIComponent(a.owner)}/${encodeURIComponent(a.repo)}/pr/${r.example_pr}">#${r.example_pr}</a>`
+                     : `<span class="muted">—</span>`
                  }</td>
                </tr>`,
              )
              .join("")}
          </tbody>
-       </table></div>`;
+       </table>`;
 
-  const reviewsHtml = a.reviews.length === 0
-    ? `<div class="panel-body text-surface-400 text-sm">No reviews recorded yet.</div>`
-    : `<div class="panel-body-flush overflow-x-auto"><table class="dash-table">
-         <thead><tr>
-           <th>PR</th><th>Title</th><th>Author</th><th>Risk</th><th class="num">Findings</th><th>Approval</th><th class="right">When</th>
-         </tr></thead>
-         <tbody>
-           ${a.reviews
-             .map((rv) => {
-               const href = `/dashboard/repo/${encodeURIComponent(a.owner)}/${encodeURIComponent(a.repo)}/pr/${rv.number}`;
-               return `<tr>
-                 <td><a href="${esc(href)}" class="link">#${rv.number}</a></td>
-                 <td class="truncate max-w-md">${esc(rv.title ?? "—")}</td>
-                 <td class="muted">${rv.author ? `@${esc(rv.author)}` : "—"}</td>
-                 <td>${riskBadge(rv.risk_level, rv.risk_score)}</td>
-                 <td class="num ${rv.finding_count > 0 ? "num-strong" : "zero"}">${rv.finding_count}</td>
-                 <td class="text-xs muted">${esc(rv.approval ?? "—")}</td>
-                 <td class="right muted">${esc(relativeTime(rv.created_at))}</td>
-               </tr>`;
-             })
-             .join("")}
-         </tbody>
-       </table></div>`;
+  // Recent reviews — timeline style
+  const reviewsBody = a.reviews.length === 0
+    ? `<div class="empty"><div class="title">No reviews recorded yet</div><div>Open a PR to get one.</div></div>`
+    : `<div class="tl">${a.reviews
+        .map((rv) => {
+          const href = `/dashboard/repo/${encodeURIComponent(a.owner)}/${encodeURIComponent(a.repo)}/pr/${rv.number}`;
+          const sevCls =
+            (rv.risk_level ?? "").toLowerCase() === "critical" ? "sev-critical"
+            : (rv.risk_level ?? "").toLowerCase() === "high" ? "sev-critical"
+            : (rv.risk_level ?? "").toLowerCase() === "elevated" ? "sev-major"
+            : (rv.risk_level ?? "").toLowerCase() === "moderate" ? "sev-minor"
+            : rv.approval === "approve" ? "approve"
+            : "";
+          const findingsChip = rv.finding_count > 0
+            ? `<span class="chip neutral tnum">${rv.finding_count} finding${rv.finding_count === 1 ? "" : "s"}</span>`
+            : `<span class="chip muted uppercase">clean</span>`;
+          return `<div class="tl-item ${sevCls}">
+            <div class="when">${esc(relativeTime(rv.created_at))}</div>
+            <div class="dot"></div>
+            <div class="body">
+              <div class="row1">
+                <a class="title" href="${esc(href)}">${esc(rv.title ?? `#${rv.number}`)}</a>
+                <span class="mono muted">#${rv.number}</span>
+              </div>
+              <div class="row2">
+                ${riskBadge(rv.risk_level, rv.risk_score)}
+                ${approvalBadge(rv.approval)}
+                ${findingsChip}
+                ${rv.author ? `<span class="mono">@${esc(rv.author)}</span>` : ""}
+              </div>
+            </div>
+          </div>`;
+        })
+        .join("")}</div>`;
 
-  const gitHubAction = `<a href="https://github.com/${esc(a.owner)}/${esc(a.repo)}" class="btn btn-ghost" target="_blank" rel="noopener">${GH_ICON}Open in GitHub</a>`;
+  // Approval donut
+  const approveN = a.approvalMix.find((m) => (m.approval ?? "").toLowerCase() === "approve")?.count ?? 0;
+  const changesN = a.approvalMix.find((m) => (m.approval ?? "").toLowerCase() === "request_changes")?.count ?? 0;
+  const commentN = a.approvalMix.find((m) => ["comment", "commented", "", null].includes((m.approval ?? "").toLowerCase()))?.count ?? 0;
+  const approvalBody = (approveN + changesN + commentN) === 0
+    ? `<div class="empty"><div class="title">No reviews yet</div><div>Approval ratio will appear after the first review.</div></div>`
+    : donut([
+        { label: "Changes requested", value: changesN, color: "#fb6d82" },
+        { label: "Commented", value: commentN, color: "#9aa0b2" },
+        { label: "Approved", value: approveN, color: "#4ade80" },
+      ], 92);
+
+  const gitHubAction = `<a href="https://github.com/${esc(a.owner)}/${esc(a.repo)}" class="btn btn-ghost" target="_blank" rel="noopener">${ICON.github}Open in GitHub</a>`;
+
+  const heroSubtitle = latestReview
+    ? `Last review ${esc(relativeTime(latestReview.created_at))} · ${esc(String(latestReview.finding_count))} finding${latestReview.finding_count === 1 ? "" : "s"}`
+    : `No reviews yet`;
 
   const body = `
     ${pageHeader({
       title,
-      subtitle: `Reviewed ${a.reviews.length} time${a.reviews.length === 1 ? "" : "s"} · ${a.sparkline.length} datapoint${a.sparkline.length === 1 ? "" : "s"} in the last 90 days`,
-      right: gitHubAction,
+      subtitle: heroSubtitle,
+      right: `${latestRisk}${gitHubAction}`,
     })}
-    <div class="grid grid-cols-1 gap-4">
-      <section class="panel">
-        ${panelHead("Risk — last 90 days", `0–100 risk score per review`)}
-        <div class="panel-body">${sparklineHtml}</div>
-      </section>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <section class="panel">
-          ${panelHead("Hot paths", "Critical + major findings · last 90 days")}
-          ${hotPathsHtml}
-        </section>
-        <section class="panel">
-          ${panelHead("Top firing rules", "All time")}
-          ${topRulesHtml}
-        </section>
+
+    <div class="grid hero" style="margin-bottom:16px">
+      ${card({
+        title: "Findings · last 30 days",
+        subtitle: `${findingsTotal} across ${a.activity.filter((d) => d.reviews > 0).length} active days`,
+        bodyClass: "chart",
+        body: stackedSeverityBar(a.activity),
+      })}
+      <div class="grid stack">
+        ${card({
+          title: "Risk score · 90d",
+          subtitle: `${a.sparkline.length} review${a.sparkline.length === 1 ? "" : "s"}`,
+          bodyClass: "chart",
+          body: riskLine(a.sparkline),
+        })}
+        ${card({
+          title: "Approval mix · 30d",
+          body: approvalBody,
+        })}
       </div>
-      <section class="panel">
-        ${panelHead("Recent reviews", `Latest ${a.reviews.length}`)}
-        ${reviewsHtml}
-      </section>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        ${renderLearningsCard(a.learnings)}
-        ${renderConfigCard(a.configYaml)}
-      </div>
+    </div>
+
+    <div class="grid two" style="margin-bottom:16px">
+      ${card({
+        title: "Hot paths",
+        subtitle: "Critical + major · last 90 days",
+        bodyClass: "flush",
+        body: hotPathsBody,
+      })}
+      ${card({
+        title: "Top firing rules",
+        subtitle: "All time",
+        bodyClass: "flush",
+        body: topRulesBody,
+      })}
+    </div>
+
+    ${card({
+      title: "Recent reviews",
+      subtitle: `Latest ${a.reviews.length}`,
+      bodyClass: "flush",
+      body: reviewsBody,
+    })}
+
+    <div class="grid two" style="margin-top:16px">
+      ${renderLearningsCard(a.learnings)}
+      ${renderConfigCard(a.configYaml)}
     </div>
   `;
 
@@ -468,46 +563,51 @@ function renderRepoDetail(a: RepoDetailArgs): string {
       { label: "Repos", href: "/dashboard" },
       { label: `${a.owner}/${a.repo}` },
     ],
+    active: "overview",
     body,
   });
 }
 
 function renderLearningsCard(learnings: Learning[]): string {
   const body = learnings.length === 0
-    ? `<div class="panel-body text-surface-400 text-sm">No learnings recorded for this repo. Use <span class="font-mono text-brand-300">@bot learn …</span> on a PR to add one.</div>`
-    : `<ul class="divide-y divide-surface-800 text-sm max-h-80 overflow-auto">
+    ? `<div class="empty"><div class="title">No learnings yet</div><div>Use <span class="mono" style="color:var(--accent-bright)">@bot learn …</span> on a PR to teach the reviewer.</div></div>`
+    : `<ul style="list-style:none;margin:0;padding:0;max-height:320px;overflow:auto">
          ${learnings
            .map(
-             (l) => `<li class="px-3.5 py-2.5 flex items-start gap-3">
-               <span class="text-[11px] text-surface-500 whitespace-nowrap font-mono mt-0.5">${esc(relativeTime(l.createdAt))}</span>
-               <div class="flex-1 min-w-0">
-                 ${l.path ? `<div class="text-[11px] font-mono text-surface-400 truncate mb-0.5">${esc(l.path)}</div>` : ""}
-                 <div class="text-surface-100 break-words">${esc(l.content)}</div>
+             (l) => `<li style="display:grid;grid-template-columns:68px 1fr;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line-soft);font-size:13px;align-items:start">
+               <span class="mono muted" style="font-size:10.5px;padding-top:2px">${esc(relativeTime(l.createdAt))}</span>
+               <div style="min-width:0">
+                 ${l.path ? `<div class="mono muted" style="font-size:11px;margin-bottom:3px">${esc(l.path)}</div>` : ""}
+                 <div style="color:var(--text-1);word-break:break-word">${esc(l.content)}</div>
                </div>
              </li>`,
            )
            .join("")}
        </ul>`;
-  return `<section class="panel">
-    ${panelHead(`Learnings (${learnings.length})`, "From @bot learn")}
-    ${body}
-  </section>`;
+  return card({
+    title: `Learnings (${learnings.length})`,
+    subtitle: "From @bot learn",
+    bodyClass: "flush",
+    body,
+  });
 }
 
 function renderConfigCard(yaml: string | null): string {
   if (yaml === null) {
-    return `<section class="panel">
-      ${panelHead(".diffsentry.yaml", "Repo defaults")}
-      <div class="panel-body text-surface-400 text-sm">No config file in this repo — defaults are in use.</div>
-    </section>`;
+    return card({
+      title: ".diffsentry.yaml",
+      subtitle: "Repo defaults",
+      body: `<div class="empty"><div class="title">Using defaults</div><div>No <span class="mono">.diffsentry.yaml</span> in this repo.</div></div>`,
+    });
   }
-  return `<section class="panel">
-    ${panelHead(".diffsentry.yaml", "Cached 5m from GitHub")}
-    <div class="panel-body"><pre class="text-xs font-mono text-brand-200 bg-surface-950 border border-surface-800 rounded p-3 max-h-80 overflow-auto whitespace-pre">${esc(yaml)}</pre></div>
-  </section>`;
+  return card({
+    title: ".diffsentry.yaml",
+    subtitle: "Cached 5m from GitHub",
+    body: `<pre style="font-family:var(--font-mono);font-size:11.5px;color:var(--text-1);background:var(--bg-deep);border:1px solid var(--line);border-radius:6px;padding:12px;max-height:320px;overflow:auto;margin:0;white-space:pre">${esc(yaml)}</pre>`,
+  });
 }
 
-// ─── PR detail ─────────────────────────────────────────────────────
+// ─── PR detail ───────────────────────────────────────────────────────
 
 interface PRDetailArgs {
   owner: string;
@@ -522,102 +622,111 @@ interface PRDetailArgs {
 
 function renderPRDetail(a: PRDetailArgs): string {
   const ghUrl = `https://github.com/${a.owner}/${a.repo}/pull/${a.number}`;
+  const stateChip = a.pr?.state
+    ? `<span class="chip ${a.pr.state === "open" ? "good" : "muted"} uppercase">${esc(a.pr.state)}</span>`
+    : "";
+
+  const subtitle = `<span class="mono" style="color:var(--text-2)">${esc(a.owner)}/${esc(a.repo)}</span> <span style="color:var(--text-4)">·</span> <span class="mono">#${a.number}</span>${a.pr?.author ? ` <span style="color:var(--text-4)">·</span> <span class="mono" style="color:var(--accent-bright)">@${esc(a.pr.author)}</span>` : ""} ${stateChip}`;
 
   const header = pageHeader({
     title: a.pr?.title ?? `PR #${a.number}`,
-    subtitle: `<span class="font-mono text-surface-300">${esc(a.owner)}/${esc(a.repo)}</span> <span class="text-surface-600">·</span> #${a.number}${a.pr?.author ? ` <span class="text-surface-600">·</span> by <span class="text-brand-300">@${esc(a.pr.author)}</span>` : ""}${a.pr?.state ? ` <span class="text-surface-600">·</span> <span class="font-mono">${esc(a.pr.state)}</span>` : ""}`,
-    right: `<a href="${esc(ghUrl)}" class="btn btn-ghost" target="_blank" rel="noopener">${GH_ICON}Open in GitHub</a>`,
+    subtitle,
+    right: `<a href="${esc(ghUrl)}" class="btn btn-ghost" target="_blank" rel="noopener">${ICON.github}Open in GitHub</a>`,
   });
 
-  const latestHtml = a.latest
-    ? `<section class="panel">
-         ${panelHead("Latest review", `${esc((a.latest.sha ?? "").slice(0, 7))} · ${esc(relativeTime(a.latest.created_at))}`)}
-         <div class="panel-body">
-           <div class="flex items-center gap-2 mb-4">
-             ${riskBadge(a.latest.risk_level, a.latest.risk_score)}
-             <span class="chip bg-surface-800 text-surface-300">${esc(a.latest.profile ?? "—")}</span>
-             <span class="chip bg-surface-800 text-surface-300">${esc(a.latest.approval ?? "—")}</span>
-           </div>
-           <dl class="kv">
-             <div><dt>Files processed</dt><dd>${a.latest.files_processed ?? 0}</dd></div>
-             <div><dt>Findings</dt><dd>${a.latest.finding_count}</dd></div>
-             <div><dt>Skipped · similar</dt><dd>${a.latest.files_skipped_similar ?? 0}</dd></div>
-             <div><dt>Skipped · trivial</dt><dd>${a.latest.files_skipped_trivial ?? 0}</dd></div>
-           </dl>
-           ${
-             a.latest.summary
-               ? `<div class="mt-4 pt-4 border-t border-surface-800">
-                    <div class="flex items-center justify-between mb-2">
-                      <div class="text-[11px] uppercase tracking-wider text-surface-400 font-semibold">Summary</div>
-                      <button type="button" class="text-[11px] text-surface-500 hover:text-surface-200" onclick="var m=this.closest('[data-md-wrap]'); m.classList.toggle('show-raw');">toggle raw</button>
-                    </div>
-                    <div data-md-wrap>
-                      <div class="md-body md-rendered max-h-80 overflow-auto">${renderMarkdown(a.latest.summary)}</div>
-                      <pre class="md-raw text-xs whitespace-pre-wrap font-mono text-surface-200 leading-relaxed max-h-80 overflow-auto" style="display:none;">${esc(a.latest.summary)}</pre>
-                    </div>
-                  </div>`
-               : ""
-           }
-         </div>
-       </section>`
-    : `<div class="panel"><div class="panel-body text-surface-400 text-sm">No reviews recorded for this PR.</div></div>`;
+  const latestBody = a.latest
+    ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+         ${riskBadge(a.latest.risk_level, a.latest.risk_score)}
+         <span class="chip neutral uppercase">${esc(a.latest.profile ?? "—")}</span>
+         ${approvalBadge(a.latest.approval)}
+       </div>
+       <dl class="kv">
+         <div><dt>Files processed</dt><dd>${a.latest.files_processed ?? 0}</dd></div>
+         <div><dt>Findings</dt><dd>${a.latest.finding_count}</dd></div>
+         <div><dt>Skipped · similar</dt><dd>${a.latest.files_skipped_similar ?? 0}</dd></div>
+         <div><dt>Skipped · trivial</dt><dd>${a.latest.files_skipped_trivial ?? 0}</dd></div>
+       </dl>
+       ${
+         a.latest.summary
+           ? `<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line-soft)">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                  <div class="chip muted uppercase">Summary</div>
+                  <button type="button" class="btn btn-link" style="font-size:11px" onclick="var m=this.closest('[data-md-wrap]'); m.classList.toggle('show-raw');">toggle raw</button>
+                </div>
+                <div data-md-wrap>
+                  <div class="md-body md-rendered" style="max-height:320px;overflow:auto">${renderMarkdown(a.latest.summary)}</div>
+                  <pre class="md-raw mono" style="display:none;font-size:11.5px;white-space:pre-wrap;color:var(--text-1);line-height:1.55;max-height:320px;overflow:auto;margin:0">${esc(a.latest.summary)}</pre>
+                </div>
+              </div>`
+           : ""
+       }`
+    : `<div class="empty"><div class="title">No reviews for this PR</div><div>Trigger a review to get started.</div></div>`;
 
-  const findingsHtml = a.findings.length === 0
-    ? `<div class="panel-body text-surface-400 text-sm">No findings in the latest review.</div>`
-    : `<div class="panel-body-flush"><table class="dash-table">
+  const latestCard = a.latest
+    ? card({
+        title: "Latest review",
+        subtitle: `${esc((a.latest.sha ?? "").slice(0, 7))} · ${esc(relativeTime(a.latest.created_at))}`,
+        body: latestBody,
+      })
+    : `<div class="card">${latestBody}</div>`;
+
+  const findingsBody = a.findings.length === 0
+    ? `<div class="empty"><div class="title">No findings</div><div>Nothing flagged in the latest review.</div></div>`
+    : `<table class="tbl rail">
          <thead><tr>
            <th>Severity</th><th>Location</th><th>Title</th><th>Source</th>
          </tr></thead>
          <tbody>
            ${a.findings
              .map(
-               (f) => `<tr>
+               (f) => `<tr data-sev="${esc((f.severity ?? "").toLowerCase())}">
                  <td>${severityBadge(f.severity)}</td>
-                 <td class="font-mono text-xs">${esc(f.path ?? "")}${f.line ? `<span class="text-surface-500">:${f.line}</span>` : ""}</td>
+                 <td class="mono">${esc(f.path ?? "")}${f.line ? `<span class="line-num">:${f.line}</span>` : ""}</td>
                  <td>
-                   <div class="text-surface-100 font-medium">${esc(f.title ?? "—")}</div>
-                   ${f.body ? `<details class="mt-1"><summary class="text-[11px] text-surface-400 cursor-pointer hover:text-surface-200">Show rendered body</summary><div class="md-body mt-2 pl-3 border-l border-surface-800">${renderMarkdown(f.body.slice(0, 4000))}</div></details>` : ""}
+                   <div class="strong">${esc(f.title ?? "—")}</div>
+                   ${f.body ? `<details style="margin-top:4px"><summary style="font-size:11px;color:var(--text-3);cursor:pointer">Show rendered body</summary><div class="md-body" style="margin-top:8px;padding-left:12px;border-left:2px solid var(--line)">${renderMarkdown(f.body.slice(0, 4000))}</div></details>` : ""}
                  </td>
-                 <td class="text-xs muted">${esc(f.source ?? "—")}</td>
+                 <td class="muted">${esc(f.source ?? "—")}</td>
                </tr>`,
              )
              .join("")}
          </tbody>
-       </table></div>`;
+       </table>`;
 
-  const reviewsList = a.reviews.length <= 1
+  const allReviewsBody = a.reviews.length <= 1
     ? ""
-    : `<section class="panel">
-         ${panelHead(`All reviews (${a.reviews.length})`)}
-         <div class="panel-body-flush"><table class="dash-table">
-           <thead><tr>
-             <th class="right">When</th><th>SHA</th><th>Profile</th><th>Risk</th><th class="num">Findings</th><th>Approval</th>
-           </tr></thead>
-           <tbody>
-             ${a.reviews
-               .map(
-                 (rv) => `<tr>
-                   <td class="right muted">${esc(relativeTime(rv.created_at))}</td>
-                   <td class="font-mono text-xs text-brand-300">${esc((rv.sha ?? "").slice(0, 7))}</td>
-                   <td class="text-xs muted">${esc(rv.profile ?? "—")}</td>
-                   <td>${riskBadge(rv.risk_level, rv.risk_score)}</td>
-                   <td class="num ${rv.finding_count > 0 ? "num-strong" : "zero"}">${rv.finding_count}</td>
-                   <td class="text-xs muted">${esc(rv.approval ?? "—")}</td>
-                 </tr>`,
-               )
-               .join("")}
-           </tbody>
-         </table></div>
-       </section>`;
+    : card({
+        title: `All reviews (${a.reviews.length})`,
+        bodyClass: "flush",
+        body: `<table class="tbl">
+          <thead><tr>
+            <th class="right">When</th><th>SHA</th><th>Profile</th><th>Risk</th><th class="num">Findings</th><th>Approval</th>
+          </tr></thead>
+          <tbody>
+            ${a.reviews
+              .map(
+                (rv) => `<tr>
+                  <td class="right muted">${esc(relativeTime(rv.created_at))}</td>
+                  <td class="mono" style="color:var(--accent-bright)">${esc((rv.sha ?? "").slice(0, 7))}</td>
+                  <td class="muted">${esc(rv.profile ?? "—")}</td>
+                  <td>${riskBadge(rv.risk_level, rv.risk_score)}</td>
+                  <td class="num ${rv.finding_count > 0 ? "strong" : "zero"}">${rv.finding_count}</td>
+                  <td>${approvalBadge(rv.approval)}</td>
+                </tr>`,
+              )
+              .join("")}
+          </tbody>
+        </table>`,
+      });
 
-  const eventsHtml = a.events.length === 0
-    ? `<div class="panel-body text-surface-400 text-sm">No events.</div>`
-    : `<ul class="divide-y divide-surface-800 max-h-96 overflow-auto">
+  const eventsBody = a.events.length === 0
+    ? `<div class="empty"><div class="title">No events</div><div>PR hooks haven't fired yet.</div></div>`
+    : `<ul style="list-style:none;margin:0;padding:0;max-height:380px;overflow:auto">
          ${a.events
            .map(
-             (ev) => `<li class="px-3.5 py-2 flex items-center justify-between text-sm">
-               <span class="font-mono text-xs text-surface-200">${esc(ev.kind)}</span>
-               <span class="text-[11px] text-surface-500 font-mono">${esc(relativeTime(ev.ts))}</span>
+             (ev) => `<li style="display:flex;align-items:center;justify-content:space-between;padding:7px 14px;border-bottom:1px solid var(--line-soft);font-size:12.5px">
+               <span class="mono" style="color:var(--text-1)">${esc(ev.kind)}</span>
+               <span class="mono muted" style="font-size:10.5px">${esc(relativeTime(ev.ts))}</span>
              </li>`,
            )
            .join("")}
@@ -625,17 +734,21 @@ function renderPRDetail(a: PRDetailArgs): string {
 
   const body = `
     ${header}
-    <div class="grid grid-cols-1 gap-4">
-      ${latestHtml}
-      <section class="panel">
-        ${panelHead("Findings", a.findings.length > 0 ? `${a.findings.length} in latest review` : "")}
-        ${findingsHtml}
-      </section>
-      ${reviewsList}
-      <section class="panel">
-        ${panelHead("Events", `${a.events.length} most recent`)}
-        ${eventsHtml}
-      </section>
+    <div class="grid stack">
+      ${latestCard}
+      ${card({
+        title: "Findings",
+        subtitle: a.findings.length > 0 ? `${a.findings.length} in latest review` : undefined,
+        bodyClass: "flush",
+        body: findingsBody,
+      })}
+      ${allReviewsBody}
+      ${card({
+        title: "Events",
+        subtitle: `${a.events.length} most recent`,
+        bodyClass: "flush",
+        body: eventsBody,
+      })}
     </div>
   `;
 
@@ -646,38 +759,42 @@ function renderPRDetail(a: PRDetailArgs): string {
       { label: `${a.owner}/${a.repo}`, href: `/dashboard/repo/${encodeURIComponent(a.owner)}/${encodeURIComponent(a.repo)}` },
       { label: `#${a.number}` },
     ],
+    active: "overview",
     body,
   });
 }
 
-// ─── Error pages ────────────────────────────────────────────────────
+// ─── Error pages ─────────────────────────────────────────────────────
 
 function renderNotFound(msg: string): string {
   return renderLayout({
     title: "Not found",
-    body: `<div class="panel">
-      <div class="panel-body text-center py-10">
-        <div class="text-xs text-surface-400 font-mono mb-2">404 · NOT FOUND</div>
-        <div class="text-surface-100 text-sm mb-4">${esc(msg)}</div>
-        <a href="/dashboard" class="btn btn-ghost">← Back to repos</a>
-      </div>
-    </div>`,
+    active: "",
+    body: `<div class="card"><div class="empty">
+      <div class="mono" style="color:var(--text-3);font-size:11px;letter-spacing:0.12em;margin-bottom:8px">404 · NOT FOUND</div>
+      <div class="title">${esc(msg)}</div>
+      <div style="margin-top:14px"><a href="/dashboard" class="btn btn-ghost">← Back to repos</a></div>
+    </div></div>`,
   });
 }
 
 function renderError(msg: string): string {
   return renderLayout({
     title: "Error",
-    body: `<div class="panel" style="border-color:rgba(239,68,68,0.4);">
-      <div class="panel-body">
-        <div class="text-red-300 text-sm font-semibold">${esc(msg)}</div>
-        <div class="text-surface-400 text-xs mt-1">Check server logs for details.</div>
+    active: "",
+    body: `<div class="card tone-danger"><div class="card-body">
+      <div style="display:flex;align-items:flex-start;gap:10px">
+        <span style="color:var(--sev-crit);flex-shrink:0">${ICON.alert}</span>
+        <div>
+          <div style="color:var(--sev-crit);font-weight:600;font-size:13px">${esc(msg)}</div>
+          <div class="muted" style="font-size:12px;margin-top:3px">Check server logs for details.</div>
+        </div>
       </div>
-    </div>`,
+    </div></div>`,
   });
 }
 
-// ─── Findings explorer ────────────────────────────────────────────
+// ─── Findings explorer ───────────────────────────────────────────────
 
 function parseFindingFilters(q: Record<string, unknown>): FindingFilters {
   const str = (k: string) => {
@@ -739,124 +856,142 @@ function renderFindings(a: FindingsPageArgs): string {
 
   const ageStr = a.filters.ageDays ? String(a.filters.ageDays) : "";
 
-  const filterForm = `
-    <form method="get" class="panel">
-      <div class="panel-body">
-        <div class="grid grid-cols-1 md:grid-cols-6 gap-3">
-          <label class="flex flex-col text-[11px] uppercase tracking-wider text-surface-400 font-semibold gap-1">Severity
-            <select name="severity">
-              ${selectOpt("", "any", a.filters.severity)}
-              ${selectOpt("critical", "critical", a.filters.severity)}
-              ${selectOpt("major", "major", a.filters.severity)}
-              ${selectOpt("minor", "minor", a.filters.severity)}
-              ${selectOpt("nit", "nit", a.filters.severity)}
-            </select>
-          </label>
-          <label class="flex flex-col text-[11px] uppercase tracking-wider text-surface-400 font-semibold gap-1">Source
-            <select name="source">
-              ${selectOpt("", "any", a.filters.source)}
-              ${selectOpt("ai", "ai", a.filters.source)}
-              ${selectOpt("safety", "safety", a.filters.source)}
-              ${selectOpt("builtin", "builtin", a.filters.source)}
-              ${selectOpt("custom", "custom", a.filters.source)}
-            </select>
-          </label>
-          <label class="flex flex-col text-[11px] uppercase tracking-wider text-surface-400 font-semibold gap-1">Repo
-            <input name="repo" value="${esc(a.filters.repo ?? "")}" placeholder="owner/repo" />
-          </label>
-          <label class="flex flex-col text-[11px] uppercase tracking-wider text-surface-400 font-semibold gap-1 md:col-span-2">Search path / title
-            <input name="q" value="${esc(a.filters.q ?? "")}" placeholder="e.g. src/server" />
-          </label>
-          <label class="flex flex-col text-[11px] uppercase tracking-wider text-surface-400 font-semibold gap-1">Age
-            <select name="age">
-              ${selectOpt("", "any", ageStr)}
-              ${selectOpt("7", "7 days", ageStr)}
-              ${selectOpt("30", "30 days", ageStr)}
-              ${selectOpt("90", "90 days", ageStr)}
-            </select>
-          </label>
-        </div>
-        <input type="hidden" name="limit" value="${esc(String(limit))}" />
-        <div class="flex items-center justify-end gap-2 mt-3">
-          <a href="/dashboard/findings" class="text-[11px] text-surface-400 hover:text-surface-200 transition-colors">Clear</a>
-          <button type="submit" class="btn btn-primary">Apply filters</button>
-        </div>
+  const activeFilterCount = [
+    a.filters.severity,
+    a.filters.source,
+    a.filters.repo,
+    a.filters.q,
+    a.filters.fingerprint,
+    a.filters.ageDays,
+  ].filter((v) => v !== undefined && v !== "").length;
+
+  const filterForm = `<form method="get" class="card">
+    <div class="filterbar">
+      <label class="field">Severity
+        <select name="severity">
+          ${selectOpt("", "any", a.filters.severity)}
+          ${selectOpt("critical", "critical", a.filters.severity)}
+          ${selectOpt("major", "major", a.filters.severity)}
+          ${selectOpt("minor", "minor", a.filters.severity)}
+          ${selectOpt("nit", "nit", a.filters.severity)}
+        </select>
+      </label>
+      <label class="field">Source
+        <select name="source">
+          ${selectOpt("", "any", a.filters.source)}
+          ${selectOpt("ai", "ai", a.filters.source)}
+          ${selectOpt("safety", "safety", a.filters.source)}
+          ${selectOpt("builtin", "builtin", a.filters.source)}
+          ${selectOpt("custom", "custom", a.filters.source)}
+        </select>
+      </label>
+      <label class="field">Repo
+        <input name="repo" value="${esc(a.filters.repo ?? "")}" placeholder="owner/repo" />
+      </label>
+      <label class="field wide">Search path / title
+        <input name="q" value="${esc(a.filters.q ?? "")}" placeholder="e.g. src/server" />
+      </label>
+      <label class="field">Age
+        <select name="age">
+          ${selectOpt("", "any", ageStr)}
+          ${selectOpt("7", "7 days", ageStr)}
+          ${selectOpt("30", "30 days", ageStr)}
+          ${selectOpt("90", "90 days", ageStr)}
+        </select>
+      </label>
+    </div>
+    <input type="hidden" name="limit" value="${esc(String(limit))}" />
+    <div class="filter-foot">
+      <span class="hint">${activeFilterCount > 0 ? `${activeFilterCount} filter${activeFilterCount === 1 ? "" : "s"} active` : "No filters active"}</span>
+      <div style="display:flex;gap:8px">
+        <a href="/dashboard/findings" class="btn btn-link">Clear</a>
+        <button type="submit" class="btn btn-primary">Apply filters</button>
       </div>
-    </form>`;
+    </div>
+  </form>`;
 
   const fingerprintClause = a.filters.fingerprint
-    ? `<div class="panel">
-         <div class="panel-body flex items-center justify-between text-xs">
-           <span class="text-surface-300">Filtering by fingerprint <span class="font-mono text-brand-300">${esc(a.filters.fingerprint)}</span></span>
-           <a href="/dashboard/findings${queryStringFromFilters(a.filters, { fingerprint: undefined })}" class="text-surface-400 hover:text-white transition-colors">Clear fingerprint</a>
-         </div>
-       </div>`
+    ? card({
+        tone: "accent",
+        bodyClass: "tight",
+        body: `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px">
+          <span>Filtering by fingerprint <span class="mono" style="color:var(--accent-bright)">${esc(a.filters.fingerprint)}</span></span>
+          <a href="/dashboard/findings${queryStringFromFilters(a.filters, { fingerprint: undefined })}" class="btn btn-link">Clear fingerprint</a>
+        </div>`,
+      })
     : "";
 
-  const groupsHtml = a.groups.length === 0
+  const groupsCard = a.groups.length === 0
     ? ""
-    : `<section class="panel">
-         ${panelHead("Recurring fingerprints", `${a.groups.length} groups`)}
-         <div class="panel-body-flush"><table class="dash-table">
-           <thead><tr>
-             <th>Fingerprint</th><th>Title</th><th>Severity</th><th class="num">Occurrences</th><th class="num">Repos</th><th class="right">Last seen</th>
-           </tr></thead>
-           <tbody>
-             ${a.groups
-               .map((g) => {
-                 const href = `/dashboard/findings${queryStringFromFilters(a.filters, { fingerprint: g.fingerprint })}`;
-                 return `<tr>
-                   <td><a class="link font-mono text-xs" href="${esc(href)}">${esc(g.fingerprint)}</a></td>
-                   <td class="truncate max-w-md">${esc(g.title ?? "—")}</td>
-                   <td>${severityBadge(g.severity)}</td>
-                   <td class="num num-strong">${g.occurrences}</td>
-                   <td class="num">${g.repos}</td>
-                   <td class="right muted">${esc(relativeTime(g.last_seen))}</td>
-                 </tr>`;
-               })
-               .join("")}
-           </tbody>
-         </table></div>
-       </section>`;
+    : card({
+        title: "Recurring fingerprints",
+        subtitle: `${a.groups.length} groups · 2+ occurrences`,
+        bodyClass: "flush",
+        body: `<table class="tbl">
+          <thead><tr>
+            <th>Fingerprint</th><th>Title</th><th>Severity</th><th class="num">Occurrences</th><th class="num">Repos</th><th class="right">Last seen</th>
+          </tr></thead>
+          <tbody>
+            ${a.groups
+              .map((g) => {
+                const href = `/dashboard/findings${queryStringFromFilters(a.filters, { fingerprint: g.fingerprint })}`;
+                return `<tr>
+                  <td><a class="link mono" href="${esc(href)}">${esc(g.fingerprint)}</a></td>
+                  <td class="truncate" style="max-width:36ch">${esc(g.title ?? "—")}</td>
+                  <td>${severityBadge(g.severity)}</td>
+                  <td class="num strong">${g.occurrences}</td>
+                  <td class="num">${g.repos}</td>
+                  <td class="right muted">${esc(relativeTime(g.last_seen))}</td>
+                </tr>`;
+              })
+              .join("")}
+          </tbody>
+        </table>`,
+      });
 
-  const tableHtml = a.rows.length === 0
-    ? `<div class="panel"><div class="panel-body text-surface-400 text-sm text-center py-8">No findings match these filters.</div></div>`
-    : `<section class="panel">
-         ${panelHead("Findings", `${a.rows.length} shown · ${a.total} total`)}
-         <div class="panel-body-flush overflow-x-auto"><table class="dash-table">
-           <thead><tr>
-             <th class="right">When</th><th>Repo</th><th>PR</th><th>Severity</th><th>Location</th><th>Title</th><th>Source</th>
-           </tr></thead>
-           <tbody>
-             ${a.rows
-               .map((r) => {
-                 const prHref = `/dashboard/repo/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.repo)}/pr/${r.number}`;
-                 const repoHref = `/dashboard/repo/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.repo)}`;
-                 return `<tr>
-                   <td class="right muted text-xs whitespace-nowrap">${esc(relativeTime(r.created_at))}</td>
-                   <td><a class="link" href="${esc(repoHref)}">${esc(r.owner)}/${esc(r.repo)}</a></td>
-                   <td><a class="link" href="${esc(prHref)}">#${r.number}</a></td>
-                   <td>${severityBadge(r.severity)}</td>
-                   <td class="font-mono text-xs truncate max-w-xs">${esc(r.path ?? "")}${r.line ? `<span class="text-surface-500">:${r.line}</span>` : ""}</td>
-                   <td class="truncate max-w-md">${esc(r.title ?? "—")}</td>
-                   <td class="text-xs muted">${esc(r.source ?? "—")}</td>
-                 </tr>`;
-               })
-               .join("")}
-           </tbody>
-         </table></div>
-       </section>`;
+  const tableCard = a.rows.length === 0
+    ? `<div class="card"><div class="empty">
+         <div class="title">No findings match these filters</div>
+         <div>Loosen a filter or <a class="link" href="/dashboard/findings">clear all</a>.</div>
+       </div></div>`
+    : card({
+        title: "Findings",
+        subtitle: `${a.rows.length} shown · ${a.total} total`,
+        bodyClass: "flush",
+        body: `<table class="tbl rail">
+          <thead><tr>
+            <th class="right">When</th><th>Repo</th><th>PR</th><th>Severity</th><th>Location</th><th>Title</th><th>Source</th>
+          </tr></thead>
+          <tbody>
+            ${a.rows
+              .map((r) => {
+                const prHref = `/dashboard/repo/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.repo)}/pr/${r.number}`;
+                const repoHref = `/dashboard/repo/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.repo)}`;
+                return `<tr data-sev="${esc((r.severity ?? "").toLowerCase())}">
+                  <td class="right muted mono nowrap">${esc(relativeTime(r.created_at))}</td>
+                  <td><a class="link" href="${esc(repoHref)}">${esc(r.owner)}/${esc(r.repo)}</a></td>
+                  <td><a class="link mono" href="${esc(prHref)}">#${r.number}</a></td>
+                  <td>${severityBadge(r.severity)}</td>
+                  <td class="mono truncate" style="max-width:32ch">${esc(r.path ?? "")}${r.line ? `<span class="line-num">:${r.line}</span>` : ""}</td>
+                  <td class="truncate strong" style="max-width:40ch">${esc(r.title ?? "—")}</td>
+                  <td class="muted">${esc(r.source ?? "—")}</td>
+                </tr>`;
+              })
+              .join("")}
+          </tbody>
+        </table>`,
+      });
 
   const prev = offset > 0
     ? `<a href="/dashboard/findings${queryStringFromFilters(a.filters, { offset: Math.max(0, offset - limit) })}" class="btn btn-ghost">← Prev</a>`
-    : `<span class="btn btn-ghost opacity-40 pointer-events-none">← Prev</span>`;
+    : `<span class="btn btn-ghost disabled">← Prev</span>`;
   const next = offset + limit < a.total
     ? `<a href="/dashboard/findings${queryStringFromFilters(a.filters, { offset: offset + limit })}" class="btn btn-ghost">Next →</a>`
-    : `<span class="btn btn-ghost opacity-40 pointer-events-none">Next →</span>`;
+    : `<span class="btn btn-ghost disabled">Next →</span>`;
   const pager = a.total > limit
-    ? `<div class="flex items-center justify-between text-xs text-surface-400 mt-1">
+    ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;color:var(--text-3);padding:4px 2px">
          ${prev}
-         <div class="font-mono">rows ${offset + 1}–${Math.min(a.total, offset + a.rows.length)} of ${a.total}</div>
+         <div class="mono">rows ${offset + 1}–${Math.min(a.total, offset + a.rows.length)} of ${a.total}</div>
          ${next}
        </div>`
     : "";
@@ -866,11 +1001,11 @@ function renderFindings(a: FindingsPageArgs): string {
       title: "Findings",
       subtitle: `${a.total} total · filter across severities, sources, and repos. Grouped by fingerprint to spot repeat offenders.`,
     })}
-    <div class="grid grid-cols-1 gap-4">
+    <div class="grid stack">
       ${filterForm}
       ${fingerprintClause}
-      ${groupsHtml}
-      ${tableHtml}
+      ${groupsCard}
+      ${tableCard}
       ${pager}
     </div>
   `;
@@ -878,52 +1013,108 @@ function renderFindings(a: FindingsPageArgs): string {
   return renderLayout({
     title: "Findings",
     crumbs: [{ label: "Repos", href: "/dashboard" }, { label: "Findings" }],
+    active: "findings",
     body,
   });
 }
 
-// ─── Patterns ─────────────────────────────────────────────────────
+// ─── Patterns ────────────────────────────────────────────────────────
 
 function renderPatterns(rules: PatternRuleRow[]): string {
   const thirtyDayTotal = rules.reduce((n, r) => n + r.hits_30d, 0);
   const allTimeTotal = rules.reduce((n, r) => n + r.hits_total, 0);
-  const body = rules.length === 0
-    ? `<div class="panel"><div class="panel-body text-center text-surface-400 py-8">No pattern-rule hits recorded yet.</div></div>`
-    : `<section class="panel">
-         ${panelHead("Pattern rules", `${rules.length} rules · ${thirtyDayTotal} hits · 30d · ${allTimeTotal} all time`)}
-         <div class="panel-body-flush overflow-x-auto"><table class="dash-table">
-           <thead><tr>
-             <th>Rule</th><th>Source</th><th>Repo</th><th class="num">Hits · 30d</th><th class="num">Hits · all time</th><th class="right">Last hit</th>
-           </tr></thead>
-           <tbody>
-             ${rules
-               .map((r) => {
-                 const repoHref = `/dashboard/repo/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.repo)}`;
-                 return `<tr>
-                   <td class="font-mono text-xs text-surface-100">${esc(r.rule_name)}</td>
-                   <td class="text-xs muted">${esc(r.source)}</td>
-                   <td><a class="link" href="${esc(repoHref)}">${esc(r.owner)}/${esc(r.repo)}</a></td>
-                   <td class="num ${r.hits_30d > 0 ? "num-strong" : "zero"}">${r.hits_30d}</td>
-                   <td class="num muted">${r.hits_total}</td>
-                   <td class="right muted text-xs">${esc(relativeTime(r.last_hit))}</td>
-                 </tr>`;
-               })
-               .join("")}
-           </tbody>
-         </table></div>
-       </section>`;
+
+  // Aggregate per rule across repos for the bar chart
+  const byRule = new Map<string, { name: string; source: string; hits30: number; hitsAll: number }>();
+  for (const r of rules) {
+    const key = `${r.rule_name}||${r.source}`;
+    const prev = byRule.get(key);
+    if (prev) {
+      prev.hits30 += r.hits_30d;
+      prev.hitsAll += r.hits_total;
+    } else {
+      byRule.set(key, { name: r.rule_name, source: r.source, hits30: r.hits_30d, hitsAll: r.hits_total });
+    }
+  }
+  const topRules = [...byRule.values()].sort((a, b) => b.hits30 - a.hits30 || b.hitsAll - a.hitsAll).slice(0, 10);
+  const maxHits = Math.max(1, ...topRules.map((r) => r.hits30 || r.hitsAll));
+
+  const distBody = topRules.length === 0
+    ? `<div class="empty"><div class="title">No rule hits recorded yet</div><div>Pattern rules will show here once they match something.</div></div>`
+    : topRules
+        .map((r) => {
+          const shown = r.hits30 || r.hitsAll;
+          const pct = (shown / maxHits) * 100;
+          return `<div class="hbar-row">
+            <div class="label">
+              <span class="path">${esc(r.name)}</span>
+              <div class="hb-track">
+                <div class="hb-seg ${r.hits30 > 0 ? "major" : ""}" style="width:${pct.toFixed(1)}%;background:${r.hits30 > 0 ? "var(--sev-major)" : "var(--text-4)"}"></div>
+              </div>
+            </div>
+            <div class="num">${shown}</div>
+          </div>`;
+        })
+        .join("");
+
+  const tableCard = rules.length === 0
+    ? `<div class="card"><div class="empty">
+         <div class="title">No pattern-rule hits recorded yet</div>
+         <div>Built-in rules, the safety scanner, and custom patterns will appear here once they fire.</div>
+       </div></div>`
+    : card({
+        title: "Pattern rules",
+        subtitle: `${rules.length} rules · ${thirtyDayTotal} hits · 30d · ${allTimeTotal} all time`,
+        bodyClass: "flush",
+        body: `<table class="tbl">
+          <thead><tr>
+            <th>Rule</th><th>Source</th><th>Repo</th><th class="num">Hits · 30d</th><th class="num">Hits · all time</th><th class="right">Last hit</th>
+          </tr></thead>
+          <tbody>
+            ${rules
+              .map((r) => {
+                const repoHref = `/dashboard/repo/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.repo)}`;
+                return `<tr>
+                  <td class="mono strong">${esc(r.rule_name)}</td>
+                  <td><span class="chip ${r.source === "safety" ? "sev-crit" : r.source === "custom" ? "accent" : "muted"} uppercase">${esc(r.source)}</span></td>
+                  <td><a class="link" href="${esc(repoHref)}">${esc(r.owner)}/${esc(r.repo)}</a></td>
+                  <td class="num ${r.hits_30d > 0 ? "strong" : "zero"}">${r.hits_30d}</td>
+                  <td class="num muted">${r.hits_total}</td>
+                  <td class="right muted mono">${esc(relativeTime(r.last_hit))}</td>
+                </tr>`;
+              })
+              .join("")}
+          </tbody>
+        </table>`,
+      });
+
+  const distCard = card({
+    title: "Hit distribution",
+    subtitle: "Top 10 rules · 30d (fallback all-time)",
+    bodyClass: "flush",
+    body: distBody,
+  });
+
+  const body = `
+    ${pageHeader({
+      title: "Pattern rules",
+      subtitle: `Built-in, safety-scanner, and custom rules. Disable noisy ones in <span class="mono" style="color:var(--accent-bright)">.diffsentry.yaml</span>.`,
+    })}
+    <div class="grid stack">
+      ${distCard}
+      ${tableCard}
+    </div>
+  `;
+
   return renderLayout({
     title: "Patterns",
     crumbs: [{ label: "Repos", href: "/dashboard" }, { label: "Patterns" }],
-    body: `${pageHeader({
-             title: "Pattern rules",
-             subtitle: `Built-in, safety-scanner, and custom rules. Disable noisy ones in <span class="font-mono text-brand-300">.diffsentry.yaml</span>.`,
-           })}
-           ${body}`,
+    active: "patterns",
+    body,
   });
 }
 
-// ─── Settings / health ────────────────────────────────────────────
+// ─── Settings / health ───────────────────────────────────────────────
 
 function bytesHuman(n: number | null): string {
   if (n === null) return "—";
@@ -934,79 +1125,75 @@ function bytesHuman(n: number | null): string {
 }
 
 function renderSettings(c: HealthCounts, logs: LogEntry[] = []): string {
-  const providerCard = `
-    <section class="panel">
-      ${panelHead("Runtime", "Process-level config")}
-      <div class="panel-body">
-        <dl class="kv">
-          <div><dt>AI provider</dt><dd>${esc(process.env.AI_PROVIDER ?? "anthropic")}</dd></div>
-          <div><dt>Node</dt><dd class="mono">${esc(process.version)}</dd></div>
-          <div><dt>Port</dt><dd>${esc(process.env.PORT ?? "3005")}</dd></div>
-          <div><dt>Log level</dt><dd>${esc(process.env.LOG_LEVEL ?? "info")}</dd></div>
-          <div><dt>Bot name</dt><dd>${esc(process.env.BOT_NAME ?? "diffsentry")}</dd></div>
-          <div><dt>DB path</dt><dd class="mono">${esc(process.env.DB_PATH ?? "./data/diffsentry.db")}</dd></div>
-        </dl>
+  const noteCard = card({
+    tone: "accent",
+    bodyClass: "tight",
+    body: `<div style="display:flex;align-items:flex-start;gap:12px;padding:6px 2px">
+      <span style="color:var(--accent-bright);flex-shrink:0;width:18px;height:18px">${ICON.check}</span>
+      <div>
+        <div style="color:var(--text);font-weight:600;font-size:13.5px;margin-bottom:2px">Operator-only surface</div>
+        <div style="color:var(--text-2);font-size:12.5px">Gated behind <span class="mono" style="color:var(--accent-bright)">ENABLE_DASHBOARD=1</span> and GitHub OAuth. Only users in <span class="mono" style="color:var(--accent-bright)">DASHBOARD_ALLOWED_LOGINS</span> or member orgs can sign in.</div>
       </div>
-    </section>`;
+    </div>`,
+  });
 
-  const dbCard = `
-    <section class="panel">
-      ${panelHead("Storage", `SQLite · ${esc(bytesHuman(c.db_bytes))}`)}
-      <div class="panel-body">
-        <dl class="kv">
-          <div><dt>Repos</dt><dd>${c.repos}</dd></div>
-          <div><dt>PRs</dt><dd>${c.prs}</dd></div>
-          <div><dt>Reviews</dt><dd>${c.reviews}</dd></div>
-          <div><dt>Findings</dt><dd>${c.findings}</dd></div>
-          <div><dt>Pattern hits</dt><dd>${c.pattern_hits}</dd></div>
-          <div><dt>Events</dt><dd>${c.events}</dd></div>
-          <div><dt>DB size</dt><dd>${esc(bytesHuman(c.db_bytes))}</dd></div>
-          <div><dt>Review span</dt><dd class="mono">${esc(c.oldest_review?.slice(0, 10) ?? "—")} → ${esc(c.newest_review?.slice(0, 10) ?? "—")}</dd></div>
-        </dl>
-      </div>
-    </section>`;
+  const providerCard = card({
+    title: "Runtime",
+    subtitle: "Process-level config",
+    body: `<dl class="kv">
+      <div><dt>AI provider</dt><dd>${esc(process.env.AI_PROVIDER ?? "anthropic")}</dd></div>
+      <div><dt>Node</dt><dd class="mono">${esc(process.version)}</dd></div>
+      <div><dt>Port</dt><dd>${esc(process.env.PORT ?? "3005")}</dd></div>
+      <div><dt>Log level</dt><dd>${esc(process.env.LOG_LEVEL ?? "info")}</dd></div>
+      <div><dt>Bot name</dt><dd>${esc(process.env.BOT_NAME ?? "diffsentry")}</dd></div>
+      <div><dt>DB path</dt><dd class="mono">${esc(process.env.DB_PATH ?? "./data/diffsentry.db")}</dd></div>
+    </dl>`,
+  });
 
-  const note = `
-    <section class="panel" style="border-color:#1746b6;background:linear-gradient(180deg,rgba(23,70,182,0.15),transparent 70%);">
-      <div class="panel-body">
-        <div class="flex items-start gap-3">
-          <svg class="w-4 h-4 text-brand-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-          <div>
-            <div class="text-sm font-semibold text-surface-100 mb-0.5">Operator-only surface</div>
-            <div class="text-[13px] text-surface-300">Gated behind <span class="font-mono text-brand-300">ENABLE_DASHBOARD=1</span> and GitHub OAuth. Only users in <span class="font-mono text-brand-300">DASHBOARD_ALLOWED_LOGINS</span> or member orgs can sign in.</div>
-          </div>
-        </div>
-      </div>
-    </section>`;
+  const dbCard = card({
+    title: "Storage",
+    subtitle: `SQLite · ${bytesHuman(c.db_bytes)}`,
+    body: `<dl class="kv">
+      <div><dt>Repos</dt><dd>${c.repos}</dd></div>
+      <div><dt>PRs</dt><dd>${c.prs}</dd></div>
+      <div><dt>Reviews</dt><dd>${c.reviews}</dd></div>
+      <div><dt>Findings</dt><dd>${c.findings}</dd></div>
+      <div><dt>Pattern hits</dt><dd>${c.pattern_hits}</dd></div>
+      <div><dt>Events</dt><dd>${c.events}</dd></div>
+      <div><dt>DB size</dt><dd>${esc(bytesHuman(c.db_bytes))}</dd></div>
+      <div><dt>Review span</dt><dd class="mono">${esc(c.oldest_review?.slice(0, 10) ?? "—")} → ${esc(c.newest_review?.slice(0, 10) ?? "—")}</dd></div>
+    </dl>`,
+  });
 
-  const logCard = `
-    <section class="panel">
-      ${panelHead("Recent warnings & errors", `${logs.length} entries · newest last`)}
-      ${
-        logs.length === 0
-          ? `<div class="panel-body text-surface-400 text-sm text-center py-6">No warn/error log entries captured since startup.</div>`
-          : `<ul class="divide-y divide-surface-800 text-sm max-h-96 overflow-auto">
-               ${logs
-                 .map((e) => {
-                   const lvl = e.level === "error" || e.level === "fatal" ? "text-red-300" : "text-amber-300";
-                   return `<li class="px-3.5 py-2 flex items-start gap-3">
-                     <span class="text-[11px] text-surface-500 font-mono whitespace-nowrap">${esc(e.ts.slice(11, 19))}</span>
-                     <span class="text-[10px] font-semibold uppercase tracking-wider ${lvl} w-12 shrink-0">${esc(e.level)}</span>
-                     <span class="text-surface-100 break-words flex-1">${esc(e.msg)}</span>
-                   </li>`;
-                 })
-                 .join("")}
-             </ul>`
-      }
-    </section>`;
+  const logCard = card({
+    title: "Recent warnings & errors",
+    subtitle: `${logs.length} entries · newest last`,
+    bodyClass: "flush",
+    body: logs.length === 0
+      ? `<div class="empty"><div class="title">No warn/error entries</div><div>Nothing captured since startup.</div></div>`
+      : logs
+          .map(
+            (e) => `<div class="logrow">
+              <span class="ts">${esc(e.ts.slice(11, 19))}</span>
+              <span class="lvl ${esc(e.level)}">${esc(e.level)}</span>
+              <span class="msg">${esc(e.msg)}</span>
+            </div>`,
+          )
+          .join(""),
+  });
 
   return renderLayout({
     title: "Settings",
     crumbs: [{ label: "Repos", href: "/dashboard" }, { label: "Settings" }],
+    active: "settings",
     body: `${pageHeader({
              title: "Settings",
              subtitle: "Runtime + storage health, plus a live error tail from this process.",
            })}
-           <div class="grid grid-cols-1 gap-4">${note}${providerCard}${dbCard}${logCard}</div>`,
+           <div class="grid stack">
+             ${noteCard}
+             <div class="grid two">${providerCard}${dbCard}</div>
+             ${logCard}
+           </div>`,
   });
 }
