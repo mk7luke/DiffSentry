@@ -689,10 +689,11 @@ const BASE_STYLES = `
   .chart-bar .col .seg.nit { background: var(--sev-nit); }
   .chart-bar .col:hover .seg { filter: brightness(1.2); }
   .chart-bar .col .empty-dot {
-    height: 2px;
-    background: var(--line-strong);
-    border-radius: 1px;
+    height: 1px;
+    background: var(--line-soft);
+    border-radius: 0.5px;
     align-self: stretch;
+    opacity: 0.6;
   }
   .chart-legend {
     display: flex;
@@ -802,12 +803,33 @@ const BASE_STYLES = `
   .donut-legend .sw { width: 9px; height: 9px; border-radius: 2px; }
 
   /* ── Risk line chart (replaces old sparkline) ──────────────────── */
-  .risk-chart { width: 100%; height: 140px; display: block; }
-  .risk-chart .axis-line { stroke: var(--line-soft); stroke-width: 1; stroke-dasharray: 2 3; }
-  .risk-chart .axis-label { fill: var(--text-4); font-size: 9px; font-family: var(--font-mono); }
+  .risk-chart-wrap { position: relative; width: 100%; height: 140px; padding-left: 28px; }
+  .risk-chart-wrap .plot { position: relative; width: 100%; height: 100%; }
+  .risk-chart { width: 100%; height: 100%; display: block; overflow: visible; }
   .risk-chart .area { fill: url(#riskGrad); opacity: 0.75; }
-  .risk-chart .line { stroke: var(--accent-bright); stroke-width: 1.6; fill: none; }
-  .risk-chart .dot { stroke: var(--bg-deep); stroke-width: 1.3; }
+  .risk-chart .line { stroke: var(--accent-bright); stroke-width: 1.6; fill: none; vector-effect: non-scaling-stroke; }
+  .risk-chart-wrap .axis { position: absolute; inset: 0; pointer-events: none; }
+  .risk-chart-wrap .axis .gridline {
+    position: absolute; left: 28px; right: 0;
+    border-top: 1px dashed var(--line-soft);
+    height: 0;
+  }
+  .risk-chart-wrap .axis .ylabel {
+    position: absolute; left: 0; width: 24px;
+    text-align: right;
+    font-size: 10px; font-family: var(--font-mono);
+    color: var(--text-4);
+    transform: translateY(-50%);
+    font-variant-numeric: tabular-nums;
+  }
+  .risk-chart-wrap .dots { position: absolute; inset: 0 0 0 28px; pointer-events: none; }
+  .risk-chart-wrap .dot-marker {
+    position: absolute;
+    width: 6px; height: 6px; border-radius: 50%;
+    transform: translate(-50%, -50%);
+    border: 1.3px solid var(--bg-deep);
+    pointer-events: auto;
+  }
 
   /* ── Timeline list (events, reviews) ───────────────────────────── */
   .tl {
@@ -1385,21 +1407,18 @@ export function riskLine(points: { created_at: string; risk_score: number | null
   }
   const w = 720;
   const h = 140;
-  const padL = 24;
-  const padR = 10;
   const padT = 12;
   const padB = 22;
-  const innerW = w - padL - padR;
   const innerH = h - padT - padB;
   const n = points.length;
   const coords = points.map((p, i) => {
-    const x = padL + (i * innerW) / Math.max(1, n - 1);
+    const x = (i * w) / Math.max(1, n - 1);
     const score = typeof p.risk_score === "number" ? p.risk_score : 0;
     const y = padT + innerH - (score / 100) * innerH;
     return [x, y, score, p] as const;
   });
   const path = coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
-  const areaPath = `${padL},${padT + innerH} ` + path + ` ${(padL + innerW).toFixed(1)},${padT + innerH}`;
+  const areaPath = `0,${padT + innerH} ` + path + ` ${w},${padT + innerH}`;
   const dots = coords
     .map(([x, y, score, p]) => {
       const color =
@@ -1408,30 +1427,35 @@ export function riskLine(points: { created_at: string; risk_score: number | null
         : score >= 35 ? "#fbbf24"
         : score >= 15 ? "#facc15"
         : "#4ade80";
-      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.8" fill="${color}" class="dot">
-        <title>#${p.number} · risk ${score} · ${p.created_at.slice(0, 10)}</title>
-      </circle>`;
+      const leftPct = n === 1 ? 0 : (x / w) * 100;
+      const topPct = (y / h) * 100;
+      return `<div class="dot-marker" style="left:${leftPct.toFixed(2)}%;top:${topPct.toFixed(2)}%;background:${color}" title="#${p.number} · risk ${score} · ${esc(p.created_at.slice(0, 10))}"></div>`;
     })
     .join("");
-  const gridLines = [0, 25, 50, 75, 100]
+  const axis = [0, 25, 50, 75, 100]
     .map((pct) => {
-      const y = padT + innerH - (pct / 100) * innerH;
-      return `<line class="axis-line" x1="${padL}" x2="${padL + innerW}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" />
-              <text class="axis-label" x="${padL - 5}" y="${(y + 3).toFixed(1)}" text-anchor="end">${pct}</text>`;
+      const yPx = padT + innerH - (pct / 100) * innerH;
+      const topPct = (yPx / h) * 100;
+      return `<div class="gridline" style="top:${topPct.toFixed(2)}%"></div>
+              <div class="ylabel" style="top:${topPct.toFixed(2)}%">${pct}</div>`;
     })
     .join("");
-  return `<svg viewBox="0 0 ${w} ${h}" class="risk-chart" preserveAspectRatio="none">
-    <defs>
-      <linearGradient id="riskGrad" x1="0" x2="0" y1="0" y2="1">
-        <stop offset="0%" stop-color="#5a8dff" stop-opacity="0.35"/>
-        <stop offset="100%" stop-color="#5a8dff" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-    ${gridLines}
-    <polygon points="${areaPath}" class="area"/>
-    <polyline points="${path}" class="line"/>
-    ${dots}
-  </svg>`;
+  return `<div class="risk-chart-wrap">
+    <div class="axis">${axis}</div>
+    <div class="plot">
+      <svg viewBox="0 0 ${w} ${h}" class="risk-chart" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="riskGrad" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="#5a8dff" stop-opacity="0.35"/>
+            <stop offset="100%" stop-color="#5a8dff" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <polygon points="${areaPath}" class="area"/>
+        <polyline points="${path}" class="line"/>
+      </svg>
+    </div>
+    <div class="dots">${dots}</div>
+  </div>`;
 }
 
 /** Horizontal bar row — critical+major split. */
