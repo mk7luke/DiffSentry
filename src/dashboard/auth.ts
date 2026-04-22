@@ -126,13 +126,17 @@ function clearCookie(res: Response, name: string) {
 function renderLoginPage(opts: { baseUrl: string; error?: string; next?: string }): string {
   const nextQs = opts.next ? `?next=${encodeURIComponent(opts.next)}` : "";
   const body = `
-    <div class="max-w-md mx-auto bg-white border border-slate-200 rounded-lg p-8 text-center">
-      <h1 class="text-xl font-semibold mb-2">Sign in</h1>
-      <p class="text-sm text-slate-500 mb-6">You must be a member of an authorized GitHub organization.</p>
-      ${opts.error ? `<div class="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-800 mb-4 text-left">${esc(opts.error)}</div>` : ""}
-      <a href="/dashboard/auth/login${nextQs}" class="inline-block bg-slate-900 text-white px-4 py-2 rounded text-sm hover:bg-slate-700">Continue with GitHub</a>
+    <div style="max-width:420px;margin:60px auto 0;text-align:center">
+      <div class="card">
+        <div class="card-body" style="padding:30px 28px">
+          <h1 style="font-size:22px;font-weight:620;letter-spacing:-0.02em;margin-bottom:6px">Sign in</h1>
+          <p style="color:var(--text-2);font-size:13px;margin-bottom:22px">You must be a member of an authorized GitHub organization.</p>
+          ${opts.error ? `<div class="card tone-danger" style="margin-bottom:18px;text-align:left"><div class="card-body" style="padding:12px 14px;color:#ffc7c7;font-size:12.5px">${esc(opts.error)}</div></div>` : ""}
+          <a href="/dashboard/auth/login${nextQs}" class="btn btn-primary" style="padding:10px 18px;font-size:13px">Continue with GitHub</a>
+        </div>
+      </div>
     </div>`;
-  return renderLayout({ title: "Sign in", body });
+  return renderLayout({ title: "Sign in", body, active: "" });
 }
 
 async function postForToken(cfg: AuthConfig, code: string, redirectUri: string): Promise<string | null> {

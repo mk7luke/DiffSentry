@@ -99,6 +99,70 @@ export function getSparkline(owner: string, repo: string): SparklinePoint[] {
     .all(owner, repo, ninety) as SparklinePoint[];
 }
 
+export interface DailyActivityRow {
+  owner: string;
+  repo: string;
+  day: string; // YYYY-MM-DD
+  reviews: number;
+  critical: number;
+  major: number;
+  minor: number;
+  nit: number;
+}
+
+/**
+ * Daily activity bins (reviews + findings by severity) for the last `days` days.
+ * Pass an owner/repo to scope to a single repo, or omit to get all repos.
+ */
+export function getDailyActivity(
+  owner: string | null,
+  repo: string | null,
+  days: number,
+): DailyActivityRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const scoped = owner && repo;
+  const where = scoped ? "rv.owner = ? AND rv.repo = ? AND rv.created_at >= ?" : "rv.created_at >= ?";
+  const params: unknown[] = scoped ? [owner, repo, cutoff] : [cutoff];
+  return db
+    .prepare(
+      `SELECT rv.owner AS owner, rv.repo AS repo,
+              substr(rv.created_at, 1, 10) AS day,
+              COUNT(DISTINCT rv.id) AS reviews,
+              SUM(CASE WHEN f.severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+              SUM(CASE WHEN f.severity = 'major' THEN 1 ELSE 0 END) AS major,
+              SUM(CASE WHEN f.severity = 'minor' THEN 1 ELSE 0 END) AS minor,
+              SUM(CASE WHEN f.severity = 'nit' THEN 1 ELSE 0 END) AS nit
+       FROM reviews rv
+       LEFT JOIN findings f ON f.review_id = rv.id
+       WHERE ${where}
+       GROUP BY rv.owner, rv.repo, day
+       ORDER BY rv.owner, rv.repo, day ASC`,
+    )
+    .all(...params) as DailyActivityRow[];
+}
+
+export interface ApprovalMixRow {
+  approval: string | null;
+  count: number;
+}
+
+/** Distribution of approval outcomes for a repo over the last `days` days. */
+export function getApprovalMix(owner: string, repo: string, days: number): ApprovalMixRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  return db
+    .prepare(
+      `SELECT approval, COUNT(*) AS count
+       FROM reviews
+       WHERE owner = ? AND repo = ? AND created_at >= ?
+       GROUP BY approval`,
+    )
+    .all(owner, repo, cutoff) as ApprovalMixRow[];
+}
+
 /** Top 10 hottest paths by critical+major findings, last 90d. */
 export function getHotPaths(owner: string, repo: string): HotPathRow[] {
   const db = openDatabase();
