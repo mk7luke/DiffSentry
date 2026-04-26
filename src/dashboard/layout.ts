@@ -363,6 +363,8 @@ const BASE_STYLES = `
     border-radius: var(--r-lg);
     box-shadow: var(--shadow-card);
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
   .card.tone-accent { border-color: var(--accent-line); box-shadow: var(--shadow-accent); }
   .card.tone-danger { border-color: var(--danger-line); }
@@ -375,6 +377,7 @@ const BASE_STYLES = `
     padding: 11px 14px;
     border-bottom: 1px solid var(--line-soft);
     background: linear-gradient(180deg, rgba(255,255,255,0.015), transparent);
+    flex-shrink: 0;
   }
   .card-head h2, .card-head h3 {
     font-size: 12.5px;
@@ -388,10 +391,15 @@ const BASE_STYLES = `
     font-family: var(--font-mono);
     letter-spacing: 0.01em;
   }
-  .card-body { padding: 14px; }
+  .card-body { padding: 14px; flex: 1; min-height: 0; }
   .card-body.flush { padding: 0; }
   .card-body.tight { padding: 10px 14px; }
-  .card-body.chart { padding: 16px 14px 8px; background: var(--bg-chart); }
+  .card-body.chart {
+    padding: 16px 14px 8px;
+    background: var(--bg-chart);
+    display: flex;
+    flex-direction: column;
+  }
 
   /* ── Metric (hero numbers) ─────────────────────────────────────── */
   .metric {
@@ -664,7 +672,8 @@ const BASE_STYLES = `
     display: flex;
     align-items: flex-end;
     gap: 3px;
-    height: 140px;
+    flex: 1;
+    min-height: 140px;
     padding: 6px 0;
   }
   .chart-bar .col {
@@ -803,7 +812,7 @@ const BASE_STYLES = `
   .donut-legend .sw { width: 9px; height: 9px; border-radius: 2px; }
 
   /* ── Risk line chart (replaces old sparkline) ──────────────────── */
-  .risk-chart-wrap { position: relative; width: 100%; height: 140px; padding-left: 28px; }
+  .risk-chart-wrap { position: relative; width: 100%; flex: 1; min-height: 140px; padding-left: 28px; }
   .risk-chart-wrap .plot { position: relative; width: 100%; height: 100%; }
   .risk-chart { width: 100%; height: 100%; display: block; overflow: visible; }
   .risk-chart .area { fill: url(#riskGrad); opacity: 0.75; }
@@ -873,13 +882,18 @@ const BASE_STYLES = `
     background: var(--line-soft);
   }
   .tl-item .body {
-    display: flex; flex-direction: column; gap: 3px;
+    display: flex; flex-direction: column; gap: 4px;
     min-width: 0;
   }
-  .tl-item .body .row1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .tl-item .body .row2 { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 11.5px; }
-  .tl-item .body .title { color: var(--text); font-weight: 500; }
+  .tl-item .body .row1 { display: flex; align-items: center; gap: 8px; }
+  .tl-item .body .row2 { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 11.5px; flex-wrap: wrap; }
+  .tl-item .body .title {
+    color: var(--text); font-weight: 500;
+    flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   .tl-item .body .title:hover { color: var(--accent-bright); }
+  .tl-item .body .author { margin-left: auto; }
 
   /* ── KV grid (settings-style pair) ─────────────────────────────── */
   .kv {

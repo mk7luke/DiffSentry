@@ -476,7 +476,7 @@ function renderRepoDetail(a: RepoDetailArgs): string {
                 ${riskBadge(rv.risk_level, rv.risk_score)}
                 ${approvalBadge(rv.approval)}
                 ${findingsChip}
-                ${rv.author ? `<span class="mono">@${esc(rv.author)}</span>` : ""}
+                ${rv.author ? `<span class="mono author">@${esc(rv.author)}</span>` : ""}
               </div>
             </div>
           </div>`;
