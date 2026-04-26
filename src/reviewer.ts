@@ -21,7 +21,7 @@ import { suggestReviewersFromBlame, renderSuggestedReviewers, combineReviewers, 
 import { loadCodeowners, ownersForFiles, renderCodeownersBlock } from "./codeowners.js";
 import { findPriorBotThreadsForPaths, renderPriorDiscussionsBlock, diffWithOtherPR, renderDiffPRReply } from "./cross-pr.js";
 import { renderStickyStatus, STICKY_MARKER } from "./sticky-status.js";
-import { recordRepo, recordPR, recordReview, recordFindings, recordPatternHits } from "./storage/dao.js";
+import { recordRepo, recordPR, recordReview, recordFindings, recordPatternHits, recordIssue, recordIssueAction } from "./storage/dao.js";
 import { runSafetyScanners } from "./safety-scanner.js";
 import { runPatternChecks } from "./pattern-checks.js";
 import { scanDependencyChanges, renderDepBlock } from "./dep-scanner.js";
@@ -1691,6 +1691,11 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
       const octokit = await this.github.getInstallationOctokit(installationId);
       const issueContext = await this.github.getIssueContext(installationId, owner, repo, issueNumber);
 
+      // Persist the issue as soon as we've fetched it so the dashboard sees it
+      // even if we bail (bot author, opt-out, or AI failure further down).
+      recordRepo({ owner, repo, installationId });
+      recordIssue(issueContext);
+
       // Skip bot-authored issues — avoids loops if another bot opened the issue.
       if (await this.isAuthorBot(octokit, owner, issueContext.author)) {
         log.info({ author: issueContext.author }, "Issue authored by a bot; skipping auto-summary");
@@ -1718,6 +1723,7 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
         await this.github.upsertComment(
           installationId, owner, repo, issueNumber, tip, ISSUE_TIPS_MARKER,
         ).catch((err) => log.warn({ err }, "Failed to post short-issue notice"));
+        recordIssueAction({ owner, repo, number: issueNumber, action: "needs_detail" });
         return;
       }
 
@@ -1753,6 +1759,7 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
       await this.github.upsertComment(
         installationId, owner, repo, issueNumber, body, ISSUE_SUMMARY_MARKER,
       );
+      recordIssueAction({ owner, repo, number: issueNumber, action: "auto_summary", summary });
       log.info("Posted issue auto-summary");
     } catch (err) {
       log.error({ err }, "handleIssueOpened failed");
@@ -1787,6 +1794,7 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
       switch (command.type) {
         case "help": {
           await reply(formatIssueHelpMessage(this.config.botName));
+          recordIssueAction({ owner, repo, number: issueNumber, action: "help" });
           return;
         }
 
@@ -1800,6 +1808,7 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
             "> ",
             `> Use \`@${this.config.botName} resume\` to re-enable.`,
           ].join("\n"));
+          recordIssueAction({ owner, repo, number: issueNumber, action: "paused" });
           return;
         }
 
@@ -1811,6 +1820,7 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
             "> ",
             "> I'll respond to mentions on this issue again.",
           ].join("\n"));
+          recordIssueAction({ owner, repo, number: issueNumber, action: "resumed" });
           return;
         }
       }
@@ -1824,6 +1834,12 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
       }
 
       const issueContext = await this.github.getIssueContext(installationId, owner, repo, issueNumber);
+      // Make sure the issue is persisted even if the bot's first contact is a
+      // comment rather than the opened webhook (e.g. installs onto a repo
+      // with existing issues).
+      recordRepo({ owner, repo, installationId });
+      recordIssue(issueContext);
+
       const repoConfig = await this.loadIssueRepoConfig(octokit, owner, repo, issueContext.defaultBranch);
 
       // Respect chat opt-out for free-form questions, summary, and plan.
@@ -1839,6 +1855,7 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
             maxFilesPerReview: this.config.maxFilesPerReview,
             botName: this.config.botName,
           }));
+          recordIssueAction({ owner, repo, number: issueNumber, action: "config" });
           return;
         }
 
@@ -1858,6 +1875,7 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
             "",
             "</details>",
           ].join("\n"));
+          recordIssueAction({ owner, repo, number: issueNumber, action: "learn", payload: { content: command.content.slice(0, 1000) } });
           return;
         }
 
@@ -1882,6 +1900,7 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
           await this.github.upsertComment(installationId, owner, repo, issueNumber, body, ISSUE_SUMMARY_MARKER);
           // Drop a small ack so the user knows their command was processed.
           await reply(`> [!NOTE]\n> Issue summary regenerated — see the pinned triage comment.`);
+          recordIssueAction({ owner, repo, number: issueNumber, action: "summary_regen", summary });
           return;
         }
 
@@ -1899,6 +1918,7 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
             issueTipsFooter(this.config.botName),
           ].join("\n");
           await reply(body);
+          recordIssueAction({ owner, repo, number: issueNumber, action: "plan", plan, payload: command.target ? { focus: command.target } : undefined });
           return;
         }
 
@@ -1914,6 +1934,7 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
             "",
             "<!-- This is an auto-generated reply by DiffSentry -->",
           ].join("\n"));
+          recordIssueAction({ owner, repo, number: issueNumber, action: "chat", payload: { question: message.slice(0, 500) } });
           return;
         }
       }

@@ -96,6 +96,28 @@ CREATE TABLE IF NOT EXISTS pattern_hits (
   review_id INTEGER REFERENCES reviews(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_pattern_rule ON pattern_hits(rule_name);
+
+CREATE TABLE IF NOT EXISTS issues (
+  owner TEXT NOT NULL,
+  repo TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  title TEXT,
+  author TEXT,
+  state TEXT,
+  body TEXT,
+  url TEXT,
+  labels_json TEXT,
+  comment_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT,
+  first_seen_at TEXT NOT NULL,
+  last_action_at TEXT,
+  last_action_kind TEXT,
+  action_count INTEGER NOT NULL DEFAULT 0,
+  last_summary TEXT,
+  last_plan TEXT,
+  PRIMARY KEY (owner, repo, number)
+);
+CREATE INDEX IF NOT EXISTS idx_issues_last_action ON issues(owner, repo, last_action_at DESC);
 `;
 
 /**

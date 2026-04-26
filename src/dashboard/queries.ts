@@ -228,6 +228,78 @@ export function getRecentReviews(owner: string, repo: string, limit = 50): Recen
     .all(owner, repo, limit) as RecentReviewRow[];
 }
 
+export interface RecentPRRow {
+  number: number;
+  title: string | null;
+  author: string | null;
+  latest_at: string;
+  review_count: number;
+  latest_approval: string | null;
+  latest_risk_score: number | null;
+  latest_risk_level: string | null;
+  total_findings: number;
+  worst_severity: string | null;
+}
+
+/**
+ * One row per PR — collapses multiple review iterations into a single
+ * row keyed by PR number, with the latest review's approval/risk and
+ * cumulative finding totals across every iteration.
+ */
+export function getRecentPRsWithReviews(owner: string, repo: string, limit = 50): RecentPRRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  return db
+    .prepare(
+      `WITH per_pr AS (
+         SELECT
+           rv.number AS number,
+           MAX(rv.created_at) AS latest_at,
+           COUNT(DISTINCT rv.id) AS review_count,
+           SUM((SELECT COUNT(*) FROM findings f WHERE f.review_id = rv.id)) AS total_findings,
+           (SELECT CASE
+              WHEN SUM(CASE WHEN f.severity = 'critical' THEN 1 ELSE 0 END) > 0 THEN 'critical'
+              WHEN SUM(CASE WHEN f.severity = 'major'    THEN 1 ELSE 0 END) > 0 THEN 'major'
+              WHEN SUM(CASE WHEN f.severity = 'minor'    THEN 1 ELSE 0 END) > 0 THEN 'minor'
+              WHEN SUM(CASE WHEN f.severity = 'nit'      THEN 1 ELSE 0 END) > 0 THEN 'nit'
+              ELSE NULL
+            END
+            FROM findings f JOIN reviews rv2 ON rv2.id = f.review_id
+            WHERE rv2.owner = rv.owner AND rv2.repo = rv.repo AND rv2.number = rv.number) AS worst_severity
+         FROM reviews rv
+         WHERE rv.owner = ? AND rv.repo = ?
+         GROUP BY rv.number
+       ),
+       latest_review AS (
+         SELECT rv.number, rv.approval, rv.risk_score, rv.risk_level, rv.created_at
+         FROM reviews rv
+         WHERE rv.owner = ? AND rv.repo = ?
+           AND rv.id = (
+             SELECT rv2.id FROM reviews rv2
+             WHERE rv2.owner = rv.owner AND rv2.repo = rv.repo AND rv2.number = rv.number
+             ORDER BY rv2.created_at DESC LIMIT 1
+           )
+       )
+       SELECT
+         pp.number,
+         p.title,
+         p.author,
+         pp.latest_at,
+         pp.review_count,
+         lr.approval AS latest_approval,
+         lr.risk_score AS latest_risk_score,
+         lr.risk_level AS latest_risk_level,
+         pp.total_findings,
+         pp.worst_severity
+       FROM per_pr pp
+       JOIN latest_review lr ON lr.number = pp.number
+       LEFT JOIN prs p ON p.owner = ? AND p.repo = ? AND p.number = pp.number
+       ORDER BY pp.latest_at DESC
+       LIMIT ?`,
+    )
+    .all(owner, repo, owner, repo, owner, repo, limit) as RecentPRRow[];
+}
+
 // ─── PR detail ──────────────────────────────────────────────────────
 
 export interface PRRow {
@@ -299,6 +371,38 @@ export function getPRReviews(owner: string, repo: string, number: number): PRRev
        ORDER BY rv.created_at DESC`,
     )
     .all(owner, repo, number) as PRReviewRow[];
+}
+
+export interface PRFindingRow extends FindingRow {
+  review_id: number;
+  review_sha: string | null;
+  review_at: string;
+}
+
+/** All findings across every review of a PR, with review SHA + timestamp. */
+export function getFindingsForPR(owner: string, repo: string, number: number): PRFindingRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  return db
+    .prepare(
+      `SELECT f.id, f.path, f.line, f.type, f.severity, f.title, f.body,
+              f.fingerprint, f.source, f.confidence,
+              rv.id AS review_id, rv.sha AS review_sha, rv.created_at AS review_at
+       FROM findings f
+       JOIN reviews rv ON rv.id = f.review_id
+       WHERE rv.owner = ? AND rv.repo = ? AND rv.number = ?
+       ORDER BY
+         CASE f.severity
+           WHEN 'critical' THEN 0
+           WHEN 'major' THEN 1
+           WHEN 'minor' THEN 2
+           WHEN 'nit' THEN 3
+           ELSE 4
+         END ASC,
+         rv.created_at DESC,
+         f.path ASC, f.line ASC`,
+    )
+    .all(owner, repo, number) as PRFindingRow[];
 }
 
 export function getFindings(reviewId: number): FindingRow[] {
@@ -445,6 +549,11 @@ export function queryFingerprintGroups(filters: FindingFilters, limit = 50): Fin
     .all(...params, limit) as FingerprintGroupRow[];
 }
 
+/**
+ * Events for a PR — excludes `issue.*` kinds so the PR timeline doesn't pick
+ * up bot actions on a same-numbered issue (PRs and issues share the GitHub
+ * number namespace per repo, so `(owner, repo, number)` alone is ambiguous).
+ */
 export function getEvents(owner: string, repo: string, number: number, limit = 100): EventRow[] {
   const db = openDatabase();
   if (!db) return [];
@@ -453,10 +562,86 @@ export function getEvents(owner: string, repo: string, number: number, limit = 1
       `SELECT id, ts, kind, payload_json
        FROM events
        WHERE owner = ? AND repo = ? AND number = ?
+         AND kind NOT LIKE 'issue.%'
        ORDER BY ts DESC
        LIMIT ?`,
     )
     .all(owner, repo, number, limit) as EventRow[];
+}
+
+// ─── Issues ─────────────────────────────────────────────────────────
+
+export interface IssueRow {
+  number: number;
+  title: string | null;
+  author: string | null;
+  state: string | null;
+  body: string | null;
+  url: string | null;
+  labels_json: string | null;
+  comment_count: number;
+  created_at: string | null;
+  first_seen_at: string;
+  last_action_at: string | null;
+  last_action_kind: string | null;
+  action_count: number;
+  last_summary: string | null;
+  last_plan: string | null;
+}
+
+/** Recent issues for a repo, newest bot activity first. */
+export function getRecentIssues(owner: string, repo: string, limit = 50): IssueRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  return db
+    .prepare(
+      `SELECT number, title, author, state, body, url, labels_json, comment_count,
+              created_at, first_seen_at, last_action_at, last_action_kind,
+              action_count, last_summary, last_plan
+       FROM issues
+       WHERE owner = ? AND repo = ?
+       ORDER BY COALESCE(last_action_at, first_seen_at) DESC
+       LIMIT ?`,
+    )
+    .all(owner, repo, limit) as IssueRow[];
+}
+
+export function getIssue(owner: string, repo: string, number: number): IssueRow | null {
+  const db = openDatabase();
+  if (!db) return null;
+  const row = db
+    .prepare(
+      `SELECT number, title, author, state, body, url, labels_json, comment_count,
+              created_at, first_seen_at, last_action_at, last_action_kind,
+              action_count, last_summary, last_plan
+       FROM issues
+       WHERE owner = ? AND repo = ? AND number = ?`,
+    )
+    .get(owner, repo, number) as IssueRow | undefined;
+  return row ?? null;
+}
+
+/** Bot activity timeline for one issue (only `issue.*` kinds). */
+export function getIssueEvents(owner: string, repo: string, number: number, limit = 100): EventRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  return db
+    .prepare(
+      `SELECT id, ts, kind, payload_json
+       FROM events
+       WHERE owner = ? AND repo = ? AND number = ?
+         AND kind LIKE 'issue.%'
+       ORDER BY ts DESC
+       LIMIT ?`,
+    )
+    .all(owner, repo, number, limit) as EventRow[];
+}
+
+export function issueExists(owner: string, repo: string, number: number): boolean {
+  const db = openDatabase();
+  if (!db) return false;
+  const row = db.prepare(`SELECT 1 FROM issues WHERE owner = ? AND repo = ? AND number = ? LIMIT 1`).get(owner, repo, number);
+  return !!row;
 }
 
 // ─── Settings / health ─────────────────────────────────────────────
@@ -466,6 +651,7 @@ export interface HealthCounts {
   prs: number;
   reviews: number;
   findings: number;
+  issues: number;
   events: number;
   pattern_hits: number;
   db_bytes: number | null;
@@ -477,7 +663,7 @@ export function getHealthCounts(): HealthCounts {
   const db = openDatabase();
   if (!db) {
     return {
-      repos: 0, prs: 0, reviews: 0, findings: 0, events: 0, pattern_hits: 0,
+      repos: 0, prs: 0, reviews: 0, findings: 0, issues: 0, events: 0, pattern_hits: 0,
       db_bytes: null, oldest_review: null, newest_review: null,
     };
   }
@@ -495,6 +681,7 @@ export function getHealthCounts(): HealthCounts {
     prs: one("SELECT COUNT(*) AS n FROM prs"),
     reviews: one("SELECT COUNT(*) AS n FROM reviews"),
     findings: one("SELECT COUNT(*) AS n FROM findings"),
+    issues: one("SELECT COUNT(*) AS n FROM issues"),
     events: one("SELECT COUNT(*) AS n FROM events"),
     pattern_hits: one("SELECT COUNT(*) AS n FROM pattern_hits"),
     db_bytes: dbBytes,
