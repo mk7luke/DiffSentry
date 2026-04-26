@@ -2,6 +2,7 @@ import express from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { getRecentLogs, logger, type LogEntry } from "../logger.js";
+import { LearningsStore } from "../learnings.js";
 import type { Learning } from "../types.js";
 import {
   approvalBadge,
@@ -67,10 +68,15 @@ export interface DashboardDeps {
 
 export function createDashboardRouter(deps: DashboardDeps): express.Router {
   const router = express.Router();
+  const learningsStore = new LearningsStore(deps.learningsDir);
   if (deps.auth) {
     deps.auth.routes(router);
     router.use(deps.auth.middleware);
   }
+
+  // Form posts from the learnings card (delete + edit). Scoped to this router
+  // only so the webhook's raw-body parser is unaffected.
+  router.use(express.urlencoded({ extended: false, limit: "32kb" }));
 
   router.use((req, _res, next) => {
     const user = getCurrentUser(req);
@@ -115,6 +121,32 @@ export function createDashboardRouter(deps: DashboardDeps): express.Router {
       logger.error({ err, owner, repo }, "dashboard repo detail failed");
       res.status(500).type("html").send(renderError("Failed to load repo detail."));
     }
+  });
+
+  router.post("/repo/:owner/:repo/learnings/:id/delete", async (req, res) => {
+    const { owner, repo, id } = req.params;
+    try {
+      await learningsStore.removeLearning(`${owner}/${repo}`, id);
+    } catch (err) {
+      logger.error({ err, owner, repo, id }, "dashboard learning delete failed");
+    }
+    res.redirect(303, `/dashboard/repo/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}#learnings`);
+  });
+
+  router.post("/repo/:owner/:repo/learnings/:id/edit", async (req, res) => {
+    const { owner, repo, id } = req.params;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const content = typeof body.content === "string" ? body.content : "";
+    const rawPath = typeof body.path === "string" ? body.path.trim() : "";
+    try {
+      await learningsStore.updateLearning(`${owner}/${repo}`, id, {
+        content,
+        path: rawPath.length > 0 ? rawPath : null,
+      });
+    } catch (err) {
+      logger.error({ err, owner, repo, id }, "dashboard learning edit failed");
+    }
+    res.redirect(303, `/dashboard/repo/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}#learnings`);
   });
 
   router.get("/findings", (req, res) => {
@@ -599,7 +631,7 @@ function renderRepoDetail(a: RepoDetailArgs): string {
     </div>
 
     <div class="grid two" style="margin-top:16px">
-      ${renderLearningsCard(a.learnings)}
+      ${renderLearningsCard(a.owner, a.repo, a.learnings)}
       ${renderConfigCard(a.configYaml)}
     </div>
   `;
@@ -615,20 +647,40 @@ function renderRepoDetail(a: RepoDetailArgs): string {
   });
 }
 
-function renderLearningsCard(learnings: Learning[]): string {
+function renderLearningsCard(owner: string, repo: string, learnings: Learning[]): string {
+  const action = (id: string, verb: "delete" | "edit") =>
+    `/dashboard/repo/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/learnings/${encodeURIComponent(id)}/${verb}`;
+
   const body = learnings.length === 0
     ? `<div class="empty"><div class="title">No learnings yet</div><div>Use <span class="mono" style="color:var(--accent-bright)">@bot learn …</span> on a PR to teach the reviewer.</div></div>`
-    : `<ul style="list-style:none;margin:0;padding:0;max-height:320px;overflow:auto">
+    : `<ul id="learnings" style="list-style:none;margin:0;padding:0;max-height:420px;overflow:auto">
          ${learnings
-           .map(
-             (l) => `<li style="display:grid;grid-template-columns:68px 1fr;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line-soft);font-size:13px;align-items:start">
+           .map((l) => {
+             const editForm = `
+               <details style="margin-top:8px">
+                 <summary class="btn btn-link" style="font-size:11px;color:var(--text-3);cursor:pointer;list-style:none;padding:0">edit</summary>
+                 <form method="post" action="${esc(action(l.id, "edit"))}" style="margin-top:8px;display:grid;gap:6px">
+                   <textarea name="content" rows="3" style="width:100%;font-family:var(--font-mono);font-size:12px;background:var(--bg-deep);color:var(--text-1);border:1px solid var(--line);border-radius:4px;padding:6px;resize:vertical">${esc(l.content)}</textarea>
+                   <input name="path" value="${esc(l.path ?? "")}" placeholder="Optional file glob (e.g. static/sales-app/**)" style="width:100%;font-family:var(--font-mono);font-size:11.5px;background:var(--bg-deep);color:var(--text-1);border:1px solid var(--line);border-radius:4px;padding:5px 6px"/>
+                   <div style="display:flex;justify-content:flex-end">
+                     <button type="submit" class="btn btn-ghost" style="font-size:11px">Save</button>
+                   </div>
+                 </form>
+               </details>`;
+             const deleteForm = `
+               <form method="post" action="${esc(action(l.id, "delete"))}" style="margin:0">
+                 <button type="submit" class="btn btn-link" style="font-size:11px;color:var(--text-3)" title="Delete this learning" onclick="return confirm('Delete this learning?')">delete</button>
+               </form>`;
+             return `<li style="display:grid;grid-template-columns:68px 1fr auto;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line-soft);font-size:13px;align-items:start">
                <span class="mono muted" style="font-size:10.5px;padding-top:2px">${esc(relativeTime(l.createdAt))}</span>
                <div style="min-width:0">
                  ${l.path ? `<div class="mono muted" style="font-size:11px;margin-bottom:3px">${esc(l.path)}</div>` : ""}
                  <div style="color:var(--text-1);word-break:break-word">${esc(l.content)}</div>
+                 ${editForm}
                </div>
-             </li>`,
-           )
+               ${deleteForm}
+             </li>`;
+           })
            .join("")}
        </ul>`;
   return card({

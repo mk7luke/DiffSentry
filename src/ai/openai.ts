@@ -105,6 +105,20 @@ export class OpenAIProvider implements AIProvider {
     return text;
   }
 
+  async complete(system: string, user: string, opts?: { maxTokens?: number; json?: boolean }): Promise<string> {
+    const tokenParam = this.model.startsWith("o") ? "max_completion_tokens" : "max_tokens";
+    const response = await this.client.chat.completions.create({
+      model: this.model,
+      [tokenParam]: opts?.maxTokens ?? 512,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      ...(opts?.json ? { response_format: { type: "json_object" as const } } : {}),
+    });
+    return response.choices[0]?.message?.content || "";
+  }
+
   async chatIssue(context: IssueContext, userMessage: string, repoConfig?: RepoConfig): Promise<string> {
     const { system, user } = buildIssueChatPrompt(context, userMessage, repoConfig);
     const log = logger.child({ provider: "openai", model: this.model, surface: "issue" });
