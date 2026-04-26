@@ -116,6 +116,19 @@ export class OpenAICompatibleProvider implements AIProvider {
     return text;
   }
 
+  async complete(system: string, user: string, opts?: { maxTokens?: number; json?: boolean }): Promise<string> {
+    const response = await this.client.chat.completions.create({
+      model: this.model,
+      max_tokens: opts?.maxTokens ?? 512,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      ...(opts?.json ? { response_format: { type: "json_object" as const } } : {}),
+    });
+    return response.choices[0]?.message?.content || "";
+  }
+
   async chatIssue(context: IssueContext, userMessage: string, repoConfig?: RepoConfig): Promise<string> {
     const { system, user } = buildIssueChatPrompt(context, userMessage, repoConfig);
     const log = logger.child({ provider: this.providerLabel, model: this.model, surface: "issue" });

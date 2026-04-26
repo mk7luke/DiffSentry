@@ -257,6 +257,11 @@ export interface AIProvider {
    * questions. The handler shapes `userMessage` per intent.
    */
   chatIssue(context: IssueContext, userMessage: string, repoConfig?: RepoConfig): Promise<string>;
+  /**
+   * Bare prompt -> text helper, no PR/issue context. Used for small one-off
+   * synthesis tasks (e.g. shaping a `@bot learn` note into a structured rule).
+   */
+  complete(system: string, user: string, opts?: { maxTokens?: number; json?: boolean }): Promise<string>;
 }
 
 // ─── Learnings ─────────────────────────────────────────────────

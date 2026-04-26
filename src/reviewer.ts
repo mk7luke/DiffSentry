@@ -9,7 +9,7 @@ import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, for
 import { parseCommand, formatHelpMessage, formatConfigMessage } from "./commands.js";
 import { parseIssueCommand, formatIssueHelpMessage } from "./issue-commands.js";
 import { buildIssueSummaryInstruction, buildIssuePlanInstruction } from "./ai/prompt.js";
-import { LearningsStore } from "./learnings.js";
+import { LearningsStore, synthesizeLearning, extractFindingMeta, type FindingContext } from "./learnings.js";
 import { loadGuidelines, getRelevantGuidelines, formatGuidelinesForPrompt } from "./guidelines.js";
 import { parseIssueReferences, fetchLinkedIssues, formatIssuesForPrompt, formatIssuesForWalkthrough } from "./issues.js";
 import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-merge.js";
@@ -1078,10 +1078,49 @@ export class Reviewer {
 
         case "learn": {
           const repoFullName = `${owner}/${repo}`;
-          await this.learnings.addLearning(repoFullName, command.content);
+          const rawNote = command.content?.trim() ?? "";
+          if (!rawNote) {
+            await reply(`Please provide content to remember: \`@${this.config.botName} learn <text>\`.`);
+            break;
+          }
+
+          const findingCtx =
+            commentKind === "review_thread"
+              ? await this.fetchParentFindingContext(installationId, owner, repo, commentId).catch((err) => {
+                  log.warn({ err }, "fetchParentFindingContext failed");
+                  return null;
+                })
+              : null;
+
+          let saved: { content: string; path?: string };
+          if (findingCtx) {
+            const synth = await synthesizeLearning(this.ai, rawNote, findingCtx);
+            saved = synth;
+          } else {
+            saved = { content: rawNote };
+          }
+
+          const stored = await this.learnings.addLearning(repoFullName, saved.content, saved.path);
+          const scopeLine = stored.path
+            ? `Scope: \`${stored.path}\``
+            : "Scope: repo-wide";
+          const synthNote = findingCtx
+            ? `_Rephrased from your note using the finding context. Edit or remove on the [dashboard](/dashboard/repo/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}#learnings)._`
+            : "";
+
           await reply(
             actionsPerformed(
-              `Learning saved. I'll apply this in future reviews of **${owner}/${repo}**.\n\n> ${command.content}`,
+              [
+                `Learning saved. I'll apply this in future reviews of **${owner}/${repo}**.`,
+                "",
+                `> ${stored.content}`,
+                "",
+                scopeLine,
+                synthNote ? "" : null,
+                synthNote || null,
+              ]
+                .filter((l) => l !== null)
+                .join("\n"),
             ),
           );
           break;
@@ -1946,6 +1985,44 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
         // give up
       }
     }
+  }
+
+  /**
+   * Walk up review-thread parents until we land on the bot's original finding,
+   * then extract the file/title/rule we should feed into learning synthesis.
+   * Bounded at 5 hops so a chatty thread can't loop us forever.
+   */
+  private async fetchParentFindingContext(
+    installationId: number,
+    owner: string,
+    repo: string,
+    commentId: number,
+  ): Promise<FindingContext | null> {
+    const octokit = await this.getInstallationOctokit(installationId);
+    const botLogin = this.config.botName.toLowerCase();
+    let cursor: number | null = commentId;
+    let lastSeen: { body?: string; path?: string } | null = null;
+    for (let hop = 0; hop < 5 && cursor !== null; hop++) {
+      const cur: Awaited<ReturnType<typeof octokit.pulls.getReviewComment>> =
+        await octokit.pulls.getReviewComment({ owner, repo, comment_id: cursor });
+      const data = cur.data;
+      const author = (data.user?.login ?? "").toLowerCase();
+      const isBot = data.user?.type === "Bot" && author.includes(botLogin);
+      if (isBot) {
+        const meta = extractFindingMeta(data.body);
+        return {
+          file: data.path ?? lastSeen?.path,
+          findingBody: data.body ?? undefined,
+          findingTitle: meta.title,
+          rule: meta.rule,
+        };
+      }
+      lastSeen = { body: data.body ?? undefined, path: data.path ?? undefined };
+      cursor = data.in_reply_to_id ?? null;
+    }
+    // Couldn't find a bot ancestor — at least surface the file path so the
+    // synthesizer can scope by directory.
+    return lastSeen?.path ? { file: lastSeen.path } : null;
   }
 
   // ─── Issue Helpers ───────────────────────────────────────────

@@ -94,6 +94,16 @@ export class AnthropicProvider implements AIProvider {
     return text;
   }
 
+  async complete(system: string, user: string, opts?: { maxTokens?: number; json?: boolean }): Promise<string> {
+    const response = await this.client.messages.create({
+      model: this.model,
+      max_tokens: opts?.maxTokens ?? 512,
+      system,
+      messages: [{ role: "user", content: user }],
+    });
+    return response.content[0]?.type === "text" ? response.content[0].text : "";
+  }
+
   async chatIssue(context: IssueContext, userMessage: string, repoConfig?: RepoConfig): Promise<string> {
     const { system, user } = buildIssueChatPrompt(context, userMessage, repoConfig);
     const log = logger.child({ provider: "anthropic", model: this.model, surface: "issue" });
