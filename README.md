@@ -117,6 +117,44 @@ won't get from CodeRabbit.
 
 Anything else after `@bot` is treated as a free-form question about the PR.
 
+### Issue support (CodeRabbit-shape)
+DiffSentry runs on GitHub Issues too — not just PRs. Subscribe to the **Issues**
+event in your GitHub App and the bot will:
+- **Auto-triage on `issues.opened`** — posts a single CodeRabbit-style summary
+  comment with **Summary**, **Key Questions**, **Suggested Labels**, **Where
+  to Look** (top-level files most likely involved), and **Suggested Next
+  Steps**. The comment is upserted by an HTML marker, so re-running
+  `@bot summary` updates in place instead of stacking comments.
+- **Skip empty issues** — when the body is shorter than ~20 chars, the bot
+  posts a friendly "needs more detail" prompt instead of burning an AI call.
+- **Skip bot-authored issues** — avoids loops with other automation.
+
+#### Issue chat commands
+| Command | Description |
+|---|---|
+| `@bot summary` | Regenerate the triage summary in place |
+| `@bot plan [focus]` | Generate a step-by-step implementation plan grounded in the issue + repo file tree (optional `[focus]` narrows the scope) |
+| `@bot pause` / `resume` | Stop/start auto-responses on this issue |
+| `@bot configuration` | Show the active `.diffsentry.yaml` |
+| `@bot learn <text>` | Save a learning for future reviews of this repo |
+| `@bot help` | Show the issue-command help |
+| `@bot <free-form question>` | Answer grounded in issue body, recent comments, and the repo's top-level file tree |
+
+#### Issue config (`.diffsentry.yaml`)
+```yaml
+issues:
+  auto_summary:
+    enabled: true   # default — post a triage summary when an issue is opened
+    on_edit: false  # default — don't re-summarize on body edits
+  chat:
+    auto_reply: true  # default — respond to @-mention questions on issues
+```
+
+The plan/summary AI call is grounded in the issue body, the most recent 30
+non-bot comments, and the top-level entries of the repo's default branch (no
+embeddings/semantic search — kept intentionally light to avoid latency and
+cost surprises).
+
 ### Web dashboard (read-only, optional)
 - **Cross-repo overview** at `/dashboard` — PRs reviewed, 7d/critical finding
   counts, last review time per repo, sortable.
@@ -160,7 +198,7 @@ Anything else after `@bot` is treated as a free-form question about the PR.
    - Contents: Read & write
    - Issues: Read & write
    - Commit statuses: Read & write
-5. **Subscribe to events**: Pull request, Issue comment, Pull request review comment.
+5. **Subscribe to events**: Pull request, **Issues**, Issue comment, Pull request review comment.
 6. Create the App, note the App ID, generate a private key (`.pem`).
 
 ### 2. Install the App
@@ -236,6 +274,7 @@ GitHub webhook
       ├── repo-config.ts          .diffsentry.yaml loading + defaults
       ├── guidelines.ts           CLAUDE.md / AGENTS.md / .cursorrules auto-detect
       ├── issues.ts               'fixes #N' parsing + linked-issue fetch
+      ├── issue-commands.ts       Issue @-mention command parsing + help text
       ├── learnings.ts            Per-repo learnings store
       ├── commands.ts             @mention command parsing + help text
       ├── walkthrough.ts          Walkthrough renderer (cohorts, effort, etc.)
@@ -276,7 +315,9 @@ GitHub webhook
 | `pull_request` | `synchronize` | Incremental review (uses state blob to skip unchanged files) |
 | `pull_request` | `ready_for_review` | Full review (draft → ready) |
 | `pull_request` | `closed` | Abort in-flight review |
-| `issue_comment` | `created` | `@bot` chat commands |
+| `issues` | `opened` / `reopened` | Auto-summary triage comment on the issue |
+| `issue_comment` | `created` (on a PR) | `@bot` chat commands |
+| `issue_comment` | `created` (on an issue) | `@bot` issue commands (summary / plan / chat / pause / resume / learn) |
 | `issue_comment` | `edited` | Finishing-Touches checkbox click handler |
 | `pull_request_review_comment` | `created` | `@bot` chat commands on review threads |
 

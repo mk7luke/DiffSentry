@@ -7,6 +7,8 @@ import { GitHubClient } from "./github.js";
 import { loadRepoConfig, mergeWithDefaults, shouldReviewPR, isPathIncluded } from "./repo-config.js";
 import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary, injectSummaryIntoPRBody } from "./walkthrough.js";
 import { parseCommand, formatHelpMessage, formatConfigMessage } from "./commands.js";
+import { parseIssueCommand, formatIssueHelpMessage } from "./issue-commands.js";
+import { buildIssueSummaryInstruction, buildIssuePlanInstruction } from "./ai/prompt.js";
 import { LearningsStore } from "./learnings.js";
 import { loadGuidelines, getRelevantGuidelines, formatGuidelinesForPrompt } from "./guidelines.js";
 import { parseIssueReferences, fetchLinkedIssues, formatIssuesForPrompt, formatIssuesForWalkthrough } from "./issues.js";
@@ -138,8 +140,23 @@ const pausedPRs = new Set<string>();
 const reviewCountByPR = new Map<string, number>();
 const activeReviews = new Map<string, AbortController>();
 
+// In-memory state per issue. Separate keyspace from PRs because GitHub uses
+// the same number sequence for both — we don't want pausing PR #42 to also
+// silence issue #42.
+const pausedIssues = new Set<string>();
+const ISSUE_SUMMARY_MARKER = "<!-- DiffSentry Issue Summary -->";
+const ISSUE_TIPS_MARKER = "<!-- DiffSentry Issue Tips -->";
+
 function prKey(owner: string, repo: string, pullNumber: number): string {
   return `${owner}/${repo}#${pullNumber}`;
+}
+
+function issueKey(owner: string, repo: string, issueNumber: number): string {
+  return `issue:${owner}/${repo}#${issueNumber}`;
+}
+
+function issueTipsFooter(botName: string): string {
+  return `\n\n---\n\n<sub>Comment \`@${botName} help\` for issue commands. Mention me with a question to get a grounded answer.</sub>`;
 }
 
 export class Reviewer {
@@ -1653,6 +1670,294 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
       } catch {
         // Give up on error reporting
       }
+    }
+  }
+
+  // ─── Issue Auto-Summary ──────────────────────────────────────
+  async handleIssueOpened(
+    installationId: number,
+    owner: string,
+    repo: string,
+    issueNumber: number
+  ): Promise<void> {
+    const log = logger.child({ owner, repo, issue: issueNumber, surface: "issue.opened" });
+
+    if (pausedIssues.has(issueKey(owner, repo, issueNumber))) {
+      log.info("Issue paused; skipping auto-summary");
+      return;
+    }
+
+    try {
+      const octokit = await this.github.getInstallationOctokit(installationId);
+      const issueContext = await this.github.getIssueContext(installationId, owner, repo, issueNumber);
+
+      // Skip bot-authored issues — avoids loops if another bot opened the issue.
+      if (await this.isAuthorBot(octokit, owner, issueContext.author)) {
+        log.info({ author: issueContext.author }, "Issue authored by a bot; skipping auto-summary");
+        return;
+      }
+
+      // Empty/near-empty issues aren't worth the AI hop. Post a softer prompt
+      // asking for more detail instead.
+      const trimmed = (issueContext.body || "").trim();
+      if (trimmed.length < 20) {
+        log.info({ length: trimmed.length }, "Issue body too short; posting prompt for detail");
+        const tip = [
+          "> [!NOTE]",
+          "> ## DiffSentry — needs more detail",
+          "> ",
+          "> This issue's description is short, so I'll skip auto-summary for now. If you can add:",
+          "> - **What you expected to happen**",
+          "> - **What actually happened**",
+          "> - **Steps to reproduce** (or a link to where the bug shows up)",
+          "> ",
+          `> …mention \`@${this.config.botName} summary\` and I'll generate a triage summary, or \`@${this.config.botName} plan\` for an implementation plan.`,
+          "",
+          ISSUE_TIPS_MARKER,
+        ].join("\n");
+        await this.github.upsertComment(
+          installationId, owner, repo, issueNumber, tip, ISSUE_TIPS_MARKER,
+        ).catch((err) => log.warn({ err }, "Failed to post short-issue notice"));
+        return;
+      }
+
+      // Load .diffsentry.yaml from the default branch (issues have no head ref).
+      const repoConfig = await this.loadIssueRepoConfig(octokit, owner, repo, issueContext.defaultBranch);
+
+      // Respect explicit opt-out without burning the AI call.
+      if (repoConfig.issues?.auto_summary?.enabled === false) {
+        log.info("Auto-summary disabled in .diffsentry.yaml; skipping");
+        return;
+      }
+
+      log.info("Generating issue auto-summary");
+      const instruction = buildIssueSummaryInstruction();
+      const summary = await this.ai.chatIssue(issueContext, instruction, repoConfig);
+
+      const body = [
+        ISSUE_SUMMARY_MARKER,
+        "<!-- This is an auto-generated issue triage summary by DiffSentry -->",
+        "",
+        `> :eyes: **DiffSentry** triaged this issue. The breakdown below is regenerable with \`@${this.config.botName} summary\`.`,
+        "",
+        "<details open>",
+        `<summary>📝 Issue triage</summary>`,
+        "",
+        summary.trim(),
+        "",
+        "</details>",
+        "",
+        issueTipsFooter(this.config.botName),
+      ].join("\n");
+
+      await this.github.upsertComment(
+        installationId, owner, repo, issueNumber, body, ISSUE_SUMMARY_MARKER,
+      );
+      log.info("Posted issue auto-summary");
+    } catch (err) {
+      log.error({ err }, "handleIssueOpened failed");
+    }
+  }
+
+  // ─── Issue Comment Handler (chat commands on issues) ─────────
+  async handleIssueComment(
+    installationId: number,
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    commentBody: string,
+    commentId: number
+  ): Promise<void> {
+    const log = logger.child({ owner, repo, issue: issueNumber, commentId, surface: "issue.comment" });
+    const key = issueKey(owner, repo, issueNumber);
+
+    const command = parseIssueCommand(commentBody, this.config.botName);
+    if (!command) {
+      log.debug("No issue command in comment");
+      return;
+    }
+    log.info({ commandType: command.type }, "Processing issue command");
+
+    const reply = (body: string): Promise<void> =>
+      this.github.postComment(installationId, owner, repo, issueNumber, body);
+
+    try {
+      const octokit = await this.github.getInstallationOctokit(installationId);
+
+      switch (command.type) {
+        case "help": {
+          await reply(formatIssueHelpMessage(this.config.botName));
+          return;
+        }
+
+        case "pause": {
+          pausedIssues.add(key);
+          await reply([
+            "> [!NOTE]",
+            "> ## DiffSentry paused on this issue",
+            "> ",
+            "> I won't auto-respond to comments here until you resume.",
+            "> ",
+            `> Use \`@${this.config.botName} resume\` to re-enable.`,
+          ].join("\n"));
+          return;
+        }
+
+        case "resume": {
+          pausedIssues.delete(key);
+          await reply([
+            "> [!NOTE]",
+            "> ## DiffSentry resumed",
+            "> ",
+            "> I'll respond to mentions on this issue again.",
+          ].join("\n"));
+          return;
+        }
+      }
+
+      // Anything below this point is a substantive command. If paused, ack
+      // briefly so the user knows their mention landed but explain why we
+      // aren't doing the heavy work.
+      if (pausedIssues.has(key)) {
+        await reply(`> [!NOTE]\n> DiffSentry is paused on this issue. \`@${this.config.botName} resume\` to re-enable.`);
+        return;
+      }
+
+      const issueContext = await this.github.getIssueContext(installationId, owner, repo, issueNumber);
+      const repoConfig = await this.loadIssueRepoConfig(octokit, owner, repo, issueContext.defaultBranch);
+
+      // Respect chat opt-out for free-form questions, summary, and plan.
+      if (repoConfig.issues?.chat?.auto_reply === false && command.type === "chat") {
+        log.info("Chat disabled in .diffsentry.yaml; ignoring free-form mention");
+        return;
+      }
+
+      switch (command.type) {
+        case "configuration": {
+          await reply(formatConfigMessage(repoConfig, {
+            aiProvider: this.config.aiProvider,
+            maxFilesPerReview: this.config.maxFilesPerReview,
+            botName: this.config.botName,
+          }));
+          return;
+        }
+
+        case "learn": {
+          if (!command.content || command.content.trim().length === 0) {
+            await reply(`Please provide content to remember: \`@${this.config.botName} learn <text>\`.`);
+            return;
+          }
+          await this.learnings.addLearning(`${owner}/${repo}`, command.content);
+          await reply([
+            "<details>",
+            "<summary>✅ Actions performed</summary>",
+            "",
+            `Learning saved. I'll apply this in future reviews of **${owner}/${repo}**.`,
+            "",
+            `> ${command.content}`,
+            "",
+            "</details>",
+          ].join("\n"));
+          return;
+        }
+
+        case "summary": {
+          const instruction = buildIssueSummaryInstruction();
+          const summary = await this.ai.chatIssue(issueContext, instruction, repoConfig);
+          const body = [
+            ISSUE_SUMMARY_MARKER,
+            "<!-- This is an auto-generated issue triage summary by DiffSentry -->",
+            "",
+            `> :eyes: **DiffSentry** regenerated the issue triage. Updated below.`,
+            "",
+            "<details open>",
+            "<summary>📝 Issue triage</summary>",
+            "",
+            summary.trim(),
+            "",
+            "</details>",
+            "",
+            issueTipsFooter(this.config.botName),
+          ].join("\n");
+          await this.github.upsertComment(installationId, owner, repo, issueNumber, body, ISSUE_SUMMARY_MARKER);
+          // Drop a small ack so the user knows their command was processed.
+          await reply(`> [!NOTE]\n> Issue summary regenerated — see the pinned triage comment.`);
+          return;
+        }
+
+        case "plan": {
+          const instruction = buildIssuePlanInstruction(command.target);
+          const plan = await this.ai.chatIssue(issueContext, instruction, repoConfig);
+          const focus = command.target ? ` (focus: ${command.target})` : "";
+          const body = [
+            "<!-- This is an auto-generated implementation plan by DiffSentry -->",
+            "",
+            `## 🗺️ Implementation plan${focus}`,
+            "",
+            plan.trim(),
+            "",
+            issueTipsFooter(this.config.botName),
+          ].join("\n");
+          await reply(body);
+          return;
+        }
+
+        case "chat": {
+          const message = command.message.trim();
+          if (!message) {
+            await reply(`Mention me followed by a question, or use \`@${this.config.botName} help\` for issue commands.`);
+            return;
+          }
+          const response = await this.ai.chatIssue(issueContext, message, repoConfig);
+          await reply([
+            response.trim(),
+            "",
+            "<!-- This is an auto-generated reply by DiffSentry -->",
+          ].join("\n"));
+          return;
+        }
+      }
+    } catch (err) {
+      log.error({ err, commandType: command.type }, "Issue command handling failed");
+      try {
+        await reply("Sorry, I encountered an error processing your request. Please try again.");
+      } catch {
+        // give up
+      }
+    }
+  }
+
+  // ─── Issue Helpers ───────────────────────────────────────────
+  private async loadIssueRepoConfig(
+    octokit: import("@octokit/rest").Octokit,
+    owner: string,
+    repo: string,
+    defaultBranch: string | undefined
+  ): Promise<RepoConfig> {
+    const ref = defaultBranch || "HEAD";
+    const raw = await loadRepoConfig(octokit, owner, repo, ref);
+    return mergeWithDefaults(raw);
+  }
+
+  /**
+   * Best-effort detection of whether a username belongs to a Bot account.
+   * GitHub's webhook payload exposes user.type, but for safety we double-check
+   * via the API when the author looks botty (`-bot`, `[bot]` suffixes).
+   */
+  private async isAuthorBot(
+    octokit: import("@octokit/rest").Octokit,
+    _owner: string,
+    author: string | undefined
+  ): Promise<boolean> {
+    if (!author) return false;
+    const lower = author.toLowerCase();
+    if (lower.endsWith("[bot]")) return true;
+    if (lower === this.config.botName.toLowerCase() || lower === `${this.config.botName.toLowerCase()}[bot]`) return true;
+    try {
+      const u = await octokit.users.getByUsername({ username: author });
+      return u.data.type === "Bot";
+    } catch {
+      return false;
     }
   }
 }

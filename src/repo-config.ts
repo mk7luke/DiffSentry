@@ -26,6 +26,15 @@ const DEFAULT_CONFIG: RepoConfig = {
   chat: {
     auto_reply: true,
   },
+  issues: {
+    auto_summary: {
+      enabled: true,
+      on_edit: false,
+    },
+    chat: {
+      auto_reply: true,
+    },
+  },
 };
 
 export async function loadRepoConfig(
@@ -89,6 +98,18 @@ export function mergeWithDefaults(config: RepoConfig): RepoConfig {
     chat: {
       ...DEFAULT_CONFIG.chat,
       ...config.chat,
+    },
+    issues: {
+      ...DEFAULT_CONFIG.issues,
+      ...config.issues,
+      auto_summary: {
+        ...DEFAULT_CONFIG.issues!.auto_summary,
+        ...config.issues?.auto_summary,
+      },
+      chat: {
+        ...DEFAULT_CONFIG.issues!.chat,
+        ...config.issues?.chat,
+      },
     },
   };
 }

@@ -1,6 +1,6 @@
 import OpenAI from "openai";
-import { AIProvider, PRContext, ReviewResult, WalkthroughResult, RepoConfig, Learning } from "../types.js";
-import { buildReviewPrompt, buildWalkthroughPrompt, buildChatPrompt } from "./prompt.js";
+import { AIProvider, PRContext, ReviewResult, WalkthroughResult, RepoConfig, Learning, IssueContext } from "../types.js";
+import { buildReviewPrompt, buildWalkthroughPrompt, buildChatPrompt, buildIssueChatPrompt } from "./prompt.js";
 import { parseReviewResponse, parseWalkthroughResponse } from "./parse.js";
 import { logger } from "../logger.js";
 
@@ -100,6 +100,36 @@ export class OpenAIProvider implements AIProvider {
         outputTokens: response.usage?.completion_tokens,
       },
       "OpenAI chat response received"
+    );
+
+    return text;
+  }
+
+  async chatIssue(context: IssueContext, userMessage: string, repoConfig?: RepoConfig): Promise<string> {
+    const { system, user } = buildIssueChatPrompt(context, userMessage, repoConfig);
+    const log = logger.child({ provider: "openai", model: this.model, surface: "issue" });
+
+    log.info("Sending issue chat request to OpenAI");
+
+    const tokenParam = this.model.startsWith("o") ? "max_completion_tokens" : "max_tokens";
+
+    const response = await this.client.chat.completions.create({
+      model: this.model,
+      [tokenParam]: 2048,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    });
+
+    const text = response.choices[0]?.message?.content || "";
+
+    log.info(
+      {
+        inputTokens: response.usage?.prompt_tokens,
+        outputTokens: response.usage?.completion_tokens,
+      },
+      "OpenAI issue chat response received"
     );
 
     return text;

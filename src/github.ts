@@ -1,6 +1,6 @@
 import { createAppAuth } from "@octokit/auth-app";
 import { Octokit } from "@octokit/rest";
-import { Config, FileChange, PRContext, ReviewResult } from "./types.js";
+import { Config, FileChange, PRContext, ReviewResult, IssueContext, IssueComment } from "./types.js";
 import { logger } from "./logger.js";
 
 function isOurBotThread(thread: any, botLogin: string): boolean {
@@ -71,6 +71,85 @@ export class GitHubClient {
       isDraft: pr.data.draft,
       labels: pr.data.labels.map((l) => l.name ?? ""),
       author: pr.data.user?.login,
+    };
+  }
+
+  /**
+   * Build the IssueContext used by `chatIssue`. Fetches the issue itself,
+   * up to the most recent 30 issue comments, the repo's default branch, and
+   * the top-level entries of that branch (for "where to look" hints in the
+   * plan + summary commands).
+   *
+   * Best-effort everywhere: if any sub-call fails, we degrade gracefully so
+   * a transient API blip doesn't drop the whole response.
+   */
+  async getIssueContext(
+    installationId: number,
+    owner: string,
+    repo: string,
+    issueNumber: number
+  ): Promise<IssueContext> {
+    const octokit = await this.getInstallationOctokit(installationId);
+
+    const issueP = octokit.issues.get({ owner, repo, issue_number: issueNumber });
+    const repoMetaP = octokit.repos.get({ owner, repo }).catch(() => null);
+    const commentsP = octokit.paginate(octokit.issues.listComments, {
+      owner,
+      repo,
+      issue_number: issueNumber,
+      per_page: 100,
+    }).catch(() => [] as any[]);
+
+    const [issueRes, repoMeta, rawComments] = await Promise.all([
+      issueP,
+      repoMetaP,
+      commentsP,
+    ]);
+
+    const issue = issueRes.data;
+    const defaultBranch = repoMeta?.data.default_branch || "main";
+
+    // File tree — top-level only, capped to 60 entries to keep prompts tight.
+    let repoFileTree: string[] = [];
+    try {
+      const tree = await octokit.git.getTree({
+        owner,
+        repo,
+        tree_sha: defaultBranch,
+        recursive: "false",
+      });
+      repoFileTree = tree.data.tree
+        .map((entry) => (entry.type === "tree" ? `${entry.path}/` : entry.path || ""))
+        .filter((p) => p.length > 0)
+        .slice(0, 60);
+    } catch (err) {
+      logger.debug({ err, owner, repo }, "Failed to fetch default-branch tree");
+    }
+
+    const comments: IssueComment[] = (rawComments as any[])
+      .slice(-30) // most recent 30 — older context decays in usefulness
+      .map((c) => ({
+        author: c.user?.login,
+        authorAssociation: c.author_association,
+        body: c.body || "",
+        createdAt: c.created_at,
+        isBot: c.user?.type === "Bot",
+      }));
+
+    return {
+      owner,
+      repo,
+      issueNumber,
+      title: issue.title,
+      body: issue.body || "",
+      state: issue.state,
+      labels: issue.labels.map((l) => (typeof l === "string" ? l : l.name ?? "")).filter(Boolean),
+      author: issue.user?.login,
+      authorAssociation: issue.author_association,
+      url: issue.html_url,
+      comments,
+      repoFileTree,
+      defaultBranch,
     };
   }
 
