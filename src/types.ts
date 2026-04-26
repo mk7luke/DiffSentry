@@ -29,6 +29,27 @@ export interface RepoConfig {
   tone_instructions?: string;
   reviews?: ReviewsConfig;
   chat?: ChatConfig;
+  issues?: IssuesConfig;
+}
+
+// ─── Issues config (mirrors PR `reviews`/`chat` shape) ────────
+export interface IssuesConfig {
+  /** Auto-summarize new issues when they're opened. */
+  auto_summary?: IssueAutoSummaryConfig;
+  /** Free-form chat behavior on issues. */
+  chat?: IssueChatConfig;
+}
+
+export interface IssueAutoSummaryConfig {
+  /** Default true — post a CodeRabbit-style summary when an issue is opened. */
+  enabled?: boolean;
+  /** Default false — also re-summarize when an issue body is edited. */
+  on_edit?: boolean;
+}
+
+export interface IssueChatConfig {
+  /** Default true — respond to @bot mentions on issues. */
+  auto_reply?: boolean;
 }
 
 export interface ReviewsConfig {
@@ -181,6 +202,33 @@ export interface FileDescription {
   changeDescription: string;
 }
 
+// ─── Issue Context ────────────────────────────────────────────
+export interface IssueComment {
+  author?: string;
+  authorAssociation?: string;
+  body: string;
+  createdAt: string;
+  isBot: boolean;
+}
+
+export interface IssueContext {
+  owner: string;
+  repo: string;
+  issueNumber: number;
+  title: string;
+  body: string;
+  state: string;
+  labels: string[];
+  author?: string;
+  authorAssociation?: string;
+  url: string;
+  comments: IssueComment[];
+  /** Top-level entries of the default branch (e.g. ["src/", "tests/", "README.md"]). */
+  repoFileTree?: string[];
+  /** Default branch name (e.g. "main"). */
+  defaultBranch?: string;
+}
+
 // ─── PR Context ────────────────────────────────────────────────
 export interface PRContext {
   owner: string;
@@ -203,6 +251,12 @@ export interface AIProvider {
   review(context: PRContext, repoConfig?: RepoConfig, learnings?: Learning[]): Promise<ReviewResult>;
   generateWalkthrough(context: PRContext, repoConfig?: RepoConfig): Promise<WalkthroughResult>;
   chat(context: PRContext, userMessage: string, repoConfig?: RepoConfig): Promise<string>;
+  /**
+   * Free-form markdown response grounded in issue context. Used for the auto-
+   * summary on issue open, the `@bot plan` command, and free-form `@bot`
+   * questions. The handler shapes `userMessage` per intent.
+   */
+  chatIssue(context: IssueContext, userMessage: string, repoConfig?: RepoConfig): Promise<string>;
 }
 
 // ─── Learnings ─────────────────────────────────────────────────
@@ -241,6 +295,17 @@ export type ChatCommand =
   | { type: "release_notes" }
   | { type: "diff_pr"; target: string }
   | { type: "rewrite_description" }
+  | { type: "chat"; message: string };
+
+// ─── Issue Chat Command ────────────────────────────────────────
+export type IssueChatCommand =
+  | { type: "help" }
+  | { type: "summary" }
+  | { type: "plan"; target?: string }
+  | { type: "pause" }
+  | { type: "resume" }
+  | { type: "configuration" }
+  | { type: "learn"; content: string }
   | { type: "chat"; message: string };
 
 // ─── Pre-Merge Checks ──────────────────────────────────────────

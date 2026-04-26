@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { AIProvider, PRContext, ReviewResult, WalkthroughResult, RepoConfig, Learning } from "../types.js";
-import { buildReviewPrompt, buildWalkthroughPrompt, buildChatPrompt } from "./prompt.js";
+import { AIProvider, PRContext, ReviewResult, WalkthroughResult, RepoConfig, Learning, IssueContext } from "../types.js";
+import { buildReviewPrompt, buildWalkthroughPrompt, buildChatPrompt, buildIssueChatPrompt } from "./prompt.js";
 import { parseReviewResponse, parseWalkthroughResponse } from "./parse.js";
 import { logger } from "../logger.js";
 
@@ -89,6 +89,33 @@ export class AnthropicProvider implements AIProvider {
         outputTokens: response.usage.output_tokens,
       },
       "Anthropic chat response received"
+    );
+
+    return text;
+  }
+
+  async chatIssue(context: IssueContext, userMessage: string, repoConfig?: RepoConfig): Promise<string> {
+    const { system, user } = buildIssueChatPrompt(context, userMessage, repoConfig);
+    const log = logger.child({ provider: "anthropic", model: this.model, surface: "issue" });
+
+    log.info("Sending issue chat request to Anthropic");
+
+    const response = await this.client.messages.create({
+      model: this.model,
+      max_tokens: 2048,
+      system,
+      messages: [{ role: "user", content: user }],
+    });
+
+    const text =
+      response.content[0].type === "text" ? response.content[0].text : "";
+
+    log.info(
+      {
+        inputTokens: response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+      },
+      "Anthropic issue chat response received"
     );
 
     return text;

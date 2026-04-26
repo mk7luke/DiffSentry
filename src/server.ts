@@ -143,6 +143,50 @@ export function createServer(config: Config) {
       }
     }
 
+    // ─── Issue Events (auto-summary on opened) ───────────────
+    if (event === "issues") {
+      const action = payload.action;
+      const issue = payload.issue;
+      const owner = payload.repository.owner.login;
+      const repo = payload.repository.name;
+      const installationId = payload.installation?.id;
+
+      if (!installationId || !issue) {
+        res.status(400).json({ error: "No installation/issue" });
+        return;
+      }
+
+      // Skip PR-shaped issue events (GitHub fires `issues` on PRs in some
+      // edge cases; the `pull_request` field disambiguates).
+      if (issue.pull_request) {
+        res.status(200).json({ status: "ignored" });
+        return;
+      }
+
+      // Bot-authored issues never get an auto-summary; avoids loops.
+      if (issue.user?.type === "Bot") {
+        res.status(200).json({ status: "ignored" });
+        return;
+      }
+
+      if (action === "opened" || action === "reopened") {
+        logger.info({ owner, repo, issue: issue.number, action }, "Issue opened, queuing auto-summary");
+        res.status(202).json({ status: "accepted" });
+
+        reviewer
+          .handleIssueOpened(installationId, owner, repo, issue.number)
+          .catch((err) => {
+            logger.error({ err, owner, repo, issue: issue.number }, "Background issue summary failed");
+          });
+        return;
+      }
+
+      // Other issue actions (edited, labeled, closed, assigned, ...) are
+      // ignored for now — keep the surface tight, avoid noisy comments.
+      res.status(200).json({ status: "ignored" });
+      return;
+    }
+
     // ─── Issue Comment Edited (Finishing Touches checkbox) ───
     if (event === "issue_comment" && payload.action === "edited") {
       const comment = payload.comment;
@@ -202,13 +246,12 @@ export function createServer(config: Config) {
       const repo = payload.repository.name;
       const installationId = payload.installation?.id;
 
-      // Only process comments on pull requests (issues with pull_request field)
-      if (!issue.pull_request || !installationId) {
+      if (!installationId) {
         res.status(200).json({ status: "ignored" });
         return;
       }
 
-      const pullNumber = issue.number;
+      const issueOrPRNumber = issue.number;
       const commentBody = comment.body || "";
       const commentId = comment.id;
 
@@ -220,22 +263,40 @@ export function createServer(config: Config) {
         return;
       }
 
-      // Check if our bot is mentioned
+      // Check if our bot is mentioned. The mention check is the same on PRs
+      // and issues — only what we do next differs.
       if (!commentBody.toLowerCase().includes(`@${config.botName.toLowerCase()}`)) {
         res.status(200).json({ status: "ignored" });
         return;
       }
 
+      // Comment on a PR → existing PR comment handler.
+      if (issue.pull_request) {
+        logger.info(
+          { owner, repo, pr: issueOrPRNumber, commentId },
+          "Bot mentioned in PR comment, processing command",
+        );
+        res.status(202).json({ status: "accepted" });
+
+        reviewer
+          .handleComment(installationId, owner, repo, issueOrPRNumber, commentBody, commentId)
+          .catch((err) => {
+            logger.error({ err, owner, repo, pr: issueOrPRNumber }, "Background comment handling failed");
+          });
+        return;
+      }
+
+      // Comment on an actual issue → new issue handler.
       logger.info(
-        { owner, repo, pr: pullNumber, commentId },
-        "Bot mentioned in PR comment, processing command"
+        { owner, repo, issue: issueOrPRNumber, commentId },
+        "Bot mentioned in issue comment, processing command",
       );
       res.status(202).json({ status: "accepted" });
 
       reviewer
-        .handleComment(installationId, owner, repo, pullNumber, commentBody, commentId)
+        .handleIssueComment(installationId, owner, repo, issueOrPRNumber, commentBody, commentId)
         .catch((err) => {
-          logger.error({ err, owner, repo, pr: pullNumber }, "Background comment handling failed");
+          logger.error({ err, owner, repo, issue: issueOrPRNumber }, "Background issue comment handling failed");
         });
       return;
     }

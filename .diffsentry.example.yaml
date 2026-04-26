@@ -132,3 +132,12 @@ reviews:
 
 chat:
   auto_reply: true  # Respond to @mentions automatically
+
+# Issue-side behavior. Issues use the default branch's .diffsentry.yaml
+# because there is no head ref to load from.
+issues:
+  auto_summary:
+    enabled: true   # Post a CodeRabbit-style triage summary on issues.opened
+    on_edit: false  # Re-run summary when the issue body is edited (off by default — noisy)
+  chat:
+    auto_reply: true  # Respond to @mentions on issues with grounded answers

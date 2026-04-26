@@ -1,4 +1,4 @@
-import { PRContext, RepoConfig, Learning } from "../types.js";
+import { PRContext, RepoConfig, Learning, IssueContext } from "../types.js";
 
 // ─── Review Prompts ────────────────────────────────────────────
 
@@ -244,6 +244,130 @@ ${userMessage}
 Respond to the user's question about this PR.`;
 
   return { system: CHAT_SYSTEM, user };
+}
+
+// ─── Issue Prompts ─────────────────────────────────────────────
+
+const ISSUE_CHAT_SYSTEM = `You are DiffSentry, an AI assistant responding to a GitHub issue. You have the issue title, body, labels, recent comments, and a top-level view of the repository's file tree.
+
+Be concise, concrete, and actionable. Use GitHub-flavored markdown:
+- Reference files in backticks (e.g. \`src/server.ts\`).
+- Use fenced code blocks for snippets.
+- Use bullet lists for steps and short lists.
+- Prefer short paragraphs over long ones.
+
+When the user's request is ambiguous, ask one focused clarifying question. When it is clear, answer directly. Don't hedge with disclaimers — say what you know, flag uncertainty inline ("I'm not sure but…") only when relevant.
+
+Do not invent files, functions, or APIs you can't see in the provided context. If you would need code you don't have, say so and suggest where to look.`;
+
+function formatIssueContextForPrompt(context: IssueContext, repoConfig?: RepoConfig): string {
+  const labels = context.labels.length > 0 ? context.labels.join(", ") : "(none)";
+  const tone = repoConfig?.tone_instructions
+    ? `\n**Tone guidance:** ${repoConfig.tone_instructions}\n`
+    : "";
+
+  const recentComments = (context.comments || [])
+    .filter((c) => !c.isBot)
+    .slice(-8)
+    .map((c) => {
+      const who = c.author ? `@${c.author}` : "unknown";
+      const trimmed = (c.body || "").trim();
+      const body = trimmed.length > 600 ? trimmed.slice(0, 600) + "…" : trimmed;
+      return `- ${who} (${c.authorAssociation || "user"}): ${body}`;
+    })
+    .join("\n");
+
+  const tree = (context.repoFileTree || []).join(", ");
+  const treeBlock = tree ? `\n**Repository top-level entries:** ${tree}\n` : "";
+
+  return `## Issue #${context.issueNumber}: ${context.title}
+
+**State:** ${context.state} | **Labels:** ${labels} | **Author:** ${context.author ? "@" + context.author : "unknown"}
+${tone}${treeBlock}
+**Body:**
+${context.body?.trim() || "(no body provided)"}
+
+${recentComments ? `**Recent comments:**\n${recentComments}\n` : ""}`;
+}
+
+export function buildIssueChatPrompt(
+  context: IssueContext,
+  userMessage: string,
+  repoConfig?: RepoConfig,
+  learnings?: Learning[]
+): { system: string; user: string } {
+  const learningsSection = learnings && learnings.length > 0
+    ? `\n## Repository Learnings\n${learnings.map((l, i) => `${i + 1}. ${l.content}`).join("\n")}\n`
+    : "";
+
+  const user = `${formatIssueContextForPrompt(context, repoConfig)}${learningsSection}
+---
+
+## User Question/Request:
+
+${userMessage}
+
+Respond in markdown.`;
+
+  return { system: ISSUE_CHAT_SYSTEM, user };
+}
+
+/**
+ * Build the auto-summary prompt — what the bot posts on issues.opened.
+ * Mirrors CodeRabbit's "issue triage" output: 1-paragraph summary, key
+ * questions, suggested labels, and a short pointer to areas of the codebase.
+ */
+export function buildIssueSummaryInstruction(): string {
+  return `Generate a CodeRabbit-style issue triage summary. Use these sections, in order, with these EXACT markdown headings (do not add or rename sections):
+
+## Summary
+1-3 sentence plain-English restatement of what this issue is asking for, written in present tense. Don't quote the issue verbatim.
+
+## Key Questions
+2-4 specific clarifying questions a maintainer would want answered before starting work. Skip this section entirely if the issue is already crystal clear — say "_The issue is well-specified — no clarifications needed._" instead.
+
+## Suggested Labels
+Bullet list of 1-4 labels from this set when they fit: \`bug\`, \`enhancement\`, \`refactor\`, \`documentation\`, \`performance\`, \`security\`, \`good first issue\`, \`needs triage\`. Use other labels only if they're already on the issue. One short reason per label.
+
+## Where to Look
+Bullet list of 2-5 files/directories from the repository tree most likely involved. Use backticks for paths. One short reason per entry. Be specific — don't list everything.
+
+## Suggested Next Steps
+Bullet list of 2-4 concrete actions the assignee should take, in order. Each step references a file/symbol when possible.
+
+Keep the whole response under ~250 words. No preamble, no sign-off.`;
+}
+
+/**
+ * Implementation-plan prompt — what `@bot plan` produces. Heavier than the
+ * triage summary; designed to be directly actionable.
+ */
+export function buildIssuePlanInstruction(extra?: string): string {
+  const focus = extra && extra.trim().length > 0
+    ? `\n\nAdditional focus from the user: ${extra.trim()}`
+    : "";
+  return `Generate an implementation plan for this issue. Use these sections, in order:
+
+## Goal
+1-2 sentences naming the deliverable (what "done" looks like).
+
+## Approach
+Short paragraph (~3-5 sentences) describing the high-level approach and the key design choice you're recommending.
+
+## Step-by-Step
+Numbered list of 3-8 concrete steps. Each step:
+- Names the file(s) to touch in backticks.
+- Names the function(s)/symbol(s) when possible.
+- Describes what changes (one sentence).
+- If there's a non-obvious "why," include a parenthetical note.
+
+## Tests
+Bullet list of 2-5 test cases worth adding, with the test type (unit / integration / e2e) and a one-line description of the scenario.
+
+## Risks & Open Questions
+Bullet list of 1-4 risks, edge cases, or things you'd want a maintainer to confirm. If none, write "_None identified._"
+
+Be concrete. Reference identifiers and file paths from the repository tree above. Don't invent files. If you can't ground a step in a real file, say so explicitly. Keep the response under ~400 words.${focus}`;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────
