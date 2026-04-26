@@ -20,6 +20,9 @@ export interface AuthRuntime {
   middleware: RequestHandler;
   routes: (app: import("express").Router) => void;
   enabled: true;
+  /** CSRF runtime bound to this auth's session secret. Use on routes that
+   * mutate state. */
+  csrf: CsrfRuntime;
 }
 
 /** Builds auth config from env vars or returns null to signal auth disabled. */
@@ -304,9 +307,105 @@ export function createAuth(cfg: AuthConfig | null): AuthRuntime | null {
     });
   };
 
-  return { middleware, routes, enabled: true };
+  return { middleware, routes, enabled: true, csrf: createCsrf(cfg.sessionSecret) };
 }
 
 export function getCurrentUser(req: Request): SessionPayload | null {
   return ((req as Request & { dsUser?: SessionPayload }).dsUser) ?? null;
+}
+
+// ─── CSRF (stateless double-submit) ────────────────────────────────
+//
+// The dashboard auth is cookie-session based with no body parsing for the
+// read-only routes, so its baseline CSRF posture is "SameSite=Lax + only
+// GETs". The two mutating learnings routes break that assumption, so we
+// require a token. We don't want a new dependency or a stateful store, so
+// the token is HMAC(sessionSecret, sessionCookieValue): bound to the user's
+// session, deterministic per session, never revealed to JS, and validated
+// by re-deriving server-side. No nonce store, no expiry beyond the session.
+
+const CSRF_COOKIE = "ds_csrf";
+
+export interface CsrfRuntime {
+  /** Issues the CSRF cookie if missing. Mount as middleware on routes that
+   * render forms. Returns the token string for embedding in <input>s. */
+  // RequestHandler<any> so route-level param inference (e.g. ":id") wins
+  // over the middleware's default ParamsDictionary.
+  ensure: RequestHandler<any>;
+  /** Reads the current request's CSRF token (after `ensure` ran). */
+  tokenFor: (req: Request) => string;
+  /** Validates `_csrf` body field against the cookie + session. Use as
+   * middleware on POST/PUT/DELETE routes that mutate state. */
+  verify: RequestHandler<any>;
+}
+
+export function createCsrf(sessionSecret: string): CsrfRuntime {
+  const tokenFromSession = (sessionCookie: string): string =>
+    sign(sessionSecret, `csrf:${sessionCookie}`);
+
+  const ensure: RequestHandler = (req, res, next) => {
+    const cookies = parseCookies(req.headers.cookie);
+    const session = cookies[SESSION_COOKIE] ?? "";
+    if (!session) return next();
+    const expected = tokenFromSession(session);
+    if (cookies[CSRF_COOKIE] !== expected) {
+      // Re-issue with the same lifetime so logout clears it transitively.
+      // Not HttpOnly — the form needs to read it server-side, not via JS,
+      // but keeping it readable is fine since the value is bound to the
+      // (HttpOnly) session cookie via HMAC.
+      const parts = [
+        `${CSRF_COOKIE}=${encodeURIComponent(expected)}`,
+        "Path=/dashboard",
+        "SameSite=Lax",
+        `Max-Age=${SESSION_MAX_AGE_SECS}`,
+      ];
+      if (process.env.NODE_ENV !== "development") parts.push("Secure");
+      res.append("Set-Cookie", parts.join("; "));
+    }
+    (req as Request & { dsCsrf?: string }).dsCsrf = expected;
+    next();
+  };
+
+  const tokenFor = (req: Request): string =>
+    (req as Request & { dsCsrf?: string }).dsCsrf ?? "";
+
+  const verify: RequestHandler = (req, res, next) => {
+    const cookies = parseCookies(req.headers.cookie);
+    const session = cookies[SESSION_COOKIE] ?? "";
+    if (!session) {
+      res.status(403).type("text/plain").send("CSRF: no session");
+      return;
+    }
+    const cookieToken = cookies[CSRF_COOKIE] ?? "";
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const formToken = typeof body._csrf === "string" ? body._csrf : "";
+    const expected = tokenFromSession(session);
+    const a = Buffer.from(cookieToken);
+    const b = Buffer.from(formToken);
+    const c = Buffer.from(expected);
+    if (
+      a.length !== c.length ||
+      b.length !== c.length ||
+      !crypto.timingSafeEqual(a, c) ||
+      !crypto.timingSafeEqual(b, c)
+    ) {
+      res.status(403).type("text/plain").send("CSRF: token mismatch");
+      return;
+    }
+    next();
+  };
+
+  return { ensure, tokenFor, verify };
+}
+
+/** No-op CSRF runtime for when auth is disabled (dev/local). Endpoints
+ * that mutate state are still protected, but accept any request — there's
+ * no session to bind against. */
+export function createNoopCsrf(): CsrfRuntime {
+  const passthrough: RequestHandler = (_req, _res, next) => next();
+  return {
+    ensure: passthrough,
+    tokenFor: () => "",
+    verify: passthrough,
+  };
 }
