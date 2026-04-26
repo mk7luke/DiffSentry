@@ -1,5 +1,5 @@
 import { openDatabase } from "./db.js";
-import type { PRContext, ReviewComment, ReviewResult } from "../types.js";
+import type { IssueContext, PRContext, ReviewComment, ReviewResult } from "../types.js";
 import type { RiskAssessment } from "../insights.js";
 import { logger } from "../logger.js";
 
@@ -152,6 +152,106 @@ export function recordEvent(opts: {
     );
   } catch (err) {
     logger.debug({ err }, "dao.recordEvent failed");
+  }
+}
+
+/**
+ * Upsert an issue row from a fetched IssueContext. Updates volatile fields
+ * (state, body, comment count, labels) on conflict but never overwrites the
+ * `first_seen_at` we stamped on initial contact, and never clears any
+ * action history columns.
+ */
+export function recordIssue(ctx: IssueContext, opts: { createdAt?: string | null } = {}): void {
+  const db = openDatabase();
+  if (!db) return;
+  try {
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO issues (
+         owner, repo, number, title, author, state, body, url, labels_json,
+         comment_count, created_at, first_seen_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(owner, repo, number) DO UPDATE SET
+         title = excluded.title,
+         author = excluded.author,
+         state = excluded.state,
+         body = excluded.body,
+         url = excluded.url,
+         labels_json = excluded.labels_json,
+         comment_count = excluded.comment_count,
+         created_at = COALESCE(issues.created_at, excluded.created_at)`,
+    ).run(
+      ctx.owner,
+      ctx.repo,
+      ctx.issueNumber,
+      ctx.title,
+      ctx.author ?? null,
+      ctx.state ?? null,
+      (ctx.body ?? "").slice(0, 50_000),
+      ctx.url ?? null,
+      JSON.stringify(ctx.labels ?? []),
+      ctx.comments?.length ?? 0,
+      opts.createdAt ?? null,
+      now,
+    );
+  } catch (err) {
+    logger.debug({ err }, "dao.recordIssue failed");
+  }
+}
+
+/**
+ * Mark an action that DiffSentry took on an issue (auto-summary,
+ * regenerated summary, plan, chat reply, learning saved, etc.). Bumps
+ * action_count, updates last_action_*, optionally captures the latest
+ * summary/plan text, and writes an event row prefixed `issue.*` for the
+ * timeline.
+ */
+export function recordIssueAction(opts: {
+  owner: string;
+  repo: string;
+  number: number;
+  /** Bare action name, e.g. "auto_summary", "summary_regen", "plan", "chat", "learn", "paused", "resumed". */
+  action: string;
+  /** When provided, replaces issues.last_summary so the dashboard can render it. */
+  summary?: string | null;
+  /** When provided, replaces issues.last_plan. */
+  plan?: string | null;
+  /** Optional payload stored on the corresponding event row. */
+  payload?: unknown;
+}): void {
+  const db = openDatabase();
+  if (!db) return;
+  try {
+    const now = new Date().toISOString();
+    db.prepare(
+      `UPDATE issues
+         SET last_action_at = ?,
+             last_action_kind = ?,
+             action_count = action_count + 1,
+             last_summary = COALESCE(?, last_summary),
+             last_plan = COALESCE(?, last_plan)
+       WHERE owner = ? AND repo = ? AND number = ?`,
+    ).run(
+      now,
+      opts.action,
+      opts.summary != null ? opts.summary.slice(0, 50_000) : null,
+      opts.plan != null ? opts.plan.slice(0, 50_000) : null,
+      opts.owner,
+      opts.repo,
+      opts.number,
+    );
+    db.prepare(
+      `INSERT INTO events (owner, repo, number, ts, kind, payload_json) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      opts.owner,
+      opts.repo,
+      opts.number,
+      now,
+      `issue.${opts.action}`,
+      opts.payload === undefined ? null : JSON.stringify(opts.payload).slice(0, 100_000),
+    );
+  } catch (err) {
+    logger.debug({ err }, "dao.recordIssueAction failed");
   }
 }
 

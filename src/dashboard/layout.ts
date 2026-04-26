@@ -46,6 +46,13 @@ const LOGO_SVG = `<svg viewBox="0 0 536.47 603.92" class="logo" aria-hidden="tru
   <path fill="currentColor" d="M268.5,603.92l-20.91-9.38c-52.32-23.47-92.73-49.8-135.59-87.15l-4.73-4.12c-11.43-9.96-21.23-20.67-30.91-32.29-27.54-33.04-48.51-70.17-60.28-111.6-6.77-23.85-10.93-47.15-13.25-71.67l-2.51-26.52-.24-13.23-.07-157.57c38.42-5.4,74.93-13.75,111.72-23.56l32.28-10.16c43.05-14.96,84.19-33.91,124.25-56.66,27.33,15.02,54.88,28.48,83.72,40.65,47.68,20.13,96.79,33.9,147.61,43.15l36.88,6.54-.1,85.75-.77,85.38c-.26,28.47-3.73,56.26-11.57,83.52l-5.79,20.14c-12.87,44.76-39.64,86.03-71.1,119.91-31.24,33.64-69.83,61.49-109.55,84.35-22.43,12.91-45,23.23-69.08,34.52ZM147.17,488.52c2.4,2.21,4.48,4.05,6.83,5.74l35.64,25.66c8.86,6.38,28.81,18.38,38.59,23.13l39.87,19.35c17.05-8.29,33.15-15.63,49.46-25.02,85.9-49.43,157.12-118.34,173.56-220.35,5.1-31.44,7.33-61.97,7.32-93.96l-.02-100.75c-83.18-14.52-156.14-39.09-230.34-78.19l-18.94,9.74c-68.9,33.69-134.48,55.7-211.11,68.48v100.67c0,15.97.48,30.85,1.59,46.54l2.29,23.71c2.42,25.08,11.06,61.19,20.89,84.67,4.83,11.54,10.78,22.67,17.11,33.59,6.35,10.94,29.09,41.03,37.68,49.18l19.54,18.55,10.04,9.26Z"/>
 </svg>`;
 
+// Inline-SVG favicon — uses the shield silhouette from LOGO_SVG so we avoid
+// shipping a binary asset and keep the dashboard a single self-contained app.
+// Encoded for use in `<link rel="icon" href="data:image/svg+xml,...">`.
+const FAVICON_DATA_URI = `data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 536.47 603.92"><path fill="#5a8dff" d="M268.5,603.92l-20.91-9.38c-52.32-23.47-92.73-49.8-135.59-87.15l-4.73-4.12c-11.43-9.96-21.23-20.67-30.91-32.29-27.54-33.04-48.51-70.17-60.28-111.6-6.77-23.85-10.93-47.15-13.25-71.67l-2.51-26.52-.24-13.23-.07-157.57c38.42-5.4,74.93-13.75,111.72-23.56l32.28-10.16c43.05-14.96,84.19-33.91,124.25-56.66,27.33,15.02,54.88,28.48,83.72,40.65,47.68,20.13,96.79,33.9,147.61,43.15l36.88,6.54-.1,85.75-.77,85.38c-.26,28.47-3.73,56.26-11.57,83.52l-5.79,20.14c-12.87,44.76-39.64,86.03-71.1,119.91-31.24,33.64-69.83,61.49-109.55,84.35-22.43,12.91-45,23.23-69.08,34.52ZM147.17,488.52c2.4,2.21,4.48,4.05,6.83,5.74l35.64,25.66c8.86,6.38,28.81,18.38,38.59,23.13l39.87,19.35c17.05-8.29,33.15-15.63,49.46-25.02,85.9-49.43,157.12-118.34,173.56-220.35,5.1-31.44,7.33-61.97,7.32-93.96l-.02-100.75c-83.18-14.52-156.14-39.09-230.34-78.19l-18.94,9.74c-68.9,33.69-134.48,55.7-211.11,68.48v100.67c0,15.97.48,30.85,1.59,46.54l2.29,23.71c2.42,25.08,11.06,61.19,20.89,84.67,4.83,11.54,10.78,22.67,17.11,33.59,6.35,10.94,29.09,41.03,37.68,49.18l19.54,18.55,10.04,9.26Z"/></svg>`,
+)}`;
+
 export const ICON = {
   overview: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z"/></svg>`,
   findings: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>`,
@@ -801,15 +808,42 @@ const BASE_STYLES = `
   /* ── Donut ─────────────────────────────────────────────────────── */
   .donut-wrap {
     display: flex;
-    gap: 18px;
+    gap: 22px;
     align-items: center;
   }
-  .donut { width: 88px; height: 88px; flex-shrink: 0; transform: rotate(-90deg); }
+  .donut { flex-shrink: 0; transform: rotate(-90deg); }
   .donut circle { fill: none; stroke-width: 10; }
   .donut .bg { stroke: var(--line); }
-  .donut-legend { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
-  .donut-legend .it { display: flex; align-items: center; gap: 8px; }
-  .donut-legend .sw { width: 9px; height: 9px; border-radius: 2px; }
+  .donut-legend {
+    display: flex; flex-direction: column; gap: 8px;
+    font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums;
+    flex: 1; min-width: 0;
+  }
+  .donut-legend .it {
+    display: grid;
+    grid-template-columns: 10px minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 10px;
+  }
+  .donut-legend .sw { width: 10px; height: 10px; border-radius: 2px; }
+  .donut-legend .label { color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .donut-legend .num { color: var(--text); font-weight: 600; padding-left: 8px; }
+  .donut-legend .bar {
+    grid-column: 2 / -1;
+    height: 4px;
+    background: var(--bg-deep);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 2px;
+  }
+  .donut-legend .bar .fill { height: 100%; border-radius: 2px; }
+  .donut-legend .pct {
+    grid-column: 2 / -1;
+    font-size: 10.5px;
+    color: var(--text-3);
+    font-family: var(--font-mono);
+    margin-top: 2px;
+  }
 
   /* ── Risk line chart (replaces old sparkline) ──────────────────── */
   .risk-chart-wrap { position: relative; width: 100%; flex: 1; min-height: 140px; padding-left: 28px; }
@@ -1157,6 +1191,7 @@ export function renderLayout(opts: RenderLayoutOpts): string {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${esc(opts.title)} — DiffSentry</title>
   <meta name="color-scheme" content="dark" />
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -1492,7 +1527,7 @@ export function hbar(opts: { label: string; critical: number; major: number; tot
 }
 
 /** Donut chart — for approval ratios and similar. */
-export function donut(slices: { label: string; value: number; color: string }[], size = 88): string {
+export function donut(slices: { label: string; value: number; color: string }[], size = 120): string {
   const total = slices.reduce((n, s) => n + s.value, 0);
   const r = size / 2 - 6;
   const c = 2 * Math.PI * r;
@@ -1510,15 +1545,19 @@ export function donut(slices: { label: string; value: number; color: string }[],
         })
         .join("");
   const legend = slices
-    .map(
-      (s) => `<div class="it"><span class="sw" style="background:${s.color}"></span>
-        <span>${esc(s.label)}</span>
-        <span class="mono" style="margin-left:auto;color:var(--text-1)">${s.value}</span>
-      </div>`,
-    )
+    .map((s) => {
+      const pct = total === 0 ? 0 : (s.value / total) * 100;
+      return `<div class="it">
+        <span class="sw" style="background:${s.color}"></span>
+        <span class="label">${esc(s.label)}</span>
+        <span class="num mono">${s.value}</span>
+        <div class="bar"><div class="fill" style="width:${pct.toFixed(1)}%;background:${s.color}"></div></div>
+        <div class="pct">${pct.toFixed(pct >= 10 ? 0 : 1)}%</div>
+      </div>`;
+    })
     .join("");
   return `<div class="donut-wrap">
-    <svg viewBox="0 0 ${size} ${size}" class="donut" aria-hidden="true">
+    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" class="donut" aria-hidden="true">
       <circle class="bg" cx="${size / 2}" cy="${size / 2}" r="${r}"></circle>
       ${segs}
     </svg>

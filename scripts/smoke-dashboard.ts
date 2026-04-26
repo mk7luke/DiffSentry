@@ -62,6 +62,29 @@ insertEvent.run("mk7luke", "diffsentry-sandbox", 42, hoursAgo(10), "pull_request
 insertEvent.run("mk7luke", "diffsentry-sandbox", 42, hoursAgo(9), "pull_request_review.submitted", null);
 insertEvent.run("mk7luke", "diffsentry-sandbox", 42, hoursAgo(5), "pull_request.synchronize", null);
 
+// Seed an issue + bot actions so the dashboard's Recent issues card and the
+// issue detail route have something to render.
+db.prepare(
+  `INSERT INTO issues (owner, repo, number, title, author, state, body, url, labels_json,
+                        comment_count, created_at, first_seen_at, last_action_at, last_action_kind,
+                        action_count, last_summary, last_plan)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+).run(
+  "mk7luke", "diffsentry-sandbox", 99,
+  "Rate limiter occasionally returns 429 to legitimate clients",
+  "alice", "open",
+  "We've been seeing a spike in 429s coming from `/api/ingest` even though the upstream client is well within the documented quota. Repro: hit the endpoint with bursts of 30 requests over 5 seconds.",
+  "https://github.com/mk7luke/diffsentry-sandbox/issues/99",
+  JSON.stringify(["bug", "needs-triage"]),
+  4,
+  hoursAgo(8), hoursAgo(8), hoursAgo(7), "auto_summary", 2,
+  "## Triage\n- Likely a sliding-window edge case in `src/limiter.ts`.\n- Risk: medium.\n- Affected paths: `src/api/handler.ts`, `src/limiter.ts`.",
+  null,
+);
+insertEvent.run("mk7luke", "diffsentry-sandbox", 99, hoursAgo(8), "issue.first_seen", null);
+insertEvent.run("mk7luke", "diffsentry-sandbox", 99, hoursAgo(7), "issue.auto_summary", null);
+insertEvent.run("mk7luke", "diffsentry-sandbox", 99, hoursAgo(2), "issue.chat", JSON.stringify({ question: "What's the simplest fix?" }));
+
 const learningsDir = path.join(os.tmpdir(), `ds-smoke-learnings-${Date.now()}`);
 fs.mkdirSync(path.join(learningsDir, "mk7luke"), { recursive: true });
 fs.writeFileSync(
@@ -120,7 +143,9 @@ try {
     "mk7luke/diffsentry-sandbox",
     "Hot paths",
     "Top firing rules",
-    "Recent reviews",
+    "Recent PRs",
+    "Recent issues",
+    "Rate limiter occasionally returns 429",
     "src/limiter.ts",
     "no-console",
     "Add rate limiter",
@@ -129,6 +154,25 @@ try {
     "Prefer async/await",
     ".diffsentry.yaml",
   ]);
+
+  const issueDetail = await fetch("/dashboard/repo/mk7luke/diffsentry-sandbox/issue/99");
+  if (issueDetail.status !== 200) throw new Error(`issue detail status ${issueDetail.status}`);
+  assertContains("issue detail", issueDetail.body, [
+    "Rate limiter occasionally returns 429",
+    "Latest triage summary",
+    "Bot activity",
+    "auto-summary",
+    "chat reply",
+    "https://github.com/mk7luke/diffsentry-sandbox/issues/99",
+  ]);
+
+  const missingIssue = await fetch("/dashboard/repo/mk7luke/diffsentry-sandbox/issue/9999");
+  if (missingIssue.status !== 404) throw new Error(`expected 404 for missing issue, got ${missingIssue.status}`);
+  console.log("  ✓ unknown issue → 404");
+
+  const badIssue = await fetch("/dashboard/repo/mk7luke/diffsentry-sandbox/issue/abc");
+  if (badIssue.status !== 400) throw new Error(`expected 400 for bad issue number, got ${badIssue.status}`);
+  console.log("  ✓ bad issue number → 400");
 
   const prDetail = await fetch("/dashboard/repo/mk7luke/diffsentry-sandbox/pr/42");
   if (prDetail.status !== 200) throw new Error(`pr detail status ${prDetail.status}`);

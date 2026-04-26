@@ -30,17 +30,21 @@ import {
   getApprovalMix,
   getDailyActivity,
   getEvents,
-  getFindings,
+  getFindingsForPR,
   getHealthCounts,
   getHotPaths,
   getInstallationId,
+  getIssue,
+  getIssueEvents,
   getPR,
   getPRReviews,
   getPatternRules,
-  getRecentReviews,
+  getRecentIssues,
+  getRecentPRsWithReviews,
   getRepoOverview,
   getSparkline,
   getTopRules,
+  issueExists,
   queryFindings,
   queryFingerprintGroups,
   repoExists,
@@ -98,13 +102,14 @@ export function createDashboardRouter(deps: DashboardDeps): express.Router {
       const sparkline = getSparkline(owner, repo);
       const hotPaths = getHotPaths(owner, repo);
       const topRules = getTopRules(owner, repo);
-      const reviews = getRecentReviews(owner, repo, 50);
+      const prs = getRecentPRsWithReviews(owner, repo, 50);
+      const issues = getRecentIssues(owner, repo, 50);
       const activity = buildDaySeries(toDayBins(getDailyActivity(owner, repo, 30)), 30);
       const approvalMix = getApprovalMix(owner, repo, 30);
       const learnings = await loadLearningsSafe(deps.learningsDir, owner, repo);
       const configYaml = await loadRepoConfigSafe(deps, owner, repo);
       res.type("html").send(
-        renderRepoDetail({ owner, repo, sparkline, hotPaths, topRules, reviews, activity, approvalMix, learnings, configYaml }),
+        renderRepoDetail({ owner, repo, sparkline, hotPaths, topRules, prs, issues, activity, approvalMix, learnings, configYaml }),
       );
     } catch (err) {
       logger.error({ err, owner, repo }, "dashboard repo detail failed");
@@ -145,6 +150,32 @@ export function createDashboardRouter(deps: DashboardDeps): express.Router {
     }
   });
 
+  router.get("/repo/:owner/:repo/issue/:number", (req, res) => {
+    const owner = req.params.owner;
+    const repo = req.params.repo;
+    const number = Number.parseInt(req.params.number, 10);
+    if (!Number.isFinite(number) || number <= 0) {
+      res.status(400).type("html").send(renderError("Invalid issue number."));
+      return;
+    }
+    try {
+      if (!issueExists(owner, repo, number)) {
+        res.status(404).type("html").send(renderNotFound(`No data for ${owner}/${repo}#${number}`));
+        return;
+      }
+      const issue = getIssue(owner, repo, number);
+      const events = getIssueEvents(owner, repo, number, 200);
+      if (!issue) {
+        res.status(404).type("html").send(renderNotFound(`No data for ${owner}/${repo}#${number}`));
+        return;
+      }
+      res.type("html").send(renderIssueDetail({ owner, repo, number, issue, events }));
+    } catch (err) {
+      logger.error({ err, owner, repo, number }, "dashboard issue detail failed");
+      res.status(500).type("html").send(renderError("Failed to load issue detail."));
+    }
+  });
+
   router.get("/repo/:owner/:repo/pr/:number", (req, res) => {
     const owner = req.params.owner;
     const repo = req.params.repo;
@@ -161,7 +192,7 @@ export function createDashboardRouter(deps: DashboardDeps): express.Router {
         return;
       }
       const latest = reviews[0] ?? null;
-      const findings = latest ? getFindings(latest.id) : [];
+      const findings = getFindingsForPR(owner, repo, number);
       const events = getEvents(owner, repo, number, 200);
       res.type("html").send(renderPRDetail({ owner, repo, number, pr, reviews, latest, findings, events }));
     } catch (err) {
@@ -354,7 +385,8 @@ interface RepoDetailArgs {
   sparkline: SparklinePoint[];
   hotPaths: ReturnType<typeof getHotPaths>;
   topRules: ReturnType<typeof getTopRules>;
-  reviews: ReturnType<typeof getRecentReviews>;
+  prs: ReturnType<typeof getRecentPRsWithReviews>;
+  issues: ReturnType<typeof getRecentIssues>;
   activity: DayBin[];
   approvalMix: ReturnType<typeof getApprovalMix>;
   learnings: Learning[];
@@ -403,8 +435,8 @@ async function loadRepoConfigSafe(deps: DashboardDeps, owner: string, repo: stri
 
 function renderRepoDetail(a: RepoDetailArgs): string {
   const title = `${a.owner}/${a.repo}`;
-  const latestReview = a.reviews[0] ?? null;
-  const latestRisk = latestReview ? riskBadge(latestReview.risk_level, latestReview.risk_score) : "";
+  const latestPR = a.prs[0] ?? null;
+  const latestRisk = latestPR ? riskBadge(latestPR.latest_risk_level, latestPR.latest_risk_score) : "";
   const findingsTotal = a.activity.reduce((n, d) => n + d.critical + d.major + d.minor + d.nit, 0);
 
   // Hot paths as horizontal bars — single chart
@@ -448,35 +480,39 @@ function renderRepoDetail(a: RepoDetailArgs): string {
          </tbody>
        </table>`;
 
-  // Recent reviews — timeline style
-  const reviewsBody = a.reviews.length === 0
+  // Recent PRs — one row per PR, aggregated across all review iterations
+  const prsBody = a.prs.length === 0
     ? `<div class="empty"><div class="title">No reviews recorded yet</div><div>Open a PR to get one.</div></div>`
-    : `<div class="tl">${a.reviews
-        .map((rv) => {
-          const href = `/dashboard/repo/${encodeURIComponent(a.owner)}/${encodeURIComponent(a.repo)}/pr/${rv.number}`;
+    : `<div class="tl">${a.prs
+        .map((pr) => {
+          const href = `/dashboard/repo/${encodeURIComponent(a.owner)}/${encodeURIComponent(a.repo)}/pr/${pr.number}`;
+          const worst = (pr.worst_severity ?? "").toLowerCase();
           const sevCls =
-            (rv.risk_level ?? "").toLowerCase() === "critical" ? "sev-critical"
-            : (rv.risk_level ?? "").toLowerCase() === "high" ? "sev-critical"
-            : (rv.risk_level ?? "").toLowerCase() === "elevated" ? "sev-major"
-            : (rv.risk_level ?? "").toLowerCase() === "moderate" ? "sev-minor"
-            : rv.approval === "approve" ? "approve"
+            worst === "critical" ? "sev-critical"
+            : worst === "major" ? "sev-major"
+            : worst === "minor" ? "sev-minor"
+            : pr.latest_approval === "approve" ? "approve"
             : "";
-          const findingsChip = rv.finding_count > 0
-            ? `<span class="chip neutral tnum">${rv.finding_count} finding${rv.finding_count === 1 ? "" : "s"}</span>`
+          const findingsChip = pr.total_findings > 0
+            ? `<span class="chip neutral tnum">${pr.total_findings} finding${pr.total_findings === 1 ? "" : "s"}</span>`
             : `<span class="chip muted uppercase">clean</span>`;
+          const iterChip = pr.review_count > 1
+            ? `<span class="chip muted uppercase" title="${pr.review_count} review iterations">${pr.review_count}× reviews</span>`
+            : "";
           return `<div class="tl-item ${sevCls}">
-            <div class="when">${esc(relativeTime(rv.created_at))}</div>
+            <div class="when">${esc(relativeTime(pr.latest_at))}</div>
             <div class="dot"></div>
             <div class="body">
               <div class="row1">
-                <a class="title" href="${esc(href)}">${esc(rv.title ?? `#${rv.number}`)}</a>
-                <span class="mono muted">#${rv.number}</span>
+                <a class="title" href="${esc(href)}">${esc(pr.title ?? `#${pr.number}`)}</a>
+                <span class="mono muted">#${pr.number}</span>
               </div>
               <div class="row2">
-                ${riskBadge(rv.risk_level, rv.risk_score)}
-                ${approvalBadge(rv.approval)}
+                ${riskBadge(pr.latest_risk_level, pr.latest_risk_score)}
+                ${approvalBadge(pr.latest_approval)}
                 ${findingsChip}
-                ${rv.author ? `<span class="mono author">@${esc(rv.author)}</span>` : ""}
+                ${iterChip}
+                ${pr.author ? `<span class="mono author">@${esc(pr.author)}</span>` : ""}
               </div>
             </div>
           </div>`;
@@ -493,12 +529,12 @@ function renderRepoDetail(a: RepoDetailArgs): string {
         { label: "Changes requested", value: changesN, color: "#fb6d82" },
         { label: "Commented", value: commentN, color: "#9aa0b2" },
         { label: "Approved", value: approveN, color: "#4ade80" },
-      ], 92);
+      ]);
 
   const gitHubAction = `<a href="https://github.com/${esc(a.owner)}/${esc(a.repo)}" class="btn btn-ghost" target="_blank" rel="noopener">${ICON.github}Open in GitHub</a>`;
 
-  const heroSubtitle = latestReview
-    ? `Last review ${esc(relativeTime(latestReview.created_at))} · ${esc(String(latestReview.finding_count))} finding${latestReview.finding_count === 1 ? "" : "s"}`
+  const heroSubtitle = latestPR
+    ? `Last review ${esc(relativeTime(latestPR.latest_at))} · ${esc(String(latestPR.total_findings))} finding${latestPR.total_findings === 1 ? "" : "s"}`
     : `No reviews yet`;
 
   const body = `
@@ -545,11 +581,22 @@ function renderRepoDetail(a: RepoDetailArgs): string {
     </div>
 
     ${card({
-      title: "Recent reviews",
-      subtitle: `Latest ${a.reviews.length}`,
+      title: "Recent PRs",
+      subtitle: `Latest ${a.prs.length} · grouped by PR`,
       bodyClass: "flush",
-      body: reviewsBody,
+      body: prsBody,
     })}
+
+    <div style="margin-top:16px">
+      ${card({
+        title: "Recent issues",
+        subtitle: a.issues.length > 0
+          ? `${a.issues.length} tracked · DiffSentry actions across each thread`
+          : `Issue activity will appear once the bot triages or replies on one`,
+        bodyClass: "flush",
+        body: renderIssuesTimeline(a.owner, a.repo, a.issues),
+      })}
+    </div>
 
     <div class="grid two" style="margin-top:16px">
       ${renderLearningsCard(a.learnings)}
@@ -607,6 +654,194 @@ function renderConfigCard(yaml: string | null): string {
   });
 }
 
+// ─── Issues ──────────────────────────────────────────────────────────
+
+const ISSUE_ACTION_LABELS: Record<string, string> = {
+  auto_summary: "auto-summary",
+  summary_regen: "summary regen",
+  plan: "plan",
+  chat: "chat reply",
+  learn: "learning saved",
+  paused: "paused",
+  resumed: "resumed",
+  help: "help posted",
+  config: "config posted",
+  needs_detail: "needs detail",
+};
+
+function issueActionLabel(action: string | null): string {
+  if (!action) return "—";
+  return ISSUE_ACTION_LABELS[action] ?? action.replace(/_/g, " ");
+}
+
+function issueStateClass(state: string | null | undefined): string {
+  const k = (state ?? "").toLowerCase();
+  if (k === "open") return "good";
+  if (k === "closed") return "muted";
+  return "muted";
+}
+
+function renderIssuesTimeline(owner: string, repo: string, issues: ReturnType<typeof getRecentIssues>): string {
+  if (issues.length === 0) {
+    return `<div class="empty"><div class="title">No issue activity yet</div><div>The bot hasn't triaged or replied on an issue in this repo.</div></div>`;
+  }
+  return `<div class="tl">${issues
+    .map((iss) => {
+      const href = `/dashboard/repo/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issue/${iss.number}`;
+      const action = (iss.last_action_kind ?? "").toLowerCase();
+      const dotCls =
+        action === "auto_summary" || action === "summary_regen" ? "approve"
+        : action === "plan" ? "sev-minor"
+        : action === "needs_detail" ? "sev-major"
+        : "";
+      const stateChip = iss.state
+        ? `<span class="chip ${issueStateClass(iss.state)} uppercase">${esc(iss.state)}</span>`
+        : "";
+      const actionChip = iss.last_action_kind
+        ? `<span class="chip neutral uppercase">${esc(issueActionLabel(iss.last_action_kind))}</span>`
+        : `<span class="chip muted uppercase">no action</span>`;
+      const actionCountChip = iss.action_count > 1
+        ? `<span class="chip muted uppercase" title="${iss.action_count} bot interactions">${iss.action_count}× actions</span>`
+        : "";
+      const commentChip = iss.comment_count > 0
+        ? `<span class="chip muted tnum">${iss.comment_count} comment${iss.comment_count === 1 ? "" : "s"}</span>`
+        : "";
+      const when = iss.last_action_at ?? iss.first_seen_at;
+      return `<div class="tl-item ${dotCls}">
+        <div class="when">${esc(relativeTime(when))}</div>
+        <div class="dot"></div>
+        <div class="body">
+          <div class="row1">
+            <a class="title" href="${esc(href)}">${esc(iss.title ?? `#${iss.number}`)}</a>
+            <span class="mono muted">#${iss.number}</span>
+          </div>
+          <div class="row2">
+            ${stateChip}
+            ${actionChip}
+            ${commentChip}
+            ${actionCountChip}
+            ${iss.author ? `<span class="mono author">@${esc(iss.author)}</span>` : ""}
+          </div>
+        </div>
+      </div>`;
+    })
+    .join("")}</div>`;
+}
+
+interface IssueDetailArgs {
+  owner: string;
+  repo: string;
+  number: number;
+  issue: NonNullable<ReturnType<typeof getIssue>>;
+  events: ReturnType<typeof getIssueEvents>;
+}
+
+function renderIssueDetail(a: IssueDetailArgs): string {
+  const ghUrl = a.issue.url ?? `https://github.com/${a.owner}/${a.repo}/issues/${a.number}`;
+  const stateChip = a.issue.state
+    ? `<span class="chip ${issueStateClass(a.issue.state)} uppercase">${esc(a.issue.state)}</span>`
+    : "";
+  const labels = (() => {
+    try {
+      const parsed = a.issue.labels_json ? JSON.parse(a.issue.labels_json) : [];
+      if (!Array.isArray(parsed)) return [] as string[];
+      return parsed.filter((x): x is string => typeof x === "string");
+    } catch {
+      return [] as string[];
+    }
+  })();
+
+  const subtitle = `<span class="mono" style="color:var(--text-2)">${esc(a.owner)}/${esc(a.repo)}</span> <span style="color:var(--text-4)">·</span> <span class="mono">#${a.number}</span>${a.issue.author ? ` <span style="color:var(--text-4)">·</span> <span class="mono" style="color:var(--accent-bright)">@${esc(a.issue.author)}</span>` : ""} ${stateChip}`;
+
+  const header = pageHeader({
+    title: a.issue.title ?? `Issue #${a.number}`,
+    subtitle,
+    right: `<a href="${esc(ghUrl)}" class="btn btn-ghost" target="_blank" rel="noopener">${ICON.github}Open in GitHub</a>`,
+  });
+
+  const overviewBody = `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      ${stateChip}
+      ${a.issue.last_action_kind ? `<span class="chip neutral uppercase">last: ${esc(issueActionLabel(a.issue.last_action_kind))}</span>` : ""}
+      ${labels.map((l) => `<span class="chip muted uppercase">${esc(l)}</span>`).join("")}
+    </div>
+    <dl class="kv">
+      <div><dt>Bot actions</dt><dd>${a.issue.action_count}</dd></div>
+      <div><dt>Comments</dt><dd>${a.issue.comment_count}</dd></div>
+      <div><dt>Opened</dt><dd>${esc(a.issue.created_at?.slice(0, 10) ?? "—")}</dd></div>
+      <div><dt>First seen</dt><dd>${esc(relativeTime(a.issue.first_seen_at))}</dd></div>
+      <div><dt>Last action</dt><dd>${esc(a.issue.last_action_at ? relativeTime(a.issue.last_action_at) : "—")}</dd></div>
+    </dl>`;
+
+  const summaryCard = a.issue.last_summary
+    ? card({
+        title: "Latest triage summary",
+        subtitle: `Auto-generated · regenerable with @bot summary`,
+        body: `<div data-md-wrap>
+          <div class="md-body md-rendered" style="max-height:420px;overflow:auto">${renderMarkdown(a.issue.last_summary)}</div>
+        </div>`,
+      })
+    : "";
+
+  const planCard = a.issue.last_plan
+    ? card({
+        title: "Latest implementation plan",
+        subtitle: `From @bot plan`,
+        body: `<div data-md-wrap>
+          <div class="md-body md-rendered" style="max-height:420px;overflow:auto">${renderMarkdown(a.issue.last_plan)}</div>
+        </div>`,
+      })
+    : "";
+
+  const bodyCard = a.issue.body
+    ? card({
+        title: "Issue body",
+        subtitle: a.issue.body.length > 4000 ? `${a.issue.body.length.toLocaleString()} chars · truncated` : undefined,
+        body: `<div class="md-body md-rendered" style="max-height:420px;overflow:auto">${renderMarkdown(a.issue.body.slice(0, 8000))}</div>`,
+      })
+    : "";
+
+  const eventsBody = a.events.length === 0
+    ? `<div class="empty"><div class="title">No bot events yet</div><div>This issue was persisted but the bot hasn't acted on it.</div></div>`
+    : `<ul style="list-style:none;margin:0;padding:0;max-height:420px;overflow:auto">
+         ${a.events
+           .map((ev) => {
+             const action = ev.kind.replace(/^issue\./, "");
+             return `<li style="display:flex;align-items:center;justify-content:space-between;padding:7px 14px;border-bottom:1px solid var(--line-soft);font-size:12.5px">
+               <span class="mono" style="color:var(--text-1)">${esc(issueActionLabel(action))}</span>
+               <span class="mono muted" style="font-size:10.5px">${esc(relativeTime(ev.ts))}</span>
+             </li>`;
+           })
+           .join("")}
+       </ul>`;
+
+  const body = `
+    ${header}
+    <div class="grid stack">
+      ${card({ title: "Overview", body: overviewBody })}
+      ${summaryCard}
+      ${planCard}
+      ${bodyCard}
+      ${card({
+        title: "Bot activity",
+        subtitle: `${a.events.length} action${a.events.length === 1 ? "" : "s"} on this issue`,
+        bodyClass: "flush",
+        body: eventsBody,
+      })}
+    </div>
+  `;
+
+  return renderLayout({
+    title: `${a.owner}/${a.repo} #${a.number}`,
+    crumbs: [
+      { label: "Repos", href: "/dashboard" },
+      { label: `${a.owner}/${a.repo}`, href: `/dashboard/repo/${encodeURIComponent(a.owner)}/${encodeURIComponent(a.repo)}` },
+      { label: `#${a.number}` },
+    ],
+    active: "overview",
+    body,
+  });
+}
+
 // ─── PR detail ───────────────────────────────────────────────────────
 
 interface PRDetailArgs {
@@ -616,7 +851,7 @@ interface PRDetailArgs {
   pr: ReturnType<typeof getPR>;
   reviews: ReturnType<typeof getPRReviews>;
   latest: ReturnType<typeof getPRReviews>[number] | null;
-  findings: ReturnType<typeof getFindings>;
+  findings: ReturnType<typeof getFindingsForPR>;
   events: ReturnType<typeof getEvents>;
 }
 
@@ -670,24 +905,31 @@ function renderPRDetail(a: PRDetailArgs): string {
       })
     : `<div class="card">${latestBody}</div>`;
 
+  const latestReviewId = a.latest?.id ?? null;
   const findingsBody = a.findings.length === 0
-    ? `<div class="empty"><div class="title">No findings</div><div>Nothing flagged in the latest review.</div></div>`
+    ? `<div class="empty"><div class="title">No findings</div><div>Nothing flagged across any review of this PR.</div></div>`
     : `<table class="tbl rail">
          <thead><tr>
-           <th>Severity</th><th>Location</th><th>Title</th><th>Source</th>
+           <th>Severity</th><th>Location</th><th>Title</th><th>Review</th><th>Source</th>
          </tr></thead>
          <tbody>
            ${a.findings
              .map(
-               (f) => `<tr data-sev="${esc((f.severity ?? "").toLowerCase())}">
-                 <td>${severityBadge(f.severity)}</td>
-                 <td class="mono">${esc(f.path ?? "")}${f.line ? `<span class="line-num">:${f.line}</span>` : ""}</td>
-                 <td>
-                   <div class="strong">${esc(f.title ?? "—")}</div>
-                   ${f.body ? `<details style="margin-top:4px"><summary style="font-size:11px;color:var(--text-3);cursor:pointer">Show rendered body</summary><div class="md-body" style="margin-top:8px;padding-left:12px;border-left:2px solid var(--line)">${renderMarkdown(f.body.slice(0, 4000))}</div></details>` : ""}
-                 </td>
-                 <td class="muted">${esc(f.source ?? "—")}</td>
-               </tr>`,
+               (f) => {
+                 const isLatest = latestReviewId !== null && f.review_id === latestReviewId;
+                 const sha = (f.review_sha ?? "").slice(0, 7);
+                 const reviewCell = `<span class="mono" style="color:${isLatest ? "var(--accent-bright)" : "var(--text-3)"}" title="${esc(f.review_at)}">${esc(sha || "—")}</span>${isLatest ? ` <span class="chip muted uppercase" style="margin-left:4px">latest</span>` : ` <span class="muted" style="font-size:10.5px;margin-left:4px">${esc(relativeTime(f.review_at))}</span>`}`;
+                 return `<tr data-sev="${esc((f.severity ?? "").toLowerCase())}">
+                   <td>${severityBadge(f.severity)}</td>
+                   <td class="mono">${esc(f.path ?? "")}${f.line ? `<span class="line-num">:${f.line}</span>` : ""}</td>
+                   <td>
+                     <div class="strong">${esc(f.title ?? "—")}</div>
+                     ${f.body ? `<details style="margin-top:4px"><summary style="font-size:11px;color:var(--text-3);cursor:pointer">Show rendered body</summary><div class="md-body" style="margin-top:8px;padding-left:12px;border-left:2px solid var(--line)">${renderMarkdown(f.body.slice(0, 4000))}</div></details>` : ""}
+                   </td>
+                   <td class="nowrap">${reviewCell}</td>
+                   <td class="muted">${esc(f.source ?? "—")}</td>
+                 </tr>`;
+               },
              )
              .join("")}
          </tbody>
@@ -738,7 +980,9 @@ function renderPRDetail(a: PRDetailArgs): string {
       ${latestCard}
       ${card({
         title: "Findings",
-        subtitle: a.findings.length > 0 ? `${a.findings.length} in latest review` : undefined,
+        subtitle: a.findings.length > 0
+          ? `${a.findings.length} across ${a.reviews.length} review${a.reviews.length === 1 ? "" : "s"}`
+          : undefined,
         bodyClass: "flush",
         body: findingsBody,
       })}
@@ -1158,6 +1402,7 @@ function renderSettings(c: HealthCounts, logs: LogEntry[] = []): string {
       <div><dt>PRs</dt><dd>${c.prs}</dd></div>
       <div><dt>Reviews</dt><dd>${c.reviews}</dd></div>
       <div><dt>Findings</dt><dd>${c.findings}</dd></div>
+      <div><dt>Issues</dt><dd>${c.issues}</dd></div>
       <div><dt>Pattern hits</dt><dd>${c.pattern_hits}</dd></div>
       <div><dt>Events</dt><dd>${c.events}</dd></div>
       <div><dt>DB size</dt><dd>${esc(bytesHuman(c.db_bytes))}</dd></div>

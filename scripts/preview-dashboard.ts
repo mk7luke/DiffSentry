@@ -142,6 +142,114 @@ async function main() {
         const rules = ["no-console", "async-callback-foreach", "setInterval-no-handle", "img-no-alt", "onClick-on-non-interactive"];
         hitInsert.run(r.owner, r.repo, rules[rand(rules.length)], "builtin", `fp_p_${number}_${rand(9999)}`, rvId);
       }
+
+      // Roughly half of recent PRs get 1–3 follow-up review iterations so
+      // the "grouped by PR" timeline has multi-iteration rows to show.
+      const extraReviews = i < 8 && rand(2) === 0 ? 1 + rand(3) : 0;
+      for (let it = 0; it < extraReviews; it++) {
+        const followHours = Math.max(1, hOld - (it + 1) * 2 - rand(3));
+        const followScore = Math.min(95, Math.max(0, riskScore - (it + 1) * 12 - rand(8)));
+        const followApproval = followScore >= 60 ? "request_changes" : followScore <= 15 ? "approve" : "comment";
+        const followLevel =
+          followScore >= 80 ? "critical"
+          : followScore >= 60 ? "high"
+          : followScore >= 40 ? "elevated"
+          : followScore >= 20 ? "moderate"
+          : "low";
+        const followId = rvInsert
+          .run(
+            r.owner, r.repo, number, `sha_${number}_v${it + 2}`,
+            profiles[rand(profiles.length)],
+            followApproval, `## Iteration ${it + 2}\n\n- ${followScore >= 60 ? "Still has open issues." : "Most prior issues addressed."}`,
+            followScore, followLevel,
+            rand(8) + 1, rand(3), rand(2),
+            hoursAgo(followHours),
+          ).lastInsertRowid as number;
+        const followFindings = followScore >= 60 ? 2 + rand(2) : rand(2);
+        for (let k = 0; k < followFindings; k++) {
+          findingInsert.run(
+            followId,
+            paths[rand(paths.length)],
+            rand(400) + 1,
+            "issue",
+            severities[rand(severities.length)],
+            `Follow-up ${k + 1} — ${title.toLowerCase()}`,
+            `Re-flagged after the prior round did not fully resolve.`,
+            `fp_${title.slice(0, 8).replace(/\W/g, "")}_v${it + 2}_${k}`,
+            "ai",
+            "medium",
+          );
+        }
+      }
+    }
+  }
+
+  // Seed a handful of issues per repo so the Recent issues card has data to render.
+  const issueInsert = db.prepare(
+    `INSERT INTO issues (owner, repo, number, title, author, state, body, url, labels_json,
+                          comment_count, created_at, first_seen_at, last_action_at, last_action_kind,
+                          action_count, last_summary, last_plan)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const issueTitles = [
+    "Rate limiter returns 429 to legitimate clients",
+    "Session storage drops keys after redeploy",
+    "Investigate flaky retry behavior on /api/sync",
+    "Wire trace logs through the request handler",
+    "DG Builder: real item images instead of Box icon",
+    "OppDetail redesign — sa25 event-detail columns",
+  ];
+  const issueAuthors = ["alice", "bob", "carol", "dave", "mk7luke"];
+  const issueActions: Array<{ k: string; w: number }> = [
+    { k: "auto_summary", w: 6 },
+    { k: "summary_regen", w: 2 },
+    { k: "plan", w: 2 },
+    { k: "chat", w: 4 },
+    { k: "needs_detail", w: 1 },
+    { k: "learn", w: 1 },
+    { k: "paused", w: 1 },
+  ];
+  const pickAction = () => {
+    const total = issueActions.reduce((n, a) => n + a.w, 0);
+    let r = rand(total);
+    for (const a of issueActions) {
+      r -= a.w;
+      if (r < 0) return a.k;
+    }
+    return "auto_summary";
+  };
+  let issueNo = 200;
+  for (const r of repos) {
+    const issuesForRepo = r.hoursOld < 200 ? 5 : r.hoursOld < 500 ? 2 : 0;
+    for (let i = 0; i < issuesForRepo; i++) {
+      const num = ++issueNo;
+      const title = issueTitles[(num + i) % issueTitles.length];
+      const author = issueAuthors[rand(issueAuthors.length)];
+      const opened = r.hoursOld + i * 12 + rand(20);
+      const actionKind = pickAction();
+      const lastActionH = Math.max(1, opened - 1 - rand(8));
+      const actionCount = 1 + rand(4);
+      const summary = actionKind === "auto_summary" || actionKind === "summary_regen"
+        ? `## Triage\n\n- **Severity:** ${["low", "moderate", "elevated"][rand(3)]}.\n- Likely root cause is in \`src/${["limiter", "auth", "session"][rand(3)]}.ts\`.\n- **Risk score:** ${20 + rand(60)}.\n\n### Suggested next steps\n1. Reproduce locally with the repro snippet.\n2. Add a regression test in \`tests/e2e\`.`
+        : null;
+      const plan = actionKind === "plan"
+        ? `1. Trace the request path in \`src/api/handler.ts\`.\n2. Add structured logging at the boundary.\n3. Land a fix in a small PR + integration test.`
+        : null;
+      issueInsert.run(
+        r.owner, r.repo, num, title, author,
+        rand(4) === 0 ? "closed" : "open",
+        `Issue body — ${title}\n\nReproduction:\n\n\`\`\`\nsteps to reproduce\n\`\`\`\n\nExpected vs actual differs by ~10%.`,
+        `https://github.com/${r.owner}/${r.repo}/issues/${num}`,
+        JSON.stringify(rand(2) === 0 ? ["bug"] : ["bug", "needs-triage"]),
+        rand(8),
+        hoursAgo(opened), hoursAgo(opened), hoursAgo(lastActionH), actionKind,
+        actionCount, summary, plan,
+      );
+      eventInsert.run(r.owner, r.repo, num, hoursAgo(opened), "issue.first_seen", null);
+      eventInsert.run(r.owner, r.repo, num, hoursAgo(lastActionH), `issue.${actionKind}`, null);
+      if (actionCount > 1) {
+        eventInsert.run(r.owner, r.repo, num, hoursAgo(Math.max(1, lastActionH - 2)), "issue.chat", null);
+      }
     }
   }
 
