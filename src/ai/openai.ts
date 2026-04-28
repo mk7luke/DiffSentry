@@ -13,17 +13,26 @@ export class OpenAIProvider implements AIProvider {
     this.model = model;
   }
 
+  private get tokenParam(): "max_completion_tokens" | "max_tokens" {
+    const m = this.model.toLowerCase();
+    if (m.startsWith("o")) return "max_completion_tokens";
+    const gpt5 = m.match(/^gpt-(\d+)(?:\.(\d+))?/);
+    if (gpt5) {
+      const major = Number(gpt5[1]);
+      if (major >= 5) return "max_completion_tokens";
+    }
+    return "max_tokens";
+  }
+
   async review(context: PRContext, repoConfig?: RepoConfig, learnings?: Learning[]): Promise<ReviewResult> {
     const { system, user } = buildReviewPrompt(context, repoConfig, learnings);
     const log = logger.child({ provider: "openai", model: this.model });
 
     log.info("Sending review request to OpenAI");
 
-    const tokenParam = this.model.startsWith("o") ? "max_completion_tokens" : "max_tokens";
-
     const response = await this.client.chat.completions.create({
       model: this.model,
-      [tokenParam]: 4096,
+      [this.tokenParam]: 4096,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -50,11 +59,9 @@ export class OpenAIProvider implements AIProvider {
 
     log.info("Sending walkthrough request to OpenAI");
 
-    const tokenParam = this.model.startsWith("o") ? "max_completion_tokens" : "max_tokens";
-
     const response = await this.client.chat.completions.create({
       model: this.model,
-      [tokenParam]: 4096,
+      [this.tokenParam]: 4096,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -81,11 +88,9 @@ export class OpenAIProvider implements AIProvider {
 
     log.info("Sending chat request to OpenAI");
 
-    const tokenParam = this.model.startsWith("o") ? "max_completion_tokens" : "max_tokens";
-
     const response = await this.client.chat.completions.create({
       model: this.model,
-      [tokenParam]: 2048,
+      [this.tokenParam]: 2048,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -106,10 +111,9 @@ export class OpenAIProvider implements AIProvider {
   }
 
   async complete(system: string, user: string, opts?: { maxTokens?: number; json?: boolean }): Promise<string> {
-    const tokenParam = this.model.startsWith("o") ? "max_completion_tokens" : "max_tokens";
     const response = await this.client.chat.completions.create({
       model: this.model,
-      [tokenParam]: opts?.maxTokens ?? 512,
+      [this.tokenParam]: opts?.maxTokens ?? 512,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -125,11 +129,9 @@ export class OpenAIProvider implements AIProvider {
 
     log.info("Sending issue chat request to OpenAI");
 
-    const tokenParam = this.model.startsWith("o") ? "max_completion_tokens" : "max_tokens";
-
     const response = await this.client.chat.completions.create({
       model: this.model,
-      [tokenParam]: 2048,
+      [this.tokenParam]: 2048,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
