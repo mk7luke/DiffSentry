@@ -148,7 +148,7 @@ The maintainer is replying to a specific finding. Their note is short and may be
 Output STRICT JSON: {"content": string, "path": string | null}.
 
 - "content": one or two sentences, imperative voice, naming the rule/category being suppressed or the convention being asserted. Include enough about WHY so future-you can decide whether the learning still applies. NEVER quote the maintainer verbatim — synthesize.
-- "path": a glob (e.g. "static/sales-app/**/*.js") if the maintainer's intent is clearly scoped to a directory or file family; otherwise null for repo-wide.
+- "path": DEFAULT TO null (repo-wide). Only set a glob when the maintainer's NOTE itself explicitly names a path, directory, or file family (e.g., "in the sales-app", "for *.test.ts files", "only in static/"). The fact that the finding happens to live on a particular file is NOT evidence the rule is path-scoped — most "not relevant" / "we always do X" notes describe a repo-wide convention. When in doubt, return null. If you do set a glob, prefer the broadest reasonable scope (a directory's "**" rather than a single file path) so future PRs touching siblings still match.
 
 Do not invent rules the maintainer didn't endorse. If their note is ambiguous, capture the conservative interpretation and say so.`;
 
