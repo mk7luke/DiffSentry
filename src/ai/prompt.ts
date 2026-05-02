@@ -77,14 +77,30 @@ Guidelines:
 - Provide a "suggestion" with the corrected code whenever a fix is feasible. Prefer "suggestionLanguage": "diff" for multi-line or context-dependent changes, "suggestion" for single-line replacements.
 - Use markdown formatting (backticks for identifiers, bullets for lists) in the body.`;
 
-function buildReviewSystemPrompt(repoConfig?: RepoConfig): string {
+function buildReviewSystemPrompt(repoConfig?: RepoConfig, learnings?: Learning[]): string {
   const profile = repoConfig?.reviews?.profile || "chill";
   const instructions = profile === "assertive" ? ASSERTIVE_INSTRUCTIONS : CHILL_INSTRUCTIONS;
   const tone = repoConfig?.tone_instructions
     ? `\n\nTone guidance: ${repoConfig.tone_instructions}`
     : "";
 
-  return REVIEW_SYSTEM_BASE + instructions + tone;
+  let learningsBlock = "";
+  if (learnings && learnings.length > 0) {
+    const items = learnings.map((l, i) => `${i + 1}. ${l.content}`).join("\n");
+    learningsBlock = `\n\n## Repository Learnings (AUTHORITATIVE — overrides default heuristics)
+
+The maintainers of this repository have explicitly taught the reviewer the following rules. Treat them as direct instructions from the team:
+
+${items}
+
+How to apply:
+- If a learning says a class of finding is "not relevant" / "ignore" / "we don't enforce X", DO NOT raise that finding again. Stay silent.
+- If a learning asserts a convention ("we always do X"), enforce it: flag code that violates it; approve code that follows it.
+- If a learning conflicts with your default profile guidance, the LEARNING WINS.
+- Never explain that you are following a learning — just apply it. The user already knows.`;
+  }
+
+  return REVIEW_SYSTEM_BASE + instructions + tone + learningsBlock;
 }
 
 export function buildReviewPrompt(
@@ -92,7 +108,7 @@ export function buildReviewPrompt(
   repoConfig?: RepoConfig,
   learnings?: Learning[]
 ): { system: string; user: string } {
-  const system = buildReviewSystemPrompt(repoConfig);
+  const system = buildReviewSystemPrompt(repoConfig, learnings);
 
   const filesSection = context.files
     .map((f) => {
@@ -106,23 +122,18 @@ export function buildReviewPrompt(
     })
     .join("\n\n");
 
-  let learningsSection = "";
-  if (learnings && learnings.length > 0) {
-    learningsSection = `\n## Repository Learnings\n\nThe team has provided these preferences and guidelines:\n${learnings.map((l, i) => `${i + 1}. ${l.content}`).join("\n")}\n\nApply these learnings when relevant to the code being reviewed.\n`;
-  }
-
   const user = `## Pull Request: ${context.title}
 
 **Branch:** ${context.headBranch} → ${context.baseBranch}
 
 **Description:**
 ${context.description || "(no description provided)"}
-${learningsSection}
+
 ## Changed Files
 
 ${filesSection}
 
-Review this pull request and respond with JSON.`;
+Review this pull request and respond with JSON. Remember to obey the Repository Learnings in the system prompt — they override your default flagging heuristics.`;
 
   return { system, user };
 }

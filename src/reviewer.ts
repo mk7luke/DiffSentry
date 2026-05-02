@@ -379,7 +379,8 @@ export class Reviewer {
       const repoFullName = `${owner}/${repo}`;
       const filenames = context.files.map((f) => f.filename);
 
-      const [relevantLearnings, allGuidelines, issueNumbers] = await Promise.all([
+      const [allLearnings, relevantLearnings, allGuidelines, issueNumbers] = await Promise.all([
+        this.learnings.getLearnings(repoFullName),
         this.learnings.getRelevantLearnings(repoFullName, filenames),
         loadGuidelines(octokit, owner, repo, context.headSha),
         Promise.resolve(parseIssueReferences(context.description)),
@@ -409,6 +410,25 @@ export class Reviewer {
         });
       }
 
+      // Visibility: surface what got loaded vs what got filtered. If learnings
+      // exist for the repo but none reached the prompt (path-glob mismatch),
+      // we want that obvious in logs since the user can't see it otherwise.
+      if (allLearnings.length > 0) {
+        const filteredOut = allLearnings.filter(
+          (l) => !relevantLearnings.some((r) => r.id === l.id),
+        );
+        log.info(
+          {
+            repo: repoFullName,
+            totalLearnings: allLearnings.length,
+            appliedLearnings: knowledgeLearnings.length,
+            filteredByPath: filteredOut.length,
+            filteredPaths: filteredOut.map((l) => l.path).filter(Boolean),
+          },
+          "Loaded repository learnings for review",
+        );
+      }
+
       // Run walkthrough and review in parallel
       log.info({ fileCount: context.files.length }, "Starting AI review");
 
@@ -416,7 +436,7 @@ export class Reviewer {
       const summaryEnabled = repoConfig.reviews?.high_level_summary !== false;
 
       const [reviewResult, walkthroughResult] = await Promise.all([
-        this.ai.review(context, repoConfig, relevantLearnings),
+        this.ai.review(context, repoConfig, knowledgeLearnings),
         walkthroughEnabled || summaryEnabled
           ? this.ai.generateWalkthrough(context, repoConfig)
           : Promise.resolve(null),
