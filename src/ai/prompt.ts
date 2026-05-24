@@ -178,7 +178,7 @@ Rules:
   - "summary": 1-2 sentence description of what changed across these files.
 - "effortEstimate": 1-5 where 1=Trivial, 2=Simple, 3=Moderate, 4=Complex, 5=Very Complex.
 - "effortMinutes": rough integer estimate of review minutes (e.g. 5, 15, 30, 60, 120).
-- "sequenceDiagrams": array of 0-3 Mermaid sequenceDiagram blocks showing key flows introduced/modified. Omit (empty array) if the changes don't involve a clear interaction flow. Each entry is a complete sequenceDiagram (without surrounding triple backticks).
+- "sequenceDiagrams": array of 0-3 Mermaid sequenceDiagram blocks showing key flows introduced/modified. Omit (empty array) if the changes don't involve a clear interaction flow. Each entry is a complete sequenceDiagram (without surrounding triple backticks). Do NOT put semicolons (\`;\`) inside message labels — Mermaid treats them as statement terminators and the diagram will fail to render (e.g. write "TL/DR" or "summary" instead of "TL;DR").
 - "suggestedLabels": from common labels: bug, enhancement, refactor, docs, test, performance, security, breaking-change, dependencies. Only suggest what fits.
 - "suggestedReviewers": leave empty (no team data available).
 - "poem": short (4-6 line) poem starting with rabbit emoji. Each line ends with two trailing spaces. Empty string if not requested.
