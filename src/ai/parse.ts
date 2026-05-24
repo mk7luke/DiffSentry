@@ -273,6 +273,33 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
   };
 }
 
+/**
+ * Mermaid treats `;` as a statement terminator inside sequence diagrams,
+ * so message labels like `Backend->>AI: generate TL;DR after completion`
+ * blow up the parser at the semicolon. We rewrite the message portion of
+ * each statement (everything after the first unquoted `:`) to escape `;`
+ * with the HTML entity `&#59;`, which Mermaid renders as a literal `;`.
+ * Lines that aren't messages (participant decls, notes, activations, etc.)
+ * are left untouched.
+ */
+function sanitizeMermaidSequenceDiagram(diagram: string): string {
+  // Sequence-diagram arrow tokens (longest first so `-->>` wins over `->`).
+  const ARROWS = ["-->>", "->>", "-->", "->", "--x", "-x", "--)", "-)"];
+  const lines = diagram.split("\n");
+
+  return lines
+    .map((line) => {
+      const arrow = ARROWS.find((a) => line.includes(a));
+      if (!arrow) return line;
+      const colonIdx = line.indexOf(":", line.indexOf(arrow) + arrow.length);
+      if (colonIdx === -1) return line;
+      const head = line.slice(0, colonIdx + 1);
+      const tail = line.slice(colonIdx + 1).replace(/;/g, "&#59;");
+      return head + tail;
+    })
+    .join("\n");
+}
+
 export function parseWalkthroughResponse(raw: string): WalkthroughResult {
   const log = logger.child({ step: "parse-walkthrough" });
 
@@ -294,10 +321,12 @@ export function parseWalkthroughResponse(raw: string): WalkthroughResult {
 
   const sequenceDiagrams: string[] | undefined = (() => {
     if (Array.isArray(parsed.sequenceDiagrams)) {
-      return parsed.sequenceDiagrams.filter((s: any) => typeof s === "string" && s.trim().length > 0);
+      return parsed.sequenceDiagrams
+        .filter((s: any) => typeof s === "string" && s.trim().length > 0)
+        .map((s: string) => sanitizeMermaidSequenceDiagram(s));
     }
     if (typeof parsed.sequenceDiagram === "string" && parsed.sequenceDiagram.trim().length > 0) {
-      return [parsed.sequenceDiagram];
+      return [sanitizeMermaidSequenceDiagram(parsed.sequenceDiagram)];
     }
     return undefined;
   })();
