@@ -173,6 +173,14 @@ export interface ReviewResult {
   summary: string;
   comments: ReviewComment[];
   approval: "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
+  /** True when the summary was synthesized by DiffSentry because the AI
+   *  didn't supply a usable one. Callers (reviewer.ts) may re-synthesize
+   *  after merging built-in findings so the summary reflects the full set. */
+  summaryIsFallback?: boolean;
+  /** True when the AI returned content that couldn't be parsed as JSON.
+   *  In this state, AI-generated inline comments are absent — only
+   *  built-in safety/pattern findings ran. */
+  parseFailed?: boolean;
 }
 
 // ─── Walkthrough Result ────────────────────────────────────────

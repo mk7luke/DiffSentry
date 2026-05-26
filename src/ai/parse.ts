@@ -183,23 +183,113 @@ function formatCommentBody(comment: {
   return parts.join("\n\n");
 }
 
+/**
+ * Try every reasonable angle to coerce the model's response into JSON:
+ *   1. Strip ``` / ```json fences and parse directly.
+ *   2. Slice from the first `{` to the last `}` (handles models that wrap
+ *      JSON in prose like "Here's the review: { ... }").
+ *   3. Same as (2) but for arrays `[...]`.
+ * Returns the parsed object on success, null on failure.
+ */
+function extractJsonObject(raw: string): any | null {
+  let cleaned = raw.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?\s*```$/, "").trim();
+  }
+  if (!cleaned) return null;
+
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // fall through to embedded-object extraction
+  }
+
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
+    } catch {
+      // continue
+    }
+  }
+  return null;
+}
+
+/**
+ * Build an informative one- or two-sentence summary from the review state
+ * itself, used whenever the AI didn't return a usable `summary` field (or
+ * its response wasn't structured at all). Replaces the old "Review complete
+ * (no structured response from AI)." text, which conveyed neither what was
+ * reviewed nor what was found.
+ *
+ * Safe to call after `comments` has been augmented with built-in safety /
+ * pattern findings — the counts reflect whatever's in `comments` at call
+ * time, so the reviewer can re-synthesize once all sources are merged.
+ */
+export function synthesizeReviewSummary(
+  result: Pick<ReviewResult, "comments" | "approval">,
+  context: Pick<PRContext, "files">,
+): string {
+  const fileCount = context.files.length;
+  const filePart = `${fileCount} file${fileCount === 1 ? "" : "s"}`;
+  const total = result.comments.length;
+
+  if (total === 0) {
+    return result.approval === "APPROVE"
+      ? `Reviewed ${filePart}. No concerns surfaced — the change looks safe to merge.`
+      : `Reviewed ${filePart}. No actionable findings — see the walkthrough above for an overview of what changed.`;
+  }
+
+  const sev: Record<CommentSeverity, number> = { critical: 0, major: 0, minor: 0, trivial: 0 };
+  const ty: Record<CommentType, number> = {
+    issue: 0,
+    suggestion: 0,
+    nitpick: 0,
+    documentation: 0,
+    security: 0,
+  };
+  for (const c of result.comments) {
+    if (c.severity) sev[c.severity]++;
+    if (c.type) ty[c.type]++;
+  }
+
+  const sevParts: string[] = [];
+  if (sev.critical) sevParts.push(`${sev.critical} critical`);
+  if (sev.major) sevParts.push(`${sev.major} major`);
+  if (sev.minor) sevParts.push(`${sev.minor} minor`);
+  if (sev.trivial) sevParts.push(`${sev.trivial} trivial`);
+  const sevSegment = sevParts.length > 0 ? ` (${sevParts.join(", ")})` : "";
+
+  const tyParts: string[] = [];
+  if (ty.security) tyParts.push(`${ty.security} security`);
+  if (ty.issue) tyParts.push(`${ty.issue} issue${ty.issue === 1 ? "" : "s"}`);
+  if (ty.suggestion) tyParts.push(`${ty.suggestion} suggestion${ty.suggestion === 1 ? "" : "s"}`);
+  if (ty.nitpick) tyParts.push(`${ty.nitpick} nitpick${ty.nitpick === 1 ? "" : "s"}`);
+  if (ty.documentation) tyParts.push(`${ty.documentation} doc note${ty.documentation === 1 ? "" : "s"}`);
+  const breakdown = tyParts.length > 0 ? ` Breakdown: ${tyParts.join(", ")}.` : "";
+
+  const headline = `Reviewed ${filePart} and surfaced ${total} finding${total === 1 ? "" : "s"}${sevSegment}.`;
+  return `${headline}${breakdown} See inline comments for details.`;
+}
+
 export function parseReviewResponse(raw: string, context: PRContext): ReviewResult {
   const log = logger.child({ step: "parse" });
 
-  let cleaned = raw.trim();
-  if (cleaned.startsWith("```")) {
-    cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?\s*```$/, "");
-  }
-
-  let parsed: any;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    log.warn({ raw: raw.slice(0, 500) }, "Failed to parse AI response as JSON, using as summary");
+  const parsed = extractJsonObject(raw);
+  if (parsed === null) {
+    // We couldn't recover any JSON. Don't pretend we have an AI summary —
+    // tell the user honestly what happened, and synthesize a description
+    // of what was reviewed so they have *some* useful signal. The reviewer
+    // will re-synthesize once built-in safety/pattern findings are merged.
+    const rawSnippet = raw.trim().slice(0, 500);
+    log.warn({ rawSnippet }, "Failed to extract JSON from AI response");
     return {
-      summary: raw.slice(0, 2000) || "Review complete (no structured response from AI).",
+      summary: synthesizeReviewSummary({ comments: [], approval: "COMMENT" }, context),
       comments: [],
       approval: "COMMENT",
+      summaryIsFallback: true,
+      parseFailed: true,
     };
   }
 
@@ -266,10 +356,17 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
     ? parsed.approval
     : "COMMENT";
 
+  const aiSummary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
+  const summaryIsFallback = aiSummary.length === 0;
+  const summary = summaryIsFallback
+    ? synthesizeReviewSummary({ comments, approval }, context)
+    : aiSummary;
+
   return {
-    summary: parsed.summary || "Review complete.",
+    summary,
     comments,
     approval,
+    summaryIsFallback,
   };
 }
 

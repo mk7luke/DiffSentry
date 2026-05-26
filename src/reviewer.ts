@@ -9,6 +9,7 @@ import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, for
 import { parseCommand, formatHelpMessage, formatConfigMessage } from "./commands.js";
 import { parseIssueCommand, formatIssueHelpMessage } from "./issue-commands.js";
 import { buildIssueSummaryInstruction, buildIssuePlanInstruction } from "./ai/prompt.js";
+import { synthesizeReviewSummary } from "./ai/parse.js";
 import { LearningsStore, synthesizeLearning, extractFindingMeta, type FindingContext } from "./learnings.js";
 import { loadGuidelines, getRelevantGuidelines, formatGuidelinesForPrompt } from "./guidelines.js";
 import { parseIssueReferences, fetchLinkedIssues, formatIssuesForPrompt, formatIssuesForWalkthrough } from "./issues.js";
@@ -807,6 +808,37 @@ export class Reviewer {
         );
       }
 
+      // Filter out review comments whose fingerprint was already posted
+      // (cross-review dedup). Anthropic + state survive bot restarts.
+      // Done here — before summary synthesis and before formatReviewBody —
+      // so the synthesized summary's counts match what actually gets posted.
+      if (priorFingerprints.size > 0) {
+        reviewResult.comments = reviewResult.comments.filter((c) => {
+          const fp = c.fingerprint;
+          if (fp && priorFingerprints.has(fp)) {
+            log.debug({ fp, path: c.path, line: c.line }, "Dropping previously-posted comment");
+            return false;
+          }
+          return true;
+        });
+      }
+
+      // If the AI didn't supply a usable summary, regenerate from the
+      // final merged comment set so the user sees something meaningful
+      // instead of "Review complete (no structured response from AI).".
+      // The synthesized text now reflects safety + pattern findings too.
+      if (reviewResult.summaryIsFallback) {
+        const synthesized = synthesizeReviewSummary(reviewResult, context);
+        reviewResult.summary = reviewResult.parseFailed
+          ? [
+              `> [!NOTE]`,
+              `> **DiffSentry couldn't parse a structured response from the AI for this review**, so any AI-generated inline comments are missing from this pass. Built-in safety and pattern checks ran normally and are reflected below. Re-run with \`@${this.config.botName} review\` to try again, or check the server logs for the raw AI output.`,
+              ``,
+              synthesized,
+            ].join("\n")
+          : synthesized;
+      }
+
       // Compose CodeRabbit-style review body before submission
       const hasYaml = rawConfig && Object.keys(rawConfig).length > 0;
       reviewResult.summary = formatReviewBody(reviewResult, {
@@ -830,19 +862,6 @@ export class Reviewer {
         plan: undefined,
         botName: this.config.botName,
       });
-
-      // Filter out review comments whose fingerprint was already posted
-      // (cross-review dedup). Anthropic + state survive bot restarts.
-      if (priorFingerprints.size > 0) {
-        reviewResult.comments = reviewResult.comments.filter((c) => {
-          const fp = c.fingerprint;
-          if (fp && priorFingerprints.has(fp)) {
-            log.debug({ fp, path: c.path, line: c.line }, "Dropping previously-posted comment");
-            return false;
-          }
-          return true;
-        });
-      }
 
       // Persist this review to SQLite (best-effort; no-op if DB disabled).
       // Done before GitHub submission so an API failure doesn't lose the data.
