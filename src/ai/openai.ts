@@ -16,9 +16,15 @@ export class OpenAIProvider implements AIProvider {
   /** o-series and gpt-5+ are reasoning models — `max_completion_tokens` is
    *  the combined budget for hidden chain-of-thought AND visible output. */
   private get isReasoningModel(): boolean {
-    const m = this.model.toLowerCase();
-    if (m.startsWith("o")) return true;
-    const gpt = m.match(/^gpt-(\d+)/);
+    return this.isOSeries || this.isGpt5OrLater;
+  }
+
+  private get isOSeries(): boolean {
+    return this.model.toLowerCase().startsWith("o");
+  }
+
+  private get isGpt5OrLater(): boolean {
+    const gpt = this.model.toLowerCase().match(/^gpt-(\d+)/);
     return !!(gpt && Number(gpt[1]) >= 5);
   }
 
@@ -47,11 +53,14 @@ export class OpenAIProvider implements AIProvider {
   }
 
   /** For JSON-output tasks the model's hidden reasoning rarely improves
-   *  quality but routinely starves the visible output of tokens. Force
-   *  minimal reasoning on these paths. SDK 4.85 doesn't type "minimal"
-   *  yet, so we spread it in via a cast. The API accepts it for gpt-5+. */
+   *  quality but routinely starves the visible output of tokens. Push
+   *  reasoning as low as the model accepts: "minimal" is gpt-5+ only,
+   *  o-series tops out at "low" and rejects "minimal". Non-reasoning
+   *  models get nothing — they'd reject the field outright. */
   private structuredOutputExtras(): Record<string, unknown> {
-    return this.isReasoningModel ? { reasoning_effort: "minimal" } : {};
+    if (this.isGpt5OrLater) return { reasoning_effort: "minimal" };
+    if (this.isOSeries) return { reasoning_effort: "low" };
+    return {};
   }
 
   /** When OpenAI returns empty content with `finish_reason: "length"`, the
