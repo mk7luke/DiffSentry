@@ -832,7 +832,11 @@ export class Reviewer {
         reviewResult.summary = reviewResult.parseFailed
           ? [
               `> [!NOTE]`,
-              `> **DiffSentry couldn't parse a structured response from the AI for this review**, so any AI-generated inline comments are missing from this pass. Built-in safety and pattern checks ran normally and are reflected below. Re-run with \`@${this.config.botName} review\` to try again, or check the server logs for the raw AI output.`,
+              `> **DiffSentry couldn't parse a structured response from the AI for this review**, so any AI-generated inline comments are missing from this pass. Built-in safety and pattern checks ran normally and are reflected below.`,
+              `>`,
+              `> Most common cause: a reasoning model (o-series or GPT-5+) burned its token budget on hidden chain-of-thought before emitting any visible output. Server logs will show \`finishReason: "length"\` and a high \`reasoningTokens\` count when that's the case.`,
+              `>`,
+              `> Re-run with \`@${this.config.botName} review\` to try again.`,
               ``,
               synthesized,
             ].join("\n")
