@@ -1,0 +1,273 @@
+# DiffSentry config for this repo (a self-hosted PR review bot).
+# Single-maintainer TS/Express project — keep noise low, but be strict on
+# the surfaces where bugs are user-visible: AI parsing, GitHub API calls,
+# SQLite migrations, dashboard auth, and the safety/pattern scanners
+# themselves (false positives anger users).
+
+language: "en-US"
+
+# Match how this repo writes review comments: direct, evidence-led, no
+# fluff. The bot's own copy is its main shop window.
+tone_instructions: "Write like a senior engineer reviewing a friend's PR: direct, specific, no hedging. Quote the file and line. Skip pleasantries."
+
+reviews:
+  # Small surface, careful changes — chill keeps the bot from picking nits
+  # on its own code. Strictness comes from path_instructions + anti_patterns.
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+
+  walkthrough:
+    enabled: true
+    collapse: true
+    changed_files_summary: true
+    sequence_diagrams: true
+    estimate_effort: true
+    suggested_labels: true
+    suggested_reviewers: true
+    poem: false
+
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    # PRs land directly on main here (see `git log --oneline`).
+    base_branches:
+      - "^main$"
+
+  # Skip generated / vendored output but review everything in src/ and tests/.
+  # `dist/`, `node_modules/`, `*.min.*`, `*.map`, `build/` are auto-ignored,
+  # but listing them explicitly makes the review-info section accurate.
+  path_filters:
+    - "!dist/**"
+    - "!node_modules/**"
+    - "!package-lock.json"
+    - "!private-key.pem"
+    - "!.env"
+    - "!.env.example"
+    - "!data/**"
+    - "!.code-review-graph/**"
+    - "!.codesurf/**"
+    - "!.contex/**"
+    - "!.omc/**"
+    - "!tests/e2e/runs/**"
+
+  # Per-area instructions. Paths are grounded in `src/` as it exists today.
+  path_instructions:
+    - path: "src/ai/**"
+      instructions: |
+        These files own prompt construction, JSON parsing, and provider
+        adapters. Be strict about:
+          - Token cost: any new prompt section needs a budget rationale.
+            Cite roughly how many tokens it adds for a median PR.
+          - JSON tolerance: parse.ts must keep handling fenced JSON,
+            trailing prose, and partial output. Don't regress to
+            `JSON.parse` without a fallback.
+          - Provider parity: changes to anthropic.ts, openai.ts, and
+            openai-compatible.ts should land together when they touch the
+            request/response contract. Flag drift.
+          - Streaming/non-streaming: don't change one without considering
+            the other.
+        Treat any new `as any` here as a major finding — this module is
+        already over its quota (see src/ai/openai.ts).
+
+    - path: "src/reviewer.ts"
+      instructions: |
+        Orchestrator. ~1600 lines, lots of side effects, easy to break
+        silently. Specifically check:
+          - Every new GitHub API call has error handling — broken APIs
+            should not abort the whole review.
+          - Walkthrough state (`walkthrough-state.ts`) round-trips: if the
+            blob shape changes, prior PRs must still decode.
+          - No new awaited calls inside a tight loop without a concurrency
+            cap. PRs with 100 files will OOM us.
+          - `.catch(() => {})` is acceptable for fire-and-forget posting,
+            but every other catch must log via `logger`.
+
+    - path: "src/storage/**"
+      instructions: |
+        SQLite. Schema is inline in `db.ts`. Migrations are forward-only.
+          - Any schema change MUST add a new SCHEMA_V<N> string and bump
+            SCHEMA_VERSION, not edit V1 in place.
+          - Prepared statements only — never interpolate values into the
+            SQL string. (parameterize via `?` placeholders.)
+          - DAO functions should fail closed when `_disabled === true`,
+            not throw — the dashboard runs in dataless mode for some users.
+
+    - path: "src/dashboard/**"
+      instructions: |
+        Read-only ops UI. Security-sensitive because OAuth + session cookies.
+          - HMAC must use `crypto.timingSafeEqual` on equal-length buffers.
+          - Any new outbound `fetch()` to github.com or other 3rd parties
+            MUST set an `AbortSignal` timeout (~10s). Hung fetches stall
+            the dashboard.
+          - Allowlists (`DASHBOARD_ALLOWED_LOGINS`, `_ORGS`) are the only
+            authz gate — losing them = open dashboard. Treat changes here
+            as security-critical.
+          - HTML is hand-rendered. Anything user-controlled rendered into
+            templates must be escaped. No `innerHTML`-equivalent helpers.
+
+    - path: "src/safety-scanner.ts"
+      instructions: |
+        Secret scanner. False positives here look terrible on real PRs.
+        Every new pattern needs (1) a test in tests/e2e or a regex unit
+        test, (2) a real-world example string it should match, (3) a
+        non-match example that's plausible in normal code.
+
+    - path: "src/pattern-checks.ts"
+      instructions: |
+        Built-in heuristics rendered as inline comments. Same false-positive
+        bar as safety-scanner. Also:
+          - Patterns must be scoped to a sensible path glob — JSX a11y
+            rules shouldn't fire on .ts backend code.
+          - Severity should match impact (`critical` is reserved for things
+            that lose data or leak secrets — not for performance hints).
+
+    - path: "src/github.ts"
+      instructions: |
+        GitHub REST/GraphQL surface. Keep retries idempotent. If you add a
+        new endpoint wrapper, return a typed shape — don't propagate
+        `octokit.X.Y()` shapes outward.
+
+    - path: "src/ai/prompt.ts"
+      instructions: |
+        Prompt copy. Changes here directly change AI outputs and cost.
+          - Avoid prose growth without a measured win — note the before/
+            after on a sample PR.
+          - Don't remove the JSON-mode guardrails ("respond with a single
+            JSON object", schema sample). Local models leak prose without
+            them.
+          - When adding a new field to the response schema, update
+            parse.ts in the same PR.
+
+    - path: "tests/e2e/**"
+      instructions: |
+        Real-PR harness against a sandbox repo. Each scenario must be
+        idempotent (safe to re-run) and clean up its branch on success.
+        Don't hardcode PR numbers or run IDs — they're not stable.
+
+    - path: "docs/**"
+      instructions: |
+        Operator-facing docs. If a behavior change in src/ alters the env
+        vars or webhook setup, the README + docs/ change should be in
+        the same PR.
+
+  # Coach checks on PR title + description. Commit style here is plain
+  # imperative ("Add X", "Fix Y", "Replace Z with W"), no Conventional
+  # Commits prefix, no trailing period — see `git log --oneline`.
+  pre_merge_checks:
+    title:
+      mode: "warning"
+      requirements: "Imperative verb, under 72 chars, no trailing period, no Conventional Commits prefix (we don't use them)."
+    description:
+      mode: "warning"
+      requirements: "At least one sentence explaining WHAT changed and WHY. Link related issue/PR if applicable."
+    custom_checks:
+      - name: "Schema bump"
+        mode: "warning"
+        instructions: "If src/storage/db.ts changed, verify the PR either (a) only touches DAO/queries, or (b) adds a new SCHEMA_V<N> string AND bumps SCHEMA_VERSION. Editing V1 in place is a bug."
+      - name: "Provider parity"
+        mode: "warning"
+        instructions: "If src/ai/anthropic.ts changed in a way that affects the request/response contract, verify openai.ts and openai-compatible.ts received corresponding updates."
+      - name: "Pattern test coverage"
+        mode: "warning"
+        instructions: "If src/safety-scanner.ts or src/pattern-checks.ts gained a new rule, verify tests/e2e/scenarios/ has a scenario covering it."
+
+  # Built-in performance/footgun heuristics. Leave on — they're tuned for
+  # JS/TS and this project IS JS/TS. The a11y/i18n ones only fire on JSX,
+  # which we don't have, so they're free.
+  builtin_patterns: true
+
+  # Repo-specific anti-patterns. Each one is grounded in something I
+  # actually saw in the codebase or in the project's coding norms.
+  anti_patterns:
+    - name: "console.log outside CLI"
+      pattern: 'console\.(log|warn|error|debug|info)\('
+      severity: "major"
+      type: "issue"
+      message: "We use the structured pino logger (src/logger.ts) everywhere except CLI entry points. console.* skips levels, JSON formatting, and the in-process ring buffer that the dashboard's settings page reads from."
+      advice: "Import `logger` from src/logger.ts and use logger.info / logger.warn / logger.error with a context object. Only src/cli/** is allowed to use console.* for user-facing CLI output."
+      path: "src/!(cli)/**"
+
+    - name: "Fresh `as any` cast"
+      pattern: '\bas\s+any\b'
+      severity: "minor"
+      type: "suggestion"
+      message: "`as any` defeats the type checker. We have a handful of them in src/ai/openai.ts and src/reviewer.ts already — each one is a small papercut. Adding more compounds the debt."
+      advice: "Prefer a narrow type assertion, an `unknown` + type guard, or extending the upstream type. If the SDK type is genuinely wrong, leave a one-line comment naming the SDK + version so we can revisit when it updates."
+      path: "src/**"
+
+    - name: "@ts-ignore / @ts-expect-error without note"
+      pattern: '@ts-(ignore|expect-error|nocheck)(?!\s*[-—:])'
+      severity: "major"
+      type: "issue"
+      message: "Suppressing a TS error without a one-line explanation makes future cleanup impossible — we already have one in src/logger.ts, that's the bar."
+      advice: "Append a brief reason on the same line: `// @ts-ignore — pino-pretty has a default export with CJS compat`."
+      path: "src/**"
+
+    - name: "fetch() without timeout"
+      pattern: '\bfetch\s*\([^)]*\)(?![^;]*signal)'
+      flags: "s"
+      severity: "major"
+      type: "issue"
+      message: "We already make 3 unguarded fetch() calls to github.com in src/dashboard/auth.ts. A hung GitHub request will stall the OAuth flow. New outbound fetches should be bounded."
+      advice: "Pass `signal: AbortSignal.timeout(10_000)` (or longer for known-slow endpoints). Wrap in try/catch and log on AbortError."
+      path: "src/**"
+
+    - name: "Process exit in library code"
+      pattern: 'process\.exit\('
+      severity: "critical"
+      type: "issue"
+      message: "process.exit() in non-CLI code kills the webhook server mid-review. We have it in src/cli/backfill.ts (fine) and src/index.ts startup (fine) — anywhere else is almost certainly a bug."
+      advice: "Throw an Error and let the top-level handler in src/index.ts decide. Library code shouldn't unilaterally terminate the process."
+      path: "src/!(cli|index.ts)/**"
+
+    - name: "Empty catch swallow"
+      pattern: 'catch\s*\([^)]*\)\s*\{\s*\}'
+      severity: "major"
+      type: "issue"
+      message: "An empty catch hides failures. We allow `.catch(() => {})` on fire-and-forget GitHub posts in reviewer.ts (intentional), but a bare try/catch with an empty body is almost always a bug."
+      advice: "Either log via the structured logger (`logger.warn({ err }, 'context')`) or rethrow. If the failure is genuinely safe to ignore, leave a one-line `//` comment saying why."
+      path: "src/**"
+
+    - name: "String-interpolated SQL"
+      pattern: 'db\.(prepare|exec)\s*\(\s*[`"''][^)]*\$\{'
+      severity: "critical"
+      type: "security"
+      message: "Building SQL with template-literal interpolation defeats better-sqlite3's parameter binding and opens SQL injection. The schema in src/storage/db.ts is parameter-free DDL — everything else must use `?` placeholders."
+      advice: "Use prepared statements with `?` placeholders: `db.prepare('SELECT * FROM x WHERE y = ?').get(value)`. Never interpolate user input into the SQL string."
+      path: "src/**"
+
+    - name: "Octokit call without error handling"
+      pattern: 'await\s+octokit\.[a-zA-Z.]+\([^)]*\)(?!\s*\.(catch|then))'
+      severity: "minor"
+      type: "suggestion"
+      message: "Some Octokit calls in this codebase intentionally let errors bubble (fatal-on-startup), but most are inside a review pass where a single 4xx shouldn't abort the whole job."
+      advice: "Wrap in try/catch and log via `logger.warn({ err, owner, repo }, 'X failed')`, or chain `.catch(() => fallback)` if the result is non-critical. Pattern is heuristic — false positives are fine, but reviewers should glance at each hit."
+      path: "src/reviewer.ts"
+
+    - name: "Hardcoded model name"
+      pattern: '"claude-[a-z0-9-]+"|"gpt-[a-z0-9.-]+"|"o[1-9][a-z0-9-]*"'
+      severity: "minor"
+      type: "suggestion"
+      message: "Model identifiers should come from config (ANTHROPIC_MODEL / OPENAI_MODEL / LOCAL_AI_MODEL). Hardcoding them in source means a model rev requires a code change + redeploy."
+      advice: "Read from `config.anthropicModel` / `config.openaiModel`, or pass the model in via the provider constructor. The one defensible exception is the default in src/config.ts."
+      path: "src/!(config.ts)/**"
+
+    - name: "Unbounded GitHub list iteration"
+      pattern: 'octokit\.(pulls|issues|repos)\.list[A-Z][a-zA-Z]*\([^)]*\)(?![^;]*per_page)'
+      severity: "minor"
+      type: "suggestion"
+      message: "Default page size is 30. For repos with many PRs/issues, callers either need `per_page: 100` + paginate, or an explicit upper bound."
+      advice: "Either pass `per_page: 100` and use `octokit.paginate()` if you need the full list, or document the 30-item ceiling at the call site."
+      path: "src/**"
+
+chat:
+  auto_reply: true
+
+issues:
+  auto_summary:
+    enabled: true
+    on_edit: false
+  chat:
+    auto_reply: true
