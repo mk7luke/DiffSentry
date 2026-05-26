@@ -13,15 +13,82 @@ export class OpenAIProvider implements AIProvider {
     this.model = model;
   }
 
+  /** o-series and gpt-5+ are reasoning models — `max_completion_tokens` is
+   *  the combined budget for hidden chain-of-thought AND visible output. */
+  private get isReasoningModel(): boolean {
+    return this.isOSeries || this.isGpt5OrLater;
+  }
+
+  private get isOSeries(): boolean {
+    return this.model.toLowerCase().startsWith("o");
+  }
+
+  private get isGpt5OrLater(): boolean {
+    const gpt = this.model.toLowerCase().match(/^gpt-(\d+)/);
+    return !!(gpt && Number(gpt[1]) >= 5);
+  }
+
   private get tokenParam(): "max_completion_tokens" | "max_tokens" {
-    const m = this.model.toLowerCase();
-    if (m.startsWith("o")) return "max_completion_tokens";
-    const gpt5 = m.match(/^gpt-(\d+)(?:\.(\d+))?/);
-    if (gpt5) {
-      const major = Number(gpt5[1]);
-      if (major >= 5) return "max_completion_tokens";
+    return this.isReasoningModel ? "max_completion_tokens" : "max_tokens";
+  }
+
+  /** Reasoning models split this budget between hidden CoT and visible
+   *  output. The previous 4096-token review budget regularly burned out
+   *  on reasoning alone, leaving `message.content` empty. These ceilings
+   *  give reasoning headroom even with `reasoning_effort: "minimal"`. */
+  private tokenBudgetFor(task: "review" | "walkthrough" | "chat" | "complete"): number {
+    if (!this.isReasoningModel) {
+      if (task === "complete") return 512;
+      return task === "chat" ? 2048 : 4096;
     }
-    return "max_tokens";
+    switch (task) {
+      case "review":
+      case "walkthrough":
+        return 16384;
+      case "chat":
+        return 8192;
+      case "complete":
+        return 4096;
+    }
+  }
+
+  /** For JSON-output tasks the model's hidden reasoning rarely improves
+   *  quality but routinely starves the visible output of tokens. Push
+   *  reasoning as low as the model accepts: "minimal" is gpt-5+ only,
+   *  o-series tops out at "low" and rejects "minimal". Non-reasoning
+   *  models get nothing — they'd reject the field outright. */
+  private structuredOutputExtras(): Record<string, unknown> {
+    if (this.isGpt5OrLater) return { reasoning_effort: "minimal" };
+    if (this.isOSeries) return { reasoning_effort: "low" };
+    return {};
+  }
+
+  /** When OpenAI returns empty content with `finish_reason: "length"`, the
+   *  request hit the token cap before any visible output was emitted —
+   *  almost always a reasoning model burning the whole budget on hidden
+   *  CoT. Log loudly so this is debuggable from the server logs. */
+  private logEmptyCompletion(
+    log: { warn: (obj: object, msg: string) => void },
+    response: OpenAI.Chat.ChatCompletion,
+    task: string,
+  ): void {
+    const choice = response.choices[0];
+    const text = choice?.message?.content?.trim() ?? "";
+    if (text) return;
+    const finishReason = choice?.finish_reason;
+    const reasoningTokens = (response.usage as any)?.completion_tokens_details?.reasoning_tokens;
+    log.warn(
+      {
+        task,
+        finishReason,
+        outputTokens: response.usage?.completion_tokens,
+        reasoningTokens,
+        isReasoningModel: this.isReasoningModel,
+      },
+      finishReason === "length"
+        ? "OpenAI returned empty content — token budget exhausted (likely reasoning tokens). Try a smaller PR, raise the budget, or use a non-reasoning model."
+        : "OpenAI returned empty content with finish_reason != length — check the prompt and model output.",
+    );
   }
 
   async review(context: PRContext, repoConfig?: RepoConfig, learnings?: Learning[]): Promise<ReviewResult> {
@@ -32,13 +99,14 @@ export class OpenAIProvider implements AIProvider {
 
     const response = await this.client.chat.completions.create({
       model: this.model,
-      [this.tokenParam]: 4096,
+      [this.tokenParam]: this.tokenBudgetFor("review"),
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
       ],
       response_format: { type: "json_object" },
-    });
+      ...this.structuredOutputExtras(),
+    } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
 
     const text = response.choices[0]?.message?.content || "";
 
@@ -46,9 +114,11 @@ export class OpenAIProvider implements AIProvider {
       {
         inputTokens: response.usage?.prompt_tokens,
         outputTokens: response.usage?.completion_tokens,
+        reasoningTokens: (response.usage as any)?.completion_tokens_details?.reasoning_tokens,
       },
       "OpenAI review response received"
     );
+    this.logEmptyCompletion(log, response, "review");
 
     return parseReviewResponse(text, context);
   }
@@ -61,13 +131,14 @@ export class OpenAIProvider implements AIProvider {
 
     const response = await this.client.chat.completions.create({
       model: this.model,
-      [this.tokenParam]: 4096,
+      [this.tokenParam]: this.tokenBudgetFor("walkthrough"),
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
       ],
       response_format: { type: "json_object" },
-    });
+      ...this.structuredOutputExtras(),
+    } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
 
     const text = response.choices[0]?.message?.content || "";
 
@@ -75,9 +146,11 @@ export class OpenAIProvider implements AIProvider {
       {
         inputTokens: response.usage?.prompt_tokens,
         outputTokens: response.usage?.completion_tokens,
+        reasoningTokens: (response.usage as any)?.completion_tokens_details?.reasoning_tokens,
       },
       "OpenAI walkthrough response received"
     );
+    this.logEmptyCompletion(log, response, "walkthrough");
 
     return parseWalkthroughResponse(text);
   }
@@ -90,7 +163,7 @@ export class OpenAIProvider implements AIProvider {
 
     const response = await this.client.chat.completions.create({
       model: this.model,
-      [this.tokenParam]: 2048,
+      [this.tokenParam]: this.tokenBudgetFor("chat"),
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -103,23 +176,27 @@ export class OpenAIProvider implements AIProvider {
       {
         inputTokens: response.usage?.prompt_tokens,
         outputTokens: response.usage?.completion_tokens,
+        reasoningTokens: (response.usage as any)?.completion_tokens_details?.reasoning_tokens,
       },
       "OpenAI chat response received"
     );
+    this.logEmptyCompletion(log, response, "chat");
 
     return text;
   }
 
   async complete(system: string, user: string, opts?: { maxTokens?: number; json?: boolean }): Promise<string> {
+    const extras = opts?.json ? this.structuredOutputExtras() : {};
     const response = await this.client.chat.completions.create({
       model: this.model,
-      [this.tokenParam]: opts?.maxTokens ?? 512,
+      [this.tokenParam]: opts?.maxTokens ?? this.tokenBudgetFor("complete"),
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
       ],
       ...(opts?.json ? { response_format: { type: "json_object" as const } } : {}),
-    });
+      ...extras,
+    } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
     return response.choices[0]?.message?.content || "";
   }
 
@@ -131,7 +208,7 @@ export class OpenAIProvider implements AIProvider {
 
     const response = await this.client.chat.completions.create({
       model: this.model,
-      [this.tokenParam]: 2048,
+      [this.tokenParam]: this.tokenBudgetFor("chat"),
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -144,9 +221,11 @@ export class OpenAIProvider implements AIProvider {
       {
         inputTokens: response.usage?.prompt_tokens,
         outputTokens: response.usage?.completion_tokens,
+        reasoningTokens: (response.usage as any)?.completion_tokens_details?.reasoning_tokens,
       },
       "OpenAI issue chat response received"
     );
+    this.logEmptyCompletion(log, response, "chatIssue");
 
     return text;
   }
