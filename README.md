@@ -236,6 +236,184 @@ Drop a `.diffsentry.yaml` in your repo root. The full template lives in
 is loaded from the PR's HEAD ref, so config changes self-test on the PR
 that introduces them.
 
+### Generating a tailored config with your coding agent
+
+A generic config is fine; a repo-grounded one is much better. Paste the
+prompt below into Claude Code (or any agent with shell + write access)
+**inside your repo**. It will explore the codebase, then write a
+`.diffsentry.yaml` whose `path_instructions`, `anti_patterns`, and
+`pre_merge_checks` are tied to paths and patterns that actually exist —
+not generic boilerplate.
+
+Safe to re-run; it overwrites `.diffsentry.yaml` at the repo root. For
+monorepos, add a line at the top of the prompt: *"This repo contains
+multiple services under `services/*` — scope every rule to one service
+path."* DiffSentry loads config from the PR head, so it's worth opening
+the first PR as a draft and checking the walkthrough looks sane before
+merging.
+
+````text
+You are generating a `.diffsentry.yaml` for THIS repository so that
+DiffSentry's PR reviews are tailored to our code, not generic.
+
+DiffSentry is an AI PR-review bot. Its per-repo config supports:
+
+  reviews:
+    profile: chill | assertive
+    request_changes_workflow: bool
+    high_level_summary: bool
+    walkthrough: { enabled, collapse, changed_files_summary,
+                   sequence_diagrams, estimate_effort,
+                   suggested_labels, suggested_reviewers, poem }
+    auto_review: { enabled, drafts, base_branches[regex],
+                   labels[!exclude], ignore_title_keywords,
+                   ignore_usernames, auto_incremental_review,
+                   auto_pause_after_reviewed_commits }
+    path_filters: [glob, !glob]            # !glob excludes
+    path_instructions:                     # per-area review focus
+      - { path: glob, instructions: text }
+    pre_merge_checks:
+      title:       { mode: off|warning|error, requirements: text }
+      description: { mode: off|warning|error, requirements: text }
+      custom_checks:
+        - { name, mode, instructions }
+    builtin_patterns: bool                 # perf/footgun heuristics
+    anti_patterns:                         # regex-based custom rules
+      - { name, pattern, flags?, severity: critical|major|minor|trivial,
+          type: issue|suggestion|nitpick|documentation|security,
+          message, advice, path? }
+    license_header:
+      required: |
+        <required header text>
+      paths: [glob]
+  chat:   { auto_reply: bool }
+  issues: { auto_summary: { enabled, on_edit }, chat: { auto_reply } }
+
+Anti-pattern regex notes:
+  - Tested against ADDED lines only, multiline=false.
+  - Use single quotes in YAML so backslashes aren't double-escaped.
+  - Keep patterns specific — avoid \w+ catchalls that fire on noise.
+
+YOUR TASK
+=========
+
+1. DETECT the stack first. Run `rg --files | head -200` and `ls -la`,
+   look at package manifests (package.json, pyproject.toml,
+   requirements*.txt, go.mod, Cargo.toml, Gemfile, pom.xml, build.gradle,
+   composer.json, mix.exs, etc.), and identify the language(s),
+   framework(s), test runner, ORM/DB layer, logger, and CI setup.
+
+2. EXPLORE to ground every rule in reality. Adapt these probes to the
+   stack you detected — skip what doesn't apply, add what does:
+
+   Layout:
+     - `rg --files | head -200`, `ls -la`
+     - Top-level dirs that hold real source vs generated/vendored output.
+
+   Entry points & HTTP surface (pick the relevant ones):
+     - Flask/Django/FastAPI/Express/Rails/Nest/etc. — find the app factory
+       and route declarations.
+     - CLI entry points, worker entry points, cron handlers.
+
+   Data layer:
+     - ORM usage (SQLAlchemy, Prisma, TypeORM, ActiveRecord, GORM, ...).
+     - Migrations directory if one exists.
+     - Raw SQL: `rg -n "execute\(\s*[\"'`]|\.query\(\s*[\"'`]"`.
+
+   Auth & security surfaces:
+     - login/session/JWT helpers, middleware, decorators.
+     - CORS / CSRF setup.
+     - Subprocess use: `rg -n "subprocess\.|os\.system\(|child_process|exec\("`.
+     - Deserialization: `rg -n "pickle\.loads?\(|yaml\.load\(|eval\("`.
+     - Templates with autoescape off / `|safe` / `dangerouslySetInnerHTML`.
+
+   Outbound calls:
+     - HTTP clients: `rg -n "requests\.|httpx\.|fetch\(|axios\.|http\.Get"`.
+     - Look for missing timeouts / AbortSignal / context.WithTimeout.
+
+   Logging & errors:
+     - Detect the structured logger (pino, structlog, zap, logrus,
+       app.logger, slf4j, ...). If one is in use, stray `print` / `console.log`
+       in production code is an anti-pattern.
+     - Empty catch / except-pass blocks.
+
+   Config:
+     - How secrets are loaded (env, vault, k8s secret). Flag literal
+       secrets / API keys / SECRET_KEY committed in source.
+     - Debug flags committed (`debug=True`, `NODE_ENV` checks, etc.).
+
+   Tests & CI:
+     - Test runner + structure.
+     - CI workflows under `.github/workflows`, `.gitlab-ci.yml`, etc.
+
+   Repo signals:
+     - `git log --pretty='%an' --since='90 days ago' | sort -u` —
+       contributor count.
+     - `git log --oneline -50` — commit style (Conventional Commits?
+       plain imperative? Sentence/lowercase?).
+     - `git log --diff-filter=A --name-only --pretty='' | head -20 |
+       xargs -I{} head -5 {}` — check if newly-added source files share
+       a license header.
+
+3. INFER from what you find. Examples of evidence-to-rule mapping:
+   - Migrations dir exists → strict `path_instructions` for it.
+   - Auth library in use → path rules emphasizing authz checks, session
+     handling, token expiry on changed auth files.
+   - ORM present → anti-pattern for string-interpolated SQL.
+   - Templates with `|safe`, `Markup()`, `dangerouslySetInnerHTML` →
+     security anti-pattern.
+   - `subprocess.*shell=True` or template-literal `exec`/`spawn` →
+     critical anti-pattern.
+   - HTTP client calls without timeouts → major anti-pattern.
+   - Committed `debug=True` / literal SECRET_KEY → critical.
+   - Structured logger in use → anti-pattern for stray `print` / `console.*`
+     in production code (scope to non-CLI paths).
+   - Forward-only migrations or hand-maintained schema → `pre_merge_checks`
+     custom check for "bump version, don't edit in place".
+   - Multiple language SDKs (e.g. anthropic + openai) → parity check.
+
+4. WRITE `.diffsentry.yaml` at the repo root. Requirements:
+   - Use real module paths from THIS repo. If a path doesn't exist,
+     omit the rule.
+   - At least 6 `path_instructions` entries covering the actual
+     top-level areas you found (routes, models, services, migrations,
+     templates, tests, scripts, config — whichever apply).
+   - At least 8 `anti_patterns`, each grounded in something real in
+     the codebase. Each MUST include `name`, `pattern`, `severity`,
+     `message`, `advice`, and `path` glob when scope-limited.
+   - Set `auto_review.ignore_usernames` to include `dependabot[bot]` and
+     `renovate[bot]` only if those bots actually open PRs (check
+     `git log --pretty='%an' | sort -u | head -50`).
+   - Set `path_filters` to exclude vendored / generated dirs you found
+     (e.g. `dist/**`, `build/**`, `**/*.min.*`, `**/*.map`, `coverage/**`,
+     `htmlcov/**`, `.venv/**`, `vendor/**`, lockfiles). Do NOT exclude
+     real source.
+   - Set `pre_merge_checks.title` and `.description` to match the
+     observed commit style.
+   - If newly-added source files share an identical license/copyright
+     header, set `license_header.required` to that exact text and
+     `paths` to where it applies. Otherwise omit the block.
+   - Default `profile: assertive` if the repo is large (>500 source
+     files OR >10 contributors in the last 90 days), else `chill`.
+   - Leave inline `#` comments above each non-obvious block explaining
+     WHY that rule exists for THIS repo (cite the file or pattern you
+     saw). Reviewers read this on PRs.
+   - VALIDATE before finishing: parse the YAML, and compile every
+     anti-pattern regex (e.g. `node -e "..."` with js-yaml + new RegExp,
+     or `python -c "..."` with PyYAML + re.compile). Fix anything that
+     doesn't load.
+
+5. AFTER WRITING, print a short summary:
+   - How many path_instructions / anti_patterns you wrote.
+   - The top 3 risk areas you identified.
+   - Anything you wanted to add but skipped because the evidence wasn't
+     strong enough (so the maintainer can decide whether to enable it
+     manually).
+
+Do not invent paths or rules you can't point to a file or grep hit for.
+A small precise config beats a big speculative one.
+````
+
 ## End-to-end test harness
 
 `tests/e2e/` is a real-PR harness. Each scenario opens a PR on a sandbox
