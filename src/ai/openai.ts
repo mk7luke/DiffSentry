@@ -8,6 +8,26 @@ export class OpenAIProvider implements AIProvider {
   private client: OpenAI;
   private model: string;
 
+  /** Lowest-to-highest reasoning effort. We want the lowest the model
+   *  accepts so reasoning tokens don't starve visible output (see bf76968).
+   *  `none` and `minimal` exist on different model families: gpt-5.0 took
+   *  `minimal`, gpt-5.5+ took `none` instead, and OpenAI may keep shifting
+   *  the alphabet — so we treat this list as a preference order rather
+   *  than a per-model hardcode. */
+  private static readonly REASONING_EFFORT_PREFERENCE = [
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+  ] as const;
+
+  /** Cached working `reasoning_effort` for this model, learned from a
+   *  rejected request. `undefined` = use the static guess; a string =
+   *  use that learned value; `null` = no value works, omit the field. */
+  private learnedReasoningEffort: string | null | undefined = undefined;
+
   constructor(apiKey: string, model: string, baseURL?: string) {
     this.client = new OpenAI({ apiKey, ...(baseURL && { baseURL }) });
     this.model = model;
@@ -56,11 +76,84 @@ export class OpenAIProvider implements AIProvider {
    *  quality but routinely starves the visible output of tokens. Push
    *  reasoning as low as the model accepts: "minimal" is gpt-5+ only,
    *  o-series tops out at "low" and rejects "minimal". Non-reasoning
-   *  models get nothing — they'd reject the field outright. */
+   *  models get nothing — they'd reject the field outright.
+   *
+   *  If a previous request was rejected because the model didn't recognize
+   *  our chosen value (e.g. gpt-5.5 wants "none", not "minimal"), use the
+   *  value we learned from that rejection instead. */
   private structuredOutputExtras(): Record<string, unknown> {
+    if (this.learnedReasoningEffort === null) return {};
+    if (this.learnedReasoningEffort !== undefined) {
+      return { reasoning_effort: this.learnedReasoningEffort };
+    }
     if (this.isGpt5OrLater) return { reasoning_effort: "minimal" };
     if (this.isOSeries) return { reasoning_effort: "low" };
     return {};
+  }
+
+  private isUnsupportedReasoningEffortError(err: unknown): boolean {
+    if (!(err instanceof OpenAI.APIError)) return false;
+    if (err.status !== 400) return false;
+    const detail = (err as { error?: { code?: string; param?: string } }).error;
+    return detail?.code === "unsupported_value" && detail?.param === "reasoning_effort";
+  }
+
+  /** OpenAI's 400 message for an unknown reasoning_effort spells out the
+   *  accepted values: `Supported values are: 'none', 'low', ..., and 'high'.`
+   *  We pull those out so we can pick the lowest-effort one that works. */
+  private parseSupportedReasoningEfforts(err: unknown): string[] {
+    const message = String(
+      (err as { error?: { message?: string }; message?: string })?.error?.message ??
+        (err as { message?: string })?.message ??
+        "",
+    );
+    const after = message.split(/Supported values are:/i)[1];
+    if (!after) return [];
+    const matches = after.match(/'([^']+)'/g) ?? [];
+    return matches.map((m) => m.slice(1, -1));
+  }
+
+  private pickLowestReasoningEffort(supported: string[]): string | null {
+    const set = new Set(supported);
+    for (const value of OpenAIProvider.REASONING_EFFORT_PREFERENCE) {
+      if (set.has(value)) return value;
+    }
+    return null;
+  }
+
+  /** Wraps a chat completion so the first request that gets rejected for
+   *  an unsupported `reasoning_effort` is retried with a value the model
+   *  actually accepts (and the choice is cached for subsequent calls). */
+  private async createWithReasoningRetry(
+    params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
+  ): Promise<OpenAI.Chat.ChatCompletion> {
+    try {
+      return await this.client.chat.completions.create(params);
+    } catch (err) {
+      if (!this.isUnsupportedReasoningEffortError(err)) throw err;
+      const supported = this.parseSupportedReasoningEfforts(err);
+      const replacement = this.pickLowestReasoningEffort(supported);
+      this.learnedReasoningEffort = replacement;
+      const retryParams = { ...(params as unknown as Record<string, unknown>) };
+      if (replacement === null) {
+        delete retryParams.reasoning_effort;
+      } else {
+        retryParams.reasoning_effort = replacement;
+      }
+      logger.warn(
+        {
+          provider: "openai",
+          model: this.model,
+          rejected: (params as unknown as Record<string, unknown>).reasoning_effort,
+          supported,
+          using: replacement,
+        },
+        "OpenAI rejected reasoning_effort; retrying with the lowest supported value",
+      );
+      return await this.client.chat.completions.create(
+        retryParams as unknown as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
+      );
+    }
   }
 
   /** When OpenAI returns empty content with `finish_reason: "length"`, the
@@ -97,7 +190,7 @@ export class OpenAIProvider implements AIProvider {
 
     log.info("Sending review request to OpenAI");
 
-    const response = await this.client.chat.completions.create({
+    const response = await this.createWithReasoningRetry({
       model: this.model,
       [this.tokenParam]: this.tokenBudgetFor("review"),
       messages: [
@@ -129,7 +222,7 @@ export class OpenAIProvider implements AIProvider {
 
     log.info("Sending walkthrough request to OpenAI");
 
-    const response = await this.client.chat.completions.create({
+    const response = await this.createWithReasoningRetry({
       model: this.model,
       [this.tokenParam]: this.tokenBudgetFor("walkthrough"),
       messages: [
@@ -187,7 +280,7 @@ export class OpenAIProvider implements AIProvider {
 
   async complete(system: string, user: string, opts?: { maxTokens?: number; json?: boolean }): Promise<string> {
     const extras = opts?.json ? this.structuredOutputExtras() : {};
-    const response = await this.client.chat.completions.create({
+    const response = await this.createWithReasoningRetry({
       model: this.model,
       [this.tokenParam]: opts?.maxTokens ?? this.tokenBudgetFor("complete"),
       messages: [
