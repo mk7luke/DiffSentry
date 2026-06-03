@@ -64,24 +64,37 @@ export function registerWebhookRoutes(router: Router, deps: WebhookRouteDeps): v
 
   // ── GET /webhooks — list + filter (event, repo) ────────────────────
   router.get("/webhooks", admin, (req, res) => {
+    const q = req.query as Record<string, unknown>;
+    const str = (k: string) => {
+      const v = q[k];
+      return typeof v === "string" && v.length > 0 ? v : undefined;
+    };
+    // Strict, non-negative decimal-integer parsing for pagination (matches the
+    // :id parser): an absent value uses the default; a malformed/negative value
+    // is a 400 rather than being silently clamped, so bad client state surfaces.
+    const count = (k: string, dflt: number): number | null => {
+      const v = q[k];
+      if (v === undefined) return dflt;
+      if (typeof v !== "string" || !/^\d+$/.test(v)) return null;
+      const n = Number(v);
+      return Number.isSafeInteger(n) ? n : null;
+    };
+    const limit = count("limit", 100);
+    const offset = count("offset", 0);
+    if (limit == null || offset == null) {
+      sendError(res, 400, "bad_request", "'limit' and 'offset' must be non-negative integers.");
+      return;
+    }
+    // A repo filter must be a full "owner/repo" slug (exactly two non-empty
+    // segments); a typo like "?repo=acme" is rejected instead of silently
+    // dropping the filter and broadening the result to every repo.
+    const repo = str("repo");
+    if (repo !== undefined && !/^[^/]+\/[^/]+$/.test(repo)) {
+      sendError(res, 400, "bad_request", "'repo' must be a full 'owner/repo' slug.");
+      return;
+    }
     try {
-      const q = req.query as Record<string, unknown>;
-      const str = (k: string) => {
-        const v = q[k];
-        return typeof v === "string" && v.length > 0 ? v : undefined;
-      };
-      const num = (k: string, dflt: number) => {
-        const v = q[k];
-        if (typeof v !== "string") return dflt;
-        const n = Number.parseInt(v, 10);
-        return Number.isFinite(n) ? n : dflt;
-      };
-      const { rows, total } = getWebhookDeliveries({
-        event: str("event"),
-        repo: str("repo"),
-        limit: num("limit", 100),
-        offset: num("offset", 0),
-      });
+      const { rows, total } = getWebhookDeliveries({ event: str("event"), repo, limit, offset });
       sendData(res, { rows, total, events: getWebhookEventTypes(), repos: getWebhookRepos() });
     } catch (err) {
       logger.error({ err }, "api /webhooks failed");

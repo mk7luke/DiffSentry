@@ -219,6 +219,16 @@ async function main() {
         adminFiltered.json.data.rows[0].event === "pull_request",
     );
 
+    // ── Strict pagination + repo-filter validation at the API boundary ──
+    const badLimit = await req("GET", "/webhooks?limit=-5", { session: adminSess });
+    ok("GET /webhooks?limit=-5 → 400", badLimit.status === 400 && badLimit.json.error.code === "bad_request");
+    const junkLimit = await req("GET", "/webhooks?limit=10abc", { session: adminSess });
+    ok("GET /webhooks?limit=10abc → 400", junkLimit.status === 400 && junkLimit.json.error.code === "bad_request");
+    const badRepo = await req("GET", "/webhooks?repo=acme", { session: adminSess });
+    ok("GET /webhooks?repo=acme (no slash) → 400", badRepo.status === 400 && badRepo.json.error.code === "bad_request");
+    const goodRepo = await req("GET", "/webhooks?repo=acme/web", { session: adminSess });
+    ok("GET /webhooks?repo=acme/web → 200", goodRepo.status === 200 && goodRepo.json.data.total === 2);
+
     const adminDetail = await req("GET", `/webhooks/${prDeliveryId}`, { session: adminSess });
     ok(
       "GET /webhooks/:id (admin) → full payload",
@@ -287,6 +297,14 @@ async function main() {
     // ── SSE delivers webhook.replayed live ─────────────────────────────
     const sseSeen = await new Promise<string>((resolve, reject) => {
       let buf = "";
+      let timeout: ReturnType<typeof setTimeout>;
+      // Clear the timeout on every completion path so a stale timer can't fire
+      // reject() after the promise already settled (which would keep the
+      // process alive ~3s and risk an unhandled rejection).
+      const finish = (fn: () => void) => {
+        clearTimeout(timeout);
+        fn();
+      };
       const r = http.request(
         {
           hostname: "127.0.0.1",
@@ -297,7 +315,7 @@ async function main() {
         },
         (res) => {
           if (res.statusCode !== 200) {
-            reject(new Error(`stream status ${res.statusCode}`));
+            finish(() => reject(new Error(`stream status ${res.statusCode}`)));
             return;
           }
           res.setEncoding("utf8");
@@ -305,7 +323,7 @@ async function main() {
             buf += chunk;
             if (buf.includes("event: webhook.replayed")) {
               r.destroy();
-              resolve(buf);
+              finish(() => resolve(buf));
             }
           });
           setTimeout(() => {
@@ -314,10 +332,10 @@ async function main() {
         },
       );
       r.on("error", (err) => {
-        if (!buf.includes("event: webhook.replayed")) reject(err);
+        if (!buf.includes("event: webhook.replayed")) finish(() => reject(err));
       });
       r.end();
-      setTimeout(() => reject(new Error("SSE timeout")), 3000);
+      timeout = setTimeout(() => finish(() => reject(new Error("SSE timeout"))), 3000);
     });
     ok("SSE stream delivered webhook.replayed live", sseSeen.includes("event: webhook.replayed"));
 
