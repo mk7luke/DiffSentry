@@ -88,15 +88,12 @@ function testFreshAndIdempotent(): void {
         assert.ok(row.applied_at, "ledger row should record applied_at");
       }
 
-      // Idempotency: run twice more, expect no change to the ledger.
+      // Idempotency: run twice more, expect no change to the ledger — including
+      // applied_at (a silent rewrite would change it).
       applyMigrations(db);
       applyMigrations(db);
-      const ledgerAfter = db.prepare("SELECT version, name FROM schema_version ORDER BY version").all();
-      assert.deepEqual(
-        ledgerAfter,
-        ledgerBefore.map((r) => ({ version: (r as { version: number }).version, name: (r as { name: string }).name })),
-        "re-running migrations must not add or change ledger rows",
-      );
+      const ledgerAfter = db.prepare("SELECT version, name, applied_at FROM schema_version ORDER BY version").all();
+      assert.deepEqual(ledgerAfter, ledgerBefore, "re-running migrations must not add or change ledger rows");
     });
     console.log("ok  fresh DB migrates to latest + idempotent re-run");
   } finally {

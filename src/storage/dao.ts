@@ -278,6 +278,9 @@ export function insertAuditLog(opts: {
   const db = openDatabase();
   if (!db) return null;
   try {
+    // JSON.stringify returns undefined for functions/symbols/undefined, so
+    // null-check before slicing rather than calling .slice on undefined.
+    const payloadJson = opts.payload === undefined ? null : JSON.stringify(opts.payload);
     const info = db.prepare(
       `INSERT INTO audit_log (ts, actor_login, actor_role, action, target_type, target_ref, payload_json, result)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -288,7 +291,7 @@ export function insertAuditLog(opts: {
       opts.action,
       opts.targetType ?? null,
       opts.targetRef ?? null,
-      opts.payload === undefined ? null : JSON.stringify(opts.payload).slice(0, 100_000),
+      payloadJson == null ? null : payloadJson.slice(0, 100_000),
       opts.result ?? null,
     );
     return Number(info.lastInsertRowid);
@@ -419,6 +422,8 @@ export function recordWebhookDelivery(opts: {
   const db = openDatabase();
   if (!db) return null;
   try {
+    // JSON.stringify can return undefined (functions/symbols/undefined) — null-check before slicing.
+    const payloadJson = opts.payload === undefined ? null : JSON.stringify(opts.payload);
     const info = db.prepare(
       `INSERT INTO webhook_deliveries (ts, event, action, owner, repo, number, delivery_id, signature_ok, payload_json, replayed_from)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -431,7 +436,7 @@ export function recordWebhookDelivery(opts: {
       opts.number ?? null,
       opts.deliveryId ?? null,
       opts.signatureOk == null ? null : opts.signatureOk ? 1 : 0,
-      opts.payload === undefined ? null : JSON.stringify(opts.payload).slice(0, 1_000_000),
+      payloadJson == null ? null : payloadJson.slice(0, 1_000_000),
       opts.replayedFrom ?? null,
     );
     return Number(info.lastInsertRowid);

@@ -12,7 +12,10 @@ tool — migrations are plain SQL strings applied in order at startup.
   left half-migrated.
 - Applied versions are tracked in the `schema_version` table, which is a
   **ledger**: one row per applied migration recording `version`, `name`, and
-  `applied_at`.
+  `applied_at`. Rows are not limited to migrations this binary knows about — a
+  database that briefly ran a newer binary keeps those future rows after a
+  rollback (they are preserved, never downgraded; see the no-downgrade note
+  below).
 - `applyMigrations(db)` runs every pending migration. It is **idempotent**:
   already-applied versions are skipped, so running it twice is a no-op.
   `openDatabase()` calls it automatically.

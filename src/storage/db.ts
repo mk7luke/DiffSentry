@@ -384,8 +384,10 @@ export function applyMigrations(db: DB): void {
     );
   }
 
+  // Plain INSERT (not INSERT OR REPLACE): the version primary key surfaces an
+  // accidental duplicate ledger write rather than silently rewriting a row.
   const insertLedger = db.prepare(
-    "INSERT OR REPLACE INTO schema_version (version, name, applied_at) VALUES (?, ?, ?)",
+    "INSERT INTO schema_version (version, name, applied_at) VALUES (?, ?, ?)",
   );
 
   for (const migration of MIGRATIONS) {
