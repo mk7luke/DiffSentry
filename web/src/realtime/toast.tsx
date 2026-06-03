@@ -71,7 +71,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         // Replace an existing toast with the same id (e.g. pending → success).
         const without = list.filter((x) => x.id !== id);
         const next = [...without, { ...t, id }];
-        return next.slice(-MAX_TOASTS);
+        const capped = next.slice(-MAX_TOASTS);
+        // Clear timers for toasts evicted by the cap so a stale setTimeout can't
+        // later fire dismiss() for a toast that's already gone. clearTimeout +
+        // Map.delete are idempotent, so StrictMode's double-invoked updater is safe.
+        if (capped.length < next.length) {
+          const retained = new Set(capped.map((x) => x.id));
+          for (const x of next) {
+            if (retained.has(x.id)) continue;
+            const timer = timers.current.get(x.id);
+            if (timer) clearTimeout(timer);
+            timers.current.delete(x.id);
+          }
+        }
+        return capped;
       });
       const ttl = t.ttl ?? 6000;
       const existing = timers.current.get(id);
