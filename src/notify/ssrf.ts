@@ -116,8 +116,12 @@ export function ipv6IsPrivate(ip: string): boolean {
   if (b.slice(0, 10).every((x) => x === 0) && b[10] === 0xff && b[11] === 0xff) return embeddedV4(12);
   // 6to4 2002::/16 → IPv4 in bytes 2-5.
   if (b[0] === 0x20 && b[1] === 0x02) return embeddedV4(2);
-  // NAT64 well-known prefix 64:ff9b::/96 → IPv4 in the last 4 bytes.
-  if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b) return embeddedV4(12);
+  // NAT64 well-known prefix 64:ff9b::/96 (bytes 0-11 fixed) → IPv4 in last 4.
+  // Require the full /96 (bytes 4-11 zero); otherwise it's not the well-known
+  // prefix and falls through to the global-unicast rule (which blocks it).
+  if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b && b.slice(4, 12).every((x) => x === 0)) {
+    return embeddedV4(12);
+  }
   // Documentation 2001:db8::/32 — never a real target.
   if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x0d && b[3] === 0xb8) return true;
   // Everything outside global unicast 2000::/3 is non-public → block. This
@@ -167,7 +171,7 @@ export async function checkWebhookUrlSafe(v: string): Promise<string | null> {
   // Lowercase, strip IPv6 brackets, and drop a single trailing dot so the FQDN
   // form ("localhost.", "127.0.0.1.") is normalized to its literal/short form
   // and can't slip past the literal-host checks below.
-  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.+$/, "");
   if (net.isIP(host) || host === "localhost") {
     return hostLiteralIsPrivate(host)
       ? "Webhook URLs may not target local or private network addresses."
