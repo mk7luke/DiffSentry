@@ -887,6 +887,21 @@ const EMPTY_WINDOW: ImpactWindow = {
   timeSavedMinutes: 0,
 };
 
+/**
+ * A fresh zero `ImpactWindow`. Never hand out a reference to the shared
+ * EMPTY_WINDOW constant — its nested `bySeverity` / `mergedBySeverity` objects
+ * would be aliased across every call, so a mutation by one caller would corrupt
+ * the template for the next. This returns a new object with copied nested
+ * objects each time.
+ */
+function emptyImpactWindow(): ImpactWindow {
+  return {
+    ...EMPTY_WINDOW,
+    bySeverity: { ...EMPTY_WINDOW.bySeverity },
+    mergedBySeverity: { ...EMPTY_WINDOW.mergedBySeverity },
+  };
+}
+
 /** A `[since, until)` window predicate over reviews, optionally scoped to a repo. */
 function impactWindowClause(
   repo: string | null,
@@ -1073,7 +1088,12 @@ function computeImpactRecurring(
   let secondHalf = 0;
   if (lowerIso && distinctFingerprints > 0) {
     const mid = new Date((Date.parse(lowerIso) + Date.parse(until)) / 2).toISOString();
-    const placeholders = groups.map(() => "?").join(", ");
+    // Derive both the placeholders and the bound values from one `fingerprints`
+    // array so they can't drift. Bind order matches the SQL placeholder order:
+    // the two `mid` CASE params in SELECT, then the `clause` window params, then
+    // the fingerprint IN(...) list.
+    const fingerprints = groups.map((g) => g.fp);
+    const placeholders = fingerprints.map(() => "?").join(", ");
     const halves = db
       .prepare(
         `SELECT SUM(CASE WHEN rv.created_at < ? THEN 1 ELSE 0 END) AS first_half,
@@ -1082,7 +1102,7 @@ function computeImpactRecurring(
          JOIN reviews rv ON rv.id = fi.review_id
          WHERE ${clause} AND fi.fingerprint IN (${placeholders})`,
       )
-      .get(mid, mid, ...params, ...groups.map((g) => g.fp)) as {
+      .get(mid, mid, ...params, ...fingerprints) as {
       first_half: number | null;
       second_half: number | null;
     };
@@ -1121,7 +1141,7 @@ export function getImpact(opts: ImpactOptions): ImpactReport {
     range: { days: opts.days, label: opts.label, since, until },
     repo,
     minutesPerFinding,
-    current: EMPTY_WINDOW,
+    current: emptyImpactWindow(),
     previous: null,
     recurring: { distinctFingerprints: 0, totalOccurrences: 0, repeatsPrevented: 0, firstHalf: 0, secondHalf: 0 },
     trend: [],
