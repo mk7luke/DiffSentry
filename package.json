@@ -15,7 +15,8 @@
     "backfill:dev": "tsx src/cli/backfill.ts",
     "smoke:dashboard": "tsx scripts/smoke-dashboard.ts",
     "smoke:api": "tsx scripts/smoke-api.ts",
-    "smoke:migrate": "tsx scripts/migrate-smoke.ts"
+    "smoke:migrate": "tsx scripts/migrate-smoke.ts",
+    "smoke:dao": "tsx scripts/smoke-dao.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

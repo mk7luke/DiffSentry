@@ -1,0 +1,87 @@
+/**
+ * Smoke-test command-center DAO helpers against a temp SQLite DB.
+ * Run: npx tsx scripts/smoke-dao.ts  (or: npm run smoke:dao)
+ *
+ * Focused on triageFinding's update semantics: a multi-field call updates the
+ * target row, an identical repeat is a no-op (returns false, triaged_at not
+ * re-stamped), a changed value updates again, and degenerate calls return false.
+ */
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+async function main(): Promise<void> {
+  const tmpDb = path.join(os.tmpdir(), `ds-dao-smoke-${process.pid}.db`);
+  process.env.DB_PATH = tmpDb;
+
+  const { openDatabase, closeDatabase } = await import("../src/storage/db.js");
+  const { triageFinding } = await import("../src/storage/dao.js");
+
+  const db = openDatabase();
+  if (!db) throw new Error("failed to open temp db");
+
+  try {
+    const reviewId = Number(
+      db
+        .prepare(`INSERT INTO reviews (owner, repo, number, sha, created_at) VALUES (?, ?, ?, ?, ?)`)
+        .run("acme", "widgets", 1, "deadbeef", "2026-01-01T00:00:00.000Z").lastInsertRowid,
+    );
+    const findingId = Number(
+      db
+        .prepare(`INSERT INTO findings (review_id, path, severity, title) VALUES (?, ?, ?, ?)`)
+        .run(reviewId, "src/x.ts", "major", "A finding").lastInsertRowid,
+    );
+
+    // Multiple supplied fields → row changes.
+    const r1 = triageFinding({ findingId, accepted: true, triagedBy: "Alice", triageNote: "looks fine" });
+    assert.equal(r1, true, "first multi-field triage should update the row");
+    const row1 = db
+      .prepare(`SELECT accepted, triaged_by, triage_note, triaged_at FROM findings WHERE id = ?`)
+      .get(findingId) as { accepted: number; triaged_by: string; triage_note: string; triaged_at: string };
+    assert.equal(row1.accepted, 1, "accepted persisted");
+    assert.equal(row1.triaged_by, "Alice", "triaged_by persisted as-is");
+    assert.equal(row1.triage_note, "looks fine", "triage_note persisted");
+    assert.ok(row1.triaged_at, "triaged_at stamped");
+    const firstStamp = row1.triaged_at;
+
+    // Identical repeat → no-op, triaged_at NOT re-stamped.
+    const r2 = triageFinding({ findingId, accepted: true, triagedBy: "Alice", triageNote: "looks fine" });
+    assert.equal(r2, false, "identical repeat should not update");
+    const row2 = db.prepare(`SELECT triaged_at FROM findings WHERE id = ?`).get(findingId) as { triaged_at: string };
+    assert.equal(row2.triaged_at, firstStamp, "triaged_at must not be re-stamped on a no-op repeat");
+
+    // A changed value → updates again.
+    const r3 = triageFinding({ findingId, accepted: false, triagedBy: "Alice", triageNote: "looks fine" });
+    assert.equal(r3, true, "a changed field should update");
+    assert.equal(
+      (db.prepare(`SELECT accepted FROM findings WHERE id = ?`).get(findingId) as { accepted: number }).accepted,
+      0,
+      "accepted flipped to 0",
+    );
+
+    // No triage field → no-op.
+    assert.equal(triageFinding({ findingId }), false, "a call with only findingId is a no-op");
+
+    // Non-existent finding → false.
+    assert.equal(triageFinding({ findingId: 9_999_999, accepted: true }), false, "missing finding returns false");
+
+    console.log("ok  triageFinding: multi-field update, idempotent repeat, change detection, no-op guards");
+  } finally {
+    closeDatabase();
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        fs.rmSync(tmpDb + suffix, { force: true });
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  console.log("\nDAO smoke test passed.");
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

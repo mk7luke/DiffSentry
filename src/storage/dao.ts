@@ -618,33 +618,44 @@ export function triageFinding(opts: {
   if (!db) return false;
   if (!ensureCommandCenterSchema(db)) return false;
   try {
-    const sets: string[] = [];
-    const setParams: unknown[] = [];
-    // Parallel "<col> IS NOT ?" predicates so the UPDATE only matches when at
-    // least one supplied field actually differs — repeat calls with identical
-    // values then leave the row (and triaged_at) untouched. `IS NOT` is the
-    // null-safe inequality SQLite needs to compare against NULL columns.
-    const diffPredicates: string[] = [];
-    const diffParams: unknown[] = [];
-    const field = (col: string, value: unknown): void => {
-      sets.push(`${col} = ?`);
-      setParams.push(value);
-      diffPredicates.push(`${col} IS NOT ?`);
-      diffParams.push(value);
-    };
-    if (opts.accepted !== undefined) field("accepted", opts.accepted == null ? null : opts.accepted ? 1 : 0);
-    if (opts.snoozedUntil !== undefined) field("snoozed_until", opts.snoozedUntil);
-    if (opts.triageNote !== undefined) field("triage_note", opts.triageNote);
-    if (opts.triagedBy !== undefined) field("triaged_by", opts.triagedBy);
+    // Each supplied triage field contributes a COMPLETE literal SQL fragment
+    // (no column name is ever interpolated from a variable) plus the value to
+    // bind. The `diff` predicate uses null-safe `IS NOT` so the UPDATE only
+    // matches when at least one supplied field actually differs — repeat calls
+    // with identical values then leave the row (and triaged_at) untouched.
+    const updates: Array<{ set: string; diff: string; value: unknown }> = [];
+    if (opts.accepted !== undefined) {
+      updates.push({
+        set: "accepted = ?",
+        diff: "accepted IS NOT ?",
+        value: opts.accepted == null ? null : opts.accepted ? 1 : 0,
+      });
+    }
+    if (opts.snoozedUntil !== undefined) {
+      updates.push({ set: "snoozed_until = ?", diff: "snoozed_until IS NOT ?", value: opts.snoozedUntil });
+    }
+    if (opts.triageNote !== undefined) {
+      updates.push({ set: "triage_note = ?", diff: "triage_note IS NOT ?", value: opts.triageNote });
+    }
+    if (opts.triagedBy !== undefined) {
+      updates.push({ set: "triaged_by = ?", diff: "triaged_by IS NOT ?", value: opts.triagedBy });
+    }
     // No actual triage field supplied — don't stamp triaged_at (or touch the
     // row at all) for a no-op call (e.g. only `findingId` was passed).
-    if (sets.length === 0) return false;
+    if (updates.length === 0) return false;
+
+    const setClauses = updates.map((u) => u.set);
+    const setValues = updates.map((u) => u.value);
+    const diffPredicates = updates.map((u) => u.diff);
+    const diffValues = updates.map((u) => u.value);
     // Stamp the time only on a row we actually update.
-    sets.push("triaged_at = ?");
-    setParams.push(new Date().toISOString());
-    const info = db
-      .prepare(`UPDATE findings SET ${sets.join(", ")} WHERE id = ? AND (${diffPredicates.join(" OR ")})`)
-      .run(...setParams, opts.findingId, ...diffParams);
+    setClauses.push("triaged_at = ?");
+    setValues.push(new Date().toISOString());
+
+    // Placeholder order is explicit: every SET value, then `id`, then every
+    // diff-predicate value. The .run() args below mirror that order exactly.
+    const sql = `UPDATE findings SET ${setClauses.join(", ")} WHERE id = ? AND (${diffPredicates.join(" OR ")})`;
+    const info = db.prepare(sql).run(...setValues, opts.findingId, ...diffValues);
     return info.changes > 0;
   } catch (err) {
     logger.debug({ err }, "dao.triageFinding failed");
