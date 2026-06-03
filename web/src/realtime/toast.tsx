@@ -88,7 +88,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       });
       const ttl = t.ttl ?? 6000;
       const existing = timers.current.get(id);
-      if (existing) clearTimeout(existing);
+      if (existing) {
+        clearTimeout(existing);
+        // Delete the entry too: a ttl:0 replacement skips the scheduling block
+        // below, so without this the map would keep a stale (cleared) handle.
+        timers.current.delete(id);
+      }
       if (ttl > 0) {
         const timer = setTimeout(() => {
           // If a later push reused this id and replaced the timer, this callback
