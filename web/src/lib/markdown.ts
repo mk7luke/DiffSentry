@@ -1,18 +1,17 @@
 import { marked } from "marked";
+import DOMPurify from "dompurify";
 
-// Mirror of src/dashboard/markdown.ts. The bot's summaries + finding bodies are
-// GitHub-flavored markdown with inline <details>/<summary>; parse to HTML so the
-// SPA matches GitHub. Not a bulletproof sanitizer — the dashboard is
-// operator-only and content is bot-authored, so we strip the obvious XSS
-// vectors and let the rest render.
+// The bot's summaries + finding bodies are GitHub-flavored markdown with inline
+// <details>/<summary>; parse to HTML so the SPA matches GitHub, then run the
+// result through DOMPurify before it reaches dangerouslySetInnerHTML.
+//
+// Unlike the legacy server-rendered dashboard (which strips a few XSS vectors
+// with regexes), DOMPurify is a maintained allowlist sanitizer: it drops
+// <script>/<iframe>/<object>, event-handler attributes, javascript:/data: URLs,
+// and other scriptable vectors the regex approach can miss, while keeping
+// normal markdown formatting (and the collapsible blocks we render).
 
 marked.setOptions({ gfm: true, breaks: false });
-
-const STRIP_SCRIPT = /<\s*script[\s\S]*?<\s*\/\s*script\s*>/gi;
-const STRIP_IFRAME = /<\s*iframe[\s\S]*?<\s*\/\s*iframe\s*>/gi;
-const STRIP_OBJECT = /<\s*(object|embed)[\s\S]*?<\s*\/\s*\1\s*>/gi;
-const STRIP_ON_HANDLER = /\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi;
-const JS_HREF = /\b(href|src)\s*=\s*("|')\s*javascript:[^"']*("|')/gi;
 
 export function renderMarkdown(input: string | null | undefined): string {
   if (!input) return "";
@@ -20,16 +19,18 @@ export function renderMarkdown(input: string | null | undefined): string {
   try {
     html = marked.parse(input, { async: false }) as string;
   } catch {
+    // Parser blew up — fall back to escaped plaintext (no HTML reaches the DOM).
     return input
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/\n/g, "<br>");
   }
-  return html
-    .replace(STRIP_SCRIPT, "")
-    .replace(STRIP_IFRAME, "")
-    .replace(STRIP_OBJECT, "")
-    .replace(STRIP_ON_HANDLER, "")
-    .replace(JS_HREF, '$1="#"');
+  return DOMPurify.sanitize(html, {
+    // <details>/<summary> + the `open` attribute power our collapsible bodies;
+    // they are HTML5-standard and on DOMPurify's default allowlist, but we name
+    // them explicitly so the intent survives any future config tightening.
+    ADD_TAGS: ["details", "summary"],
+    ADD_ATTR: ["open"],
+  });
 }
