@@ -321,7 +321,10 @@ const REQUIRED_FINDINGS_COLUMNS = ["accepted", "snoozed_until", "triaged_by", "t
 function ensureCommandCenterSchema(
   db: DB,
   requiredTables: readonly string[] = REQUIRED_V2_TABLES,
-  requiredFindingColumns: readonly string[] = REQUIRED_FINDINGS_COLUMNS,
+  // Defaults to [] so table-only callers (insertAuditLog, upsertSettingOverride,
+  // setRole, ...) don't implicitly depend on the `findings` triage columns.
+  // triageFinding passes REQUIRED_FINDINGS_COLUMNS explicitly.
+  requiredFindingColumns: readonly string[] = [],
 ): boolean {
   const depsKey = `${[...requiredTables].sort().join(",")}|${[...requiredFindingColumns].sort().join(",")}`;
   let okSet = v2SchemaOkByDb.get(db);
