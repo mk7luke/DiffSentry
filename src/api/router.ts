@@ -18,6 +18,7 @@ import {
 import { insertAuditLog, setRole } from "../storage/dao.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
+import { registerNotificationRoutes } from "./notifications.js";
 import {
   getApprovalMix,
   getAuditActions,
@@ -182,6 +183,11 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   if (deps.reviewer) {
     registerActionRoutes(router, { reviewer: deps.reviewer, requireRole, csrf });
   }
+
+  // ─── Notification settings (admin write) ───────────────────────────
+  // Channels, alert rules, test-send, and the delivery log. No reviewer
+  // dependency — always mounted. Admin-gated inside registerNotificationRoutes.
+  registerNotificationRoutes(router, { requireRole, csrf });
 
   // ─── /me ───────────────────────────────────────────────────────────
   // The role resolves from the roles table > admin env > author env > viewer

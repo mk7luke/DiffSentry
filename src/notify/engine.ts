@@ -1,0 +1,311 @@
+import { bus, type BusEnvelope } from "../realtime/bus.js";
+import { logger } from "../logger.js";
+import {
+  getAlertRules,
+  getNotificationChannel,
+  getNotificationChannels,
+  getWeeklyDigest,
+  getCostSince,
+  type AlertRuleRow,
+  type NotificationChannelRow,
+} from "../dashboard/queries.js";
+import { recordNotificationDelivery, getSettingOverride, upsertSettingOverride } from "../storage/dao.js";
+import { deliverToChannel, type ChannelMessage } from "./channels.js";
+import {
+  renderBudgetMessage,
+  renderDigestMessage,
+  renderFindingMessage,
+  renderReviewFailedMessage,
+  severityRank,
+} from "./messages.js";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Alert engine — subscribes to the in-process bus and fans matching events out
+// to the configured channels, recording every delivery. Also runs two timers:
+//   - a weekly digest (rules with event "digest")
+//   - a budget checker (emits budget.exceeded when spend crosses NOTIFY_BUDGET_USD)
+//
+// Everything is best-effort: the engine never throws into a bus handler, and it
+// degrades to a no-op when persistence is off (no rules/channels to read).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type AlertEventType = "finding" | "review_failed" | "budget" | "digest" | "any";
+
+export interface RuleCondition {
+  event: AlertEventType;
+  /** Findings only: fire only at/above this severity. Defaults to "nit" (any). */
+  minSeverity?: "critical" | "major" | "minor" | "nit";
+}
+
+/** Bus topics the engine reacts to → the rule event type they map to. */
+const TOPIC_EVENT: Partial<Record<BusEnvelope["topic"], AlertEventType>> = {
+  "finding.surfaced": "finding",
+  "review.failed": "review_failed",
+  "budget.exceeded": "budget",
+};
+
+function parseJson<T>(raw: string | null | undefined, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function parseCondition(row: AlertRuleRow): RuleCondition {
+  const c = parseJson<Partial<RuleCondition>>(row.condition_json, {});
+  const event: AlertEventType =
+    c.event === "review_failed" || c.event === "budget" || c.event === "digest" || c.event === "any"
+      ? c.event
+      : "finding";
+  return { event, minSeverity: c.minSeverity };
+}
+
+function channelConfig(row: NotificationChannelRow): Record<string, unknown> {
+  return parseJson<Record<string, unknown>>(row.config_json, {});
+}
+
+/** Does an event for (owner/repo) fall within a rule's scope? A null/empty/
+ *  "global" scope matches everything; otherwise it must equal "owner/repo". */
+function scopeMatches(scope: string | null, owner?: string, repo?: string): boolean {
+  const s = (scope ?? "").trim();
+  if (s === "" || s === "global") return true;
+  if (!owner || !repo) return false;
+  return s === `${owner}/${repo}`;
+}
+
+export interface DispatchMeta {
+  trigger: string;
+  target: string;
+  ruleId?: number | null;
+  ruleName?: string | null;
+}
+
+/**
+ * Deliver one message to one channel, record the delivery, and publish a
+ * notification.delivered bus event. Returns the delivery result.
+ */
+export async function dispatchToChannel(
+  channel: NotificationChannelRow,
+  msg: ChannelMessage,
+  meta: DispatchMeta,
+): Promise<{ ok: boolean; detail: string }> {
+  const result = await deliverToChannel({ type: channel.type, config: channelConfig(channel) }, msg);
+  recordNotificationDelivery({
+    channelId: channel.id,
+    channelType: channel.type,
+    channelName: channel.name,
+    ruleId: meta.ruleId ?? null,
+    ruleName: meta.ruleName ?? null,
+    trigger: meta.trigger,
+    target: meta.target,
+    title: msg.title,
+    status: result.ok ? "ok" : "error",
+    detail: result.detail,
+  });
+  bus.publish("notification.delivered", {
+    channelId: channel.id,
+    channelType: channel.type,
+    channelName: channel.name,
+    ruleName: meta.ruleName ?? null,
+    trigger: meta.trigger,
+    target: meta.target,
+    status: result.ok ? "ok" : "error",
+    detail: result.detail,
+  });
+  return result;
+}
+
+/** Send a test message to one channel by id. Returns the result (or a reason). */
+export async function sendTest(channelId: number, actorLogin?: string | null): Promise<{ ok: boolean; detail: string }> {
+  const channel = getNotificationChannel(channelId);
+  if (!channel) return { ok: false, detail: "channel not found" };
+  const msg: ChannelMessage = {
+    title: "DiffSentry test notification",
+    text: `This is a test from DiffSentry${actorLogin ? `, sent by @${actorLogin}` : ""}. If you can see this, the channel is wired up correctly.`,
+    severity: "info",
+    fields: [{ label: "Channel", value: channel.name ?? channel.type }],
+  };
+  return dispatchToChannel(channel, msg, { trigger: "test", target: "—" });
+}
+
+function dashboardOrigin(): string | undefined {
+  const raw = (process.env.DASHBOARD_URL ?? "").trim();
+  if (!raw) return undefined;
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+/** ISO-week key "YYYY-Www" used to dedupe the weekly digest across restarts. */
+function isoWeekKey(d: Date): string {
+  // Copy to a UTC date at the week's Thursday (ISO week rule).
+  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((date.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+class NotificationEngine {
+  private unsub: (() => void) | null = null;
+  private timers: NodeJS.Timeout[] = [];
+  /** Month keys ("YYYY-MM") already budget-alerted this process, to avoid spam. */
+  private budgetAlerted = new Set<string>();
+
+  start(): void {
+    if (this.unsub) return; // already started
+    this.unsub = bus.subscribe((env) => {
+      const eventType = TOPIC_EVENT[env.topic];
+      if (!eventType) return;
+      void this.onEvent(eventType, env);
+    });
+    // Hourly tick drives the (time-gated) weekly digest + the budget checker.
+    const tick = setInterval(() => void this.tick(), 60 * 60 * 1000);
+    if (typeof tick.unref === "function") tick.unref();
+    this.timers.push(tick);
+    logger.info("Notification engine started (bus subscriber + hourly digest/budget tick)");
+  }
+
+  stop(): void {
+    this.unsub?.();
+    this.unsub = null;
+    for (const t of this.timers) clearInterval(t);
+    this.timers = [];
+  }
+
+  private async onEvent(eventType: AlertEventType, env: BusEnvelope): Promise<void> {
+    try {
+      const payload = env.payload as unknown as Record<string, unknown>;
+      const owner = typeof payload.owner === "string" ? payload.owner : undefined;
+      const repo = typeof payload.repo === "string" ? payload.repo : undefined;
+      const rules = getAlertRules().filter((r) => r.enabled === 1);
+      if (rules.length === 0) return;
+      const channels = new Map(getNotificationChannels().map((c) => [c.id, c]));
+
+      const msg = this.renderForEvent(eventType, env);
+      if (!msg) return;
+      const target =
+        owner && repo
+          ? `${owner}/${repo}${typeof payload.number === "number" ? `#${payload.number}` : ""}`
+          : typeof payload.scope === "string"
+            ? payload.scope
+            : "—";
+
+      for (const rule of rules) {
+        const cond = parseCondition(rule);
+        if (cond.event !== eventType && cond.event !== "any") continue;
+        if (!scopeMatches(rule.scope, owner, repo)) continue;
+        // Severity floor for finding events.
+        if (eventType === "finding") {
+          const floor = cond.minSeverity ?? "nit";
+          const worst = typeof payload.worst === "string" ? payload.worst : null;
+          if (severityRank(worst) < severityRank(floor)) continue;
+        }
+        if (rule.channel_id == null) continue;
+        const channel = channels.get(rule.channel_id);
+        if (!channel || channel.enabled !== 1) continue;
+        await dispatchToChannel(channel, msg, {
+          trigger: eventType,
+          target,
+          ruleId: rule.id,
+          ruleName: rule.name,
+        });
+      }
+    } catch (err) {
+      logger.debug({ err, eventType }, "notification engine: onEvent failed");
+    }
+  }
+
+  private renderForEvent(eventType: AlertEventType, env: BusEnvelope): ChannelMessage | null {
+    switch (eventType) {
+      case "finding":
+        return renderFindingMessage(env.payload as never);
+      case "review_failed":
+        return renderReviewFailedMessage(env.payload as never);
+      case "budget":
+        return renderBudgetMessage(env.payload as never);
+      default:
+        return null;
+    }
+  }
+
+  private async tick(): Promise<void> {
+    try {
+      this.checkBudget();
+      await this.maybeSendDigest();
+    } catch (err) {
+      logger.debug({ err }, "notification engine: tick failed");
+    }
+  }
+
+  /** Compare 30-day spend against the global budget; emit budget.exceeded once
+   *  per calendar month when it is crossed. The bus event drives dispatch. */
+  private checkBudget(): void {
+    const limitRaw = Number.parseFloat(process.env.NOTIFY_BUDGET_USD ?? "");
+    if (!Number.isFinite(limitRaw) || limitRaw <= 0) return;
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const spent = getCostSince(since);
+    if (spent <= limitRaw) return;
+    const now = new Date();
+    const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+    if (this.budgetAlerted.has(monthKey)) return;
+    this.budgetAlerted.add(monthKey);
+    bus.publish("budget.exceeded", { scope: "global", window: "30d", spentUsd: spent, limitUsd: limitRaw });
+  }
+
+  /** Send the weekly digest if it's the configured weekday+hour (UTC) and this
+   *  ISO week hasn't been sent yet (persisted so restarts don't double-send). */
+  private async maybeSendDigest(): Promise<void> {
+    if (process.env.NOTIFY_DIGEST_DISABLED === "1") return;
+    const day = clampInt(process.env.NOTIFY_DIGEST_DAY, 1, 0, 6); // 0=Sun..6=Sat, default Mon
+    const hour = clampInt(process.env.NOTIFY_DIGEST_HOUR, 9, 0, 23);
+    const now = new Date();
+    if (now.getUTCDay() !== day || now.getUTCHours() !== hour) return;
+
+    const weekKey = isoWeekKey(now);
+    const lastSent = getSettingOverride<string>("global", "digest.lastSentWeek");
+    if (lastSent === weekKey) return;
+
+    const digestRules = getAlertRules().filter((r) => r.enabled === 1 && parseCondition(r).event === "digest");
+    if (digestRules.length === 0) {
+      // Still mark the week so we don't re-evaluate every hour today.
+      upsertSettingOverride({ scope: "global", key: "digest.lastSentWeek", value: weekKey, updatedBy: "system" });
+      return;
+    }
+    const digest = getWeeklyDigest(7);
+    const msg = renderDigestMessage(digest, dashboardOrigin());
+    const channels = new Map(getNotificationChannels().map((c) => [c.id, c]));
+    for (const rule of digestRules) {
+      if (rule.channel_id == null) continue;
+      const channel = channels.get(rule.channel_id);
+      if (!channel || channel.enabled !== 1) continue;
+      await dispatchToChannel(channel, msg, {
+        trigger: "digest",
+        target: rule.scope ?? "global",
+        ruleId: rule.id,
+        ruleName: rule.name,
+      });
+    }
+    upsertSettingOverride({ scope: "global", key: "digest.lastSentWeek", value: weekKey, updatedBy: "system" });
+    logger.info({ weekKey, rules: digestRules.length }, "Weekly digest sent");
+  }
+}
+
+function clampInt(raw: string | undefined, dflt: number, min: number, max: number): number {
+  const n = Number.parseInt(raw ?? "", 10);
+  if (!Number.isFinite(n)) return dflt;
+  return Math.max(min, Math.min(max, n));
+}
+
+/** Process-wide singleton. */
+export const notificationEngine = new NotificationEngine();
+
+/** Start the alert engine (idempotent). Call once at boot. */
+export function startNotifications(): void {
+  notificationEngine.start();
+}

@@ -7,6 +7,7 @@ import { FindingsPage } from "./pages/Findings";
 import { PatternsPage } from "./pages/Patterns";
 import { SettingsPage } from "./pages/Settings";
 import { AuditPage } from "./pages/Audit";
+import { NotificationsPage } from "./pages/Notifications";
 import { NotFoundState } from "./components/states";
 
 function NotFoundPage() {
@@ -32,6 +33,7 @@ export const router = createBrowserRouter([
       { path: "/findings", element: <FindingsPage /> },
       { path: "/patterns", element: <PatternsPage /> },
       { path: "/audit", element: <AuditPage /> },
+      { path: "/notifications", element: <NotificationsPage /> },
       { path: "/settings", element: <SettingsPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],

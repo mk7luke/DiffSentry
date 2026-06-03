@@ -751,6 +751,228 @@ export function getRole(login: string | null | undefined): Role | undefined {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Notifications — channel + alert-rule config and the delivery log. Channels
+// and rules live in the v2 schema (notification_channels / alert_rules);
+// deliveries in the v3 notification_deliveries table. All best-effort no-ops
+// when persistence is disabled or the table is missing, matching every other
+// helper here. Reads live in src/dashboard/queries.ts.
+// ---------------------------------------------------------------------------
+
+/** Insert a notification channel. `config` is JSON-serialized (it holds the
+ *  webhook URL / SMTP recipient / etc.). Returns the rowid, or null. */
+export function insertNotificationChannel(opts: {
+  type: string;
+  name?: string | null;
+  config: unknown;
+  enabled?: boolean;
+  createdBy?: string | null;
+}): number | null {
+  const db = openDatabase();
+  if (!db) return null;
+  if (!ensureCommandCenterSchema(db, ["notification_channels"])) return null;
+  try {
+    const configJson = safeJsonStringify(opts.config) ?? "{}";
+    const info = db.prepare(
+      `INSERT INTO notification_channels (type, name, config_json, enabled, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      opts.type,
+      opts.name ?? null,
+      configJson,
+      opts.enabled === false ? 0 : 1,
+      opts.createdBy ?? null,
+      new Date().toISOString(),
+    );
+    return Number(info.lastInsertRowid);
+  } catch (err) {
+    logger.debug({ err }, "dao.insertNotificationChannel failed");
+    return null;
+  }
+}
+
+/** Update a channel's name / config / enabled flag. Only provided fields are
+ *  written. Returns true when a row changed. */
+export function updateNotificationChannel(opts: {
+  id: number;
+  name?: string | null;
+  config?: unknown;
+  enabled?: boolean;
+}): boolean {
+  const db = openDatabase();
+  if (!db) return false;
+  if (!ensureCommandCenterSchema(db, ["notification_channels"])) return false;
+  try {
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    if (opts.name !== undefined) {
+      sets.push("name = ?");
+      values.push(opts.name);
+    }
+    if (opts.config !== undefined) {
+      sets.push("config_json = ?");
+      values.push(safeJsonStringify(opts.config) ?? "{}");
+    }
+    if (opts.enabled !== undefined) {
+      sets.push("enabled = ?");
+      values.push(opts.enabled ? 1 : 0);
+    }
+    if (sets.length === 0) return false;
+    const info = db.prepare(`UPDATE notification_channels SET ${sets.join(", ")} WHERE id = ?`).run(...values, opts.id);
+    return info.changes > 0;
+  } catch (err) {
+    logger.debug({ err }, "dao.updateNotificationChannel failed");
+    return false;
+  }
+}
+
+/** Delete a channel. Its rules keep working but their channel_id is set NULL by
+ *  the FK (ON DELETE SET NULL), so they simply stop delivering until re-pointed. */
+export function deleteNotificationChannel(id: number): boolean {
+  const db = openDatabase();
+  if (!db) return false;
+  if (!ensureCommandCenterSchema(db, ["notification_channels"])) return false;
+  try {
+    const info = db.prepare(`DELETE FROM notification_channels WHERE id = ?`).run(id);
+    return info.changes > 0;
+  } catch (err) {
+    logger.debug({ err }, "dao.deleteNotificationChannel failed");
+    return false;
+  }
+}
+
+/** Insert an alert rule. `condition` is JSON-serialized. Returns the rowid. */
+export function insertAlertRule(opts: {
+  name?: string | null;
+  scope?: string | null;
+  condition: unknown;
+  channelId?: number | null;
+  enabled?: boolean;
+  createdBy?: string | null;
+}): number | null {
+  const db = openDatabase();
+  if (!db) return null;
+  if (!ensureCommandCenterSchema(db, ["alert_rules"])) return null;
+  try {
+    const info = db.prepare(
+      `INSERT INTO alert_rules (name, scope, condition_json, channel_id, enabled, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      opts.name ?? null,
+      opts.scope ?? null,
+      safeJsonStringify(opts.condition) ?? "{}",
+      opts.channelId ?? null,
+      opts.enabled === false ? 0 : 1,
+      opts.createdBy ?? null,
+      new Date().toISOString(),
+    );
+    return Number(info.lastInsertRowid);
+  } catch (err) {
+    logger.debug({ err }, "dao.insertAlertRule failed");
+    return null;
+  }
+}
+
+/** Update an alert rule. Only provided fields are written. */
+export function updateAlertRule(opts: {
+  id: number;
+  name?: string | null;
+  scope?: string | null;
+  condition?: unknown;
+  channelId?: number | null;
+  enabled?: boolean;
+}): boolean {
+  const db = openDatabase();
+  if (!db) return false;
+  if (!ensureCommandCenterSchema(db, ["alert_rules"])) return false;
+  try {
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    if (opts.name !== undefined) {
+      sets.push("name = ?");
+      values.push(opts.name);
+    }
+    if (opts.scope !== undefined) {
+      sets.push("scope = ?");
+      values.push(opts.scope);
+    }
+    if (opts.condition !== undefined) {
+      sets.push("condition_json = ?");
+      values.push(safeJsonStringify(opts.condition) ?? "{}");
+    }
+    if (opts.channelId !== undefined) {
+      sets.push("channel_id = ?");
+      values.push(opts.channelId);
+    }
+    if (opts.enabled !== undefined) {
+      sets.push("enabled = ?");
+      values.push(opts.enabled ? 1 : 0);
+    }
+    if (sets.length === 0) return false;
+    const info = db.prepare(`UPDATE alert_rules SET ${sets.join(", ")} WHERE id = ?`).run(...values, opts.id);
+    return info.changes > 0;
+  } catch (err) {
+    logger.debug({ err }, "dao.updateAlertRule failed");
+    return false;
+  }
+}
+
+/** Delete an alert rule. */
+export function deleteAlertRule(id: number): boolean {
+  const db = openDatabase();
+  if (!db) return false;
+  if (!ensureCommandCenterSchema(db, ["alert_rules"])) return false;
+  try {
+    const info = db.prepare(`DELETE FROM alert_rules WHERE id = ?`).run(id);
+    return info.changes > 0;
+  } catch (err) {
+    logger.debug({ err }, "dao.deleteAlertRule failed");
+    return false;
+  }
+}
+
+/** Append a notification-delivery row (the alert engine, test-send, and digest
+ *  all call this). Returns the rowid, or null. */
+export function recordNotificationDelivery(opts: {
+  channelId?: number | null;
+  channelType?: string | null;
+  channelName?: string | null;
+  ruleId?: number | null;
+  ruleName?: string | null;
+  trigger: string;
+  target?: string | null;
+  title?: string | null;
+  status: "ok" | "error";
+  detail?: string | null;
+}): number | null {
+  const db = openDatabase();
+  if (!db) return null;
+  if (!ensureCommandCenterSchema(db, ["notification_deliveries"])) return null;
+  try {
+    const info = db.prepare(
+      `INSERT INTO notification_deliveries
+         (ts, channel_id, channel_type, channel_name, rule_id, rule_name, trigger, target, title, status, detail)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      new Date().toISOString(),
+      opts.channelId ?? null,
+      opts.channelType ?? null,
+      opts.channelName ?? null,
+      opts.ruleId ?? null,
+      opts.ruleName ?? null,
+      opts.trigger,
+      opts.target ?? null,
+      opts.title != null ? opts.title.slice(0, 2_000) : null,
+      opts.status,
+      opts.detail != null ? opts.detail.slice(0, 2_000) : null,
+    );
+    return Number(info.lastInsertRowid);
+  } catch (err) {
+    logger.debug({ err }, "dao.recordNotificationDelivery failed");
+    return null;
+  }
+}
+
 /** Bulk insert pattern hits — every pattern-checks / safety-scanner finding. */
 export function recordPatternHits(opts: {
   owner: string;

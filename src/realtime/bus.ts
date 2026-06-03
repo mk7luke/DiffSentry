@@ -40,12 +40,70 @@ export interface ActionPayload {
   detail?: string;
 }
 
+/** A review produced findings — emitted once per completed review (after the
+ *  findings are persisted), carrying a per-severity breakdown so the alert
+ *  engine can match rules like "critical finding in repo X". */
+export interface FindingSurfacedPayload {
+  owner: string;
+  repo: string;
+  number: number;
+  /** Total findings across this review. */
+  total: number;
+  /** Count by severity bucket (0 when absent). */
+  critical: number;
+  major: number;
+  minor: number;
+  nit: number;
+  /** Highest severity present, or null when none. */
+  worst: "critical" | "major" | "minor" | "nit" | null;
+  /** Title of a representative (highest-severity) finding, for the message. */
+  sample?: string | null;
+}
+
+/** Spend over a window crossed its configured budget. Emitted by the budget
+ *  checker (notify/engine). */
+export interface BudgetExceededPayload {
+  /** 'global' or 'owner/repo'. */
+  scope: string;
+  /** Spend window label, e.g. "30d" or "2026-06". */
+  window: string;
+  spentUsd: number;
+  limitUsd: number;
+}
+
+/** A notification was dispatched (or failed) to a channel. Emitted by the alert
+ *  engine so the Notifications screen's "recent deliveries" updates live. */
+export interface NotificationDeliveredPayload {
+  channelId: number | null;
+  channelType: string | null;
+  channelName: string | null;
+  ruleName: string | null;
+  trigger: string;
+  target: string;
+  status: "ok" | "error";
+  detail?: string;
+}
+
+/** Command-center configuration changed (channel/rule created, edited, removed).
+ *  Emitted by the admin write endpoints so other connected dashboards refresh. */
+export interface ConfigChangedPayload {
+  /** What kind of config changed, e.g. "channel" | "rule". */
+  kind: string;
+  /** The mutation, e.g. "create" | "update" | "delete". */
+  op: string;
+  actor: string | null;
+}
+
 /** Topic → payload map. Add new topics here so publish/subscribe stay typed. */
 export interface BusEventMap {
   "review.started": ReviewLifecyclePayload;
   "review.finished": ReviewLifecyclePayload;
   "review.failed": ReviewLifecyclePayload;
   "action.performed": ActionPayload;
+  "finding.surfaced": FindingSurfacedPayload;
+  "budget.exceeded": BudgetExceededPayload;
+  "notification.delivered": NotificationDeliveredPayload;
+  "config.changed": ConfigChangedPayload;
 }
 
 export type BusTopic = keyof BusEventMap;

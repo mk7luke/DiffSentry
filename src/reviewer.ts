@@ -961,6 +961,27 @@ export class Reviewer {
         });
       }
 
+      // Surface a severity breakdown on the bus so the alert engine can match
+      // rules like "critical finding in repo X". Best-effort: a publish failure
+      // (or no subscribers) never affects review output. Emitted only when the
+      // review actually produced findings.
+      try {
+        const sev = (s: string) =>
+          reviewResult.comments.filter((c) => (c.severity ?? "").toLowerCase() === s).length;
+        const counts = { critical: sev("critical"), major: sev("major"), minor: sev("minor"), nit: sev("nit") };
+        const total = reviewResult.comments.length;
+        if (total > 0) {
+          const worst: "critical" | "major" | "minor" | "nit" | null =
+            counts.critical > 0 ? "critical" : counts.major > 0 ? "major" : counts.minor > 0 ? "minor" : counts.nit > 0 ? "nit" : null;
+          const sample = worst
+            ? reviewResult.comments.find((c) => (c.severity ?? "").toLowerCase() === worst)?.title ?? null
+            : null;
+          bus.publish("finding.surfaced", { owner, repo, number: pullNumber, total, ...counts, worst, sample });
+        }
+      } catch (err) {
+        log.debug({ err }, "Failed to publish finding.surfaced");
+      }
+
       // Submit the code review
       log.info(
         { commentCount: reviewResult.comments.length, approval: reviewResult.approval },

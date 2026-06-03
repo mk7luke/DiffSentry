@@ -7,6 +7,7 @@ import type {
   FindingsResponse,
   HealthResponse,
   MeResponse,
+  NotificationsResponse,
   PatternsResponse,
   PRDetailResponse,
   RepoDetailResponse,
@@ -112,6 +113,81 @@ export function useAudit(query: AuditQuery, enabled: boolean) {
     enabled,
     placeholderData: (prev) => prev,
   });
+}
+
+// ─── Notifications ──────────────────────────────────────────────────
+
+const NOTIF_KEY = ["notifications"];
+
+export function useNotifications(enabled: boolean) {
+  return useQuery({
+    queryKey: NOTIF_KEY,
+    queryFn: () => apiGet<NotificationsResponse>("/notifications"),
+    enabled,
+    // Deliveries trickle in from background events; refresh periodically while open.
+    refetchInterval: 20_000,
+  });
+}
+
+/** Generic notification mutation: invalidates the notifications query on success. */
+function useNotifMutation<TVars>(fn: (vars: TVars) => Promise<unknown>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: NOTIF_KEY });
+    },
+  });
+}
+
+export interface ChannelInput {
+  type: string;
+  name?: string | null;
+  config: Record<string, unknown>;
+  enabled?: boolean;
+}
+
+export function useCreateChannel() {
+  return useNotifMutation((vars: ChannelInput) => apiSend("/notifications/channels", { body: vars }));
+}
+
+export function useUpdateChannel() {
+  return useNotifMutation((vars: { id: number; patch: Partial<ChannelInput> }) =>
+    apiSend(`/notifications/channels/${vars.id}`, { method: "PUT", body: vars.patch }),
+  );
+}
+
+export function useDeleteChannel() {
+  return useNotifMutation((id: number) => apiSend(`/notifications/channels/${id}`, { method: "DELETE" }));
+}
+
+export function useTestChannel() {
+  // Test does not change config, so no invalidation needed; caller reads result.
+  return useMutation({
+    mutationFn: (id: number) => apiSend<{ id: number; ok: boolean; detail: string }>(`/notifications/channels/${id}/test`),
+  });
+}
+
+export interface RuleInput {
+  name?: string | null;
+  scope?: string;
+  condition: { event: string; minSeverity?: string };
+  channelId?: number | null;
+  enabled?: boolean;
+}
+
+export function useCreateRule() {
+  return useNotifMutation((vars: RuleInput) => apiSend("/notifications/rules", { body: vars }));
+}
+
+export function useUpdateRule() {
+  return useNotifMutation((vars: { id: number; patch: Partial<RuleInput> }) =>
+    apiSend(`/notifications/rules/${vars.id}`, { method: "PUT", body: vars.patch }),
+  );
+}
+
+export function useDeleteRule() {
+  return useNotifMutation((id: number) => apiSend(`/notifications/rules/${id}`, { method: "DELETE" }));
 }
 
 /** Admin: grant or clear a per-login role override. `role: null` clears it. */

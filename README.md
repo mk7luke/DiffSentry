@@ -538,6 +538,16 @@ GitHub webhook
 | `DASHBOARD_AUTHOR_LOGINS` | No | | Comma-separated logins granted the `author` role. |
 | `DASHBOARD_SESSION_SECRET` | No | `GITHUB_WEBHOOK_SECRET` | HMAC key for the dashboard session + CSRF cookies. |
 | `DASHBOARD_SSE_HEARTBEAT_MS` | No | `25000` | Heartbeat interval (ms, min 1000) for the `/api/v1/stream` SSE feed. |
+| `NOTIFY_SMTP_HOST` | If email channel | | SMTP server host for the email notification channel. Email channels are disabled until this and `NOTIFY_SMTP_FROM` are set. |
+| `NOTIFY_SMTP_PORT` | No | `587` | SMTP port. `465` implies implicit TLS; `587`/`25` use STARTTLS when offered. |
+| `NOTIFY_SMTP_FROM` | If email channel | | "From" address for notification emails. |
+| `NOTIFY_SMTP_USER` | No | | SMTP username (AUTH LOGIN/PLAIN). Omit for unauthenticated relays. |
+| `NOTIFY_SMTP_PASS` | No | | SMTP password. |
+| `NOTIFY_SMTP_SECURE` | No | `false` | Force implicit TLS from the first byte (auto-on when port is 465). |
+| `NOTIFY_BUDGET_USD` | No | | When set, the alert engine emits a `budget.exceeded` event once per month if 30-day AI spend (from `cost_events`) crosses this dollar amount. |
+| `NOTIFY_DIGEST_DAY` | No | `1` | UTC weekday (0=Sun…6=Sat) the weekly digest is sent. |
+| `NOTIFY_DIGEST_HOUR` | No | `9` | UTC hour (0–23) the weekly digest is sent. |
+| `NOTIFY_DIGEST_DISABLED` | No | | Set to `1` to disable the scheduled weekly digest entirely. |
 
 \* One of `GITHUB_PRIVATE_KEY_PATH` or `GITHUB_PRIVATE_KEY` is required.
 
@@ -757,9 +767,31 @@ double-submit token as an `X-CSRF-Token` header.
 | Manage config | — | — | ✅ |
 | Manage role overrides | — | — | ✅ |
 | View audit log | — | — | ✅ |
+| Manage notifications | — | — | ✅ |
 
 When OAuth is disabled (open/local mode) there is no session to gate on, so the
 local operator is treated as `admin`.
+
+**Notifications** (admin) push DiffSentry signal off the dashboard. Configure
+delivery **channels** and **alert rules** on the Notifications screen:
+
+- **Channels** — Slack incoming webhook, Discord webhook, a generic JSON webhook,
+  or email (SMTP via the `NOTIFY_SMTP_*` env vars). Secrets are masked after save.
+- **Rules** — route an event to a channel, optionally scoped to one `owner/repo`.
+  Events: `finding` (with a minimum-severity floor — e.g. "critical finding in
+  repo X"), `review_failed`, `budget` (AI spend over `NOTIFY_BUDGET_USD`), and
+  `digest`. The alert engine subscribes to the in-process bus, so a matching
+  event delivers a real message immediately.
+- **Weekly digest** — a `digest` rule sends a per-channel ROI rollup (reviews,
+  findings by severity, top repos) once a week (`NOTIFY_DIGEST_DAY` /
+  `NOTIFY_DIGEST_HOUR`, UTC; persisted so restarts don't double-send).
+- **Send test** — every channel has a one-click test send; **recent deliveries**
+  (rule-, digest-, and test-driven) are listed with status + detail.
+
+Each write follows the command-center contract (`requireRole('admin')` + CSRF +
+`audit_log` + a `config.changed` SSE event). Endpoints live under
+`/api/v1/notifications` (`GET` everything; `POST`/`PUT`/`DELETE` for channels and
+rules; `POST .../channels/:id/test`). Verified by `npm run smoke:notifications`.
 
 **Local development**
 
