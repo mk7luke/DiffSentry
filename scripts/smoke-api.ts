@@ -194,9 +194,27 @@ async function main() {
       recurring.status === 200 && !!fp2group && fp2group.occurrences === 2 && fp2group.repos === 2 && fp2group.prs === 2,
     );
 
+    // Filtered recurring query — proves buildFindingsWhere params bind in the
+    // right placeholder order alongside the SELECT's `now` and HAVING/LIMIT.
+    const recurringMajor = await get(`/api/v1/findings/recurring?severity=major`);
+    ok(
+      "recurring?severity=major → fp2 only (major class)",
+      recurringMajor.status === 200 &&
+        recurringMajor.json.data.rows.some((g: any) => g.fingerprint === "fp2" && g.severity === "major") &&
+        recurringMajor.json.data.rows.every((g: any) => g.severity === "major"),
+    );
+    const recurringCritical = await get(`/api/v1/findings/recurring?severity=critical`);
+    ok(
+      "recurring?severity=critical → excludes the major fp2 class",
+      recurringCritical.status === 200 && !recurringCritical.json.data.rows.some((g: any) => g.fingerprint === "fp2"),
+    );
+
     // ── Bulk triage a whole fingerprint class ─────────────────────────
     const bulk = await post(`/api/v1/findings/triage`, { fingerprint: "fp2", state: "accepted", note: "known + acceptable" });
-    ok("bulk triage by fingerprint → 2 changed", bulk.status === 200 && bulk.json.data.changed === 2 && bulk.json.data.requested === 2);
+    ok(
+      "bulk triage by fingerprint → 2 matched/changed",
+      bulk.status === 200 && bulk.json.data.changed === 2 && bulk.json.data.requested === 2 && bulk.json.data.matched === 2,
+    );
 
     const recurringAfter = await get(`/api/v1/findings/recurring`);
     const fp2after = recurringAfter.json.data.rows.find((g: any) => g.fingerprint === "fp2");
@@ -204,6 +222,16 @@ async function main() {
 
     const bulkEmpty = await post(`/api/v1/findings/triage`, { state: "accepted" });
     ok("bulk triage with no targets → 400", bulkEmpty.status === 400 && bulkEmpty.json.error.code === "bad_request");
+
+    const bulkMalformed = await post(`/api/v1/findings/triage`, { ids: [f1Id, "abc", -3], state: "accepted" });
+    ok("bulk triage malformed ids → 400 (not silently dropped)", bulkMalformed.status === 400 && bulkMalformed.json.error.code === "bad_request");
+
+    const bulkMissing = await post(`/api/v1/findings/triage`, { ids: [987654, 987655], state: "accepted" });
+    ok("bulk triage non-existent ids → 404", bulkMissing.status === 404 && bulkMissing.json.error.code === "not_found");
+
+    // De-dup: a repeated id is counted once (matched/requested both 1).
+    const bulkDedup = await post(`/api/v1/findings/triage`, { ids: [f1Id, f1Id], state: "dismissed" });
+    ok("bulk triage dedups repeated ids → matched 1", bulkDedup.status === 200 && bulkDedup.json.data.matched === 1 && bulkDedup.json.data.requested === 1);
 
     // ── Triage shows in the audit log ─────────────────────────────────
     const audit = await get(`/api/v1/audit`);

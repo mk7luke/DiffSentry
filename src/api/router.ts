@@ -419,12 +419,23 @@ export function createApiRouter(deps: ApiDeps): express.Router {
       sendError(res, 400, "bad_request", "Body needs state ('accepted'|'dismissed'|'snoozed') and, for snoozed, a future 'until' date.");
       return;
     }
-    // Resolve the target id set: explicit ids, or every finding in a fingerprint class.
-    let ids: number[] = [];
+    // Resolve the target id set: an explicit id list, or every finding in a
+    // fingerprint class. An explicit list must be all positive integers — a
+    // malformed entry is rejected (400) rather than silently dropped, and the
+    // list is de-duplicated so a repeated id isn't counted twice.
+    let ids: number[];
     if (Array.isArray(body.ids)) {
-      ids = body.ids.map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0);
+      const parsed = body.ids.map((v) => (typeof v === "number" ? v : Number(v)));
+      if (parsed.some((n) => !Number.isInteger(n) || n <= 0)) {
+        sendError(res, 400, "bad_request", "'ids' must contain only positive integers.");
+        return;
+      }
+      ids = [...new Set(parsed)];
     } else if (typeof body.fingerprint === "string" && body.fingerprint.length > 0) {
       ids = getFindingIdsByFingerprint(body.fingerprint);
+    } else {
+      sendError(res, 400, "bad_request", "Provide a non-empty 'ids' array or a 'fingerprint'.");
+      return;
     }
     if (ids.length === 0) {
       sendError(res, 400, "bad_request", "Provide a non-empty 'ids' array or a 'fingerprint' that matches findings.");
@@ -435,15 +446,24 @@ export function createApiRouter(deps: ApiDeps): express.Router {
       return;
     }
     try {
-      const changed = bulkTriageFindings({ ids, ...write });
+      // Resolve coordinates first so we only triage + audit findings that
+      // actually exist; a request whose ids match nothing is a 404, and we
+      // never write a misleading audit row for zero real matches.
       const coords = getFindingCoords(ids);
+      if (coords.length === 0) {
+        sendError(res, 404, "not_found", "No findings matched the given ids or fingerprint.");
+        return;
+      }
+      const matchedIds = coords.map((c) => c.id);
+      const changed = bulkTriageFindings({ ids: matchedIds, ...write });
       recordTriage(actor?.login ?? null, actor?.role ?? null, coords, body.state as TriageState, {
         until: write.snoozedUntil ?? undefined,
         note: write.triageNote ?? undefined,
         requested: ids.length,
+        matched: matchedIds.length,
         changed,
       });
-      sendData(res, { requested: ids.length, changed, state: body.state });
+      sendData(res, { requested: ids.length, matched: matchedIds.length, changed, state: body.state });
     } catch (err) {
       logger.error({ err }, "api POST /findings/triage failed");
       sendError(res, 500, "internal", "Failed to triage findings.");

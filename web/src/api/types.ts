@@ -212,6 +212,8 @@ export interface RecurringResponse {
 export interface TriageResult {
   id?: number;
   requested?: number;
+  /** Bulk only — how many of the requested ids matched existing findings. */
+  matched?: number;
   changed: number;
   state: TriageState;
 }
