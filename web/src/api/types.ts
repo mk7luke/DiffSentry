@@ -294,3 +294,30 @@ export interface FindingsResponse {
 export interface PatternsResponse {
   rules: PatternRuleRow[];
 }
+
+// ─── Activity stream (Ops Console) ──────────────────────────────────
+
+export interface ActivityRow {
+  source: "review" | "event";
+  id: number;
+  ts: string;
+  owner: string;
+  repo: string;
+  number: number | null;
+  kind: string;
+  severity: string | null;
+  approval: string | null;
+  risk_level: string | null;
+  risk_score: number | null;
+  finding_count: number | null;
+  title: string | null;
+  author: string | null;
+}
+
+export interface ActivityResponse {
+  rows: ActivityRow[];
+  nextBefore: string | null;
+  hasMore: boolean;
+  /** Distinct kinds present server-side, for the filter dropdown. */
+  kinds: string[];
+}

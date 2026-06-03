@@ -687,8 +687,17 @@ untouched.
 
 **SPA pages** (all read-only)
 
-- `/` — repos overview (PRs reviewed, 7d findings, 7d critical, last review),
-  sortable, with a 14-day aggregate activity chart.
+- `/` — role-aware landing: **admins** drop into the live Ops Console, everyone
+  else lands on the repos overview.
+- `/ops` — **Ops Console**: a live, filterable tail of everything the bot is
+  doing. Backfills from `GET /api/v1/activity` (events + reviews unified,
+  cursor-paginated) then live-tails the SSE bus (`review.*`, `webhook.*`,
+  `action.performed`). Auto-scrolls to the tail (pauses on hover), filters by
+  repo / kind / severity, colour-codes each row by event type, shows an
+  events-per-minute sparkline + SSE connection indicator, and deep-links each
+  row to its PR.
+- `/overview` — repos overview (PRs reviewed, 7d findings, 7d critical, last
+  review), sortable, with a 14-day aggregate activity chart.
 - `/repos/:owner/:repo` — 90-day risk line, hot paths, top firing pattern
   rules, recent PRs + issues, active `@bot learn` learnings, and the live
   `.diffsentry.yaml` for the repo.
@@ -707,8 +716,9 @@ untouched.
 
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
-`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, and `/audit`
-(admin). Write endpoints: `POST /roles` (admin) sets/clears a role override.
+`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, `/activity`
+(unified events+reviews feed; `?repo=&kind=&severity=&before=&limit=`), and
+`/audit` (admin). Write endpoints: `POST /roles` (admin) sets/clears a role override.
 When OAuth is configured every endpoint requires a valid session (401 JSON
 otherwise); the queries reuse the same SQL as the legacy dashboard and no-op
 gracefully when persistence is disabled.
@@ -726,8 +736,10 @@ SSE event:
 
 **Realtime** (`GET /api/v1/stream`) is a Server-Sent Events feed on an in-process
 event bus. The review engine publishes `review.started` / `review.finished` /
-`review.failed`, and every command action publishes `action.performed`. The SPA
-opens one `EventSource`, surfaces events as toasts, and live-refetches the
+`review.failed`, every inbound GitHub webhook publishes `webhook.received`, and
+every command action publishes `action.performed`. The SPA
+opens one `EventSource`, surfaces events as toasts, streams them into the Ops
+Console, and live-refetches the
 affected PR — so a re-review's findings appear without a refresh. The stream
 heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed
 events on reconnect via `Last-Event-ID`.

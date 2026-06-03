@@ -140,6 +140,56 @@ async function main() {
     const health = await get("/api/v1/health");
     ok("health → counts + logs", health.status === 200 && health.json.data.counts.repos === 2 && Array.isArray(health.json.data.logs));
 
+    const activity = await get("/api/v1/activity");
+    ok(
+      "activity → events + reviews unified",
+      activity.status === 200 &&
+        Array.isArray(activity.json.data.rows) &&
+        activity.json.data.rows.some((r: any) => r.source === "review" && r.kind === "review") &&
+        activity.json.data.rows.some((r: any) => r.source === "event" && r.kind === "pull_request.opened") &&
+        activity.json.data.kinds.includes("review") &&
+        activity.json.data.kinds.includes("pull_request.opened"),
+    );
+
+    const reviewRow = activity.json.data.rows.find((r: any) => r.source === "review");
+    ok(
+      "activity → review row carries worst severity + finding count",
+      reviewRow && reviewRow.severity === "critical" && reviewRow.finding_count >= 1 && reviewRow.number === 42,
+    );
+
+    const activityKind = await get("/api/v1/activity?kind=review");
+    ok(
+      "activity?kind=review → only reviews",
+      activityKind.status === 200 &&
+        activityKind.json.data.rows.length >= 1 &&
+        activityKind.json.data.rows.every((r: any) => r.kind === "review"),
+    );
+
+    const activitySev = await get("/api/v1/activity?severity=critical");
+    ok(
+      "activity?severity=critical → only critical-bearing reviews",
+      activitySev.status === 200 &&
+        activitySev.json.data.rows.length >= 1 &&
+        activitySev.json.data.rows.every((r: any) => r.severity === "critical"),
+    );
+
+    const activityRepo = await get("/api/v1/activity?repo=mk7luke/other-repo");
+    ok(
+      "activity?repo=… → scoped to one repo",
+      activityRepo.status === 200 &&
+        activityRepo.json.data.rows.length >= 1 &&
+        activityRepo.json.data.rows.every((r: any) => r.repo === "other-repo"),
+    );
+
+    const activityPaged = await get("/api/v1/activity?limit=1");
+    ok(
+      "activity?limit=1 → paginates with a cursor",
+      activityPaged.status === 200 &&
+        activityPaged.json.data.rows.length === 1 &&
+        activityPaged.json.data.hasMore === true &&
+        typeof activityPaged.json.data.nextBefore === "string",
+    );
+
     const missing = await get("/api/v1/repos/unknown/unknown");
     ok("unknown repo → 404 JSON", missing.status === 404 && missing.json.error.code === "not_found");
 

@@ -138,7 +138,7 @@ export function PRDetailPage() {
     <>
       <Breadcrumbs
         crumbs={[
-          { label: "Repos", to: "/" },
+          { label: "Repos", to: "/overview" },
           { label: `${owner}/${repo}`, to: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}` },
           { label: `#${number}` },
         ]}

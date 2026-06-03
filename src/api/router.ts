@@ -19,6 +19,8 @@ import { insertAuditLog, setRole } from "../storage/dao.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
 import {
+  getActivity,
+  getActivityKinds,
   getApprovalMix,
   getAuditActions,
   getAuditLog,
@@ -296,6 +298,37 @@ export function createApiRouter(deps: ApiDeps): express.Router {
     } catch (err) {
       logger.error({ err }, "api /findings failed");
       sendError(res, 500, "internal", "Failed to load findings.");
+    }
+  });
+
+  // ─── /activity ─────────────────────────────────────────────────────
+  // The Ops Console backfill: a unified, newest-first feed of events + reviews,
+  // cursor-paginated on `ts` (pass ?before=<iso> to page older). Any
+  // authenticated role may read it — the live tail is the SSE /stream above.
+  router.get("/activity", (req, res) => {
+    try {
+      const q = req.query as Record<string, unknown>;
+      const str = (k: string) => {
+        const v = q[k];
+        return typeof v === "string" && v.length > 0 ? v : undefined;
+      };
+      const num = (k: string) => {
+        const v = q[k];
+        if (typeof v !== "string") return undefined;
+        const n = Number.parseInt(v, 10);
+        return Number.isFinite(n) ? n : undefined;
+      };
+      const result = getActivity({
+        repo: str("repo"),
+        kind: str("kind"),
+        severity: str("severity"),
+        before: str("before"),
+        limit: num("limit") ?? 100,
+      });
+      sendData(res, { ...result, kinds: getActivityKinds() });
+    } catch (err) {
+      logger.error({ err }, "api /activity failed");
+      sendError(res, 500, "internal", "Failed to load activity.");
     }
   });
 

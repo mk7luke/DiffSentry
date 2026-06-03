@@ -110,7 +110,7 @@ export function RepoDetailPage() {
 
   return (
     <>
-      <Breadcrumbs crumbs={[{ label: "Repos", to: "/" }, { label: `${owner}/${repo}` }]} />
+      <Breadcrumbs crumbs={[{ label: "Repos", to: "/overview" }, { label: `${owner}/${repo}` }]} />
       <QueryBoundary query={query} loadingLabel="Loading repo…">
         {(a) => {
           const activity = buildDaySeries(toDayBins(a.activity), 30);
