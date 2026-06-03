@@ -30,6 +30,25 @@ import { detectDescriptionDrift, renderDriftBlock, reviewCommitMessages, renderC
 import { createHash } from "node:crypto";
 import { logger } from "./logger.js";
 import { bus } from "./realtime/bus.js";
+import { runWithCostContext, getCostContext, setCostReviewId, flushCostEvents } from "./ai/cost.js";
+
+/** Map a PR chat command to the cost-attribution kind for its AI calls. */
+function costKindForCommand(type: string): string {
+  switch (type) {
+    case "review":
+    case "full_review":
+      return "review";
+    case "summary":
+      return "summary";
+    case "generate_docstrings":
+    case "generate_tests":
+    case "simplify":
+    case "autofix":
+      return "finishing-touch";
+    default:
+      return "chat";
+  }
+}
 
 function normalizePatchForHash(patch: string): string {
   // Strip metadata lines + leading +/- markers, collapse all whitespace,
@@ -270,7 +289,24 @@ export class Reviewer {
   }
 
   // ─── Main PR Review Handler ──────────────────────────────────
+  // Public entrypoint: establishes the cost-attribution context (kind=review)
+  // for every AI call this review makes, then runs the implementation. Usage is
+  // buffered (pending: []) and stamped with the review_id once it's known — see
+  // setCostReviewId below.
   async handlePullRequest(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    mode: "full" | "incremental"
+  ): Promise<void> {
+    return runWithCostContext(
+      { owner, repo, number: pullNumber, kind: "review", reviewId: null, pending: [] },
+      () => this.handlePullRequestImpl(installationId, owner, repo, pullNumber, mode),
+    );
+  }
+
+  private async handlePullRequestImpl(
     installationId: number,
     owner: string,
     repo: string,
@@ -934,6 +970,9 @@ export class Reviewer {
         filesSkippedSimilar: filesSkippedSimilar.length,
         filesSkippedTrivial: filesSkippedTrivial.length,
       });
+      // Stamp the review_id onto the cost events buffered during the AI calls
+      // above (the review row didn't exist when they were made) and flush them.
+      setCostReviewId(reviewId);
       if (reviewId !== null) {
         recordFindings(reviewId, reviewResult.comments, (c) => {
           // Tag source by which producer emitted the finding. Safety-scanner
@@ -1061,6 +1100,10 @@ export class Reviewer {
       throw err;
     } finally {
       activeReviews.delete(key);
+      // Flush any cost events still buffered — covers the early-return and error
+      // paths where setCostReviewId was never reached (they persist with a null
+      // review_id but stay attributable by owner/repo/number).
+      flushCostEvents();
       // Always emit a terminal event so subscribers can clear "in progress"
       // state, whether the run completed, was skipped early, was aborted, or
       // failed. An aborted run is reported as finished (it terminated cleanly).
@@ -1075,7 +1118,25 @@ export class Reviewer {
   }
 
   // ─── Chat Command Handler ────────────────────────────────────
+  // Public entrypoint: run inside an isolated cost context so every AI call this
+  // command makes is attributed to this PR. The kind is refined once the command
+  // is parsed (chat vs finishing-touch vs …).
   async handleComment(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    commentBody: string,
+    commentId: number,
+    commentKind: "issue" | "review_thread" = "issue"
+  ): Promise<void> {
+    return runWithCostContext(
+      { owner, repo, number: pullNumber, kind: "chat" },
+      () => this.handleCommentImpl(installationId, owner, repo, pullNumber, commentBody, commentId, commentKind),
+    );
+  }
+
+  private async handleCommentImpl(
     installationId: number,
     owner: string,
     repo: string,
@@ -1094,6 +1155,12 @@ export class Reviewer {
     }
 
     log.info({ commandType: command.type }, "Processing command");
+
+    // Refine the cost-attribution kind now that the command is known.
+    // review/full_review re-enter handlePullRequest, which re-establishes its
+    // own kind=review context, so those stay tagged "review".
+    const costCtx = getCostContext();
+    if (costCtx) costCtx.kind = costKindForCommand(command.type);
 
     // Local helper so every reply in this handler lands in the right place
     // (inside the review thread when the trigger came from one, otherwise
@@ -1828,6 +1895,19 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
     repo: string,
     issueNumber: number
   ): Promise<void> {
+    // Attribute the auto-summary AI call to this issue (kind=issue).
+    return runWithCostContext(
+      { owner, repo, number: issueNumber, kind: "issue" },
+      () => this.handleIssueOpenedImpl(installationId, owner, repo, issueNumber),
+    );
+  }
+
+  private async handleIssueOpenedImpl(
+    installationId: number,
+    owner: string,
+    repo: string,
+    issueNumber: number
+  ): Promise<void> {
     const log = logger.child({ owner, repo, issue: issueNumber, surface: "issue.opened" });
 
     if (pausedIssues.has(issueKey(owner, repo, issueNumber))) {
@@ -1915,7 +1995,23 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
   }
 
   // ─── Issue Comment Handler (chat commands on issues) ─────────
+  // Public entrypoint: isolated cost context so every AI call is attributed to
+  // this issue (kind=issue).
   async handleIssueComment(
+    installationId: number,
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    commentBody: string,
+    commentId: number
+  ): Promise<void> {
+    return runWithCostContext(
+      { owner, repo, number: issueNumber, kind: "issue" },
+      () => this.handleIssueCommentImpl(installationId, owner, repo, issueNumber, commentBody, commentId),
+    );
+  }
+
+  private async handleIssueCommentImpl(
     installationId: number,
     owner: string,
     repo: string,

@@ -813,3 +813,198 @@ export function getRoleOverrides(): RoleOverrideRow[] {
     return [];
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI cost / spend (cost_events)
+//
+// Every read tolerates a missing cost_events table (returns the empty shape) so
+// these compose into the same "degrades gracefully when persistence is off"
+// contract the rest of the query layer follows.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Settings key a per-scope monthly budget lives under. Mirrors BUDGET_KEY in
+ * src/ai/cost.ts — duplicated as a literal here to avoid importing the cost
+ * module (which imports this one). */
+const BUDGET_SETTINGS_KEY = "budget.monthly_usd";
+
+/** Build a WHERE clause + bound params for a cost_events scan. */
+function costWhere(
+  owner: string | null,
+  repo: string | null,
+  sinceIso?: string,
+): { clause: string; params: Array<string | number> } {
+  const conds: string[] = [];
+  const params: Array<string | number> = [];
+  if (sinceIso) {
+    conds.push("ts >= ?");
+    params.push(sinceIso);
+  }
+  if (owner) {
+    conds.push("owner = ?");
+    params.push(owner);
+  }
+  if (repo) {
+    conds.push("repo = ?");
+    params.push(repo);
+  }
+  return { clause: conds.length ? `WHERE ${conds.join(" AND ")}` : "", params };
+}
+
+export interface CostTotals {
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  events: number;
+}
+
+const EMPTY_TOTALS: CostTotals = { cost_usd: 0, input_tokens: 0, output_tokens: 0, events: 0 };
+
+/** Sum cost + tokens over a window/scope. */
+export function getCostTotals(opts: { sinceIso?: string; owner?: string | null; repo?: string | null }): CostTotals {
+  const db = openDatabase();
+  if (!db) return { ...EMPTY_TOTALS };
+  try {
+    const { clause, params } = costWhere(opts.owner ?? null, opts.repo ?? null, opts.sinceIso);
+    const row = db
+      .prepare(
+        `SELECT COALESCE(SUM(cost_usd), 0) AS cost_usd,
+                COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                COUNT(*) AS events
+         FROM cost_events ${clause}`,
+      )
+      .get(...params) as CostTotals | undefined;
+    return row ?? { ...EMPTY_TOTALS };
+  } catch {
+    return { ...EMPTY_TOTALS };
+  }
+}
+
+/** Month-to-date spend (USD) for a scope — `null` owner/repo means global. */
+export function getMonthToDateCost(owner: string | null, repo: string | null, monthStartIso: string): number {
+  return getCostTotals({ sinceIso: monthStartIso, owner, repo }).cost_usd;
+}
+
+export interface CostGroupRow {
+  key: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  events: number;
+}
+
+/** Aggregate spend grouped by repo, model, day, or kind. */
+export function getCostByGroup(opts: {
+  group: "repo" | "model" | "day" | "kind";
+  sinceIso?: string;
+  owner?: string | null;
+  repo?: string | null;
+  limit?: number;
+}): CostGroupRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  // Group key is a fixed SQL fragment chosen by the literal `group` enum — never
+  // interpolated from user input.
+  const keyExpr =
+    opts.group === "repo"
+      ? "(COALESCE(owner, '?') || '/' || COALESCE(repo, '?'))"
+      : opts.group === "model"
+        ? "COALESCE(model, 'unknown')"
+        : opts.group === "kind"
+          ? "COALESCE(kind, 'unknown')"
+          : "substr(ts, 1, 10)"; // day
+  const orderBy = opts.group === "day" ? "key ASC" : "cost_usd DESC";
+  const limit = opts.limit && opts.limit > 0 ? opts.limit : 1000;
+  try {
+    const { clause, params } = costWhere(opts.owner ?? null, opts.repo ?? null, opts.sinceIso);
+    return db
+      .prepare(
+        `SELECT ${keyExpr} AS key,
+                COALESCE(SUM(cost_usd), 0) AS cost_usd,
+                COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                COUNT(*) AS events
+         FROM cost_events ${clause}
+         GROUP BY key
+         ORDER BY ${orderBy}
+         LIMIT ?`,
+      )
+      .all(...params, limit) as CostGroupRow[];
+  } catch {
+    return [];
+  }
+}
+
+export interface CostDailyModelRow {
+  day: string;
+  model: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+/** Per-day, per-model spend — drives the stacked spend-over-time chart. */
+export function getCostDailyByModel(opts: {
+  sinceIso?: string;
+  owner?: string | null;
+  repo?: string | null;
+}): CostDailyModelRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  try {
+    const { clause, params } = costWhere(opts.owner ?? null, opts.repo ?? null, opts.sinceIso);
+    return db
+      .prepare(
+        `SELECT substr(ts, 1, 10) AS day,
+                COALESCE(model, 'unknown') AS model,
+                COALESCE(SUM(cost_usd), 0) AS cost_usd,
+                COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS output_tokens
+         FROM cost_events ${clause}
+         GROUP BY day, model
+         ORDER BY day ASC`,
+      )
+      .all(...params) as CostDailyModelRow[];
+  } catch {
+    return [];
+  }
+}
+
+export interface BudgetRow {
+  scope: string;
+  monthly_usd: number;
+  updated_by: string | null;
+  updated_at: string | null;
+}
+
+/** Configured monthly budgets (settings_overrides, key = budget.monthly_usd). */
+export function getBudgets(): BudgetRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  try {
+    const rows = db
+      .prepare(`SELECT scope, value_json, updated_by, updated_at FROM settings_overrides WHERE key = ?`)
+      .all(BUDGET_SETTINGS_KEY) as Array<{
+      scope: string;
+      value_json: string | null;
+      updated_by: string | null;
+      updated_at: string | null;
+    }>;
+    const out: BudgetRow[] = [];
+    for (const r of rows) {
+      if (r.value_json == null) continue;
+      let v: unknown;
+      try {
+        v = JSON.parse(r.value_json);
+      } catch {
+        continue;
+      }
+      if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+        out.push({ scope: r.scope, monthly_usd: v, updated_by: r.updated_by, updated_at: r.updated_at });
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}

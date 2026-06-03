@@ -1826,3 +1826,158 @@ label.field {
 .role-form .field {
   margin-bottom: 0;
 }
+
+/* ── Cost page ─────────────────────────────────────────────────────── */
+
+/* Range toggle in the page header. */
+.seg-toggle {
+  display: inline-flex;
+  gap: 2px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 2px;
+}
+.seg-toggle .btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: var(--r-sm);
+}
+.seg-toggle .btn.active {
+  background: var(--bg-elev-2);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+/* Inline color swatch (model rows in the tokens-vs-cost table). */
+.sw-inline {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: 7px;
+  vertical-align: middle;
+}
+
+/* Top-repos cost bars. */
+.costbars {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+}
+.cb-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.cb-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.cb-name {
+  font-size: 12.5px;
+  color: var(--text-1);
+  text-decoration: none;
+}
+a.cb-name:hover {
+  color: var(--accent-bright);
+}
+.cb-cost {
+  font-size: 12.5px;
+  color: var(--text);
+  font-weight: 600;
+}
+.cb-track {
+  height: 7px;
+  border-radius: 4px;
+  background: var(--bg-elev-2);
+  overflow: hidden;
+}
+.cb-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--accent-deep), var(--accent-bright));
+}
+.cb-sub {
+  font-size: 11px;
+}
+
+/* Budget gauges. */
+.budget-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.budget-cell .btn-link {
+  align-self: flex-start;
+}
+.gauge {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.gauge-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.gauge-label {
+  font-size: 12.5px;
+  font-family: var(--font-mono);
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gauge-pct {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.gauge-pct.good {
+  color: var(--good);
+}
+.gauge-pct.warn {
+  color: var(--warn);
+}
+.gauge-pct.crit {
+  color: var(--sev-crit);
+}
+.gauge-track {
+  height: 9px;
+  border-radius: 5px;
+  background: var(--bg-elev-2);
+  overflow: hidden;
+}
+.gauge-fill {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.3s ease;
+}
+.gauge-fill.good {
+  background: var(--good);
+}
+.gauge-fill.warn {
+  background: var(--warn);
+}
+.gauge-fill.crit {
+  background: var(--sev-crit);
+}
+.gauge-foot {
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.gauge-flag {
+  margin-left: 8px;
+  color: var(--sev-crit);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}

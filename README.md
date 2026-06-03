@@ -697,6 +697,9 @@ untouched.
 - `/findings` — cross-repo filterable explorer (severity, source, repo,
   free-text, age) with a "recurring fingerprints" group.
 - `/patterns` — every pattern-rule hit with 30d + all-time counts.
+- `/cost` — AI spend: spend-over-time stacked by model, top repositories,
+  tokens-vs-dollars per model, month-to-date + projected month-end, and a budget
+  gauge per scope (admins can set/clear monthly ceilings inline).
 - `/audit` — **admin only** — the audit trail (who did what, when) plus a
   per-login role-override editor.
 - `/settings` — runtime + storage health, the signed-in session with its
@@ -707,11 +710,13 @@ untouched.
 
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
-`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, and `/audit`
-(admin). Write endpoints: `POST /roles` (admin) sets/clears a role override.
-When OAuth is configured every endpoint requires a valid session (401 JSON
-otherwise); the queries reuse the same SQL as the legacy dashboard and no-op
-gracefully when persistence is disabled.
+`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, `/cost`
+(`?range=7d|30d|90d|mtd&group=repo|model|day|kind`), and `/audit` (admin). Write
+endpoints: `POST /roles` (admin) sets/clears a role override; `POST /cost/budget`
+(admin) `{ scope, monthlyUsd }` sets or clears a monthly budget. When OAuth is
+configured every endpoint requires a valid session (401 JSON otherwise); the
+queries reuse the same SQL as the legacy dashboard and no-op gracefully when
+persistence is disabled.
 
 **Command actions** (`author`+) drive the review engine from the dashboard. Each
 is `requireRole('author')` + CSRF gated, writes an `audit_log` row, and emits an
@@ -726,11 +731,30 @@ SSE event:
 
 **Realtime** (`GET /api/v1/stream`) is a Server-Sent Events feed on an in-process
 event bus. The review engine publishes `review.started` / `review.finished` /
-`review.failed`, and every command action publishes `action.performed`. The SPA
-opens one `EventSource`, surfaces events as toasts, and live-refetches the
-affected PR — so a re-review's findings appear without a refresh. The stream
-heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed
-events on reconnect via `Last-Event-ID`.
+`review.failed`, every command action publishes `action.performed`, and the cost
+instrumentation publishes `budget.exceeded` when month-to-date spend crosses a
+configured ceiling. The SPA opens one `EventSource`, surfaces events as toasts,
+and live-refetches the affected PR — so a re-review's findings appear without a
+refresh. The stream heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s)
+and replays missed events on reconnect via `Last-Event-ID`.
+
+**AI cost tracking**
+
+Every provider call (Anthropic, OpenAI, or any OpenAI-compatible endpoint)
+records its token usage and a computed USD cost to a `cost_events` row, tagged
+with `owner/repo/number/review_id/kind` (`review`, `chat`, `finishing-touch`,
+`issue`, …). Attribution is threaded through an `AsyncLocalStorage` context the
+engine establishes around each unit of work, so concurrent reviews never
+cross-attribute and the `AIProvider` interface is unchanged. During a review the
+events are buffered and stamped with the `review_id` once the review row exists.
+
+Cost is derived from a built-in per-model price table (USD per 1M input/output
+tokens); override or extend it with `AI_MODEL_PRICES` (a JSON map of model id or
+family prefix → `{ input, output }`). Unknown models still record tokens at a
+zero cost until a price is added. **Budgets** are monthly USD ceilings per scope
+(`global` or `owner/repo`), stored in `settings_overrides` and managed on the
+Cost page; the first crossing within a month emits the `budget.exceeded` event
+and writes an `audit_log` entry (deduped per scope/month).
 
 **Roles & access control (RBAC)**
 

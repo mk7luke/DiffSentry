@@ -40,12 +40,27 @@ export interface ActionPayload {
   detail?: string;
 }
 
+/** AI-spend budget exceeded — emitted from the cost instrumentation. */
+export interface BudgetAlertPayload {
+  /** 'global' or 'owner/repo'. */
+  scope: string;
+  owner: string | null;
+  repo: string | null;
+  /** YYYY-MM the alert is for. */
+  month: string;
+  /** Month-to-date spend that tripped the budget. */
+  spentUsd: number;
+  /** The configured monthly ceiling. */
+  budgetUsd: number;
+}
+
 /** Topic → payload map. Add new topics here so publish/subscribe stay typed. */
 export interface BusEventMap {
   "review.started": ReviewLifecyclePayload;
   "review.finished": ReviewLifecyclePayload;
   "review.failed": ReviewLifecyclePayload;
   "action.performed": ActionPayload;
+  "budget.exceeded": BudgetAlertPayload;
 }
 
 export type BusTopic = keyof BusEventMap;

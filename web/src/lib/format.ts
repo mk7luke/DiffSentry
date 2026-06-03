@@ -92,3 +92,21 @@ export function formatBytes(bytes: number | null): string {
 }
 
 export const SEVERITY_ORDER: Severity[] = ["critical", "major", "minor", "nit"];
+
+/** Format a USD amount. Sub-cent values get more precision so they aren't $0.00. */
+export function formatUsd(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "$0.00";
+  if (n === 0) return "$0.00";
+  if (Math.abs(n) < 0.01) return `$${n.toFixed(4)}`;
+  if (Math.abs(n) < 1) return `$${n.toFixed(3)}`;
+  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** Compact token counts: 950, 12.3k, 4.1M. */
+export function formatTokens(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "0";
+  const abs = Math.abs(n);
+  if (abs < 1000) return String(Math.round(n));
+  if (abs < 1_000_000) return `${(n / 1000).toFixed(abs < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(abs < 10_000_000 ? 1 : 0)}M`;
+}

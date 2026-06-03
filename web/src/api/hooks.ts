@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiSend } from "./client";
 import type {
   AuditResponse,
+  CostResponse,
   FindingsResponse,
   HealthResponse,
   MeResponse,
@@ -111,6 +112,27 @@ export function useAudit(query: AuditQuery, enabled: boolean) {
       }),
     enabled,
     placeholderData: (prev) => prev,
+  });
+}
+
+/** AI spend rollups for the Cost page. `range` is e.g. "7d" | "30d" | "90d" | "mtd". */
+export function useCost(range: string) {
+  return useQuery({
+    queryKey: ["cost", range],
+    queryFn: () => apiGet<CostResponse>("/cost", { range }),
+    placeholderData: (prev) => prev,
+  });
+}
+
+/** Admin: set (or clear, with `monthlyUsd: null`) a monthly budget for a scope. */
+export function useSetBudget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { scope: string; monthlyUsd: number | null }) =>
+      apiSend<{ scope: string; monthlyUsd: number | null }>("/cost/budget", { body: vars }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["cost"] });
+    },
   });
 }
 

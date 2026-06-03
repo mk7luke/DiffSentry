@@ -18,6 +18,7 @@ import {
 import { insertAuditLog, setRole } from "../storage/dao.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
+import { registerCostRoutes } from "./cost.js";
 import {
   getApprovalMix,
   getAuditActions,
@@ -182,6 +183,9 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   if (deps.reviewer) {
     registerActionRoutes(router, { reviewer: deps.reviewer, requireRole, csrf });
   }
+
+  // ─── Cost (read for all; budget writes are admin) ──────────────────
+  registerCostRoutes(router, { requireRole, csrf });
 
   // ─── /me ───────────────────────────────────────────────────────────
   // The role resolves from the roles table > admin env > author env > viewer

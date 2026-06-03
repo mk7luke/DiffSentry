@@ -1,5 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useEventStream, type ActionPayload, type ReviewLifecyclePayload, type StreamEnvelope } from "./useEventStream";
+import {
+  useEventStream,
+  type ActionPayload,
+  type BudgetAlertPayload,
+  type ReviewLifecyclePayload,
+  type StreamEnvelope,
+} from "./useEventStream";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Toast / live feed primitive.
@@ -151,6 +157,17 @@ function StreamToasts() {
           tone: p.result === "ok" || p.result === "accepted" ? "info" : "danger",
           title: `${who} · ${p.action} · ${ref}`,
           body: p.detail,
+        });
+        return;
+      }
+      if (env.topic === "budget.exceeded") {
+        const p = env.payload as BudgetAlertPayload;
+        push({
+          id: `budget-${p.scope}-${p.month}`,
+          tone: "danger",
+          title: `Budget exceeded · ${p.scope}`,
+          body: `$${p.spentUsd.toFixed(2)} spent of $${p.budgetUsd.toFixed(2)} (${p.month})`,
+          ttl: 0,
         });
       }
     },
