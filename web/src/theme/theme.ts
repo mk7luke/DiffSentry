@@ -137,17 +137,19 @@ export function applyTheme(resolved: ResolvedTheme, density: Density): void {
 }
 
 /** Pin a custom accent on <html>, or clear it (revert to CSS/theme accent) when
- * the color is the built-in default or malformed. */
+ * the color is the built-in default or malformed. Canonicalizes first (via
+ * canonicalHex) so #rgb, hashless, and #rrggbb inputs all take the same path and
+ * the default comparison + var derivation use a single canonical form. */
 export function applyAccent(hex: string | null | undefined): void {
   const el = root();
   if (!el) return;
-  const normalized = typeof hex === "string" ? hex.trim().toLowerCase() : "";
-  const isCustom = !!parseHex(normalized) && normalized !== DEFAULT_ACCENT;
+  const canonical = typeof hex === "string" ? canonicalHex(hex) : null;
+  const isCustom = canonical != null && canonical !== DEFAULT_ACCENT;
   if (!isCustom) {
     for (const name of ACCENT_VAR_NAMES) el.style.removeProperty(name);
     return;
   }
-  const vars = accentVars(normalized);
+  const vars = accentVars(canonical);
   for (const [name, value] of Object.entries(vars)) el.style.setProperty(name, value);
 }
 
