@@ -1,3 +1,4 @@
+import type { Database as DB } from "better-sqlite3";
 import { openDatabase } from "./db.js";
 import type { IssueContext, PRContext, ReviewComment, ReviewResult } from "../types.js";
 import type { RiskAssessment } from "../insights.js";
@@ -252,6 +253,501 @@ export function recordIssueAction(opts: {
     );
   } catch (err) {
     logger.debug({ err }, "dao.recordIssueAction failed");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Command-center writes (schema v2). All best-effort no-ops when the DB is
+// disabled, matching the helpers above. Reads/queries for the dashboard live
+// in src/dashboard/queries.ts; these are the mutating helpers other worktrees
+// (API routes, alerting, cost tracking) compose on top of.
+// ---------------------------------------------------------------------------
+
+/**
+ * Best-effort JSON serialization for optional payload columns. Returns `null`
+ * instead of throwing whenever the value can't be represented as JSON —
+ * `undefined`, an unsupported top-level value (function/symbol), a circular
+ * structure, or a `BigInt` — so the surrounding row is still inserted with a
+ * NULL payload rather than being lost to the catch block.
+ */
+function safeJsonStringify(value: unknown): string | null {
+  if (value === undefined) return null;
+  try {
+    // Top-level function/symbol/undefined yield undefined; circular and BigInt throw.
+    return JSON.stringify(value) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Per-DB record of which dependency sets have probed OK — keyed by the handle
+ *  itself so a reopened/different DB is re-probed rather than inheriting a
+ *  stale result. The inner Set holds dependency-set keys (see depsKey below). */
+const v2SchemaOkByDb = new WeakMap<DB, Set<string>>();
+/** One-shot throttle for the missing-schema warning (logging only — never the
+ *  schema result), so a missing v2 schema doesn't log on every v2 access. */
+let _v2SchemaMissingWarned = false;
+
+/** Every table introduced by the command-center (v2) migration — a full
+ *  "did migration 2 run" check, not just the subset the DAO helpers touch. */
+const REQUIRED_V2_TABLES = [
+  "audit_log",
+  "settings_overrides",
+  "api_tokens",
+  "cost_events",
+  "notification_channels",
+  "alert_rules",
+  "saved_views",
+  "webhook_deliveries",
+  "roles",
+];
+/** Triage columns the v2 helpers depend on (`accepted` is v1; the rest are v2). */
+const REQUIRED_FINDINGS_COLUMNS = ["accepted", "snoozed_until", "triaged_by", "triaged_at", "triage_note"];
+
+/**
+ * Guard for command-center (schema v2) helpers. `openDatabase()` runs the
+ * migration runner on first open, so a successfully-opened DB is normally at
+ * the latest version — this is a defensive check so that an un-migrated DB
+ * surfaces a distinct, loud warning instead of every v2 access silently
+ * no-opping as if persistence were merely disabled (a `null` db). Returns true
+ * when the v2 tables/columns are present.
+ *
+ * Each caller declares only the tables/finding-columns it actually touches, so
+ * a missing *unrelated* v2 table doesn't block a helper that doesn't use it
+ * (defaults to the full v2 set). Successful probes are cached per (db,
+ * dependency-set); a failed/missing probe is NOT cached, so a DB that migrates
+ * after the first call (or a transient error) can recover on a later call.
+ */
+function ensureCommandCenterSchema(
+  db: DB,
+  requiredTables: readonly string[] = REQUIRED_V2_TABLES,
+  // Defaults to [] so table-only callers (insertAuditLog, upsertSettingOverride,
+  // setRole, ...) don't implicitly depend on the `findings` triage columns.
+  // triageFinding passes REQUIRED_FINDINGS_COLUMNS explicitly.
+  requiredFindingColumns: readonly string[] = [],
+): boolean {
+  const depsKey = `${[...requiredTables].sort().join(",")}|${[...requiredFindingColumns].sort().join(",")}`;
+  let okSet = v2SchemaOkByDb.get(db);
+  if (okSet?.has(depsKey)) return true;
+  try {
+    const tables = new Set(
+      (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map(
+        (r) => r.name,
+      ),
+    );
+    const findingsCols = new Set(
+      (db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    const missingTables = requiredTables.filter((t) => !tables.has(t));
+    const missingColumns = requiredFindingColumns.filter((c) => !findingsCols.has(c));
+    if (missingTables.length === 0 && missingColumns.length === 0) {
+      if (!okSet) {
+        okSet = new Set();
+        v2SchemaOkByDb.set(db, okSet);
+      }
+      okSet.add(depsKey);
+      return true;
+    }
+    if (!_v2SchemaMissingWarned) {
+      _v2SchemaMissingWarned = true;
+      logger.warn(
+        { missingTables, missingColumns },
+        "Command-center (v2) schema is incomplete — migrations may not have run. Affected DAO access will be skipped.",
+      );
+    }
+    return false;
+  } catch (err) {
+    if (!_v2SchemaMissingWarned) {
+      _v2SchemaMissingWarned = true;
+      logger.warn({ err }, "Command-center (v2) schema check failed");
+    }
+    return false;
+  }
+}
+
+/**
+ * Append an audit_log row. Every role-gated write endpoint must call this.
+ * Returns the new rowid, or null when persistence is disabled.
+ */
+export function insertAuditLog(opts: {
+  actorLogin?: string | null;
+  actorRole?: string | null;
+  action: string;
+  targetType?: string | null;
+  targetRef?: string | null;
+  payload?: unknown;
+  result?: string | null;
+}): number | null {
+  const db = openDatabase();
+  if (!db) return null;
+  if (!ensureCommandCenterSchema(db, ["audit_log"])) return null;
+  try {
+    const payloadJson = safeJsonStringify(opts.payload);
+    const info = db.prepare(
+      `INSERT INTO audit_log (ts, actor_login, actor_role, action, target_type, target_ref, payload_json, result)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      new Date().toISOString(),
+      opts.actorLogin ?? null,
+      opts.actorRole ?? null,
+      opts.action,
+      opts.targetType ?? null,
+      opts.targetRef ?? null,
+      payloadJson == null ? null : payloadJson.slice(0, 100_000),
+      opts.result ?? null,
+    );
+    return Number(info.lastInsertRowid);
+  } catch (err) {
+    logger.debug({ err }, "dao.insertAuditLog failed");
+    return null;
+  }
+}
+
+/**
+ * A settings-override scope is either the literal 'global' or an 'owner/repo'
+ * pair — exactly two non-empty segments. We enforce only the shape (not a
+ * character allow-list) so legitimate repository names are never dropped;
+ * anything else is rejected so a typo can't silently write a row no read will
+ * ever match.
+ */
+function isValidScope(scope: string): boolean {
+  if (scope === "global") return true;
+  const parts = scope.split("/");
+  return parts.length === 2 && parts.every((p) => p.length > 0);
+}
+
+/** A settings-override key must be a non-empty, non-whitespace string. */
+function isValidKey(key: string): boolean {
+  return typeof key === "string" && key.trim().length > 0;
+}
+
+/**
+ * Upsert a settings override. `scope` is 'global' or 'owner/repo'. `value` is
+ * JSON-serialized before storage.
+ */
+export function upsertSettingOverride(opts: {
+  scope: string;
+  key: string;
+  value: unknown;
+  updatedBy?: string | null;
+}): void {
+  const db = openDatabase();
+  if (!db) return;
+  if (!ensureCommandCenterSchema(db, ["settings_overrides"])) return;
+  if (!isValidScope(opts.scope)) {
+    logger.debug({ scope: opts.scope, key: opts.key }, "dao.upsertSettingOverride: invalid scope — skipping write");
+    return;
+  }
+  if (!isValidKey(opts.key)) {
+    logger.debug({ scope: opts.scope, key: opts.key }, "dao.upsertSettingOverride: invalid key — skipping write");
+    return;
+  }
+  try {
+    // Settings overrides are meaningful config (not best-effort logs), so an
+    // unrepresentable value is rejected rather than silently coerced to null.
+    const valueJson = safeJsonStringify(opts.value);
+    if (valueJson == null) {
+      logger.debug(
+        { scope: opts.scope, key: opts.key },
+        "dao.upsertSettingOverride: value not JSON-serializable — skipping write",
+      );
+      return;
+    }
+    db.prepare(
+      `INSERT INTO settings_overrides (scope, key, value_json, updated_by, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(scope, key) DO UPDATE SET
+         value_json = excluded.value_json,
+         updated_by = excluded.updated_by,
+         updated_at = excluded.updated_at`,
+    ).run(
+      opts.scope,
+      opts.key,
+      valueJson,
+      opts.updatedBy ?? null,
+      new Date().toISOString(),
+    );
+  } catch (err) {
+    logger.debug({ err }, "dao.upsertSettingOverride failed");
+  }
+}
+
+/**
+ * Read a single settings override, JSON-parsed.
+ *
+ * `undefined` means the override is missing (no row) or persistence is
+ * disabled; `null` means a value was stored explicitly as JSON null.
+ * To remove an override entirely, use `deleteSettingOverride`.
+ */
+export function getSettingOverride<T = unknown>(scope: string, key: string): T | null | undefined {
+  const db = openDatabase();
+  if (!db) return undefined;
+  if (!ensureCommandCenterSchema(db, ["settings_overrides"])) return undefined;
+  if (!isValidScope(scope)) {
+    logger.debug({ scope, key }, "dao.getSettingOverride: invalid scope — ignoring");
+    return undefined;
+  }
+  if (!isValidKey(key)) {
+    logger.debug({ scope, key }, "dao.getSettingOverride: invalid key — ignoring");
+    return undefined;
+  }
+  try {
+    const row = db
+      .prepare(`SELECT value_json FROM settings_overrides WHERE scope = ? AND key = ?`)
+      .get(scope, key) as { value_json?: string } | undefined;
+    if (!row || row.value_json == null) return undefined;
+    try {
+      return JSON.parse(row.value_json) as T | null;
+    } catch (parseErr) {
+      // A corrupted persisted override must be distinguishable in logs from a
+      // normal miss (which logs nothing and also returns undefined).
+      logger.warn({ err: parseErr, scope, key }, "dao.getSettingOverride: invalid stored JSON — ignoring override");
+      return undefined;
+    }
+  } catch (err) {
+    logger.debug({ err }, "dao.getSettingOverride failed");
+    return undefined;
+  }
+}
+
+/** Delete a settings override (revert to the file-based default). */
+export function deleteSettingOverride(scope: string, key: string): void {
+  const db = openDatabase();
+  if (!db) return;
+  if (!ensureCommandCenterSchema(db, ["settings_overrides"])) return;
+  if (!isValidScope(scope)) {
+    logger.debug({ scope, key }, "dao.deleteSettingOverride: invalid scope — skipping");
+    return;
+  }
+  if (!isValidKey(key)) {
+    logger.debug({ scope, key }, "dao.deleteSettingOverride: invalid key — skipping");
+    return;
+  }
+  try {
+    db.prepare(`DELETE FROM settings_overrides WHERE scope = ? AND key = ?`).run(scope, key);
+  } catch (err) {
+    logger.debug({ err }, "dao.deleteSettingOverride failed");
+  }
+}
+
+/** Record an AI cost/usage event. Returns the rowid, or null when disabled. */
+export function recordCostEvent(opts: {
+  owner?: string | null;
+  repo?: string | null;
+  number?: number | null;
+  reviewId?: number | null;
+  provider?: string | null;
+  model?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  costUsd?: number | null;
+  /** e.g. "review", "summary", "chat", "plan". */
+  kind?: string | null;
+}): number | null {
+  const db = openDatabase();
+  if (!db) return null;
+  if (!ensureCommandCenterSchema(db, ["cost_events"])) return null;
+  try {
+    const info = db.prepare(
+      `INSERT INTO cost_events (ts, owner, repo, number, review_id, provider, model, input_tokens, output_tokens, cost_usd, kind)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      new Date().toISOString(),
+      opts.owner ?? null,
+      opts.repo ?? null,
+      opts.number ?? null,
+      opts.reviewId ?? null,
+      opts.provider ?? null,
+      opts.model ?? null,
+      opts.inputTokens ?? null,
+      opts.outputTokens ?? null,
+      opts.costUsd ?? null,
+      opts.kind ?? null,
+    );
+    return Number(info.lastInsertRowid);
+  } catch (err) {
+    logger.debug({ err }, "dao.recordCostEvent failed");
+    return null;
+  }
+}
+
+/**
+ * Record a raw webhook delivery (for the deliveries view + replay). Returns the
+ * rowid, or null when disabled.
+ */
+export function recordWebhookDelivery(opts: {
+  event: string;
+  action?: string | null;
+  owner?: string | null;
+  repo?: string | null;
+  number?: number | null;
+  deliveryId?: string | null;
+  signatureOk?: boolean | null;
+  payload?: unknown;
+  /** rowid of the delivery this is a replay of, if any. */
+  replayedFrom?: number | null;
+}): number | null {
+  const db = openDatabase();
+  if (!db) return null;
+  if (!ensureCommandCenterSchema(db, ["webhook_deliveries"])) return null;
+  try {
+    const payloadJson = safeJsonStringify(opts.payload);
+    const info = db.prepare(
+      `INSERT INTO webhook_deliveries (ts, event, action, owner, repo, number, delivery_id, signature_ok, payload_json, replayed_from)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      new Date().toISOString(),
+      opts.event,
+      opts.action ?? null,
+      opts.owner ?? null,
+      opts.repo ?? null,
+      opts.number ?? null,
+      opts.deliveryId ?? null,
+      opts.signatureOk == null ? null : opts.signatureOk ? 1 : 0,
+      payloadJson == null ? null : payloadJson.slice(0, 1_000_000),
+      opts.replayedFrom ?? null,
+    );
+    return Number(info.lastInsertRowid);
+  } catch (err) {
+    logger.debug({ err }, "dao.recordWebhookDelivery failed");
+    return null;
+  }
+}
+
+/**
+ * Apply triage state to a finding (snooze, accept/dismiss note, triager).
+ * Only the provided fields are written; omitted fields are left untouched.
+ *
+ * Returns true when a row was actually updated; false when persistence is
+ * disabled, no triage field was supplied, the finding id matched nothing, or
+ * an error was caught.
+ */
+export function triageFinding(opts: {
+  findingId: number;
+  accepted?: boolean | null;
+  snoozedUntil?: string | null;
+  triagedBy?: string | null;
+  triageNote?: string | null;
+}): boolean {
+  const db = openDatabase();
+  if (!db) return false;
+  if (!ensureCommandCenterSchema(db, [], REQUIRED_FINDINGS_COLUMNS)) return false;
+  try {
+    // Each supplied triage field contributes a COMPLETE literal SQL fragment
+    // (no column name is ever interpolated from a variable) plus the value to
+    // bind. The `diff` predicate uses null-safe `IS NOT` so the UPDATE only
+    // matches when at least one supplied field actually differs — repeat calls
+    // with identical values then leave the row (and triaged_at) untouched.
+    const updates: Array<{ set: string; diff: string; value: unknown }> = [];
+    if (opts.accepted !== undefined) {
+      updates.push({
+        set: "accepted = ?",
+        diff: "accepted IS NOT ?",
+        value: opts.accepted == null ? null : opts.accepted ? 1 : 0,
+      });
+    }
+    if (opts.snoozedUntil !== undefined) {
+      updates.push({ set: "snoozed_until = ?", diff: "snoozed_until IS NOT ?", value: opts.snoozedUntil });
+    }
+    if (opts.triageNote !== undefined) {
+      updates.push({ set: "triage_note = ?", diff: "triage_note IS NOT ?", value: opts.triageNote });
+    }
+    if (opts.triagedBy !== undefined) {
+      updates.push({ set: "triaged_by = ?", diff: "triaged_by IS NOT ?", value: opts.triagedBy });
+    }
+    // No actual triage field supplied — don't stamp triaged_at (or touch the
+    // row at all) for a no-op call (e.g. only `findingId` was passed).
+    if (updates.length === 0) return false;
+
+    const setClauses = updates.map((u) => u.set);
+    const setValues = updates.map((u) => u.value);
+    const diffPredicates = updates.map((u) => u.diff);
+    const diffValues = updates.map((u) => u.value);
+    // Stamp the time only on a row we actually update.
+    setClauses.push("triaged_at = ?");
+    setValues.push(new Date().toISOString());
+
+    // Placeholder order is explicit: every SET value, then `id`, then every
+    // diff-predicate value. The .run() args below mirror that order exactly.
+    const sql = `UPDATE findings SET ${setClauses.join(", ")} WHERE id = ? AND (${diffPredicates.join(" OR ")})`;
+    const info = db.prepare(sql).run(...setValues, opts.findingId, ...diffValues);
+    return info.changes > 0;
+  } catch (err) {
+    logger.debug({ err }, "dao.triageFinding failed");
+    return false;
+  }
+}
+
+/** Canonical command-center roles the dashboard gates write access on. */
+export const VALID_ROLES = ["viewer", "author", "admin"] as const;
+export type Role = (typeof VALID_ROLES)[number];
+const VALID_ROLE_SET = new Set<string>(VALID_ROLES);
+
+/**
+ * Set (or clear) a role override for a login. role=null removes the override.
+ * `role` is typed `string` (not `Role`) on purpose: this is a runtime-safe
+ * boundary for untyped API input, and `VALID_ROLE_SET` is the real gate.
+ */
+export function setRole(opts: { login?: string | null; role: string | null; grantedBy?: string | null }): void {
+  const db = openDatabase();
+  if (!db) return;
+  if (!ensureCommandCenterSchema(db, ["roles"])) return;
+  // GitHub logins are case-insensitive — canonicalize to lowercase so a value
+  // set as "Alice" is read back by getRole("alice").
+  const login = (opts.login ?? "").trim().toLowerCase();
+  if (login.length === 0) {
+    logger.debug({ login: opts.login }, "dao.setRole: empty login — skipping");
+    return;
+  }
+  try {
+    if (opts.role == null) {
+      db.prepare(`DELETE FROM roles WHERE login = ?`).run(login);
+      return;
+    }
+    if (!VALID_ROLE_SET.has(opts.role)) {
+      logger.debug({ login, role: opts.role }, "dao.setRole: unknown role — refusing to persist");
+      return;
+    }
+    db.prepare(
+      `INSERT INTO roles (login, role, granted_by, granted_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(login) DO UPDATE SET
+         role = excluded.role,
+         granted_by = excluded.granted_by,
+         granted_at = excluded.granted_at`,
+    ).run(login, opts.role, opts.grantedBy ?? null, new Date().toISOString());
+  } catch (err) {
+    logger.debug({ err }, "dao.setRole failed");
+  }
+}
+
+/**
+ * Read a role override for a login. Returns undefined when unset, disabled, or
+ * when the stored role is not a recognized value — so downstream authorization
+ * falls back to the safe default rather than trusting an unknown role string.
+ */
+export function getRole(login: string | null | undefined): Role | undefined {
+  const db = openDatabase();
+  if (!db) return undefined;
+  if (!ensureCommandCenterSchema(db, ["roles"])) return undefined;
+  // Match setRole's canonicalization (trim + lowercase) so reads hit the same key.
+  const normalizedLogin = (login ?? "").trim().toLowerCase();
+  if (normalizedLogin.length === 0) return undefined;
+  try {
+    const row = db.prepare(`SELECT role FROM roles WHERE login = ?`).get(normalizedLogin) as
+      | { role?: string }
+      | undefined;
+    const role = row?.role;
+    if (role == null) return undefined;
+    if (!VALID_ROLE_SET.has(role)) {
+      logger.warn({ login: normalizedLogin, role }, "dao.getRole: stored role is not recognized — ignoring");
+      return undefined;
+    }
+    // Safe: VALID_ROLE_SET.has(role) just confirmed role is one of VALID_ROLES.
+    return role as Role;
+  } catch (err) {
+    logger.debug({ err }, "dao.getRole failed");
+    return undefined;
   }
 }
 
