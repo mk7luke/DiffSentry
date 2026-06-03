@@ -99,15 +99,16 @@ export function fetchActivity(query: ActivityQuery): Promise<ActivityResponse> {
 }
 
 /**
- * The Ops Console backfill: the most-recent page for the active repo scope.
- * The page then live-tails the SSE bus on top of this seed. Kept coarse (repo
- * only) so kind/severity filtering can apply uniformly to live + backfilled
- * rows in the component.
+ * The Ops Console backfill: the most-recent page for the active filter scope
+ * (repo / kind / severity), so older matches aren't hidden behind an unfiltered
+ * page. The component then live-tails the SSE bus on top of this seed.
  */
 export function useActivity(query: ActivityQuery) {
+  const limit = query.limit ?? 120;
   return useQuery({
-    queryKey: ["activity", query.repo ?? "", query.limit ?? 120],
-    queryFn: () => fetchActivity({ repo: query.repo, limit: query.limit ?? 120 }),
+    queryKey: ["activity", query.repo ?? "", query.kind ?? "", query.severity ?? "", limit],
+    queryFn: () =>
+      fetchActivity({ repo: query.repo, kind: query.kind, severity: query.severity, limit }),
     // The bus is the realtime source of truth; don't poll the backfill.
     staleTime: 60_000,
     refetchOnWindowFocus: false,

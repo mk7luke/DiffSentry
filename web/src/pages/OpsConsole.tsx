@@ -181,7 +181,15 @@ export function OpsConsolePage() {
   const [paused, setPaused] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
-  const backfill = useActivity({ repo: repo || undefined, limit: PAGE });
+  // Filters are authoritative end-to-end: the backfill query is fetched
+  // pre-filtered (so older matches aren't hidden behind an unfiltered page),
+  // and live events are filtered before buffering (below).
+  const backfill = useActivity({
+    repo: repo || undefined,
+    kind: kind || undefined,
+    severity: severity || undefined,
+    limit: PAGE,
+  });
   const repos = useRepos();
   const status = useStreamStatus();
 
@@ -191,16 +199,22 @@ export function OpsConsolePage() {
   const [older, setOlder] = useState<FeedItem[]>([]);
   const [live, setLive] = useState<FeedItem[]>([]);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  // Every live kind ever seen this session, recorded before the filter is
+  // applied — keeps the kind dropdown complete (incl. live-only kinds like
+  // review.started / action.*) even while a kind/severity filter is active.
+  const [liveKinds, setLiveKinds] = useState<ReadonlySet<string>>(() => new Set());
   // Server-driven pagination cursor (opaque). Reactive state, not a ref, so the
   // "Load older" button reflects exhaustion immediately. `before` is whatever
   // the API returned as `nextBefore` — never derived from the rendered list.
   const [cursor, setCursor] = useState<{ before: string | null; hasMore: boolean }>({ before: null, hasMore: true });
 
   useEffect(() => {
+    // Any filter change invalidates the accumulated feed — a new backfill query
+    // owns the base set, and stale older/live rows from the previous scope must go.
     setOlder([]);
     setLive([]);
     setCursor({ before: null, hasMore: true });
-  }, [repo]);
+  }, [repo, kind, severity]);
 
   // Seed the "load older" cursor from each fresh backfill page. Runs only when
   // the React-Query page changes (repo switch / refetch), not after loadOlder
@@ -211,15 +225,23 @@ export function OpsConsolePage() {
     }
   }, [backfill.data]);
 
-  // Live tail. Append every envelope; the merge step dedupes + caps.
-  const onEvent = useCallback((env: StreamEnvelope) => {
-    const item = envToItem(env);
-    if (!item) return;
-    setLive((prev) => {
-      const next = prev.length >= MAX_ITEMS ? prev.slice(prev.length - MAX_ITEMS + 1) : prev;
-      return [...next, item];
-    });
-  }, []);
+  // Live tail. Record the kind for the dropdown, then drop events outside the
+  // active filter so the live buffer stays scoped (no cross-repo leakage).
+  const onEvent = useCallback(
+    (env: StreamEnvelope) => {
+      const item = envToItem(env);
+      if (!item) return;
+      setLiveKinds((prev) => (prev.has(item.kind) ? prev : new Set(prev).add(item.kind)));
+      if (repo && `${item.owner}/${item.repo}` !== repo) return;
+      if (kind && item.kind !== kind) return;
+      if (severity && (item.severity ?? "").toLowerCase() !== severity) return;
+      setLive((prev) => {
+        const next = prev.length >= MAX_ITEMS ? prev.slice(prev.length - MAX_ITEMS + 1) : prev;
+        return [...next, item];
+      });
+    },
+    [repo, kind, severity],
+  );
   useEventStream(onEvent);
 
   // Per-minute clock for the sparkline + relative times.
@@ -241,12 +263,14 @@ export function OpsConsolePage() {
     return all.length > MAX_ITEMS ? all.slice(all.length - MAX_ITEMS) : all;
   }, [older, baseItems, live]);
 
-  // Filter dropdown options: server-known kinds ∪ kinds actually seen (incl. live).
+  // Filter dropdown options: server-known kinds ∪ live kinds seen this session.
+  // Sourced independently of `merged` so an active kind/severity filter never
+  // collapses the list to just the selected option.
   const kindOptions = useMemo(() => {
     const set = new Set<string>(backfill.data?.kinds ?? []);
-    for (const it of merged) set.add(it.kind);
+    for (const k of liveKinds) set.add(k);
     return Array.from(set).sort();
-  }, [backfill.data, merged]);
+  }, [backfill.data, liveKinds]);
 
   const visible = useMemo(() => {
     return merged.filter((it) => {
@@ -304,7 +328,13 @@ export function OpsConsolePage() {
     if (!before) return;
     setLoadingOlder(true);
     try {
-      const res = await fetchActivity({ repo: repo || undefined, before, limit: PAGE });
+      const res = await fetchActivity({
+        repo: repo || undefined,
+        kind: kind || undefined,
+        severity: severity || undefined,
+        before,
+        limit: PAGE,
+      });
       setCursor({ before: res.nextBefore, hasMore: res.hasMore });
       setOlder((prev) => {
         const byKey = new Map(prev.map((i) => [i.key, i] as const));
@@ -317,7 +347,7 @@ export function OpsConsolePage() {
     } finally {
       setLoadingOlder(false);
     }
-  }, [loadingOlder, repo, cursor.before]);
+  }, [loadingOlder, repo, kind, severity, cursor.before]);
 
   const repoOptions = repos.data?.repos.map((r) => `${r.owner}/${r.repo}`) ?? [];
   const hasFilters = !!(repo || kind || severity);
