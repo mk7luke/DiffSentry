@@ -234,6 +234,14 @@ async function main() {
     });
     ok("create channel(non-boolean enabled) → 400", badEnabled.status === 400 && badEnabled.json.error.code === "bad_request");
 
+    // ── Non-http(s) schemes are rejected regardless of egress flags ────
+    const badScheme = await req("POST", "/notifications/channels", {
+      session: admin,
+      csrf: true,
+      body: { type: "webhook", name: "s", config: { url: "file:///etc/passwd" } },
+    });
+    ok("create channel(file:// scheme) → 400", badScheme.status === 400 && badScheme.json.error.code === "bad_request");
+
     // ── Admin creates a rule: critical finding in acme/web → channel ───
     const rule = await req("POST", "/notifications/rules", {
       session: admin,
@@ -343,8 +351,8 @@ async function main() {
 
     console.log("\nall notification smoke checks passed ✓");
   } finally {
-    server.close();
-    receiver.close();
+    await new Promise<void>((r) => server.close(() => r()));
+    await new Promise<void>((r) => receiver.close(() => r()));
     closeDatabase();
     try {
       fs.unlinkSync(tmpDb);

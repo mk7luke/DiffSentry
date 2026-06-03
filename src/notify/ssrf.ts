@@ -135,7 +135,13 @@ export async function checkWebhookUrlSafe(v: string): Promise<string | null> {
   } catch {
     return "A valid webhook URL is required.";
   }
-  if (parsed.protocol !== "https:" && !(allowInsecureScheme() && parsed.protocol === "http:")) {
+  // Positive scheme allowlist, enforced independently of the egress policy so a
+  // non-http(s) scheme (file:, ftp:, data:, gopher:, …) can never be stored —
+  // regardless of the private-egress opt-in below.
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return "Webhook URLs must use http(s).";
+  }
+  if (parsed.protocol === "http:" && !allowInsecureScheme()) {
     return "Webhook URLs must use https.";
   }
   // Private/loopback egress is a distinct, explicit opt-in (self-hosted relays).
