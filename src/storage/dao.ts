@@ -280,23 +280,23 @@ function safeJsonStringify(value: unknown): string | null {
   }
 }
 
-let _v2SchemaChecked = false;
 let _v2SchemaOk = false;
 
 /**
- * Guard for command-center (schema v2) writes. `openDatabase()` runs the
+ * Guard for command-center (schema v2) helpers. `openDatabase()` runs the
  * migration runner on first open, so a successfully-opened DB is normally at
  * the latest version — this is a defensive check so that an un-migrated DB
- * surfaces a distinct, loud warning instead of every v2 write silently
+ * surfaces a distinct, loud warning instead of every v2 access silently
  * no-opping as if persistence were merely disabled (a `null` db). Returns true
  * when the v2 tables/columns are present.
  *
- * The result is cached for the process: the schema only moves forward within a
- * run, so the PRAGMA lookups happen at most once.
+ * Only a successful probe is cached: the schema only moves forward within a
+ * run, so once present it stays present and we skip the PRAGMA lookups. A
+ * failed/missing probe is NOT cached, so a DB that migrates after the first
+ * call (or a transient error) can recover on a later call.
  */
 function ensureCommandCenterSchema(db: DB): boolean {
-  if (_v2SchemaChecked) return _v2SchemaOk;
-  _v2SchemaChecked = true;
+  if (_v2SchemaOk) return true;
   try {
     const hasAuditLog = db
       .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'audit_log'")
@@ -408,6 +408,7 @@ export function upsertSettingOverride(opts: {
 export function getSettingOverride<T = unknown>(scope: string, key: string): T | null | undefined {
   const db = openDatabase();
   if (!db) return undefined;
+  if (!ensureCommandCenterSchema(db)) return undefined;
   try {
     const row = db
       .prepare(`SELECT value_json FROM settings_overrides WHERE scope = ? AND key = ?`)
@@ -614,6 +615,7 @@ export function setRole(opts: { login: string; role: string | null; grantedBy?: 
 export function getRole(login: string): string | undefined {
   const db = openDatabase();
   if (!db) return undefined;
+  if (!ensureCommandCenterSchema(db)) return undefined;
   try {
     const row = db.prepare(`SELECT role FROM roles WHERE login = ?`).get(login) as { role?: string } | undefined;
     const role = row?.role;
