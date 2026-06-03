@@ -11,14 +11,24 @@ import dns from "node:dns/promises";
 // client's own internal resolution. Fully closing it would require a
 // connect-time pinned dispatcher (custom undici Agent), which we avoid to keep
 // the single-container deployment dependency-free. The route is admin + CSRF
-// gated and the NOTIFY_ALLOW_INSECURE_WEBHOOKS flag exists for intentional
-// self-hosted internal relays / tests.
+// gated, with two independent escape hatches for self-hosted/test use:
+// NOTIFY_ALLOW_INSECURE_WEBHOOKS (permit http) and NOTIFY_ALLOW_PRIVATE_WEBHOOKS
+// (permit private/loopback egress).
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Allow http + loopback/private targets (tests / self-hosted internal relays).
- *  Read lazily so harnesses can set the env before the first call. */
-export function allowInsecureWebhooks(): boolean {
+// Two independent relaxations, so enabling plain-http for an internal relay does
+// NOT also open up private/loopback/metadata egress (and vice-versa). Read
+// lazily so harnesses can set the env before the first call.
+
+/** Allow a plain `http://` scheme (otherwise https is required). */
+export function allowInsecureScheme(): boolean {
   return process.env.NODE_ENV === "test" || process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS === "true";
+}
+
+/** Allow webhook targets on loopback/private/link-local/reserved networks.
+ *  Separate, explicit opt-in for intentional self-hosted internal relays. */
+export function allowPrivateEgress(): boolean {
+  return process.env.NODE_ENV === "test" || process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS === "true";
 }
 
 /** Is a dotted-quad IPv4 in a loopback/private/link-local/reserved range?
@@ -109,24 +119,27 @@ export function hostLiteralIsPrivate(host: string): boolean {
 }
 
 /**
- * Validate that `v` is a safe outbound webhook URL: `https` (unless the insecure
- * flag is set) targeting a host that is not — and does not resolve to — a
- * loopback/private/link-local/reserved address. Resolves hostnames via DNS and
- * checks every returned address. Returns an error string, or null when safe.
+ * Validate that `v` is a safe outbound webhook URL: `https` (unless the insecure-
+ * scheme flag is set) targeting a host that is not — and does not resolve to — a
+ * loopback/private/link-local/reserved address (unless private egress is
+ * explicitly allowed). Resolves hostnames via DNS and checks every returned
+ * address. Returns an error string, or null when safe.
+ *
+ * Scheme and egress are separate opt-ins: enabling plain-http for an internal
+ * relay does not by itself permit private/metadata targets.
  */
 export async function checkWebhookUrlSafe(v: string): Promise<string | null> {
-  const allowInsecure = allowInsecureWebhooks();
   let parsed: URL;
   try {
     parsed = new URL(v);
   } catch {
     return "A valid webhook URL is required.";
   }
-  if (parsed.protocol !== "https:" && !(allowInsecure && parsed.protocol === "http:")) {
+  if (parsed.protocol !== "https:" && !(allowInsecureScheme() && parsed.protocol === "http:")) {
     return "Webhook URLs must use https.";
   }
-  // Escape hatch (test / self-hosted internal relays): skip the egress checks.
-  if (allowInsecure) return null;
+  // Private/loopback egress is a distinct, explicit opt-in (self-hosted relays).
+  if (allowPrivateEgress()) return null;
 
   const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (net.isIP(host) || host === "localhost") {

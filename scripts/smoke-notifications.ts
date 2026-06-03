@@ -49,9 +49,10 @@ async function main() {
   process.env.DB_PATH = tmpDb;
   process.env.DASHBOARD_ADMIN_LOGINS = "adminuser";
   process.env.DASHBOARD_AUTHOR_LOGINS = "authoruser";
-  // The fake Slack receiver runs on http://127.0.0.1 — allow loopback/plain-http
-  // webhook targets (validateChannelConfig rejects them otherwise / SSRF guard).
+  // The fake Slack receiver runs on http://127.0.0.1 — allow both plain-http
+  // (scheme) and loopback (egress); otherwise the SSRF guard rejects it.
   process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS = "true";
+  process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS = "true";
 
   const db = openDatabase();
   if (!db) throw new Error("failed to open temp db");
@@ -180,6 +181,7 @@ async function main() {
 
     // ── SSRF guard: with the insecure flag OFF, http + private targets 400 ──
     delete process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS;
+    delete process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS;
     const httpReject = await req("POST", "/notifications/channels", {
       session: admin,
       csrf: true,
@@ -206,7 +208,15 @@ async function main() {
       });
       ok(`create channel(compressed IPv6 ${label}) → 400 (SSRF blocked)`, r.status === 400);
     }
-    process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS = "true"; // restore for the rest
+    // Insecure SCHEME alone must NOT open private egress: http loopback still blocked.
+    process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS = "true";
+    const schemeOnly = await req("POST", "/notifications/channels", {
+      session: admin,
+      csrf: true,
+      body: { type: "webhook", name: "bad", config: { url: "http://127.0.0.1:1/x" } },
+    });
+    ok("insecure-scheme on, private-egress off → http loopback still 400", schemeOnly.status === 400);
+    process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS = "true"; // restore both for the rest
 
     // ── Webhook custom headers: hop-by-hop / request-controlled are rejected ──
     const badHeader = await req("POST", "/notifications/channels", {

@@ -548,7 +548,8 @@ GitHub webhook
 | `NOTIFY_DIGEST_DAY` | No | `1` | UTC weekday (0=Sun…6=Sat) the weekly digest is sent. |
 | `NOTIFY_DIGEST_HOUR` | No | `9` | UTC hour (0–23) the weekly digest is sent. |
 | `NOTIFY_DIGEST_DISABLED` | No | | Set to `1` to disable the scheduled weekly digest entirely. |
-| `NOTIFY_ALLOW_INSECURE_WEBHOOKS` | No | | Allow `http://` and loopback/private/link-local webhook+Slack+Discord channel URLs (SSRF guard escape hatch for self-hosted internal relays / local testing). Off by default — channel URLs must be `https` to a public host. |
+| `NOTIFY_ALLOW_INSECURE_WEBHOOKS` | No | | Permit plain `http://` webhook/Slack/Discord channel URLs (scheme only). Off by default — `https` required. Does **not** by itself allow private targets. |
+| `NOTIFY_ALLOW_PRIVATE_WEBHOOKS` | No | | Permit webhook URLs that target (or resolve to) loopback/private/link-local/reserved addresses — separate, explicit SSRF opt-in for self-hosted internal relays. Off by default. |
 
 \* One of `GITHUB_PRIVATE_KEY_PATH` or `GITHUB_PRIVATE_KEY` is required.
 
