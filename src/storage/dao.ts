@@ -339,7 +339,9 @@ export function upsertSettingOverride(opts: {
     ).run(
       opts.scope,
       opts.key,
-      JSON.stringify(opts.value ?? null),
+      // Consistent with insertAuditLog/recordWebhookDelivery: an unrepresentable
+      // value stores JSON null rather than throwing and dropping the write.
+      safeJsonStringify(opts.value) ?? "null",
       opts.updatedBy ?? null,
       new Date().toISOString(),
     );
@@ -349,10 +351,14 @@ export function upsertSettingOverride(opts: {
 }
 
 /**
- * Read a single settings override, JSON-parsed. Returns undefined when the
- * key is unset or persistence is disabled.
+ * Read a single settings override, JSON-parsed.
+ *
+ * `undefined` means the override is missing (no row) or persistence is
+ * disabled; `null` means a value was stored explicitly as JSON null (which is
+ * also what an unrepresentable value upserts to — see `upsertSettingOverride`).
+ * To remove an override entirely, use `deleteSettingOverride`.
  */
-export function getSettingOverride<T = unknown>(scope: string, key: string): T | undefined {
+export function getSettingOverride<T = unknown>(scope: string, key: string): T | null | undefined {
   const db = openDatabase();
   if (!db) return undefined;
   try {
@@ -360,7 +366,7 @@ export function getSettingOverride<T = unknown>(scope: string, key: string): T |
       .prepare(`SELECT value_json FROM settings_overrides WHERE scope = ? AND key = ?`)
       .get(scope, key) as { value_json?: string } | undefined;
     if (!row || row.value_json == null) return undefined;
-    return JSON.parse(row.value_json) as T;
+    return JSON.parse(row.value_json) as T | null;
   } catch (err) {
     logger.debug({ err }, "dao.getSettingOverride failed");
     return undefined;
