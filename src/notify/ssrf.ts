@@ -147,7 +147,10 @@ export async function checkWebhookUrlSafe(v: string): Promise<string | null> {
   // Private/loopback egress is a distinct, explicit opt-in (self-hosted relays).
   if (allowPrivateEgress()) return null;
 
-  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  // Lowercase, strip IPv6 brackets, and drop a single trailing dot so the FQDN
+  // form ("localhost.", "127.0.0.1.") is normalized to its literal/short form
+  // and can't slip past the literal-host checks below.
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
   if (net.isIP(host) || host === "localhost") {
     return hostLiteralIsPrivate(host)
       ? "Webhook URLs may not target local or private network addresses."

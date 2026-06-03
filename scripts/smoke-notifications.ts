@@ -208,6 +208,12 @@ async function main() {
       });
       ok(`create channel(compressed IPv6 ${label}) → 400 (SSRF blocked)`, r.status === 400);
     }
+    const dotReject = await req("POST", "/notifications/channels", {
+      session: admin,
+      csrf: true,
+      body: { type: "webhook", name: "bad", config: { url: "https://localhost./x" } },
+    });
+    ok("create channel(trailing-dot localhost.) → 400 (SSRF blocked)", dotReject.status === 400);
     // Insecure SCHEME alone must NOT open private egress: http loopback still blocked.
     process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS = "true";
     const schemeOnly = await req("POST", "/notifications/channels", {
