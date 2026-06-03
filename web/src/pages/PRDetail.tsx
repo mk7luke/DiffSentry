@@ -5,7 +5,8 @@ import { usePRDetail } from "../api/hooks";
 import { Breadcrumbs } from "../components/Shell";
 import { Card, PageHeader } from "../components/primitives";
 import { ActionButton } from "../components/ActionButton";
-import { ApprovalBadge, RiskBadge, SeverityBadge } from "../components/badges";
+import { ApprovalBadge, RiskBadge, SeverityBadge, TriageBadge } from "../components/badges";
+import { TriageMenu } from "../components/TriageControls";
 import { EmptyState, QueryBoundary } from "../components/states";
 import { Markdown } from "../components/Markdown";
 import { GithubIcon } from "../components/icons";
@@ -202,6 +203,7 @@ export function PRDetailPage() {
                           <th>Title</th>
                           <th>Review</th>
                           <th>Source</th>
+                          <th>Triage</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -243,6 +245,12 @@ export function PRDetailPage() {
                                 )}
                               </td>
                               <td className="muted">{f.source ?? "—"}</td>
+                              <td>
+                                <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                  <TriageBadge row={f} />
+                                  <TriageMenu target={{ kind: "single", id: f.id }} compact />
+                                </div>
+                              </td>
                             </tr>
                           );
                         })}

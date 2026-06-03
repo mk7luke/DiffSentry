@@ -678,6 +678,142 @@ export function triageFinding(opts: {
   }
 }
 
+/** A finding's PR coordinates — used to attribute triage events on the bus. */
+export interface FindingCoords {
+  id: number;
+  owner: string;
+  repo: string;
+  number: number;
+  fingerprint: string | null;
+}
+
+/**
+ * Resolve the PR coordinates (owner/repo/number) for a set of finding ids.
+ * Used by the API to publish an `action.performed` bus event per affected PR
+ * after a triage write. Returns [] when persistence is disabled or no id
+ * matched. Ids are bound positionally — never interpolated into the SQL text.
+ */
+export function getFindingCoords(ids: number[]): FindingCoords[] {
+  const db = openDatabase();
+  if (!db || ids.length === 0) return [];
+  try {
+    const placeholders = ids.map(() => "?").join(", ");
+    return db
+      .prepare(
+        `SELECT fi.id, rv.owner, rv.repo, rv.number, fi.fingerprint
+         FROM findings fi
+         JOIN reviews rv ON rv.id = fi.review_id
+         WHERE fi.id IN (${placeholders})`,
+      )
+      .all(...ids) as FindingCoords[];
+  } catch (err) {
+    logger.debug({ err }, "dao.getFindingCoords failed");
+    return [];
+  }
+}
+
+/**
+ * Every finding id sharing a fingerprint — the "dismiss a whole class" path.
+ * Capped so a pathological fingerprint can't trigger an unbounded UPDATE.
+ */
+export function getFindingIdsByFingerprint(fingerprint: string, limit = 1000): number[] {
+  const db = openDatabase();
+  if (!db || !fingerprint) return [];
+  try {
+    const cap = Math.min(Math.max(limit, 1), 5000);
+    const rows = db
+      .prepare(`SELECT id FROM findings WHERE fingerprint = ? ORDER BY id DESC LIMIT ?`)
+      .all(fingerprint, cap) as Array<{ id: number }>;
+    return rows.map((r) => r.id);
+  } catch (err) {
+    logger.debug({ err }, "dao.getFindingIdsByFingerprint failed");
+    return [];
+  }
+}
+
+/**
+ * Apply the same triage state to many findings in one statement. Mirrors
+ * triageFinding's safe-fragment construction (no column name is interpolated)
+ * but binds an `IN (...)` list of ids. Returns the number of rows actually
+ * changed (rows already at the target state are left untouched by the null-safe
+ * `IS NOT` diff predicate, so re-applying is a no-op).
+ */
+export function bulkTriageFindings(opts: {
+  ids: number[];
+  accepted?: boolean | null;
+  snoozedUntil?: string | null;
+  triagedBy?: string | null;
+  triageNote?: string | null;
+}): number {
+  const db = openDatabase();
+  if (!db || opts.ids.length === 0) return 0;
+  if (!ensureCommandCenterSchema(db, [], REQUIRED_FINDINGS_COLUMNS)) return 0;
+  try {
+    const updates: Array<{ set: string; diff: string; value: unknown }> = [];
+    if (opts.accepted !== undefined) {
+      updates.push({
+        set: "accepted = ?",
+        diff: "accepted IS NOT ?",
+        value: opts.accepted == null ? null : opts.accepted ? 1 : 0,
+      });
+    }
+    if (opts.snoozedUntil !== undefined) {
+      updates.push({ set: "snoozed_until = ?", diff: "snoozed_until IS NOT ?", value: opts.snoozedUntil });
+    }
+    if (opts.triageNote !== undefined) {
+      updates.push({ set: "triage_note = ?", diff: "triage_note IS NOT ?", value: opts.triageNote });
+    }
+    if (opts.triagedBy !== undefined) {
+      updates.push({ set: "triaged_by = ?", diff: "triaged_by IS NOT ?", value: opts.triagedBy });
+    }
+    if (updates.length === 0) return 0;
+
+    const setClauses = updates.map((u) => u.set);
+    const setValues = updates.map((u) => u.value);
+    const diffPredicates = updates.map((u) => u.diff);
+    const diffValues = updates.map((u) => u.value);
+    setClauses.push("triaged_at = ?");
+    setValues.push(new Date().toISOString());
+
+    const placeholders = opts.ids.map(() => "?").join(", ");
+    // Placeholder order: every SET value, then the id list, then every
+    // diff-predicate value. The .run() args mirror that order exactly.
+    const sql = `UPDATE findings SET ${setClauses.join(", ")} WHERE id IN (${placeholders}) AND (${diffPredicates.join(" OR ")})`;
+    const info = db.prepare(sql).run(...setValues, ...opts.ids, ...diffValues);
+    return info.changes;
+  } catch (err) {
+    logger.debug({ err }, "dao.bulkTriageFindings failed");
+    return 0;
+  }
+}
+
+/**
+ * The set of fingerprints a review may suppress: findings explicitly dismissed
+ * (accepted = 0) or currently snoozed (snoozed_until in the future). This is the
+ * read the engine consults when DIFFSENTRY_SUPPRESS_DISMISSED is enabled — it
+ * is opt-in precisely because it changes review output. Returns an empty set
+ * (never throws) when persistence or the v2 schema is unavailable, so the
+ * engine degrades to its default behavior.
+ */
+export function getSuppressedFingerprints(nowIso = new Date().toISOString()): Set<string> {
+  const db = openDatabase();
+  if (!db) return new Set();
+  if (!ensureCommandCenterSchema(db, [], REQUIRED_FINDINGS_COLUMNS)) return new Set();
+  try {
+    const rows = db
+      .prepare(
+        `SELECT DISTINCT fingerprint FROM findings
+         WHERE fingerprint IS NOT NULL AND fingerprint <> ''
+           AND (accepted = 0 OR (snoozed_until IS NOT NULL AND snoozed_until > ?))`,
+      )
+      .all(nowIso) as Array<{ fingerprint: string }>;
+    return new Set(rows.map((r) => r.fingerprint));
+  } catch (err) {
+    logger.debug({ err }, "dao.getSuppressedFingerprints failed");
+    return new Set();
+  }
+}
+
 /** Canonical command-center roles the dashboard gates write access on. */
 export const VALID_ROLES = ["viewer", "author", "admin"] as const;
 export type Role = (typeof VALID_ROLES)[number];

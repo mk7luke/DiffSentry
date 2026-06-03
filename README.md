@@ -538,6 +538,7 @@ GitHub webhook
 | `DASHBOARD_AUTHOR_LOGINS` | No | | Comma-separated logins granted the `author` role. |
 | `DASHBOARD_SESSION_SECRET` | No | `GITHUB_WEBHOOK_SECRET` | HMAC key for the dashboard session + CSRF cookies. |
 | `DASHBOARD_SSE_HEARTBEAT_MS` | No | `25000` | Heartbeat interval (ms, min 1000) for the `/api/v1/stream` SSE feed. |
+| `DIFFSENTRY_SUPPRESS_DISMISSED` | No | | Set to `1` so new reviews drop findings whose fingerprint was dismissed or is currently snoozed via triage. Off by default — triage never changes review output unless enabled. |
 
 \* One of `GITHUB_PRIVATE_KEY_PATH` or `GITHUB_PRIVATE_KEY` is required.
 
@@ -695,7 +696,10 @@ untouched.
 - `/repos/:owner/:repo/pr/:number` — latest review snapshot, full findings
   table, all-reviews list, events timeline, link back to GitHub.
 - `/findings` — cross-repo filterable explorer (severity, source, repo,
-  free-text, age) with a "recurring fingerprints" group.
+  free-text, age, **triage state**) with inline + bulk **triage** controls
+  (accept / dismiss / snooze-with-date + note) and a recurring-fingerprints group.
+- `/findings/recurring` — fingerprints ranked by how often they reappear, with a
+  per-class triage rollup and one-click accept/dismiss of a whole class.
 - `/patterns` — every pattern-rule hit with 30d + all-time counts.
 - `/audit` — **admin only** — the audit trail (who did what, when) plus a
   per-login role-override editor.
@@ -707,15 +711,16 @@ untouched.
 
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
-`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, and `/audit`
-(admin). Write endpoints: `POST /roles` (admin) sets/clears a role override.
+`/repos/:owner/:repo/prs/:number`, `/findings`, `/findings/recurring`,
+`/patterns`, and `/audit` (admin). Write endpoints: `POST /roles` (admin)
+sets/clears a role override; the triage endpoints below (`author`+).
 When OAuth is configured every endpoint requires a valid session (401 JSON
 otherwise); the queries reuse the same SQL as the legacy dashboard and no-op
 gracefully when persistence is disabled.
 
-**Command actions** (`author`+) drive the review engine from the dashboard. Each
-is `requireRole('author')` + CSRF gated, writes an `audit_log` row, and emits an
-SSE event:
+**Command actions** (`author`+) drive the review engine and findings triage from
+the dashboard. Each is `requireRole('author')` + CSRF gated, writes an
+`audit_log` row, and emits an SSE event:
 
 | Endpoint | Effect |
 |---|---|
@@ -723,6 +728,14 @@ SSE event:
 | `POST .../prs/:number/resolve` | Resolve all DiffSentry review threads on the PR. |
 | `POST .../prs/:number/pause` / `.../resume` | Pause / resume automatic + manual reviews. |
 | `POST .../prs/:number/cancel` | Abort any in-flight review (handlePRClose semantics). |
+| `POST /findings/:id/triage` `{ state, until?, note? }` | Triage one finding — `state` is `accepted`\|`dismissed`\|`snoozed` (snooze needs a future `until`). |
+| `POST /findings/triage` `{ ids[]\|fingerprint, state, until?, note? }` | Bulk-triage many findings, or a whole fingerprint class at once. |
+
+**Triage feedback into reviews** is opt-in. Triage state always persists and is
+visible in the UI + audit log, but reviews ignore it by default. Set
+`DIFFSENTRY_SUPPRESS_DISMISSED=1` to have new reviews drop any finding whose
+fingerprint is dismissed or currently snoozed — so the engine never changes its
+output from triage data unless an operator explicitly enables it.
 
 **Realtime** (`GET /api/v1/stream`) is a Server-Sent Events feed on an in-process
 event bus. The review engine publishes `review.started` / `review.finished` /

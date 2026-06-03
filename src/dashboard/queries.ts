@@ -373,7 +373,7 @@ export function getPRReviews(owner: string, repo: string, number: number): PRRev
     .all(owner, repo, number) as PRReviewRow[];
 }
 
-export interface PRFindingRow extends FindingRow {
+export interface PRFindingRow extends FindingRow, TriageColumns {
   review_id: number;
   review_sha: string | null;
   review_at: string;
@@ -387,6 +387,7 @@ export function getFindingsForPR(owner: string, repo: string, number: number): P
     .prepare(
       `SELECT f.id, f.path, f.line, f.type, f.severity, f.title, f.body,
               f.fingerprint, f.source, f.confidence,
+              f.accepted, f.snoozed_until, f.triaged_by, f.triaged_at, f.triage_note,
               rv.id AS review_id, rv.sha AS review_sha, rv.created_at AS review_at
        FROM findings f
        JOIN reviews rv ON rv.id = f.review_id
@@ -428,7 +429,18 @@ export function getFindings(reviewId: number): FindingRow[] {
 
 // ─── Findings explorer ─────────────────────────────────────────────
 
-export interface FindingExplorerRow {
+/** Triage columns shared by the explorer + PR finding rows. */
+export interface TriageColumns {
+  /** 1 = accepted, 0 = dismissed, null = no accept/dismiss decision. */
+  accepted: number | null;
+  /** ISO-8601 — suppressed until this time when in the future. */
+  snoozed_until: string | null;
+  triaged_by: string | null;
+  triaged_at: string | null;
+  triage_note: string | null;
+}
+
+export interface FindingExplorerRow extends TriageColumns {
   id: number;
   owner: string;
   repo: string;
@@ -449,6 +461,8 @@ export interface FindingFilters {
   repo?: string; // "owner/repo"
   q?: string; // substring on path + title
   fingerprint?: string;
+  /** accepted | dismissed | snoozed | untriaged */
+  triage?: string;
   ageDays?: number; // only findings from reviews created within N days
   limit?: number;
   offset?: number;
@@ -479,6 +493,16 @@ function buildFindingsWhere(f: FindingFilters): { clause: string; params: unknow
     clauses.push("fi.fingerprint = ?");
     params.push(f.fingerprint);
   }
+  if (f.triage === "accepted") {
+    clauses.push("fi.accepted = 1");
+  } else if (f.triage === "dismissed") {
+    clauses.push("fi.accepted = 0");
+  } else if (f.triage === "snoozed") {
+    clauses.push("fi.snoozed_until IS NOT NULL AND fi.snoozed_until > ?");
+    params.push(new Date().toISOString());
+  } else if (f.triage === "untriaged") {
+    clauses.push("fi.triaged_at IS NULL");
+  }
   if (f.q) {
     clauses.push("(COALESCE(fi.path,'') LIKE ? OR COALESCE(fi.title,'') LIKE ?)");
     const like = `%${f.q}%`;
@@ -505,7 +529,8 @@ export function queryFindings(filters: FindingFilters): FindingExplorerResult {
   const rows = db
     .prepare(
       `SELECT fi.id, rv.owner, rv.repo, rv.number, rv.created_at,
-              fi.path, fi.line, fi.severity, fi.title, fi.source, fi.fingerprint, fi.type
+              fi.path, fi.line, fi.severity, fi.title, fi.source, fi.fingerprint, fi.type,
+              fi.accepted, fi.snoozed_until, fi.triaged_by, fi.triaged_at, fi.triage_note
        FROM findings fi
        JOIN reviews rv ON rv.id = fi.review_id
        ${clause}
@@ -547,6 +572,72 @@ export function queryFingerprintGroups(filters: FindingFilters, limit = 50): Fin
        LIMIT ?`,
     )
     .all(...params, limit) as FingerprintGroupRow[];
+}
+
+export interface RecurringFindingRow {
+  fingerprint: string;
+  title: string | null;
+  severity: string | null;
+  /** Total findings carrying this fingerprint. */
+  occurrences: number;
+  /** Distinct owner/repo the fingerprint has appeared in. */
+  repos: number;
+  /** Distinct PRs (owner/repo/number) the fingerprint has appeared on. */
+  prs: number;
+  first_seen: string;
+  last_seen: string;
+  /** Triage rollup across the class. */
+  accepted_count: number;
+  dismissed_count: number;
+  snoozed_count: number;
+  untriaged_count: number;
+}
+
+/**
+ * Recurring findings ranked by how often a fingerprint reappears, with a triage
+ * rollup so the UI can show "N dismissed / M accepted" and offer class-wide
+ * triage. `min` defaults to 2 (only genuinely recurring classes); pass 1 to
+ * include singletons. Honors the shared finding filters (severity/source/repo/
+ * age/triage) so the view can be scoped.
+ */
+export function queryRecurringFindings(filters: FindingFilters, limit = 100, min = 2): RecurringFindingRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  const { clause, params } = buildFindingsWhere(filters);
+  const now = new Date().toISOString();
+  const safeLimit = Math.min(Math.max(limit, 1), 500);
+  const safeMin = Math.max(min, 1);
+  try {
+    return db
+      .prepare(
+        `SELECT fi.fingerprint,
+                MAX(fi.title) AS title,
+                CASE MIN(CASE fi.severity
+                      WHEN 'critical' THEN 0 WHEN 'major' THEN 1
+                      WHEN 'minor' THEN 2 WHEN 'nit' THEN 3 ELSE 4 END)
+                  WHEN 0 THEN 'critical' WHEN 1 THEN 'major'
+                  WHEN 2 THEN 'minor' WHEN 3 THEN 'nit' ELSE NULL END AS severity,
+                COUNT(*) AS occurrences,
+                COUNT(DISTINCT rv.owner || '/' || rv.repo) AS repos,
+                COUNT(DISTINCT rv.owner || '/' || rv.repo || '#' || rv.number) AS prs,
+                MIN(rv.created_at) AS first_seen,
+                MAX(rv.created_at) AS last_seen,
+                SUM(CASE WHEN fi.accepted = 1 THEN 1 ELSE 0 END) AS accepted_count,
+                SUM(CASE WHEN fi.accepted = 0 THEN 1 ELSE 0 END) AS dismissed_count,
+                SUM(CASE WHEN fi.snoozed_until IS NOT NULL AND fi.snoozed_until > ? THEN 1 ELSE 0 END) AS snoozed_count,
+                SUM(CASE WHEN fi.triaged_at IS NULL THEN 1 ELSE 0 END) AS untriaged_count
+         FROM findings fi
+         JOIN reviews rv ON rv.id = fi.review_id
+         ${clause ? clause + " AND " : "WHERE "} fi.fingerprint IS NOT NULL AND fi.fingerprint <> ''
+         GROUP BY fi.fingerprint
+         HAVING occurrences >= ?
+         ORDER BY occurrences DESC, last_seen DESC
+         LIMIT ?`,
+      )
+      .all(now, ...params, safeMin, safeLimit) as RecurringFindingRow[];
+  } catch {
+    return [];
+  }
 }
 
 /**

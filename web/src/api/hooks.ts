@@ -9,9 +9,12 @@ import type {
   MeResponse,
   PatternsResponse,
   PRDetailResponse,
+  RecurringResponse,
   RepoDetailResponse,
   ReposResponse,
   Role,
+  TriageResult,
+  TriageState,
 } from "./types";
 
 export function useMe() {
@@ -55,6 +58,7 @@ export interface FindingsQuery {
   repo?: string;
   q?: string;
   fingerprint?: string;
+  triage?: string;
   age?: string;
   limit?: number;
   offset?: number;
@@ -70,11 +74,69 @@ export function useFindings(query: FindingsQuery) {
         repo: query.repo,
         q: query.q,
         fingerprint: query.fingerprint,
+        triage: query.triage,
         age: query.age,
         limit: query.limit,
         offset: query.offset,
       }),
     placeholderData: (prev) => prev,
+  });
+}
+
+export function useRecurring(query: FindingsQuery) {
+  return useQuery({
+    queryKey: ["recurring", query],
+    queryFn: () =>
+      apiGet<RecurringResponse>("/findings/recurring", {
+        severity: query.severity,
+        source: query.source,
+        repo: query.repo,
+        q: query.q,
+        triage: query.triage,
+        age: query.age,
+        limit: query.limit,
+      }),
+    placeholderData: (prev) => prev,
+  });
+}
+
+export interface TriageVars {
+  state: TriageState;
+  /** ISO-8601 deadline — required when state is "snoozed". */
+  until?: string;
+  note?: string;
+}
+
+/**
+ * Refetch every view a triage write can touch: the explorer, the recurring
+ * view, any open PR detail, and the audit log. Called from each triage success.
+ */
+function invalidateTriageViews(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: ["findings"] });
+  void qc.invalidateQueries({ queryKey: ["recurring"] });
+  void qc.invalidateQueries({ queryKey: ["pr"] });
+  void qc.invalidateQueries({ queryKey: ["audit"] });
+}
+
+/** Triage a single finding by id. */
+export function useTriageFinding() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number } & TriageVars) =>
+      apiSend<TriageResult>(`/findings/${vars.id}/triage`, {
+        body: { state: vars.state, until: vars.until, note: vars.note },
+      }),
+    onSuccess: () => invalidateTriageViews(qc),
+  });
+}
+
+/** Bulk-triage findings by explicit id list, or a whole fingerprint class. */
+export function useBulkTriage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: ({ ids: number[] } | { fingerprint: string }) & TriageVars) =>
+      apiSend<TriageResult>("/findings/triage", { body: vars }),
+    onSuccess: () => invalidateTriageViews(qc),
   });
 }
 
