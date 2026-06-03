@@ -197,9 +197,13 @@ function flatten(global: Learning[], repos: { owner: string; repo: string; learn
 export function registerLearningRoutes(router: Router, deps: LearningDeps): void {
   const { learnings, requireRole, csrf } = deps;
   const author = requireRole("author");
+  // Reads require an authenticated user (viewer floor). When auth is enabled the
+  // router's auth gate already 401s anon requests; this makes the role contract
+  // explicit per-route and resolves req.dsActor for handlers.
+  const viewer = requireRole("viewer");
 
   // ── List everything (global + per-repo) + dedupe suggestions ────────
-  router.get("/learnings", async (_req: Request, res: Response) => {
+  router.get("/learnings", viewer, async (_req: Request, res: Response) => {
     try {
       const [global, repos] = await Promise.all([learnings.getGlobalLearnings(), learnings.listAllRepos()]);
       const duplicates = computeDuplicates(flatten(global, repos));
@@ -211,9 +215,9 @@ export function registerLearningRoutes(router: Router, deps: LearningDeps): void
   });
 
   // ── Test a file path against the learnings that would apply ─────────
-  // Read-only (no CSRF / role gate beyond the auth floor): mirrors the engine's
+  // Read-only (viewer floor, no CSRF — it mutates nothing): mirrors the engine's
   // getRelevantLearnings selection for a single filename.
-  router.post("/learnings/test", async (req: Request, res: Response) => {
+  router.post("/learnings/test", viewer, async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const filePath = typeof body.path === "string" ? body.path.trim() : "";
     const owner = typeof body.owner === "string" ? body.owner.trim() : "";

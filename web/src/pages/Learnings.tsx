@@ -386,7 +386,9 @@ function LearningRow({
 }
 
 function NewLearningCard({ repoLabels }: { repoLabels: string[] }) {
-  const [scope, setScope] = useState<"global" | "repo">("repo");
+  // On a fresh store with no repos, default to global so a learning can be
+  // added immediately (the repo target would otherwise be empty + required).
+  const [scope, setScope] = useState<"global" | "repo">(repoLabels.length === 0 ? "global" : "repo");
   const [target, setTarget] = useState(repoLabels[0] ?? "");
   const [content, setContent] = useState("");
   const [path, setPath] = useState("");

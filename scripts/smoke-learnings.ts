@@ -121,6 +121,12 @@ async function main() {
   const viewerSess = sessionValue("vieweruser", 3);
 
   try {
+    // ─── Reads require auth (viewer floor) ─────────────────────────────
+    const listAnon = await req("GET", "/learnings", {});
+    ok("list(anon) → 401 unauthorized", listAnon.status === 401 && listAnon.json.error.code === "unauthorized");
+    const testAnon = await req("POST", "/learnings/test", { body: { path: "src/index.ts" } });
+    ok("test(anon) → 401 unauthorized", testAnon.status === 401 && testAnon.json.error.code === "unauthorized");
+
     // ─── RBAC + CSRF on create ─────────────────────────────────────────
     const byViewer = await req("POST", "/repos/acme/widget/learnings", {
       session: viewerSess,
