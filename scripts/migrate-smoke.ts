@@ -68,37 +68,37 @@ function cleanup(file: string): void {
 function testFreshAndIdempotent(): void {
   const file = tmpPath();
   try {
-  withDb(file, (db) => {
-    applyMigrations(db);
-    assert.equal(currentSchemaVersion(db), LATEST_SCHEMA_VERSION, "fresh DB should reach latest version");
+    withDb(file, (db) => {
+      applyMigrations(db);
+      assert.equal(currentSchemaVersion(db), LATEST_SCHEMA_VERSION, "fresh DB should reach latest version");
 
-    const tables = tableNames(db);
-    for (const t of ["repos", "prs", "reviews", "findings", "events", "issues", ...EXPECTED_V2_TABLES]) {
-      assert.ok(tables.has(t), `expected table ${t} to exist`);
-    }
-    const findingsCols = columnNames(db, "findings");
-    for (const c of EXPECTED_TRIAGE_COLS) {
-      assert.ok(findingsCols.has(c), `expected findings.${c} to exist`);
-    }
+      const tables = tableNames(db);
+      for (const t of ["repos", "prs", "reviews", "findings", "events", "issues", ...EXPECTED_V2_TABLES]) {
+        assert.ok(tables.has(t), `expected table ${t} to exist`);
+      }
+      const findingsCols = columnNames(db, "findings");
+      for (const c of EXPECTED_TRIAGE_COLS) {
+        assert.ok(findingsCols.has(c), `expected findings.${c} to exist`);
+      }
 
-    const ledgerBefore = db.prepare("SELECT version, name, applied_at FROM schema_version ORDER BY version").all();
-    assert.equal(ledgerBefore.length, MIGRATIONS.length, "ledger should have one row per migration");
-    for (const row of ledgerBefore as Array<{ name: string; applied_at: string }>) {
-      assert.ok(row.name, "ledger row should record a name");
-      assert.ok(row.applied_at, "ledger row should record applied_at");
-    }
+      const ledgerBefore = db.prepare("SELECT version, name, applied_at FROM schema_version ORDER BY version").all();
+      assert.equal(ledgerBefore.length, MIGRATIONS.length, "ledger should have one row per migration");
+      for (const row of ledgerBefore as Array<{ name: string; applied_at: string }>) {
+        assert.ok(row.name, "ledger row should record a name");
+        assert.ok(row.applied_at, "ledger row should record applied_at");
+      }
 
-    // Idempotency: run twice more, expect no change to the ledger.
-    applyMigrations(db);
-    applyMigrations(db);
-    const ledgerAfter = db.prepare("SELECT version, name FROM schema_version ORDER BY version").all();
-    assert.deepEqual(
-      ledgerAfter,
-      ledgerBefore.map((r) => ({ version: (r as { version: number }).version, name: (r as { name: string }).name })),
-      "re-running migrations must not add or change ledger rows",
-    );
-  });
-  console.log("ok  fresh DB migrates to latest + idempotent re-run");
+      // Idempotency: run twice more, expect no change to the ledger.
+      applyMigrations(db);
+      applyMigrations(db);
+      const ledgerAfter = db.prepare("SELECT version, name FROM schema_version ORDER BY version").all();
+      assert.deepEqual(
+        ledgerAfter,
+        ledgerBefore.map((r) => ({ version: (r as { version: number }).version, name: (r as { name: string }).name })),
+        "re-running migrations must not add or change ledger rows",
+      );
+    });
+    console.log("ok  fresh DB migrates to latest + idempotent re-run");
   } finally {
     cleanup(file);
   }
@@ -108,46 +108,46 @@ function testFreshAndIdempotent(): void {
 function testExistingV1Upgrade(): void {
   const file = tmpPath();
   try {
-  // Simulate a DB created by the OLD code: legacy single-column schema_version
-  // plus the v1 baseline tables, with a real findings row to protect.
-  withDb(file, (db) => {
-    db.exec("CREATE TABLE schema_version (version INTEGER PRIMARY KEY)");
-    db.prepare("INSERT INTO schema_version (version) VALUES (1)").run();
-    db.exec(MIGRATIONS[0].sql); // v1 baseline (CREATE IF NOT EXISTS, safe)
-    db.prepare(
-      `INSERT INTO reviews (owner, repo, number, sha, created_at) VALUES (?, ?, ?, ?, ?)`,
-    ).run("acme", "widgets", 1, "deadbeef", "2026-01-01T00:00:00.000Z");
-    db.prepare(
-      `INSERT INTO findings (review_id, path, severity, title, accepted) VALUES (?, ?, ?, ?, ?)`,
-    ).run(1, "src/x.ts", "critical", "Pre-existing finding", 1);
-  });
+    // Simulate a DB created by the OLD code: legacy single-column schema_version
+    // plus the v1 baseline tables, with a real findings row to protect.
+    withDb(file, (db) => {
+      db.exec("CREATE TABLE schema_version (version INTEGER PRIMARY KEY)");
+      db.prepare("INSERT INTO schema_version (version) VALUES (1)").run();
+      db.exec(MIGRATIONS[0].sql); // v1 baseline (CREATE IF NOT EXISTS, safe)
+      db.prepare(
+        `INSERT INTO reviews (owner, repo, number, sha, created_at) VALUES (?, ?, ?, ?, ?)`,
+      ).run("acme", "widgets", 1, "deadbeef", "2026-01-01T00:00:00.000Z");
+      db.prepare(
+        `INSERT INTO findings (review_id, path, severity, title, accepted) VALUES (?, ?, ?, ?, ?)`,
+      ).run(1, "src/x.ts", "critical", "Pre-existing finding", 1);
+    });
 
-  withDb(file, (db) => {
-    assert.equal(currentSchemaVersion(db), 1, "legacy DB should report version 1 before upgrade");
-    applyMigrations(db);
-    assert.equal(currentSchemaVersion(db), LATEST_SCHEMA_VERSION, "legacy DB should upgrade to latest");
+    withDb(file, (db) => {
+      assert.equal(currentSchemaVersion(db), 1, "legacy DB should report version 1 before upgrade");
+      applyMigrations(db);
+      assert.equal(currentSchemaVersion(db), LATEST_SCHEMA_VERSION, "legacy DB should upgrade to latest");
 
-    // New tables + triage columns present.
-    const tables = tableNames(db);
-    for (const t of EXPECTED_V2_TABLES) assert.ok(tables.has(t), `expected table ${t} after upgrade`);
-    const findingsCols = columnNames(db, "findings");
-    for (const c of EXPECTED_TRIAGE_COLS) assert.ok(findingsCols.has(c), `expected findings.${c} after upgrade`);
+      // New tables + triage columns present.
+      const tables = tableNames(db);
+      for (const t of EXPECTED_V2_TABLES) assert.ok(tables.has(t), `expected table ${t} after upgrade`);
+      const findingsCols = columnNames(db, "findings");
+      for (const c of EXPECTED_TRIAGE_COLS) assert.ok(findingsCols.has(c), `expected findings.${c} after upgrade`);
 
-    // Pre-existing data survived untouched.
-    const finding = db.prepare("SELECT title, accepted, snoozed_until FROM findings WHERE id = 1").get() as {
-      title: string;
-      accepted: number;
-      snoozed_until: string | null;
-    };
-    assert.equal(finding.title, "Pre-existing finding", "existing finding data must survive");
-    assert.equal(finding.accepted, 1, "existing accepted flag must survive");
-    assert.equal(finding.snoozed_until, null, "new column defaults to NULL");
+      // Pre-existing data survived untouched.
+      const finding = db.prepare("SELECT title, accepted, snoozed_until FROM findings WHERE id = 1").get() as {
+        title: string;
+        accepted: number;
+        snoozed_until: string | null;
+      };
+      assert.equal(finding.title, "Pre-existing finding", "existing finding data must survive");
+      assert.equal(finding.accepted, 1, "existing accepted flag must survive");
+      assert.equal(finding.snoozed_until, null, "new column defaults to NULL");
 
-    // Ledger now has both versions, and the legacy row got backfilled columns.
-    const ledger = db.prepare("SELECT version FROM schema_version ORDER BY version").all() as Array<{ version: number }>;
-    assert.deepEqual(ledger.map((r) => r.version), MIGRATIONS.map((m) => m.version), "ledger has all versions");
-  });
-  console.log("ok  existing v1 DB upgrades in place without data loss");
+      // Ledger now has both versions, and the legacy row got backfilled columns.
+      const ledger = db.prepare("SELECT version FROM schema_version ORDER BY version").all() as Array<{ version: number }>;
+      assert.deepEqual(ledger.map((r) => r.version), MIGRATIONS.map((m) => m.version), "ledger has all versions");
+    });
+    console.log("ok  existing v1 DB upgrades in place without data loss");
   } finally {
     cleanup(file);
   }
@@ -157,23 +157,54 @@ function testExistingV1Upgrade(): void {
 function testPreExistingTriageColumn(): void {
   const file = tmpPath();
   try {
-  // A v1 DB where someone already hand-added one of the triage columns. The
-  // plain ALTER would throw "duplicate column"; the guarded `post` step must
-  // skip it and add only the missing ones.
-  withDb(file, (db) => {
-    db.exec("CREATE TABLE schema_version (version INTEGER PRIMARY KEY)");
-    db.prepare("INSERT INTO schema_version (version) VALUES (1)").run();
-    db.exec(MIGRATIONS[0].sql);
-    db.exec("ALTER TABLE findings ADD COLUMN snoozed_until TEXT"); // pre-existing
-  });
+    // A v1 DB where someone already hand-added one of the triage columns. The
+    // plain ALTER would throw "duplicate column"; the guarded `post` step must
+    // skip it and add only the missing ones.
+    withDb(file, (db) => {
+      db.exec("CREATE TABLE schema_version (version INTEGER PRIMARY KEY)");
+      db.prepare("INSERT INTO schema_version (version) VALUES (1)").run();
+      db.exec(MIGRATIONS[0].sql);
+      db.exec("ALTER TABLE findings ADD COLUMN snoozed_until TEXT"); // pre-existing
+    });
 
-  withDb(file, (db) => {
-    applyMigrations(db); // must not throw on the duplicate column
-    assert.equal(currentSchemaVersion(db), LATEST_SCHEMA_VERSION, "should still reach latest");
-    const cols = columnNames(db, "findings");
-    for (const c of EXPECTED_TRIAGE_COLS) assert.ok(cols.has(c), `expected findings.${c}`);
-  });
-  console.log("ok  migration 2 skips a pre-existing triage column (idempotent ADD COLUMN)");
+    withDb(file, (db) => {
+      applyMigrations(db); // must not throw on the duplicate column
+      assert.equal(currentSchemaVersion(db), LATEST_SCHEMA_VERSION, "should still reach latest");
+      const cols = columnNames(db, "findings");
+      for (const c of EXPECTED_TRIAGE_COLS) assert.ok(cols.has(c), `expected findings.${c}`);
+    });
+    console.log("ok  migration 2 skips a pre-existing triage column (idempotent ADD COLUMN)");
+  } finally {
+    cleanup(file);
+  }
+}
+
+// --- 5: a future ledger row must not block known pending migrations --------
+function testFutureVersionDoesNotBlockPending(): void {
+  const file = tmpPath();
+  try {
+    // Ledger records v1 and a future v99 (e.g. a newer binary ran, then was
+    // rolled back) but migration 2 was never applied. The runner must still
+    // apply migration 2 without downgrading the future row.
+    withDb(file, (db) => {
+      db.exec("CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT, applied_at TEXT)");
+      db.exec(MIGRATIONS[0].sql); // v1 baseline tables incl. findings
+      db.prepare("INSERT INTO schema_version (version, name, applied_at) VALUES (1, 'v1_baseline', ?)")
+        .run("2026-01-01T00:00:00.000Z");
+      db.prepare("INSERT INTO schema_version (version, name, applied_at) VALUES (99, 'future', ?)")
+        .run("2026-01-01T00:00:00.000Z");
+    });
+
+    withDb(file, (db) => {
+      applyMigrations(db);
+      const versions = (db.prepare("SELECT version FROM schema_version").all() as Array<{ version: number }>)
+        .map((r) => r.version);
+      assert.ok(versions.includes(2), "migration 2 must be applied even with a future ledger row present");
+      assert.ok(versions.includes(99), "the future ledger row must be left untouched (no downgrade)");
+      const cols = columnNames(db, "findings");
+      for (const c of EXPECTED_TRIAGE_COLS) assert.ok(cols.has(c), `expected findings.${c}`);
+    });
+    console.log("ok  future ledger row does not block a supported pending migration");
   } finally {
     cleanup(file);
   }
@@ -182,4 +213,5 @@ function testPreExistingTriageColumn(): void {
 testFreshAndIdempotent();
 testExistingV1Upgrade();
 testPreExistingTriageColumn();
+testFutureVersionDoesNotBlockPending();
 console.log(`\nAll migration smoke tests passed (latest schema version = ${LATEST_SCHEMA_VERSION}).`);

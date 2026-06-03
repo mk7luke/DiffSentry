@@ -18,7 +18,8 @@ tool — migrations are plain SQL strings applied in order at startup.
   `openDatabase()` calls it automatically.
 - **Never auto-downgrades.** If the database's max version is higher than the
   binary knows about (`LATEST_SCHEMA_VERSION`), the runner logs a warning and
-  leaves the database untouched rather than dropping anything.
+  never drops the future rows. It still applies any *supported* versions the
+  ledger is missing, so a future row can't block a known pending migration.
 - Each applied migration is logged at `info` level (`Applied schema migration`).
 
 ### Legacy databases

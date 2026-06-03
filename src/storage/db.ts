@@ -267,15 +267,20 @@ export interface Migration {
  * COLUMN has no IF NOT EXISTS, so we inspect the current columns and add only
  * the missing ones. Column names are fixed literals (no user input).
  *
- * Self-contained: if `findings` doesn't exist yet (e.g. a ledger that marks
- * v1 applied without the table actually present), apply the idempotent v1
- * baseline first so this step never depends on migration 1 having run.
+ * Requires the `findings` table (created by migration 1) to already exist.
+ * Migration 2 will not silently repair a v1 ledger that is inconsistent with
+ * the database — if the table is missing we throw rather than recreate it.
  */
 function ensureFindingsTriageColumns(db: DB): void {
   const hasFindings = db
     .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'findings'")
     .get();
-  if (!hasFindings) db.exec(SCHEMA_V1);
+  if (!hasFindings) {
+    throw new Error(
+      "Migration 2 (command_center) requires the `findings` table from migration 1, but it is missing — " +
+        "the schema_version ledger is inconsistent with the database. Refusing to proceed.",
+    );
+  }
   const cols = new Set(
     (db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>).map((c) => c.name),
   );
@@ -360,8 +365,8 @@ export function currentSchemaVersion(db: DB): number {
  * Apply every pending migration in order. Each runs in its own transaction so
  * a failure rolls back that migration only; the ledger row is written in the
  * same transaction. Idempotent: already-applied versions are skipped, so
- * running twice is a no-op. Never downgrades — if the database is ahead of
- * this binary we log and leave it untouched.
+ * running twice is a no-op. Never downgrades — a database ahead of this binary
+ * keeps its future rows; we still fill in any supported versions it is missing.
  */
 export function applyMigrations(db: DB): void {
   validateMigrations();
@@ -370,11 +375,13 @@ export function applyMigrations(db: DB): void {
 
   const dbVersion = applied.size === 0 ? 0 : Math.max(...applied);
   if (dbVersion > LATEST_SCHEMA_VERSION) {
+    // A future migration row exists (e.g. ran a newer binary, then rolled
+    // back). We don't downgrade those, but we must still apply any supported
+    // versions missing from the ledger rather than bailing out entirely.
     logger.warn(
       { dbVersion, supported: LATEST_SCHEMA_VERSION },
-      "Database schema is newer than this binary — refusing to downgrade, leaving as-is",
+      "Database schema is newer than this binary — not downgrading, but applying any supported pending migrations",
     );
-    return;
   }
 
   const insertLedger = db.prepare(
