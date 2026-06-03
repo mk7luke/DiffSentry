@@ -325,7 +325,7 @@ export function OpsConsolePage() {
     // Page strictly by the server cursor — never the oldest *rendered* row,
     // which the ring cap can trim ahead of the true history boundary.
     const before = cursor.before;
-    if (!before) return;
+    if (!cursor.hasMore || !before) return;
     setLoadingOlder(true);
     try {
       const res = await fetchActivity({
@@ -347,7 +347,7 @@ export function OpsConsolePage() {
     } finally {
       setLoadingOlder(false);
     }
-  }, [loadingOlder, repo, kind, severity, cursor.before]);
+  }, [loadingOlder, repo, kind, severity, cursor.before, cursor.hasMore]);
 
   const repoOptions = repos.data?.repos.map((r) => `${r.owner}/${r.repo}`) ?? [];
   const hasFilters = !!(repo || kind || severity);
