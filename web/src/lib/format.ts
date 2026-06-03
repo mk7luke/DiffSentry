@@ -92,3 +92,35 @@ export function formatBytes(bytes: number | null): string {
 }
 
 export const SEVERITY_ORDER: Severity[] = ["critical", "major", "minor", "nit"];
+
+/** Compact integer formatting: 1234 → "1,234", 12000 → "12k", 1_300_000 → "1.3M". */
+export function formatCompact(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (abs >= 10_000) return `${Math.round(n / 1000)}k`;
+  return n.toLocaleString("en-US");
+}
+
+/**
+ * Reviewer-time saved, from minutes into a human headline.
+ * < 60m → "45 min"; < 1 workday → "6.5 hrs"; else "3.2 days" (8h workdays).
+ */
+export function formatMinutesSaved(minutes: number): { value: string; unit: string } {
+  if (minutes < 60) return { value: String(Math.round(minutes)), unit: minutes === 1 ? "minute" : "minutes" };
+  const hours = minutes / 60;
+  if (hours < 8) {
+    const v = hours >= 10 ? Math.round(hours) : Math.round(hours * 10) / 10;
+    return { value: String(v), unit: v === 1 ? "hour" : "hours" };
+  }
+  const days = hours / 8; // 8-hour working days
+  const v = days >= 10 ? Math.round(days) : Math.round(days * 10) / 10;
+  return { value: String(v), unit: v === 1 ? "work-day" : "work-days" };
+}
+
+/** Percent-change of `current` vs `prev`; null when there's no comparable prior. */
+export function percentDelta(current: number, prev: number | null | undefined): number | null {
+  if (prev == null) return null;
+  if (prev === 0) return current === 0 ? 0 : null; // null = "new", no baseline
+  return ((current - prev) / prev) * 100;
+}
