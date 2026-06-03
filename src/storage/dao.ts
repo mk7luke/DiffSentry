@@ -287,6 +287,11 @@ const v2SchemaOkDbs = new WeakSet<DB>();
  *  schema result), so a missing v2 schema doesn't log on every v2 access. */
 let _v2SchemaMissingWarned = false;
 
+/** v2 tables the command-center DAO helpers read/write. */
+const REQUIRED_V2_TABLES = ["audit_log", "settings_overrides", "cost_events", "webhook_deliveries", "roles"];
+/** Triage columns the v2 helpers depend on (`accepted` is v1; the rest are v2). */
+const REQUIRED_FINDINGS_COLUMNS = ["accepted", "snoozed_until", "triaged_by", "triaged_at", "triage_note"];
+
 /**
  * Guard for command-center (schema v2) helpers. `openDatabase()` runs the
  * migration runner on first open, so a successfully-opened DB is normally at
@@ -303,13 +308,18 @@ let _v2SchemaMissingWarned = false;
 function ensureCommandCenterSchema(db: DB): boolean {
   if (v2SchemaOkDbs.has(db)) return true;
   try {
-    const hasAuditLog = db
-      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'audit_log'")
-      .get();
+    const tables = new Set(
+      (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map(
+        (r) => r.name,
+      ),
+    );
     const findingsCols = new Set(
       (db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>).map((c) => c.name),
     );
-    if (Boolean(hasAuditLog) && findingsCols.has("triaged_at")) {
+    const ok =
+      REQUIRED_V2_TABLES.every((t) => tables.has(t)) &&
+      REQUIRED_FINDINGS_COLUMNS.every((c) => findingsCols.has(c));
+    if (ok) {
       v2SchemaOkDbs.add(db);
       return true;
     }
@@ -368,6 +378,18 @@ export function insertAuditLog(opts: {
 }
 
 /**
+ * A settings-override scope is either the literal 'global' or a well-formed
+ * 'owner/repo' (each segment using GitHub's allowed name characters). Anything
+ * else is rejected so a typo can't silently write a row no read will ever match.
+ */
+const SCOPE_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
+function isValidScope(scope: string): boolean {
+  if (scope === "global") return true;
+  const parts = scope.split("/");
+  return parts.length === 2 && parts.every((p) => SCOPE_SEGMENT_RE.test(p));
+}
+
+/**
  * Upsert a settings override. `scope` is 'global' or 'owner/repo'. `value` is
  * JSON-serialized before storage.
  */
@@ -380,6 +402,10 @@ export function upsertSettingOverride(opts: {
   const db = openDatabase();
   if (!db) return;
   if (!ensureCommandCenterSchema(db)) return;
+  if (!isValidScope(opts.scope)) {
+    logger.debug({ scope: opts.scope, key: opts.key }, "dao.upsertSettingOverride: invalid scope — skipping write");
+    return;
+  }
   try {
     // Settings overrides are meaningful config (not best-effort logs), so an
     // unrepresentable value is rejected rather than silently coerced to null.
@@ -421,6 +447,10 @@ export function getSettingOverride<T = unknown>(scope: string, key: string): T |
   const db = openDatabase();
   if (!db) return undefined;
   if (!ensureCommandCenterSchema(db)) return undefined;
+  if (!isValidScope(scope)) {
+    logger.debug({ scope, key }, "dao.getSettingOverride: invalid scope — ignoring");
+    return undefined;
+  }
   try {
     const row = db
       .prepare(`SELECT value_json FROM settings_overrides WHERE scope = ? AND key = ?`)
@@ -445,6 +475,10 @@ export function deleteSettingOverride(scope: string, key: string): void {
   const db = openDatabase();
   if (!db) return;
   if (!ensureCommandCenterSchema(db)) return;
+  if (!isValidScope(scope)) {
+    logger.debug({ scope, key }, "dao.deleteSettingOverride: invalid scope — skipping");
+    return;
+  }
   try {
     db.prepare(`DELETE FROM settings_overrides WHERE scope = ? AND key = ?`).run(scope, key);
   } catch (err) {
