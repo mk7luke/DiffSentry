@@ -209,6 +209,9 @@ async function main() {
     const noCsrf = await req("POST", `${PR}/pause`, { session: authorSess, body: {} });
     ok("pause(author, no CSRF) → 403", noCsrf.status === 403);
 
+    const commandNoCsrf = await req("POST", `${PR}/command`, { session: authorSess, body: { command: "summary" } });
+    ok("command(author, no CSRF) → 403", commandNoCsrf.status === 403);
+
     // ── Missing installation → 404 for review/resolve ──────────────────
     const noInstall = await req("POST", "/repos/ghost/repo/prs/1/review", { session: authorSess, csrf: true, body: { mode: "full" } });
     ok("review(no installation) → 404", noInstall.status === 404 && noInstall.json.error.code === "not_found");
