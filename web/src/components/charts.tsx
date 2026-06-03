@@ -199,12 +199,20 @@ export function LineSpark({
   const max = Math.max(1, ...values);
   const pad = 2;
   const innerH = height - pad * 2;
+  const baselineY = pad + innerH;
+  const yFor = (v: number) => pad + innerH - (v / max) * innerH;
   const pts = values.map((v, i) => {
     const x = n <= 1 ? width / 2 : (i * width) / (n - 1);
-    const y = pad + innerH - (v / max) * innerH;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
+    return `${x.toFixed(1)},${yFor(v).toFixed(1)}`;
   });
-  const line = n <= 1 ? `0,${(pad + innerH).toFixed(1)} ${width},${(pad + innerH).toFixed(1)}` : pts.join(" ");
+  // 0 points → flat baseline; 1 point → horizontal line at its scaled height
+  // (a lone non-zero reading shouldn't look identical to all-zero); else polyline.
+  const line =
+    n === 0
+      ? `0,${baselineY.toFixed(1)} ${width},${baselineY.toFixed(1)}`
+      : n === 1
+        ? `0,${yFor(values[0]).toFixed(1)} ${width},${yFor(values[0]).toFixed(1)}`
+        : pts.join(" ");
   // With a title the sparkline is a labelled image for assistive tech; without
   // one it's decorative and hidden so screen readers don't announce empty SVG.
   return (
