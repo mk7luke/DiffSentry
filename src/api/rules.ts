@@ -251,6 +251,21 @@ export function registerRuleRoutes(router: Router, deps: RuleDeps): void {
       sendError(res, 400, "bad_request", error ?? "Invalid rule.");
       return;
     }
+    // A flags-only update can be valid in isolation yet invalid against the
+    // *stored* pattern (e.g. the `u` flag rejecting an escape that compiled
+    // without it). parseRuleBody only sees the incoming fields, so validate the
+    // effective pattern+flags here — where `existing` is available — to reject a
+    // bad combo at author time instead of silently dropping the rule when
+    // compile() returns null at review time.
+    if (input.flags !== undefined || input.pattern !== undefined) {
+      const mergedPattern = input.pattern ?? existing.pattern;
+      const mergedFlags = input.flags !== undefined ? input.flags ?? undefined : existing.flags ?? undefined;
+      const merged = validatePattern(mergedPattern, mergedFlags);
+      if (!merged.ok) {
+        sendError(res, 400, "bad_request", `Invalid regular expression: ${merged.error}`);
+        return;
+      }
+    }
     // A rename must not collide with another rule's name (see create note).
     if (input.name != null && input.name !== existing.name && customRuleNameExists(input.name, id)) {
       sendError(res, 400, "bad_request", `A custom rule named '${input.name}' already exists. Names must be unique.`);
