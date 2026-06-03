@@ -75,7 +75,7 @@ function LearningsContent({
   data: { global: Learning[]; repos: { owner: string; repo: string; learnings: Learning[] }[]; duplicates: DuplicateGroup[] };
 }) {
   const { capabilities } = useAuth();
-  const canWrite = capabilities.triggerReview;
+  const canWrite = capabilities.manageLearnings;
 
   // Flatten into render units.
   const items = useMemo<Item[]>(() => {

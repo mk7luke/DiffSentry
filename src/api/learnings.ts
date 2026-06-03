@@ -85,6 +85,13 @@ function parseBody(
     out.path = null;
   }
 
+  // A partial update with no mutable field set is a no-op — reject it rather
+  // than returning 200 + an audit row + an SSE event for a write that changed
+  // nothing.
+  if (opts.partial && out.content === undefined && out.path === undefined) {
+    return { error: "At least one of 'content' or 'path' must be provided." };
+  }
+
   return out;
 }
 
@@ -257,18 +264,38 @@ export function registerLearningRoutes(router: Router, deps: LearningDeps): void
       sendError(res, 400, "bad_request", `At most ${MAX_BULK} items may be deleted at once.`);
       return;
     }
+    // Validate every item up front and reject the whole request on any malformed
+    // entry, rather than silently skipping it and returning a misleadingly low
+    // count (which would hide client bugs).
+    const refs: Array<{ scope: "global" | "repo"; owner?: string; repo?: string; id: string }> = [];
+    for (const raw of items as Array<Record<string, unknown>>) {
+      const id = typeof raw?.id === "string" && raw.id.length > 0 ? raw.id : null;
+      if (!id) {
+        sendError(res, 400, "bad_request", "Each item requires a non-empty 'id'.");
+        return;
+      }
+      if (raw.scope === "global") {
+        refs.push({ scope: "global", id });
+      } else if (raw.scope === "repo") {
+        const owner = typeof raw.owner === "string" ? raw.owner : "";
+        const repo = typeof raw.repo === "string" ? raw.repo : "";
+        if (!validSegment(owner) || !validSegment(repo)) {
+          sendError(res, 400, "bad_request", "Repo-scoped items require a valid 'owner' and 'repo'.");
+          return;
+        }
+        refs.push({ scope: "repo", owner, repo, id });
+      } else {
+        sendError(res, 400, "bad_request", "Each item 'scope' must be 'global' or 'repo'.");
+        return;
+      }
+    }
     try {
       let deleted = 0;
-      for (const raw of items as Array<Record<string, unknown>>) {
-        const id = typeof raw?.id === "string" ? raw.id : "";
-        if (!id) continue;
-        if (raw.scope === "global") {
-          if (await learnings.removeGlobalLearning(id)) deleted += 1;
+      for (const ref of refs) {
+        if (ref.scope === "global") {
+          if (await learnings.removeGlobalLearning(ref.id)) deleted += 1;
         } else {
-          const owner = typeof raw.owner === "string" ? raw.owner : "";
-          const repo = typeof raw.repo === "string" ? raw.repo : "";
-          if (!validSegment(owner) || !validSegment(repo)) continue;
-          if (await learnings.removeLearning(`${owner}/${repo}`, id)) deleted += 1;
+          if (await learnings.removeLearning(`${ref.owner}/${ref.repo}`, ref.id)) deleted += 1;
         }
       }
       recordChange(actor, { scope: "global", action: "bulk_delete", count: deleted });

@@ -11,6 +11,7 @@ const CAPABILITY_LABELS: { key: keyof Capabilities; label: string }[] = [
   { key: "viewDashboard", label: "View dashboard" },
   { key: "triageFindings", label: "Triage findings" },
   { key: "triggerReview", label: "Trigger reviews" },
+  { key: "manageLearnings", label: "Manage learnings" },
   { key: "manageConfig", label: "Manage config" },
   { key: "manageRoles", label: "Manage roles" },
   { key: "viewAudit", label: "View audit log" },

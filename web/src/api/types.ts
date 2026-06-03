@@ -213,6 +213,7 @@ export interface Capabilities {
   viewDashboard: boolean;
   triageFindings: boolean;
   triggerReview: boolean;
+  manageLearnings: boolean;
   manageConfig: boolean;
   manageRoles: boolean;
   viewAudit: boolean;

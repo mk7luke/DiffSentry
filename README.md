@@ -759,6 +759,7 @@ double-submit token as an `X-CSRF-Token` header.
 | View dashboard & findings | ✅ | ✅ | ✅ |
 | Triage findings | — | ✅ | ✅ |
 | Trigger reviews | — | ✅ | ✅ |
+| Manage learnings | — | ✅ | ✅ |
 | Manage config | — | — | ✅ |
 | Manage role overrides | — | — | ✅ |
 | View audit log | — | — | ✅ |

@@ -230,6 +230,13 @@ async function main() {
       updated.status === 200 && updated.json.data.path === undefined && updated.json.data.content.includes("nested"),
     );
 
+    const emptyUpdate = await req("PUT", `/repos/acme/widget/learnings/${repoId}`, {
+      session: authorSess,
+      csrf: csrfFor(authorSess),
+      body: {},
+    });
+    ok("empty partial update → 400 (no-op rejected)", emptyUpdate.status === 400 && emptyUpdate.json.error.code === "bad_request");
+
     // ─── Promote to global ─────────────────────────────────────────────
     const promoted = await req("POST", `/repos/acme/widget/learnings/${repoId}/promote`, {
       session: authorSess,
@@ -259,6 +266,13 @@ async function main() {
     );
 
     // ─── Bulk delete ───────────────────────────────────────────────────
+    const badBulk = await req("POST", "/learnings/bulk-delete", {
+      session: authorSess,
+      csrf: csrfFor(authorSess),
+      body: { items: [{ scope: "global" }] }, // missing id
+    });
+    ok("bulk-delete with malformed item → 400", badBulk.status === 400 && badBulk.json.error.code === "bad_request");
+
     const allGlobals = (await req("GET", "/learnings", { session: authorSess })).json.data.global;
     const bulk = await req("POST", "/learnings/bulk-delete", {
       session: authorSess,
