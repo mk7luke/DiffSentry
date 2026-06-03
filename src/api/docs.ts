@@ -8,9 +8,22 @@
 // documented without signing in.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Escape a string for safe interpolation into a double-quoted HTML attribute. */
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 /** Render the standalone docs page. `specUrl` is fetched client-side. */
 export function renderDocsPage(opts: { specUrl?: string } = {}): string {
   const specUrl = opts.specUrl ?? "/api/v1/openapi.json";
+  // The default specUrl is a constant, but the param is overridable — escape it
+  // for the HTML href so a quote-bearing value can't break out of the attribute.
+  // The inlined script still uses JSON.stringify(specUrl) (safe in JS context).
+  const specHref = escapeHtmlAttr(specUrl);
   // The viewer script is inlined; it fetches the spec and builds the DOM. Kept
   // intentionally compact — it groups operations by tag and renders method,
   // path, summary, params, and the security schemes each operation accepts.
@@ -78,7 +91,7 @@ export function renderDocsPage(opts: { specUrl?: string } = {}): string {
   <h1>DiffSentry API <span class="ver" id="ver"></span></h1>
   <p id="desc">Loading the API reference…</p>
   <div class="links">
-    <a href="${specUrl}">openapi.json ↗</a>
+    <a href="${specHref}">openapi.json ↗</a>
     <a href="/">← Back to dashboard</a>
   </div>
 </header>

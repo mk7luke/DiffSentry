@@ -43,6 +43,22 @@ export function normalizeScopes(input: unknown): ApiScope[] {
   return API_SCOPES.filter((s) => out.has(s));
 }
 
+/**
+ * Canonicalize scopes read back from storage at AUTHENTICATION time: drop
+ * unknown values and apply `review ⇒ read`, but — unlike normalizeScopes — do
+ * NOT default an empty/garbage set to `read`. Authentication must fail safe: a
+ * corrupt, empty, or all-unknown stored scope array yields no scopes (denied
+ * everywhere by the scope gate), never an implicit read grant. The default is
+ * applied only at creation time (normalizeScopes), so no real token is useless.
+ */
+export function canonicalizeStoredScopes(input: unknown): ApiScope[] {
+  const arr = Array.isArray(input) ? input : [];
+  const out = new Set<ApiScope>();
+  for (const s of arr) if (isApiScope(s)) out.add(s);
+  if (out.has("review")) out.add("read");
+  return API_SCOPES.filter((s) => out.has(s));
+}
+
 /** The scope a request requires, by HTTP method: reads need `read`, writes need
  *  `review`. Used by the gate to reject an over-/under-scoped token. */
 export function requiredScopeForMethod(method: string): ApiScope {
@@ -83,15 +99,16 @@ export function authenticateBearer(authorizationHeader: string | undefined): Tok
   const row = findActiveApiTokenByHash(hashApiToken(token));
   if (!row) return null;
 
-  // Run the stored scopes back through the canonical normalizer so the
-  // principal only ever carries known scopes (unknown strings dropped) typed as
-  // ApiScope[]. Malformed JSON falls through to an empty scope list — the token
-  // then has no usable scope and is denied everywhere by the scope gate.
+  // Canonicalize the stored scopes WITHOUT defaulting: unknown values are
+  // dropped and `review ⇒ read` applied, but an empty/garbage/corrupt stored
+  // array yields no scopes (and is then denied everywhere by the scope gate)
+  // rather than fail-open to an implicit `read`. Malformed JSON likewise falls
+  // through to an empty scope list.
   let scopes: ApiScope[] = [];
   if (row.scopes_json) {
     try {
       const parsed = JSON.parse(row.scopes_json);
-      if (Array.isArray(parsed)) scopes = normalizeScopes(parsed);
+      scopes = canonicalizeStoredScopes(parsed);
     } catch (err) {
       logger.debug({ err, tokenId: row.id }, "token-auth: malformed scopes_json — treating as no scopes");
     }

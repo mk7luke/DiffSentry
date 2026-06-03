@@ -40,8 +40,10 @@ async function main() {
   process.env.DASHBOARD_ADMIN_LOGINS = "adminuser";
 
   const { openDatabase, closeDatabase } = await import("../src/storage/db.js");
+  const { createApiToken } = await import("../src/storage/dao.js");
   const { createApiRouter } = await import("../src/api/router.js");
   const { createAuth } = await import("../src/dashboard/auth.js");
+  const { generateApiToken } = await import("../src/api/token-auth.js");
 
   const db = openDatabase();
   if (!db) throw new Error("failed to open temp db");
@@ -54,6 +56,12 @@ async function main() {
     now,
     now,
   );
+
+  // Seed a token whose persisted scopes are empty (simulating a corrupt/legacy
+  // row). Auth must fail SAFE — canonicalizeStoredScopes does not default it to
+  // `read`, so this token has no usable scope and is denied everywhere.
+  const corrupt = generateApiToken();
+  createApiToken({ name: "corrupt-scopes", tokenHash: corrupt.hash, scopes: [], createdBy: "seed" });
 
   const learningsDir = path.join(os.tmpdir(), `ds-tokens-learnings-${Date.now()}`);
   fs.mkdirSync(learningsDir, { recursive: true });
@@ -226,6 +234,15 @@ async function main() {
     // ─── Unknown token → 401 ───────────────────────────────────────────
     const badToken = await req("GET", "/repos", { bearer: "dsk_not-a-real-token" });
     ok("repos(unknown token) → 401", badToken.status === 401 && badToken.json.error.code === "unauthorized");
+
+    // ─── Fail-safe: a token with empty/corrupt stored scopes is denied ─
+    // It authenticates (active row) but canonicalizeStoredScopes grants nothing,
+    // so the scope gate rejects even a GET — no implicit `read` fallback.
+    const corruptResp = await req("GET", "/repos", { bearer: corrupt.token });
+    ok(
+      "repos(empty-scope token) → 403 lacks 'read' (fail-safe, not fail-open)",
+      corruptResp.status === 403 && /read/.test(corruptResp.json.error.message),
+    );
 
     // ─── ACCEPTANCE: revoked token → 401 ───────────────────────────────
     const revoke = await req("DELETE", `/tokens/${readTokenId}`, { session: adminSess, csrf: adminCsrf });
