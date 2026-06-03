@@ -1,3 +1,5 @@
+import net from "node:net";
+import dns from "node:dns/promises";
 import type { Request, Response, Router } from "express";
 import type { Role } from "../dashboard/roles.js";
 import { getActor } from "../dashboard/roles.js";
@@ -63,7 +65,74 @@ function allowInsecureWebhooks(): boolean {
   return process.env.NODE_ENV === "test" || process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS === "true";
 }
 
-function validateWebhookUrl(v: string): string | null {
+/** Is a dotted-quad IPv4 in a loopback/private/link-local/reserved range?
+ *  A malformed value is treated as private (fail closed). */
+function ipv4IsPrivate(ip: string): boolean {
+  const parts = ip.split(".").map((p) => Number(p));
+  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) return true;
+  const [a, b] = parts;
+  return (
+    a === 0 || // 0.0.0.0/8 "this network" / unspecified
+    a === 127 || // loopback
+    a === 10 || // private
+    (a === 172 && b >= 16 && b <= 31) || // private
+    (a === 192 && b === 168) || // private
+    (a === 169 && b === 254) || // link-local
+    (a === 100 && b >= 64 && b <= 127) || // CGNAT 100.64/10
+    a >= 224 // multicast + reserved
+  );
+}
+
+/** Is an IPv6 literal loopback/unique-local/link-local/multicast — or an
+ *  IPv4-mapped/-embedded address whose embedded IPv4 is private? */
+function ipv6IsPrivate(ip: string): boolean {
+  const lower = ip.toLowerCase();
+  // IPv4-mapped (::ffff:127.0.0.1) and IPv4-compatible (::127.0.0.1) dotted forms.
+  const dotted = lower.match(/(?:::ffff:|::)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (dotted) return ipv4IsPrivate(dotted[1]);
+  // IPv4-mapped in hex form (::ffff:7f00:0001).
+  const hex = lower.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hex) {
+    const hi = parseInt(hex[1], 16);
+    const lo = parseInt(hex[2], 16);
+    const embedded = [(hi >> 8) & 255, hi & 255, (lo >> 8) & 255, lo & 255].join(".");
+    return ipv4IsPrivate(embedded);
+  }
+  return (
+    lower === "::" || // unspecified
+    lower === "::1" || // loopback
+    /^f[cd][0-9a-f]{2}:/.test(lower) || // fc00::/7 unique-local
+    /^fe[89ab][0-9a-f]:/.test(lower) || // fe80::/10 link-local
+    lower.startsWith("ff") // multicast
+  );
+}
+
+/** Block a host that is itself a private/loopback IP literal (any family) or
+ *  localhost. Returns false for plain hostnames (those are resolved separately). */
+function hostLiteralIsPrivate(host: string): boolean {
+  if (host === "localhost") return true;
+  const fam = net.isIP(host);
+  if (fam === 4) return ipv4IsPrivate(host);
+  if (fam === 6) return ipv6IsPrivate(host);
+  return false;
+}
+
+/**
+ * Validate an outbound webhook URL the server will later POST to. It is a stored
+ * egress target (SSRF surface), so by default we require `https` and reject any
+ * loopback / private / link-local / reserved destination — including IPv4-mapped
+ * IPv6 literals and **hostnames that resolve** to such addresses (a DNS lookup is
+ * performed and every returned address is checked). Plain-http + local targets
+ * are allowed only behind an explicit env flag (smoke tests / intentional
+ * self-hosted internal relays). Returns an error string, or null.
+ *
+ * Note: validation-time resolution narrows but cannot fully eliminate DNS-
+ * rebinding (the name could be re-pointed between save and send); fully closing
+ * that needs a connect-time address check in the HTTP client. Given the route is
+ * admin + CSRF gated and the flag exists for internal use, this is the
+ * proportionate boundary; see the reply on PR #39 thread.
+ */
+async function validateWebhookUrl(v: string): Promise<string | null> {
   const allowInsecure = allowInsecureWebhooks();
   let parsed: URL;
   try {
@@ -74,40 +143,48 @@ function validateWebhookUrl(v: string): string | null {
   if (parsed.protocol !== "https:" && !(allowInsecure && parsed.protocol === "http:")) {
     return "Webhook URLs must use https.";
   }
+  // Escape hatch (test / self-hosted internal relays): skip the egress checks.
+  if (allowInsecure) return null;
+
   const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  const isLocal =
-    host === "localhost" ||
-    host === "0.0.0.0" ||
-    host === "::" ||
-    host === "::1" ||
-    host.startsWith("127.") ||
-    host.startsWith("10.") ||
-    host.startsWith("192.168.") ||
-    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
-    /^169\.254\./.test(host) ||
-    /^(fc|fd)[0-9a-f]{2}:/i.test(host) || // unique-local IPv6
-    /^fe80:/i.test(host); // link-local IPv6
-  if (isLocal && !allowInsecure) {
-    return "Webhook URLs may not target local or private network addresses.";
+  if (net.isIP(host) || host === "localhost") {
+    return hostLiteralIsPrivate(host)
+      ? "Webhook URLs may not target local or private network addresses."
+      : null;
+  }
+  // Hostname: resolve and reject if ANY result is a private/loopback address.
+  try {
+    const results = await dns.lookup(host, { all: true });
+    if (results.length === 0) return "Webhook host did not resolve.";
+    for (const r of results) {
+      const priv = r.family === 6 ? ipv6IsPrivate(r.address) : ipv4IsPrivate(r.address);
+      if (priv) return "Webhook URLs may not resolve to local or private network addresses.";
+    }
+  } catch {
+    return "Webhook host did not resolve.";
   }
   return null;
 }
 
-/** Validate a channel config for its type. Returns the cleaned config or an error. */
-function validateChannelConfig(type: string, config: unknown): { config: Record<string, unknown> } | { error: string } {
+/** Validate a channel config for its type. Returns the cleaned config or an error.
+ *  Async because webhook URL validation may perform a DNS lookup (SSRF guard). */
+async function validateChannelConfig(
+  type: string,
+  config: unknown,
+): Promise<{ config: Record<string, unknown> } | { error: string }> {
   const c = config && typeof config === "object" && !Array.isArray(config) ? (config as Record<string, unknown>) : {};
   const str = (k: string) => (typeof c[k] === "string" ? (c[k] as string).trim() : "");
   switch (type) {
     case "slack":
     case "discord": {
       const webhookUrl = str("webhookUrl");
-      const error = validateWebhookUrl(webhookUrl);
+      const error = await validateWebhookUrl(webhookUrl);
       if (error) return { error };
       return { config: { webhookUrl } };
     }
     case "webhook": {
       const url = str("url");
-      const error = validateWebhookUrl(url);
+      const error = await validateWebhookUrl(url);
       if (error) return { error };
       const out: Record<string, unknown> = { url };
       if (c.headers && typeof c.headers === "object" && !Array.isArray(c.headers)) out.headers = c.headers;
@@ -220,14 +297,14 @@ export function registerNotificationRoutes(router: Router, deps: NotificationDep
   });
 
   // ── Create a channel ────────────────────────────────────────────────
-  router.post("/notifications/channels", admin, csrf.verify, (req, res) => {
+  router.post("/notifications/channels", admin, csrf.verify, async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const type = typeof body.type === "string" ? body.type : "";
     if (!isChannelType(type)) {
       sendError(res, 400, "bad_request", `type must be one of: ${CHANNEL_TYPES.join(", ")}.`);
       return;
     }
-    const validated = validateChannelConfig(type, body.config);
+    const validated = await validateChannelConfig(type, body.config);
     if ("error" in validated) {
       sendError(res, 400, "bad_request", validated.error);
       return;
@@ -255,7 +332,7 @@ export function registerNotificationRoutes(router: Router, deps: NotificationDep
   });
 
   // ── Update a channel (name / config / enabled) ──────────────────────
-  router.put("/notifications/channels/:id", admin, csrf.verify, (req, res) => {
+  router.put("/notifications/channels/:id", admin, csrf.verify, async (req, res) => {
     const id = parseId(String(req.params.id));
     if (id == null) {
       sendError(res, 400, "bad_request", "Invalid channel id.");
@@ -271,7 +348,7 @@ export function registerNotificationRoutes(router: Router, deps: NotificationDep
     if (body.name !== undefined) patch.name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : null;
     if (body.enabled !== undefined) patch.enabled = body.enabled !== false;
     if (body.config !== undefined) {
-      const validated = validateChannelConfig(existing.type, body.config);
+      const validated = await validateChannelConfig(existing.type, body.config);
       if ("error" in validated) {
         sendError(res, 400, "bad_request", validated.error);
         return;

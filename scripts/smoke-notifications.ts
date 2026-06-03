@@ -192,6 +192,12 @@ async function main() {
       body: { type: "webhook", name: "bad", config: { url: "https://169.254.169.254/latest/meta-data" } },
     });
     ok("create channel(link-local metadata IP) → 400 (SSRF blocked)", privReject.status === 400);
+    const mappedReject = await req("POST", "/notifications/channels", {
+      session: admin,
+      csrf: true,
+      body: { type: "webhook", name: "bad", config: { url: "https://[::ffff:127.0.0.1]/x" } },
+    });
+    ok("create channel(IPv4-mapped IPv6 loopback) → 400 (SSRF blocked)", mappedReject.status === 400);
     process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS = "true"; // restore for the rest
 
     // ── Admin creates a rule: critical finding in acme/web → channel ───
