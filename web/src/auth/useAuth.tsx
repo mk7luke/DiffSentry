@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMe } from "../api/hooks";
-import { reconcileCacheOwner } from "../lib/persist";
+import { applyPersistedDataForOwner } from "../lib/persist";
 import type { Capabilities, Role } from "../api/types";
 
 // Auth context — fetches /me exactly once (TanStack Query dedupes the
@@ -35,11 +35,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const login = user?.login ?? null;
 
-  // Bind the persisted offline cache to this user. If it was written under a
-  // different login on this device, reconcileCacheOwner wipes it so we never
-  // surface one user's cached data to another. See lib/persist.ts.
+  // Reconcile the persisted offline cache against the verified identity. Only
+  // once /me resolves to a concrete login do we hydrate the cached data — and
+  // only if this device's cache was written under the same login; a mismatch
+  // wipes it. This is the gate that keeps user A's data out of user B's UI.
+  // See lib/persist.ts.
   useEffect(() => {
-    if (login) reconcileCacheOwner(login, queryClient);
+    if (login) applyPersistedDataForOwner(login, queryClient);
   }, [login, queryClient]);
 
   const value: AuthState = {

@@ -25,8 +25,10 @@ const queryClient = new QueryClient({
   },
 });
 
-// Restore the persisted (user-scoped) query cache before first paint so an
-// offline launch shows last-viewed data instead of empty skeletons.
+// Prime the persisted query cache before first paint. When offline at boot it
+// hydrates last-viewed data immediately; when online it defers hydration until
+// /me verifies the cache owner (see lib/persist.ts), so one user's cached data
+// is never shown to another on a shared device.
 async function bootstrap() {
   await initPersistence(queryClient);
 
