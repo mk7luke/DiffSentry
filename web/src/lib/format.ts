@@ -111,8 +111,11 @@ export function formatCompact(n: number): string {
  * < 60m → "45 min"; < 1 workday → "6.5 hrs"; else "3.2 days" (8h workdays).
  */
 export function formatMinutesSaved(minutes: number): { value: string; unit: string } {
-  if (minutes < 60) return { value: String(Math.round(minutes)), unit: minutes === 1 ? "minute" : "minutes" };
-  const hours = minutes / 60;
+  // Clamp malformed/negative input (e.g. a bad env value) to zero so the hero
+  // never renders "NaN minutes" or "-5 minutes" — mirrors formatCompact's guard.
+  const safe = Number.isFinite(minutes) ? Math.max(0, minutes) : 0;
+  if (safe < 60) return { value: String(Math.round(safe)), unit: safe === 1 ? "minute" : "minutes" };
+  const hours = safe / 60;
   if (hours < 8) {
     const v = hours >= 10 ? Math.round(hours) : Math.round(hours * 10) / 10;
     return { value: String(v), unit: v === 1 ? "hour" : "hours" };
