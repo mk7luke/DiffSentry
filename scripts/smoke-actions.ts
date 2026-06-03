@@ -183,13 +183,14 @@ async function main() {
     ok("cancel(author) → 200 + call", cancel.status === 200 && calls.some((c) => c.method === "cancelReview"));
 
     // ── Author chat command → 202 + reviewer.runCommand(phrase) ─────────
+    const callsBeforeCommand = calls.length;
     const command = await req("POST", `${PR}/command`, { session: authorSess, csrf: true, body: { command: "generate_tests" } });
     ok(
       "command(author) → 202 accepted",
       command.status === 202 && command.json.data.result === "accepted" && command.json.data.command === "generate_tests",
     );
     await new Promise((r) => setTimeout(r, 20));
-    const ranCommand = calls.find((c) => c.method === "runCommand");
+    const ranCommand = calls.slice(callsBeforeCommand).find((c) => c.method === "runCommand");
     ok(
       "command → reviewer.runCommand(42, acme, web, 7, 'generate tests')",
       !!ranCommand &&
