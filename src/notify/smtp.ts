@@ -154,14 +154,19 @@ class SmtpSession {
     });
   }
 
-  async command(line: string, expect: number[]): Promise<string> {
-    this.socket.write(line + "\r\n");
+  /** Read one reply and assert its status code is expected, else throw. */
+  async readExpect(expect: number[], label: string): Promise<string> {
     const reply = await this.read();
     const code = Number.parseInt(reply.slice(0, 3), 10);
     if (!expect.includes(code)) {
-      throw new Error(`SMTP command failed (${line.split(" ")[0]}): ${reply.split("\n")[0]}`);
+      throw new Error(`SMTP ${label} failed: ${reply.split("\n")[0]}`);
     }
     return reply;
+  }
+
+  async command(line: string, expect: number[]): Promise<string> {
+    this.socket.write(line + "\r\n");
+    return this.readExpect(expect, `command (${line.split(" ")[0]})`);
   }
 
   rawWrite(data: string): void {
@@ -267,7 +272,7 @@ export async function sendMail(cfg: SmtpConfig, msg: SmtpMessage): Promise<void>
     : await connectPlain(cfg.host, cfg.port);
   const session = new SmtpSession(socket);
   try {
-    await session.read(); // server greeting (220)
+    await session.readExpect([220], "greeting"); // server must greet with 220
     const ehloName = "diffsentry.local";
     let ehlo = await session.command(`EHLO ${ehloName}`, [250]);
 
@@ -308,7 +313,7 @@ export async function sendMail(cfg: SmtpConfig, msg: SmtpMessage): Promise<void>
       body +
       `\r\n.\r\n`;
     session.rawWrite(message);
-    await session.read(); // 250 queued
+    await session.readExpect([250], "DATA"); // message must be accepted (250)
     await session.command("QUIT", [221]).catch(() => undefined);
   } finally {
     session.end();

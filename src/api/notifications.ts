@@ -358,7 +358,8 @@ export function registerNotificationRoutes(router: Router, deps: NotificationDep
     try {
       const changed = updateNotificationChannel(patch);
       audit(req, "notification.channel.update", `channel#${id}`, { fields: Object.keys(patch).filter((k) => k !== "id") }, changed ? "ok" : "error");
-      announce(req, "channel", "update");
+      // Only announce a real mutation — a no-op update shouldn't refresh dashboards.
+      if (changed) announce(req, "channel", "update");
       sendData(res, { id, changed });
     } catch (err) {
       logger.error({ err, id }, "api PUT /notifications/channels failed");
@@ -493,7 +494,8 @@ export function registerNotificationRoutes(router: Router, deps: NotificationDep
     try {
       const changed = updateAlertRule(patch);
       audit(req, "notification.rule.update", `rule#${id}`, { fields: Object.keys(patch).filter((k) => k !== "id") }, changed ? "ok" : "error");
-      announce(req, "rule", "update");
+      // Only announce a real mutation — a no-op update shouldn't refresh dashboards.
+      if (changed) announce(req, "rule", "update");
       sendData(res, { id, changed });
     } catch (err) {
       logger.error({ err, id }, "api PUT /notifications/rules failed");
