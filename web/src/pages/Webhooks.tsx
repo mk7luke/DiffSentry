@@ -205,7 +205,12 @@ function DeliveryRow({ row }: { row: WebhookDeliveryRow }) {
       <Chip tone="muted">n/a</Chip>
     );
 
+  // Only signature-verified deliveries can be replayed — mirrors the server
+  // guard (rejected bodies never passed verification).
+  const replayable = row.signature_ok === 1;
+
   const doReplay = () => {
+    if (!replayable) return;
     if (!window.confirm(`Replay delivery #${row.id} (${eventLabel}) through the engine?`)) return;
     replay.mutate(row.id, {
       onSuccess: (data) => {
@@ -268,9 +273,14 @@ function DeliveryRow({ row }: { row: WebhookDeliveryRow }) {
           <button
             className="btn btn-ghost"
             onClick={doReplay}
-            disabled={replay.isPending}
+            disabled={replay.isPending || !replayable}
+            aria-disabled={replay.isPending || !replayable}
             aria-busy={replay.isPending}
-            title="Re-dispatch this payload through the engine"
+            title={
+              !replayable
+                ? "Rejected deliveries cannot be replayed"
+                : "Re-dispatch this payload through the engine"
+            }
           >
             {replay.isPending ? <span className="spinner btn-spinner" /> : null}
             {replay.isPending ? "Replaying…" : "Replay"}

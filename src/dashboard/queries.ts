@@ -853,8 +853,10 @@ export function getWebhookDeliveries(opts: {
 } = {}): { rows: WebhookDeliveryRow[]; total: number } {
   const db = openDatabase();
   if (!db) return { rows: [], total: 0 };
-  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
-  const offset = Math.max(opts.offset ?? 0, 0);
+  // Coerce to integers (not just clamp) so a float from a direct caller can't be
+  // bound to LIMIT/OFFSET — the API parser uses parseInt, but this guards every caller.
+  const limit = Math.min(Math.max(Math.floor(opts.limit ?? 100), 1), 500);
+  const offset = Math.max(Math.floor(opts.offset ?? 0), 0);
   const where: string[] = [];
   const args: unknown[] = [];
   if (opts.event) {

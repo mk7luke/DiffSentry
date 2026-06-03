@@ -51,8 +51,11 @@ function sendError(res: Response, status: number, code: ErrorCode, message: stri
 }
 
 function parseId(raw: string): number | null {
-  const n = Number.parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  // Strict: the whole segment must be digits, so "123abc" is rejected (400)
+  // rather than silently truncated to delivery 123 by parseInt.
+  if (!/^\d+$/.test(raw)) return null;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
 /** Register the webhook-delivery endpoints on the API router (under /api/v1). */
@@ -133,6 +136,13 @@ export function registerWebhookRoutes(router: Router, deps: WebhookRouteDeps): v
       }
       if (!row) {
         sendError(res, 404, "not_found", `No delivery #${id}.`);
+        return;
+      }
+      // Never promote a rejected (or unverified) delivery into a trusted replay:
+      // its body never passed signature verification, so re-dispatching it would
+      // run an unauthenticated payload through the engine as an admin action.
+      if (row.signature_ok !== 1) {
+        sendError(res, 400, "bad_request", "Rejected deliveries cannot be replayed.");
         return;
       }
       if (!row.event) {

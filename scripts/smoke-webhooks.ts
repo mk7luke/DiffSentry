@@ -228,6 +228,20 @@ async function main() {
     const missingDetail = await req("GET", "/webhooks/99999", { session: adminSess });
     ok("GET /webhooks/:id (missing) → 404", missingDetail.status === 404 && missingDetail.json.error.code === "not_found");
 
+    // ── Strict id parsing: a non-numeric segment is rejected, not truncated ──
+    const junkId = await req("GET", `/webhooks/${prDeliveryId}abc`, { session: adminSess });
+    ok("GET /webhooks/<id>abc → 400 (not delivery <id>)", junkId.status === 400 && junkId.json.error.code === "bad_request");
+
+    // ── A rejected (bad-signature) delivery cannot be replayed ──────────
+    const rejected = getWebhookDeliveries({ event: "issues" }).rows[0];
+    const rejectedReplay = await req("POST", `/webhooks/${rejected.id}/replay`, { session: adminSess, csrf: true });
+    ok(
+      "replay (rejected delivery) → 400 bad_request",
+      rejectedReplay.status === 400 &&
+        rejectedReplay.json.error.code === "bad_request" &&
+        /cannot be replayed/i.test(rejectedReplay.json.error.message),
+    );
+
     // ── Replay is admin + CSRF gated ───────────────────────────────────
     const viewerReplay = await req("POST", `/webhooks/${prDeliveryId}/replay`, { session: viewerSess, csrf: true });
     ok("replay (viewer) → 403", viewerReplay.status === 403);

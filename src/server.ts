@@ -129,16 +129,22 @@ export function createServer(config: Config) {
     // Parse defensively: a rejected (bad-signature) delivery may still be JSON,
     // and we record it anyway so the deliveries view surfaces rejected hits too.
     let payload: any = null;
+    // What we persist: the parsed payload on success, or the raw UTF-8 body
+    // wrapped on parse failure — so a malformed delivery is still inspectable
+    // rather than stored as a bare `null`.
+    let payloadForStorage: unknown = null;
     try {
       payload = JSON.parse(body.toString());
+      payloadForStorage = payload;
     } catch {
       payload = null;
+      payloadForStorage = { raw: body.toString("utf8") };
     }
 
     // Capture the raw delivery BEFORE dispatch (best-effort; no-op when DB
     // disabled), including rejected ones, so the inspection view sees everything.
     try {
-      const meta = extractWebhookMeta(payload);
+      const meta = payload != null ? extractWebhookMeta(payload) : { action: null, owner: null, repo: null, number: null };
       recordWebhookDelivery({
         event,
         action: meta.action,
@@ -147,7 +153,7 @@ export function createServer(config: Config) {
         number: meta.number,
         deliveryId,
         signatureOk,
-        payload,
+        payload: payloadForStorage,
       });
     } catch {
       // best effort
