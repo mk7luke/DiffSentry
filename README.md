@@ -689,6 +689,10 @@ untouched.
 
 - `/` — repos overview (PRs reviewed, 7d findings, 7d critical, last review),
   sortable, with a 14-day aggregate activity chart.
+- `/queue` — the live **review pipeline board**: Queued → Running → Done /
+  Failed lanes with per-card elapsed timers, a cancel button on in-flight
+  reviews, and a one-click retry on the failed lane. Hydrates from
+  `GET /api/v1/queue` then updates live from the `queue.updated` SSE stream.
 - `/repos/:owner/:repo` — 90-day risk line, hot paths, top firing pattern
   rules, recent PRs + issues, active `@bot learn` learnings, and the live
   `.diffsentry.yaml` for the repo.
@@ -706,9 +710,11 @@ untouched.
 **JSON API** (`/api/v1`)
 
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
-failure. Read endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
-`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, and `/audit`
-(admin). Write endpoints: `POST /roles` (admin) sets/clears a role override.
+failure. Read endpoints: `GET /me`, `/health`, `/queue`, `/repos`,
+`/repos/:owner/:repo`, `/repos/:owner/:repo/prs/:number`, `/findings`,
+`/patterns`, and `/audit` (admin). `GET /queue` returns the live review-pipeline
+snapshot from an in-process registry (works regardless of persistence). Write
+endpoints: `POST /roles` (admin) sets/clears a role override.
 When OAuth is configured every endpoint requires a valid session (401 JSON
 otherwise); the queries reuse the same SQL as the legacy dashboard and no-op
 gracefully when persistence is disabled.
@@ -726,9 +732,12 @@ SSE event:
 
 **Realtime** (`GET /api/v1/stream`) is a Server-Sent Events feed on an in-process
 event bus. The review engine publishes `review.started` / `review.finished` /
-`review.failed`, and every command action publishes `action.performed`. The SPA
-opens one `EventSource`, surfaces events as toasts, and live-refetches the
-affected PR — so a re-review's findings appear without a refresh. The stream
+`review.failed`, the in-memory review queue publishes `queue.updated` on every
+state transition (queued → running → done/failed/canceled, including phase
+changes), and every command action publishes `action.performed`. The SPA
+opens one `EventSource`, surfaces events as toasts, drives the live queue board,
+and live-refetches the affected PR — so a re-review's findings appear without a
+refresh. The stream
 heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed
 events on reconnect via `Last-Event-ID`.
 

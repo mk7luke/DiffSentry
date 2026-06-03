@@ -2,7 +2,7 @@ import type { ComponentType, ReactNode, SVGProps } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
 import type { Capabilities } from "../api/types";
-import { AuditIcon, FindingsIcon, LogoIcon, OverviewIcon, PatternsIcon, SettingsIcon } from "./icons";
+import { AuditIcon, FindingsIcon, LogoIcon, OverviewIcon, PatternsIcon, QueueIcon, SettingsIcon } from "./icons";
 
 // Page shell: sticky left sidebar (brand + primary nav + signed-in user) and
 // the main content column. Mirrors renderLayout() from src/dashboard/layout.ts.
@@ -18,6 +18,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: "/", label: "Overview", Icon: OverviewIcon, end: true },
+  { to: "/queue", label: "Queue", Icon: QueueIcon, end: false },
   { to: "/findings", label: "Findings", Icon: FindingsIcon, end: false },
   { to: "/patterns", label: "Patterns", Icon: PatternsIcon, end: false },
   { to: "/audit", label: "Audit log", Icon: AuditIcon, end: false, cap: "viewAudit" },

@@ -24,7 +24,8 @@ export type StreamTopic =
   | "review.started"
   | "review.finished"
   | "review.failed"
-  | "action.performed";
+  | "action.performed"
+  | "queue.updated";
 
 export interface ReviewLifecyclePayload {
   owner: string;
@@ -45,8 +46,30 @@ export interface ActionPayload {
   detail?: string;
 }
 
+/** Mirrors ReviewQueueEntry in src/realtime/bus.ts. */
+export interface QueueUpdatedPayload {
+  key: string;
+  owner: string;
+  repo: string;
+  number: number;
+  mode: "full" | "incremental";
+  state: "queued" | "running" | "done" | "failed" | "canceled";
+  phase: string | null;
+  enqueuedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  attempt: number;
+}
+
 /** Every topic the server emits — the SSE `event:` names we listen for. */
-const TOPICS: StreamTopic[] = ["review.started", "review.finished", "review.failed", "action.performed"];
+const TOPICS: StreamTopic[] = [
+  "review.started",
+  "review.finished",
+  "review.failed",
+  "action.performed",
+  "queue.updated",
+];
 
 type Listener = (env: StreamEnvelope) => void;
 
