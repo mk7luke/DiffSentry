@@ -262,14 +262,21 @@ function BudgetsCard({ data }: { data: CostResponse }) {
       setBudget.mutate({ scope: s, monthlyUsd: null }, { onSuccess: () => setAmount("") });
       return;
     }
-    const n = Number.parseFloat(trimmed);
+    // Number() (not parseFloat) so a partially numeric field like "100abc" is
+    // rejected rather than silently coerced to 100.
+    const n = Number(trimmed);
     if (!Number.isFinite(n) || n <= 0) return;
     setBudget.mutate({ scope: s, monthlyUsd: n }, { onSuccess: () => setAmount("") });
   };
 
   const clear = (s: string) => setBudget.mutate({ scope: s, monthlyUsd: null });
   const err = setBudget.error instanceof ApiError ? setBudget.error.message : setBudget.error ? "Failed to update budget." : null;
-  const repoScopes = data.byRepo.map((r) => r.key).filter((k) => k.split("/").every((p) => p && p !== "?"));
+  const repoScopes = data.byRepo.map((r) => r.key).filter((k) => {
+    // Only suggest exactly owner/repo scopes — the same shape repoHref accepts
+    // and the budget API contract allows; never owner/repo/extra.
+    const parts = k.split("/");
+    return parts.length === 2 && parts.every((p) => p && p !== "?");
+  });
 
   return (
     <Card
