@@ -90,7 +90,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       const existing = timers.current.get(id);
       if (existing) clearTimeout(existing);
       if (ttl > 0) {
-        const timer = setTimeout(() => dismiss(id), ttl);
+        const timer = setTimeout(() => {
+          // If a later push reused this id and replaced the timer, this callback
+          // is stale — skip it so it can't dismiss the newer toast or clear its
+          // timer. Otherwise it's still the active timer, so dismiss normally.
+          if (timers.current.get(id) === timer) dismiss(id);
+        }, ttl);
         if (typeof timer === "object" && "unref" in timer) (timer as { unref?: () => void }).unref?.();
         timers.current.set(id, timer);
       }
