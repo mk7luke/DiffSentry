@@ -24,7 +24,8 @@ export type StreamTopic =
   | "review.started"
   | "review.finished"
   | "review.failed"
-  | "action.performed";
+  | "action.performed"
+  | "webhook.replayed";
 
 export interface ReviewLifecyclePayload {
   owner: string;
@@ -45,8 +46,22 @@ export interface ActionPayload {
   detail?: string;
 }
 
+export interface WebhookReplayPayload {
+  id: number;
+  newDeliveryId: number | null;
+  event: string;
+  action: string | null;
+  actor: string | null;
+}
+
 /** Every topic the server emits — the SSE `event:` names we listen for. */
-const TOPICS: StreamTopic[] = ["review.started", "review.finished", "review.failed", "action.performed"];
+const TOPICS: StreamTopic[] = [
+  "review.started",
+  "review.finished",
+  "review.failed",
+  "action.performed",
+  "webhook.replayed",
+];
 
 type Listener = (env: StreamEnvelope) => void;
 

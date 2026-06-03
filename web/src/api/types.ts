@@ -294,3 +294,38 @@ export interface FindingsResponse {
 export interface PatternsResponse {
   rules: PatternRuleRow[];
 }
+
+// ─── Webhook deliveries (mirror src/dashboard/queries.ts) ────────────
+
+export interface WebhookDeliveryRow {
+  id: number;
+  ts: string;
+  event: string | null;
+  action: string | null;
+  owner: string | null;
+  repo: string | null;
+  number: number | null;
+  delivery_id: string | null;
+  signature_ok: number | null;
+  replayed_from: number | null;
+  payload_bytes: number | null;
+}
+
+export interface WebhookDeliveryDetail extends WebhookDeliveryRow {
+  payload_json: string | null;
+}
+
+export interface WebhooksResponse {
+  rows: WebhookDeliveryRow[];
+  total: number;
+  events: string[];
+  repos: string[];
+}
+
+export interface ReplayResponse {
+  id: number;
+  newDeliveryId: number | null;
+  event: string | null;
+  dispatchStatus: number;
+  result: string;
+}

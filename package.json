@@ -18,7 +18,8 @@
     "smoke:rbac": "tsx scripts/smoke-rbac.ts",
     "smoke:actions": "tsx scripts/smoke-actions.ts",
     "smoke:migrate": "tsx scripts/migrate-smoke.ts",
-    "smoke:dao": "tsx scripts/smoke-dao.ts"
+    "smoke:dao": "tsx scripts/smoke-dao.ts",
+    "smoke:webhooks": "tsx scripts/smoke-webhooks.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

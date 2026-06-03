@@ -18,6 +18,7 @@ import {
 import { insertAuditLog, setRole } from "../storage/dao.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
+import { registerWebhookRoutes, type ReplayWebhook } from "./webhooks.js";
 import {
   getApprovalMix,
   getAuditActions,
@@ -64,6 +65,10 @@ export interface ApiDeps {
    * the SSE stream are still mounted, but actions have nothing to drive — so
    * they are only registered when a reviewer is provided. */
   reviewer?: ReviewerActions;
+  /** Re-dispatches a stored webhook delivery (records a flagged replay row +
+   * runs the same engine path). When omitted, GET /webhooks still works but
+   * POST /webhooks/:id/replay answers 503. */
+  replayWebhook?: ReplayWebhook;
 }
 
 type ErrorCode =
@@ -182,6 +187,11 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   if (deps.reviewer) {
     registerActionRoutes(router, { reviewer: deps.reviewer, requireRole, csrf });
   }
+
+  // ─── Webhook deliveries (admin) ────────────────────────────────────
+  // Inspection (list + full payload) and admin replay. The GET endpoints are
+  // always mounted; replay only acts when a replayWebhook closure is wired in.
+  registerWebhookRoutes(router, { requireRole, csrf, replayWebhook: deps.replayWebhook });
 
   // ─── /me ───────────────────────────────────────────────────────────
   // The role resolves from the roles table > admin env > author env > viewer

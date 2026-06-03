@@ -1,5 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useEventStream, type ActionPayload, type ReviewLifecyclePayload, type StreamEnvelope } from "./useEventStream";
+import {
+  useEventStream,
+  type ActionPayload,
+  type ReviewLifecyclePayload,
+  type StreamEnvelope,
+  type WebhookReplayPayload,
+} from "./useEventStream";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Toast / live feed primitive.
@@ -151,6 +157,16 @@ function StreamToasts() {
           tone: p.result === "ok" || p.result === "accepted" ? "info" : "danger",
           title: `${who} · ${p.action} · ${ref}`,
           body: p.detail,
+        });
+        return;
+      }
+      if (env.topic === "webhook.replayed") {
+        const p = env.payload as WebhookReplayPayload;
+        const who = p.actor ? `@${p.actor}` : "someone";
+        push({
+          tone: "info",
+          title: `${who} replayed webhook · ${p.event}`,
+          body: p.newDeliveryId ? `New delivery #${p.newDeliveryId} (from #${p.id})` : `Replayed delivery #${p.id}`,
         });
       }
     },

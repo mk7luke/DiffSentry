@@ -10,8 +10,11 @@ import type {
   PatternsResponse,
   PRDetailResponse,
   RepoDetailResponse,
+  ReplayResponse,
   ReposResponse,
   Role,
+  WebhookDeliveryDetail,
+  WebhooksResponse,
 } from "./types";
 
 export function useMe() {
@@ -111,6 +114,50 @@ export function useAudit(query: AuditQuery, enabled: boolean) {
       }),
     enabled,
     placeholderData: (prev) => prev,
+  });
+}
+
+export interface WebhooksQuery {
+  event?: string;
+  repo?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/** Admin: paged raw webhook deliveries + filter options. */
+export function useWebhooks(query: WebhooksQuery, enabled: boolean) {
+  return useQuery({
+    queryKey: ["webhooks", query],
+    queryFn: () =>
+      apiGet<WebhooksResponse>("/webhooks", {
+        event: query.event,
+        repo: query.repo,
+        limit: query.limit,
+        offset: query.offset,
+      }),
+    enabled,
+    placeholderData: (prev) => prev,
+  });
+}
+
+/** Admin: one delivery with its full stored payload. Enabled lazily on expand. */
+export function useWebhookDelivery(id: number | null) {
+  return useQuery({
+    queryKey: ["webhook", id],
+    queryFn: () => apiGet<WebhookDeliveryDetail>(`/webhooks/${id}`),
+    enabled: id != null,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Admin: re-dispatch a stored delivery through the engine. Refetches the list. */
+export function useReplayWebhook() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend<ReplayResponse>(`/webhooks/${id}/replay`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["webhooks"] });
+    },
   });
 }
 
