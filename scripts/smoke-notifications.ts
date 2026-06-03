@@ -208,6 +208,14 @@ async function main() {
     });
     ok("create channel(forbidden webhook header) → 400", badHeader.status === 400 && badHeader.json.error.code === "bad_request");
 
+    // ── A non-boolean `enabled` is rejected ────────────────────────────
+    const badEnabled = await req("POST", "/notifications/channels", {
+      session: admin,
+      csrf: true,
+      body: { type: "slack", name: "e", config: { webhookUrl: slackUrl }, enabled: "false" },
+    });
+    ok("create channel(non-boolean enabled) → 400", badEnabled.status === 400 && badEnabled.json.error.code === "bad_request");
+
     // ── Admin creates a rule: critical finding in acme/web → channel ───
     const rule = await req("POST", "/notifications/rules", {
       session: admin,

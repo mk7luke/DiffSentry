@@ -223,16 +223,25 @@ function connectTls(host: string, port: number, existing?: net.Socket): Promise<
     const socket = tls.connect({ host, port, servername: host, socket: existing }, () => {
       if (settled) return;
       settled = true;
-      socket.removeListener("error", onError);
+      cleanup();
       resolve(socket);
     });
-    const onError = (err: Error) => {
+    const cleanup = () => {
+      socket.setTimeout(0);
+      socket.removeListener("error", onError);
+    };
+    // Bound the TLS handshake the same way connectPlain bounds the TCP connect,
+    // so an unreachable/half-open TLS endpoint can't hang sendMail forever.
+    const fail = (err: Error) => {
       if (settled) return;
       settled = true;
+      cleanup();
       socket.destroy();
       reject(err);
     };
+    const onError = (err: Error) => fail(err);
     socket.once("error", onError);
+    socket.setTimeout(CONNECT_TIMEOUT_MS, () => fail(new Error("SMTP TLS connect timeout")));
   });
 }
 

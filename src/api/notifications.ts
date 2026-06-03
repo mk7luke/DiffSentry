@@ -52,15 +52,17 @@ function parseId(raw: string): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/**
- * Validate an outbound webhook URL the server will later POST to. Since this is
- * a stored egress target (SSRF surface), require `https` and reject loopback /
- * private / link-local / unspecified hosts by default. Plain-http and local
- * targets are allowed only behind an explicit env flag (used by smoke tests and
- * intentional self-hosted internal relays). Returns an error string, or null.
- */
+/** Reject a provided non-boolean `enabled` with a 400. Returns true if it did. */
+function rejectNonBoolEnabled(res: Response, body: Record<string, unknown>): boolean {
+  if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
+    sendError(res, 400, "bad_request", "enabled must be a boolean.");
+    return true;
+  }
+  return false;
+}
+
 // Read lazily (not a module-load const) so tests/harnesses can set the env
-// before the first validation call.
+// before the first validation call. (See validateWebhookUrl below for the policy.)
 function allowInsecureWebhooks(): boolean {
   return process.env.NODE_ENV === "test" || process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS === "true";
 }
@@ -335,6 +337,7 @@ export function registerNotificationRoutes(router: Router, deps: NotificationDep
   // ── Create a channel ────────────────────────────────────────────────
   router.post("/notifications/channels", admin, csrf.verify, async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
+    if (rejectNonBoolEnabled(res, body)) return;
     const type = typeof body.type === "string" ? body.type : "";
     if (!isChannelType(type)) {
       sendError(res, 400, "bad_request", `type must be one of: ${CHANNEL_TYPES.join(", ")}.`);
@@ -380,6 +383,7 @@ export function registerNotificationRoutes(router: Router, deps: NotificationDep
       return;
     }
     const body = (req.body ?? {}) as Record<string, unknown>;
+    if (rejectNonBoolEnabled(res, body)) return;
     const patch: { id: number; name?: string | null; config?: unknown; enabled?: boolean } = { id };
     if (body.name !== undefined) patch.name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : null;
     if (body.enabled !== undefined) patch.enabled = body.enabled !== false;
@@ -452,6 +456,7 @@ export function registerNotificationRoutes(router: Router, deps: NotificationDep
   // ── Create a rule ───────────────────────────────────────────────────
   router.post("/notifications/rules", admin, csrf.verify, (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
+    if (rejectNonBoolEnabled(res, body)) return;
     const validated = validateCondition(body.condition);
     if ("error" in validated) {
       sendError(res, 400, "bad_request", validated.error);
@@ -505,6 +510,7 @@ export function registerNotificationRoutes(router: Router, deps: NotificationDep
       return;
     }
     const body = (req.body ?? {}) as Record<string, unknown>;
+    if (rejectNonBoolEnabled(res, body)) return;
     const patch: { id: number; name?: string | null; scope?: string; condition?: unknown; channelId?: number | null; enabled?: boolean } = { id };
     if (body.name !== undefined) patch.name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : null;
     if (body.scope !== undefined) patch.scope = typeof body.scope === "string" && body.scope.trim() ? body.scope.trim() : "global";
