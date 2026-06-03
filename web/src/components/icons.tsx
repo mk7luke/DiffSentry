@@ -68,6 +68,16 @@ export function AuditIcon(props: IconProps) {
   );
 }
 
+export function WebhooksIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M9.5 8.5a3 3 0 1 1 4.2 2.75l2.3 4" />
+      <path d="M14.5 18a3 3 0 1 1-1.2-2.4l2.3-4" />
+      <path d="M6.5 14a3 3 0 1 0 2.9 3.75H14" />
+    </svg>
+  );
+}
+
 export function SearchIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...props}>

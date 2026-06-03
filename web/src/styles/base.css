@@ -1869,6 +1869,102 @@ label.field {
   margin-bottom: 0;
 }
 
+/* ─── Webhook deliveries ──────────────────────────────────────────── */
+
+/* Disclosure toggle in the first cell of each delivery row. */
+.tbl td.cell-toggle {
+  width: 28px;
+  padding-right: 0;
+  text-align: center;
+}
+.btn-disclose {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--r-xs);
+  transition: color 0.12s, background 0.12s;
+}
+.btn-disclose:hover {
+  color: var(--text-1);
+  background: var(--bg-hover);
+}
+.tbl tbody tr.row-open {
+  background: var(--bg-elev-2);
+}
+.tbl tbody tr.row-detail td {
+  background: var(--bg-chart);
+  padding: 12px 14px 16px;
+}
+.tbl tbody tr.row-detail:hover td {
+  background: var(--bg-chart);
+}
+
+.delivery-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.delivery-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+.kvi {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kvi-k {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.kvi-v {
+  font-size: 12px;
+  color: var(--text-1);
+}
+
+/* Syntax-highlighted JSON viewer. */
+.jsonview {
+  margin: 0;
+  max-height: 460px;
+  overflow: auto;
+  padding: 12px 14px;
+  background: var(--bg-deep);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+  tab-size: 2;
+}
+.jsonview code {
+  font-family: inherit;
+  color: var(--text-2);
+}
+.jv-key {
+  color: var(--accent-bright);
+}
+.jv-str {
+  color: var(--good);
+}
+.jv-num {
+  color: var(--sev-major);
+}
+.jv-bool {
+  color: var(--accent-2);
+}
+.jv-null {
+  color: var(--text-3);
+  font-style: italic;
+}
+
 /* ─── Command palette (Cmd-K) ──────────────────────────────────────── */
 /* Sidebar trigger — a faux search field that opens the palette. */
 .cmdk-trigger {

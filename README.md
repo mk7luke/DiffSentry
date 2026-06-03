@@ -699,6 +699,10 @@ untouched.
 - `/patterns` — every pattern-rule hit with 30d + all-time counts.
 - `/audit` — **admin only** — the audit trail (who did what, when) plus a
   per-login role-override editor.
+- `/webhooks` — **admin only** — every raw webhook delivery GitHub sent
+  (event, repo, signature status, size), with an expandable syntax-highlighted
+  JSON viewer and a one-click **Replay** that re-runs the stored payload through
+  the engine. Filter by event type and repo.
 - `/settings` — runtime + storage health, the signed-in session with its
   resolved role + capabilities, and a recent warn/error log tail captured via
   an in-process pino ring buffer.
@@ -721,12 +725,22 @@ in the sidebar) to open a keyboard-first palette that combines three things:
 
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
-`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, `/search?q=`, and
-`/audit` (admin). Write endpoints: `POST /roles` (admin) sets/clears a role
-override.
-When OAuth is configured every endpoint requires a valid session (401 JSON
-otherwise); the queries reuse the same SQL as the legacy dashboard and no-op
-gracefully when persistence is disabled.
+`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, `/search?q=`,
+`/audit` (admin), `/webhooks` + `/webhooks/:id` (admin). Write endpoints:
+`POST /roles` (admin) sets/clears a role override; `POST /webhooks/:id/replay`
+(admin) re-dispatches a stored delivery. When OAuth is configured every endpoint
+requires a valid session (401 JSON otherwise); the queries reuse the same SQL as
+the legacy dashboard and no-op gracefully when persistence is disabled.
+
+**Webhook capture & replay.** Every delivery to `POST /webhook` is persisted to
+`webhook_deliveries` (event, action, repo, PR/issue number, `X-GitHub-Delivery`
+id, whether the signature verified, and a truncated payload) right after
+signature verification — rejected deliveries are recorded too, so the inspection
+view shows everything. `POST /webhooks/:id/replay` (admin + CSRF) records a new
+delivery row flagged `replayed_from` and re-runs the stored payload through the
+exact same engine path the live handler uses, then writes a `webhook.replay`
+audit row and emits `webhook.replayed` over SSE. Replay never re-enters the
+`/webhook` capture path, so it can't loop.
 
 **Command actions** (`author`+) drive the review engine from the dashboard. Each
 is `requireRole('author')` + CSRF gated, writes an `audit_log` row, and emits an
@@ -748,7 +762,8 @@ optimistic toast and reports the audit-logged result.
 
 **Realtime** (`GET /api/v1/stream`) is a Server-Sent Events feed on an in-process
 event bus. The review engine publishes `review.started` / `review.finished` /
-`review.failed`, and every command action publishes `action.performed`. The SPA
+`review.failed`, every command action publishes `action.performed`, and a
+webhook replay publishes `webhook.replayed`. The SPA
 opens one `EventSource`, surfaces events as toasts, and live-refetches the
 affected PR — so a re-review's findings appear without a refresh. The stream
 heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed
