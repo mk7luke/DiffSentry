@@ -153,7 +153,12 @@ export class GitHubClient {
         ? { slug: data.slug ?? null, name: data.name ?? null, htmlUrl: data.html_url ?? null }
         : null;
     } catch (err) {
+      // App JWT couldn't authenticate (bad App ID / private key). Return now —
+      // the remaining calls would fail with the same credentials and bury this
+      // root cause behind secondary 401s. A set top-level `error` is the
+      // documented signal that App authentication itself failed.
       result.error = err instanceof Error ? err.message : String(err);
+      return result;
     }
 
     // Installations + the repos each can reach.
