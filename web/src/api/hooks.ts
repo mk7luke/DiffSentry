@@ -11,8 +11,12 @@ import type {
   PRDetailResponse,
   QueueResponse,
   RepoDetailResponse,
+  ReplayResponse,
   ReposResponse,
   Role,
+  SearchResponse,
+  WebhookDeliveryDetail,
+  WebhooksResponse,
 } from "./types";
 
 export function useMe() {
@@ -96,6 +100,19 @@ export function useQueue() {
   });
 }
 
+/** Cmd-K palette search. Disabled for blank queries; keeps the prior page of
+ * results visible while the next one loads so the list doesn't flicker. */
+export function useSearch(q: string, enabled = true) {
+  const trimmed = q.trim();
+  return useQuery({
+    queryKey: ["search", trimmed],
+    queryFn: () => apiGet<SearchResponse>("/search", { q: trimmed }),
+    enabled: enabled && trimmed.length > 0,
+    placeholderData: (prev) => prev,
+    staleTime: 15_000,
+  });
+}
+
 export function useHealth() {
   return useQuery({
     queryKey: ["health"],
@@ -122,6 +139,50 @@ export function useAudit(query: AuditQuery, enabled: boolean) {
       }),
     enabled,
     placeholderData: (prev) => prev,
+  });
+}
+
+export interface WebhooksQuery {
+  event?: string;
+  repo?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/** Admin: paged raw webhook deliveries + filter options. */
+export function useWebhooks(query: WebhooksQuery, enabled: boolean) {
+  return useQuery({
+    queryKey: ["webhooks", query],
+    queryFn: () =>
+      apiGet<WebhooksResponse>("/webhooks", {
+        event: query.event,
+        repo: query.repo,
+        limit: query.limit,
+        offset: query.offset,
+      }),
+    enabled,
+    placeholderData: (prev) => prev,
+  });
+}
+
+/** Admin: one delivery with its full stored payload. Enabled lazily on expand. */
+export function useWebhookDelivery(id: number | null) {
+  return useQuery({
+    queryKey: ["webhook", id],
+    queryFn: () => apiGet<WebhookDeliveryDetail>(`/webhooks/${id}`),
+    enabled: id != null,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Admin: re-dispatch a stored delivery through the engine. Refetches the list. */
+export function useReplayWebhook() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend<ReplayResponse>(`/webhooks/${id}/replay`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["webhooks"] });
+    },
   });
 }
 

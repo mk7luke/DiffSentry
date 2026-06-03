@@ -2,7 +2,8 @@ import type { ComponentType, ReactNode, SVGProps } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
 import type { Capabilities } from "../api/types";
-import { AuditIcon, FindingsIcon, LogoIcon, OverviewIcon, PatternsIcon, QueueIcon, SettingsIcon } from "./icons";
+import { AuditIcon, FindingsIcon, LogoIcon, OverviewIcon, PatternsIcon, QueueIcon, SearchIcon, SettingsIcon, WebhooksIcon } from "./icons";
+import { CommandPalette, openCommandPalette } from "./CommandPalette";
 
 // Page shell: sticky left sidebar (brand + primary nav + signed-in user) and
 // the main content column. Mirrors renderLayout() from src/dashboard/layout.ts.
@@ -22,6 +23,7 @@ const NAV: NavItem[] = [
   { to: "/findings", label: "Findings", Icon: FindingsIcon, end: false },
   { to: "/patterns", label: "Patterns", Icon: PatternsIcon, end: false },
   { to: "/audit", label: "Audit log", Icon: AuditIcon, end: false, cap: "viewAudit" },
+  { to: "/webhooks", label: "Webhooks", Icon: WebhooksIcon, end: false, cap: "viewAudit" },
   { to: "/settings", label: "Settings", Icon: SettingsIcon, end: false },
 ];
 
@@ -40,6 +42,11 @@ function Sidebar() {
           <div className="wordmark-sub">REVIEW OPS</div>
         </div>
       </NavLink>
+      <button type="button" className="cmdk-trigger" onClick={openCommandPalette}>
+        <SearchIcon />
+        <span>Search…</span>
+        <kbd className="cmdk-kbd">⌘K</kbd>
+      </button>
       <nav className="sidebar-nav" aria-label="Primary">
         {items.map(({ to, label, Icon, end }) => (
           <NavLink key={to} to={to} end={end} className={({ isActive }) => `snav${isActive ? " active" : ""}`}>
@@ -73,6 +80,7 @@ export function Shell() {
       <main className="main">
         <Outlet />
       </main>
+      <CommandPalette />
     </div>
   );
 }

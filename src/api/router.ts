@@ -19,6 +19,7 @@ import { insertAuditLog, setRole } from "../storage/dao.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
 import { reviewQueue } from "../realtime/queue.js";
+import { registerWebhookRoutes, type ReplayWebhook } from "./webhooks.js";
 import {
   getApprovalMix,
   getAuditActions,
@@ -38,9 +39,11 @@ import {
   getRoleOverrides,
   getSparkline,
   getTopRules,
+  listRepos,
   queryFindings,
   queryFingerprintGroups,
   repoExists,
+  searchEntities,
   type FindingFilters,
 } from "../dashboard/queries.js";
 
@@ -65,6 +68,10 @@ export interface ApiDeps {
    * the SSE stream are still mounted, but actions have nothing to drive — so
    * they are only registered when a reviewer is provided. */
   reviewer?: ReviewerActions;
+  /** Re-dispatches a stored webhook delivery (records a flagged replay row +
+   * runs the same engine path). When omitted, GET /webhooks still works but
+   * POST /webhooks/:id/replay answers 503. */
+  replayWebhook?: ReplayWebhook;
 }
 
 type ErrorCode =
@@ -145,6 +152,59 @@ function parseFindingFilters(q: Record<string, unknown>): FindingFilters {
   };
 }
 
+// ─── Search ranking ─────────────────────────────────────────────────────────
+// The DB returns candidate rows per entity; we score each match in one place so
+// repos, PRs, findings, and (on-disk) learnings rank against the same scale.
+
+type SearchType = "repo" | "pr" | "finding" | "learning";
+
+interface SearchResult {
+  type: SearchType;
+  title: string;
+  subtitle: string | null;
+  /** SPA client-side route to deep-link to (note: PR route is `/pr/`, not the
+   * API's `/prs/`). */
+  to: string;
+  owner: string;
+  repo: string;
+  number: number | null;
+  severity: string | null;
+  score: number;
+}
+
+/** Small per-type bias so equally-good text matches order sensibly (a repo name
+ * hit feels more "primary" than a finding-title hit). Never dominates the
+ * text-match score below. */
+const TYPE_BIAS: Record<SearchType, number> = { repo: 0.3, pr: 0.25, finding: 0.2, learning: 0.15 };
+
+/**
+ * Score how well `hay` matches the lowercased query `q`. 0 means no match;
+ * higher is better. Rewards prefix and word-boundary hits over mid-word ones,
+ * an exact match most of all, and shorter haystacks slightly (more specific).
+ */
+function scoreText(hay: string | null | undefined, q: string): number {
+  if (!hay) return 0;
+  const h = hay.toLowerCase();
+  const idx = h.indexOf(q);
+  if (idx < 0) return 0;
+  let s = 1;
+  if (h === q) s += 3;
+  else if (idx === 0) s += 2;
+  else if (!/[a-z0-9]/i.test(h[idx - 1] ?? "")) s += 1; // preceded by a non-word char
+  s += Math.max(0, 1 - hay.length / 120);
+  return s;
+}
+
+/** Best score across several fields. */
+function bestScore(q: string, ...fields: Array<string | null | undefined>): number {
+  let best = 0;
+  for (const f of fields) {
+    const s = scoreText(f, q);
+    if (s > best) best = s;
+  }
+  return best;
+}
+
 export function createApiRouter(deps: ApiDeps): express.Router {
   const router = express.Router();
   void new LearningsStore(deps.learningsDir); // reserved for future write endpoints
@@ -183,6 +243,11 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   if (deps.reviewer) {
     registerActionRoutes(router, { reviewer: deps.reviewer, requireRole, csrf });
   }
+
+  // ─── Webhook deliveries (admin) ────────────────────────────────────
+  // Inspection (list + full payload) and admin replay. The GET endpoints are
+  // always mounted; replay only acts when a replayWebhook closure is wired in.
+  registerWebhookRoutes(router, { requireRole, csrf, replayWebhook: deps.replayWebhook });
 
   // ─── /me ───────────────────────────────────────────────────────────
   // The role resolves from the roles table > admin env > author env > viewer
@@ -322,6 +387,102 @@ export function createApiRouter(deps: ApiDeps): express.Router {
     } catch (err) {
       logger.error({ err }, "api /patterns failed");
       sendError(res, 500, "internal", "Failed to load patterns.");
+    }
+  });
+
+  // ─── /search ───────────────────────────────────────────────────────
+  // Powers the Cmd-K palette. Any authenticated role may search (read-only).
+  // Mixes repos, PRs, findings, and on-disk learnings into one ranked list,
+  // each carrying a client-side deep link the SPA navigates to on Enter.
+  router.get("/search", async (req, res) => {
+    const raw = req.query.q;
+    const q = (typeof raw === "string" ? raw : "").trim();
+    const limit = (() => {
+      const v = req.query.limit;
+      const n = typeof v === "string" ? Number.parseInt(v, 10) : NaN;
+      return Number.isFinite(n) ? Math.min(Math.max(n, 1), 50) : 25;
+    })();
+    if (q.length < 1) {
+      sendData(res, { q, results: [] });
+      return;
+    }
+    const ql = q.toLowerCase();
+    try {
+      const { repos, prs, findings } = searchEntities(q, 20);
+      const results: SearchResult[] = [];
+
+      for (const r of repos) {
+        const slug = `${r.owner}/${r.repo}`;
+        results.push({
+          type: "repo",
+          title: slug,
+          subtitle: r.last_review ? "repository" : "repository · no reviews yet",
+          to: `/repos/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.repo)}`,
+          owner: r.owner,
+          repo: r.repo,
+          number: null,
+          severity: null,
+          score: TYPE_BIAS.repo + bestScore(ql, slug, r.repo),
+        });
+      }
+
+      for (const p of prs) {
+        results.push({
+          type: "pr",
+          title: p.title ? `#${p.number} · ${p.title}` : `#${p.number}`,
+          subtitle: `${p.owner}/${p.repo}${p.author ? ` · @${p.author}` : ""}${p.state ? ` · ${p.state}` : ""}`,
+          to: `/repos/${encodeURIComponent(p.owner)}/${encodeURIComponent(p.repo)}/pr/${p.number}`,
+          owner: p.owner,
+          repo: p.repo,
+          number: p.number,
+          severity: null,
+          score: TYPE_BIAS.pr + bestScore(ql, p.title, p.author, `#${p.number}`, String(p.number)),
+        });
+      }
+
+      for (const f of findings) {
+        const loc = f.path ? `${f.path}${f.line ? `:${f.line}` : ""}` : `${f.owner}/${f.repo}#${f.number}`;
+        results.push({
+          type: "finding",
+          title: f.title ?? loc,
+          subtitle: `${f.owner}/${f.repo}#${f.number} · ${loc}`,
+          to: `/repos/${encodeURIComponent(f.owner)}/${encodeURIComponent(f.repo)}/pr/${f.number}`,
+          owner: f.owner,
+          repo: f.repo,
+          number: f.number,
+          severity: f.severity,
+          score: TYPE_BIAS.finding + bestScore(ql, f.title, f.path),
+        });
+      }
+
+      // Learnings live on disk (one JSON file per repo), so scan the known
+      // repos' files and match on content. Cheap — repo count is small and
+      // files are tiny; mirrors how /repos/:owner/:repo already loads them.
+      const learningHits = await Promise.all(
+        listRepos().map(async ({ owner, repo }) => {
+          const learnings = await loadLearningsSafe(deps.learningsDir, owner, repo);
+          return learnings
+            .filter((l) => l.content.toLowerCase().includes(ql))
+            .map<SearchResult>((l) => ({
+              type: "learning",
+              title: l.content.length > 90 ? `${l.content.slice(0, 90)}…` : l.content,
+              subtitle: `learning · ${owner}/${repo}${l.path ? ` · ${l.path}` : ""}`,
+              to: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+              owner,
+              repo,
+              number: null,
+              severity: null,
+              score: TYPE_BIAS.learning + bestScore(ql, l.content),
+            }));
+        }),
+      );
+      for (const arr of learningHits) results.push(...arr);
+
+      results.sort((a, b) => b.score - a.score);
+      sendData(res, { q, results: results.slice(0, limit) });
+    } catch (err) {
+      logger.error({ err, q }, "api /search failed");
+      sendError(res, 500, "internal", "Search failed.");
     }
   });
 

@@ -71,6 +71,17 @@ export interface ReviewQueueEntry {
   attempt: number;
 }
 
+/** An admin replayed a stored webhook delivery — emitted from the API. */
+export interface WebhookReplayPayload {
+  /** rowid of the original delivery that was replayed. */
+  id: number;
+  /** rowid of the new delivery row recorded for the replay (null if DB off). */
+  newDeliveryId: number | null;
+  event: string;
+  action: string | null;
+  actor: string | null;
+}
+
 /** Topic → payload map. Add new topics here so publish/subscribe stay typed. */
 export interface BusEventMap {
   "review.started": ReviewLifecyclePayload;
@@ -78,6 +89,7 @@ export interface BusEventMap {
   "review.failed": ReviewLifecyclePayload;
   "action.performed": ActionPayload;
   "queue.updated": ReviewQueueEntry;
+  "webhook.replayed": WebhookReplayPayload;
 }
 
 export type BusTopic = keyof BusEventMap;
