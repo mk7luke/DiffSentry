@@ -46,6 +46,30 @@ export interface GithubDiagnostics {
   error?: string;
 }
 
+// Narrow shapes for the raw @octokit/rest responses getAppDiagnostics() reads.
+// We assert to these (only the fields we use) instead of `any`: the App-level
+// list endpoints + paginate() don't infer cleanly down to this handful of
+// fields, but the runtime payloads carry them. @octokit/rest ^21.
+interface RawInstallation {
+  id: number;
+  account?: { login?: string; slug?: string; type?: string } | null;
+  repository_selection?: string | null;
+}
+interface RawWebhookDelivery {
+  id: number;
+  event: string;
+  action?: string | null;
+  status: string;
+  status_code: number;
+  delivered_at: string;
+  redelivery?: boolean;
+}
+interface RawRateBucket {
+  limit: number;
+  remaining: number;
+  reset: number;
+}
+
 function isOurBotThread(thread: any, botLogin: string): boolean {
   const first = thread.comments?.nodes?.[0];
   if (!first) return false;
@@ -134,7 +158,7 @@ export class GitHubClient {
 
     // Installations + the repos each can reach.
     try {
-      const insts = (await app.paginate(app.apps.listInstallations, { per_page: 100 })) as any[];
+      const insts = (await app.paginate(app.apps.listInstallations, { per_page: 100 })) as RawInstallation[];
       for (const inst of insts) {
         const info: InstallationInfo = {
           id: inst.id,
@@ -150,7 +174,7 @@ export class GitHubClient {
           const { data } = await instOcto.apps.listReposAccessibleToInstallation({ per_page: 100 });
           const repos = data.repositories ?? [];
           info.repoCount = data.total_count ?? repos.length;
-          info.repos = repos.slice(0, 50).map((r: any) => r.full_name);
+          info.repos = repos.slice(0, 50).map((r) => r.full_name);
           info.truncated = info.repoCount > info.repos.length;
         } catch (err) {
           logger.debug({ err, installationId: inst.id }, "diagnostics: list repos failed");
@@ -170,7 +194,7 @@ export class GitHubClient {
     }
     try {
       const { data } = await app.apps.listWebhookDeliveries({ per_page: 10 });
-      result.webhook.deliveries = (data as any[]).map((d) => ({
+      result.webhook.deliveries = (data as RawWebhookDelivery[]).map((d) => ({
         id: d.id,
         event: d.event,
         action: d.action ?? null,
@@ -186,9 +210,8 @@ export class GitHubClient {
     // Rate limit (App JWT core bucket).
     try {
       const { data } = await app.rateLimit.get();
-      const core = (data.resources?.core ?? (data as any).rate) as
-        | { limit: number; remaining: number; reset: number }
-        | undefined;
+      const limits = data as { resources?: { core?: RawRateBucket }; rate?: RawRateBucket };
+      const core = limits.resources?.core ?? limits.rate;
       if (core) {
         result.rateLimit = {
           limit: core.limit,

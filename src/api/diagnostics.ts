@@ -245,9 +245,13 @@ function summarize(checks: DiagnosticCheck[]): { ok: number; warn: number; fail:
 export function registerDiagnosticsRoutes(router: Router, deps: DiagnosticsRouteDeps): void {
   const { diagnostics, requireRole, csrf, authEnabled } = deps;
   const author = requireRole("author");
+  // Reads expose configuration + installation detail, so gate them at the
+  // minimum role explicitly (the global auth gate already floors any
+  // authenticated request at viewer — this self-documents the access tier).
+  const viewer = requireRole("viewer");
 
   // ── GET /diagnostics — static, fast, no network ──────────────────
-  router.get("/diagnostics", (_req, res) => {
+  router.get("/diagnostics", viewer, (_req, res) => {
     try {
       const checks = buildChecks(authEnabled);
       const summary = summarize(checks);
@@ -283,7 +287,7 @@ export function registerDiagnosticsRoutes(router: Router, deps: DiagnosticsRoute
   });
 
   // ── GET /diagnostics/github — live probe ─────────────────────────
-  router.get("/diagnostics/github", async (_req, res) => {
+  router.get("/diagnostics/github", viewer, async (_req, res) => {
     try {
       const gh = await diagnostics.getGithubDiagnostics();
       const connectedRepos = gh.installations.reduce((n, i) => n + i.repoCount, 0);
