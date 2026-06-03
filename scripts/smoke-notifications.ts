@@ -183,6 +183,21 @@ async function main() {
     });
     ok("create rule(admin) → 201", rule.status === 201);
 
+    // ── A rule pointing at a non-existent channel is rejected (400) ────
+    const badRuleCreate = await req("POST", "/notifications/rules", {
+      session: admin,
+      csrf: true,
+      body: { name: "bad", condition: { event: "finding" }, channelId: 99999 },
+    });
+    ok("create rule(bad channelId) → 400", badRuleCreate.status === 400 && badRuleCreate.json.error.code === "bad_request");
+    const ruleId: number = rule.json.data.id;
+    const badRuleUpdate = await req("PUT", `/notifications/rules/${ruleId}`, {
+      session: admin,
+      csrf: true,
+      body: { channelId: 99999 },
+    });
+    ok("update rule(bad channelId) → 400", badRuleUpdate.status === 400 && badRuleUpdate.json.error.code === "bad_request");
+
     // ── A matching event delivers a real Slack message ─────────────────
     received.length = 0;
     bus.publish("finding.surfaced", {

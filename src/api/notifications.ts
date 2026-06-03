@@ -304,6 +304,12 @@ export function registerNotificationRoutes(router: Router, deps: NotificationDep
       sendError(res, 400, "bad_request", "A channelId is required.");
       return;
     }
+    // Reject up front so a non-existent channel returns a clean 400 rather than
+    // tripping the FK constraint inside insertAlertRule (which surfaces as a 500).
+    if (!getNotificationChannels().some((c) => c.id === channelId)) {
+      sendError(res, 400, "bad_request", "channelId does not match an existing channel.");
+      return;
+    }
     const scope = typeof body.scope === "string" && body.scope.trim() ? body.scope.trim() : "global";
     const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : null;
     try {
@@ -347,6 +353,12 @@ export function registerNotificationRoutes(router: Router, deps: NotificationDep
     if (body.enabled !== undefined) patch.enabled = body.enabled !== false;
     if (body.channelId !== undefined) {
       const cid = typeof body.channelId === "number" ? body.channelId : parseId(String(body.channelId));
+      // A supplied channelId must be valid + existing — never silently unset the
+      // rule's channel (or write an FK-violating id) from a bad value.
+      if (cid == null || !getNotificationChannels().some((c) => c.id === cid)) {
+        sendError(res, 400, "bad_request", "channelId must reference an existing channel.");
+        return;
+      }
       patch.channelId = cid;
     }
     if (body.condition !== undefined) {

@@ -54,11 +54,20 @@ export function smtpConfigFromEnv(): SmtpConfig | null {
 const CONNECT_TIMEOUT_MS = 10_000;
 
 /** A live SMTP dialog over one socket. Reads CRLF-framed replies and writes
- *  commands, resolving each reply once the final (non-continuation) line lands. */
+ *  commands, resolving each reply once the final (non-continuation) line lands.
+ *
+ *  Every read is bounded: it rejects after CONNECT_TIMEOUT_MS and immediately on
+ *  a socket `error`/`close` so a hung or dropped server can never leave sendMail
+ *  awaiting forever. Once the socket has failed, `deadError` short-circuits any
+ *  later read so the rest of the dialog unwinds quickly. */
 class SmtpSession {
   private socket: net.Socket;
   private buffer = "";
   private pending: { resolve: (v: string) => void; reject: (e: Error) => void } | null = null;
+  /** Set once the socket has failed/closed; later reads reject with it at once. */
+  private deadError: Error | null = null;
+  /** The current socket's `data` handler, removed on rebind to avoid leaks. */
+  private onData: ((chunk: string) => void) | null = null;
 
   constructor(socket: net.Socket) {
     this.socket = socket;
@@ -67,7 +76,7 @@ class SmtpSession {
 
   private attach(socket: net.Socket): void {
     socket.setEncoding("utf8");
-    socket.on("data", (chunk: string) => {
+    const onData = (chunk: string) => {
       this.buffer += chunk;
       // A complete reply ends with a line "NNN <text>" (space after the code);
       // "NNN-<text>" lines are continuations.
@@ -84,11 +93,14 @@ class SmtpSession {
           return;
         }
       }
-    });
+    };
+    this.onData = onData;
+    socket.on("data", onData);
   }
 
   /** Swap in the TLS socket after a STARTTLS upgrade. */
   rebind(socket: net.Socket): void {
+    if (this.onData) this.socket.removeListener("data", this.onData);
     this.socket = socket;
     this.buffer = "";
     this.attach(socket);
@@ -96,7 +108,49 @@ class SmtpSession {
 
   read(): Promise<string> {
     return new Promise((resolve, reject) => {
-      this.pending = { resolve, reject };
+      if (this.deadError) {
+        reject(this.deadError);
+        return;
+      }
+      const socket = this.socket;
+      let settled = false;
+      const cleanup = () => {
+        clearTimeout(timer);
+        socket.removeListener("error", onError);
+        socket.removeListener("close", onClose);
+      };
+      const fail = (err: Error) => {
+        if (settled) return;
+        settled = true;
+        this.deadError = err;
+        this.pending = null;
+        cleanup();
+        reject(err);
+      };
+      const onError = (err: Error) => fail(err instanceof Error ? err : new Error(String(err)));
+      const onClose = () => fail(new Error("SMTP connection closed unexpectedly"));
+      const timer = setTimeout(() => {
+        socket.destroy();
+        fail(new Error("SMTP read timeout"));
+      }, CONNECT_TIMEOUT_MS);
+      socket.once("error", onError);
+      socket.once("close", onClose);
+      // Wrap resolve/reject so the per-read listeners + timer are always torn
+      // down, whether the reply lands (data handler) or end() rejects us.
+      this.pending = {
+        resolve: (v: string) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(v);
+        },
+        reject: (e: Error) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(e);
+        },
+      };
     });
   }
 
@@ -115,6 +169,12 @@ class SmtpSession {
   }
 
   end(): void {
+    // Reject anything still awaiting so a teardown mid-dialog never hangs.
+    if (this.pending) {
+      const p = this.pending;
+      this.pending = null;
+      p.reject(new Error("SMTP session ended"));
+    }
     try {
       this.socket.end();
     } catch {
