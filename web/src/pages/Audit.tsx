@@ -5,7 +5,7 @@ import { useAuth } from "../auth/useAuth";
 import { Breadcrumbs } from "../components/Shell";
 import { Card, PageHeader } from "../components/primitives";
 import { RoleBadge } from "../components/badges";
-import { EmptyState, QueryBoundary } from "../components/states";
+import { EmptyState, LoadingState, QueryBoundary } from "../components/states";
 import { ApiError } from "../api/client";
 import type { Role } from "../api/types";
 import { pluralize, relativeTime } from "../lib/format";
@@ -19,7 +19,19 @@ const ROLES: Role[] = ["viewer", "author", "admin"];
 export function AuditPage() {
   const { capabilities, isLoading } = useAuth();
 
-  if (!isLoading && !capabilities.viewAudit) {
+  // Wait for /me before deciding — otherwise AuditContent would mount and fire
+  // the (admin-only) /audit query before the role resolves.
+  if (isLoading) {
+    return (
+      <>
+        <Breadcrumbs crumbs={[{ label: "Audit log" }]} />
+        <PageHeader title="Audit log" subtitle="Admin only." />
+        <LoadingState label="Loading…" />
+      </>
+    );
+  }
+
+  if (!capabilities.viewAudit) {
     return (
       <>
         <Breadcrumbs crumbs={[{ label: "Audit log" }]} />
