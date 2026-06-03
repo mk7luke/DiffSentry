@@ -1826,3 +1826,141 @@ label.field {
 .role-form .field {
   margin-bottom: 0;
 }
+
+/* ── Custom rule builder (Rules screen) ────────────────────────── */
+.rule-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.rule-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+.rule-grid.pattern-row {
+  grid-template-columns: 1fr 80px 1fr;
+}
+.rule-grid .field {
+  margin-bottom: 0;
+  min-width: 0;
+}
+.rule-grid .field.grow {
+  grid-column: span 2;
+}
+input.mono,
+textarea.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.rule-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.rule-enable {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.rule-enable input {
+  width: auto;
+}
+
+@media (max-width: 760px) {
+  .rule-grid,
+  .rule-grid.pattern-row {
+    grid-template-columns: 1fr;
+  }
+  .rule-grid .field.grow {
+    grid-column: auto;
+  }
+}
+
+/* Enable/disable pill toggle in the rules table. */
+.pill-toggle {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.pill-toggle.on {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  border-color: var(--accent-line);
+}
+.pill-toggle.off {
+  background: var(--bg-elev-2);
+  color: var(--text-3);
+}
+.pill-toggle:hover {
+  filter: brightness(1.1);
+}
+
+/* ── Live rule tester ──────────────────────────────────────────── */
+.tester {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--line);
+}
+.tester-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.tester-head h3 {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-2);
+}
+.tester-result {
+  margin-top: 10px;
+  font-size: 12.5px;
+  min-height: 18px;
+}
+.tester-result .ok {
+  color: var(--accent-bright);
+  font-weight: 500;
+}
+.tester-snippet {
+  margin-top: 10px;
+  background: var(--bg-deep);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 8px 0;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.tester-snippet .line {
+  display: flex;
+  gap: 12px;
+  padding: 0 12px;
+  white-space: pre;
+}
+.tester-snippet .line.hit {
+  background: var(--sev-major-soft);
+  box-shadow: inset 2px 0 0 var(--sev-major);
+}
+.tester-snippet .ln {
+  color: var(--text-4);
+  text-align: right;
+  width: 28px;
+  flex-shrink: 0;
+  user-select: none;
+}
+.tester-snippet .src {
+  color: var(--text-1);
+}

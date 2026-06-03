@@ -294,3 +294,63 @@ export interface FindingsResponse {
 export interface PatternsResponse {
   rules: PatternRuleRow[];
 }
+
+// ─── Custom rules (admin-authored anti-patterns) ────────────────────
+
+export type RuleSeverity = "critical" | "major" | "minor" | "trivial";
+export type RuleType = "issue" | "suggestion" | "nitpick" | "documentation" | "security";
+
+/** A custom_rules row + its pattern-hit counts (mirrors CustomRuleWithHits). */
+export interface CustomRuleRow {
+  id: number;
+  scope: string;
+  kind: string;
+  name: string;
+  severity: string;
+  type: string;
+  pattern: string;
+  flags: string | null;
+  path_glob: string | null;
+  message: string | null;
+  advice: string | null;
+  enabled: number;
+  created_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  hits_total: number;
+  hits_30d: number;
+  last_hit: string | null;
+}
+
+export interface CustomRulesResponse {
+  rules: CustomRuleRow[];
+}
+
+/** Body for create/update. Server applies defaults for omitted optionals. */
+export interface CustomRuleInput {
+  name: string;
+  pattern: string;
+  scope?: string;
+  kind?: string;
+  severity?: string;
+  type?: string;
+  flags?: string | null;
+  pathGlob?: string | null;
+  message?: string | null;
+  advice?: string | null;
+  enabled?: boolean;
+}
+
+export interface RuleTestMatch {
+  line: number;
+  text: string;
+  match: string;
+}
+
+/** Result of POST /rules/test — compile status + per-line matches. */
+export interface RuleTestResult {
+  ok: boolean;
+  error?: string;
+  applies: boolean;
+  matches: RuleTestMatch[];
+}

@@ -22,7 +22,7 @@ import { suggestReviewersFromBlame, renderSuggestedReviewers, combineReviewers, 
 import { loadCodeowners, ownersForFiles, renderCodeownersBlock } from "./codeowners.js";
 import { findPriorBotThreadsForPaths, renderPriorDiscussionsBlock, diffWithOtherPR, renderDiffPRReply } from "./cross-pr.js";
 import { renderStickyStatus, STICKY_MARKER } from "./sticky-status.js";
-import { recordRepo, recordPR, recordReview, recordFindings, recordPatternHits, recordIssue, recordIssueAction } from "./storage/dao.js";
+import { recordRepo, recordPR, recordReview, recordFindings, recordPatternHits, recordIssue, recordIssueAction, listCustomRulesForRepo } from "./storage/dao.js";
 import { runSafetyScanners } from "./safety-scanner.js";
 import { runPatternChecks } from "./pattern-checks.js";
 import { scanDependencyChanges, renderDepBlock } from "./dep-scanner.js";
@@ -562,8 +562,10 @@ export class Reviewer {
         }
       }
 
-      // Run anti-pattern + built-in heuristic checks
-      const patternFindings = runPatternChecks(context.files, repoConfig);
+      // Run anti-pattern + built-in heuristic checks. Admin-authored custom
+      // rules (global + this repo's scope) compile in alongside the built-ins
+      // and the .diffsentry.yaml anti_patterns.
+      const patternFindings = runPatternChecks(context.files, repoConfig, listCustomRulesForRepo(owner, repo));
       if (patternFindings.length > 0) {
         log.info({ count: patternFindings.length }, "Pattern checks produced findings");
         reviewResult.comments = [...patternFindings, ...reviewResult.comments];
@@ -942,6 +944,10 @@ export class Reviewer {
           // anti-pattern findings. Map heuristically — close enough for the
           // dashboard's source filter.
           if (c.fingerprint && c.body?.includes("DiffSentry's safety scanner")) return "safety";
+          // Pattern-engine findings carry an explicit origin tag; fall back to
+          // body-sniffing only for anything that predates it.
+          if (c.patternSource === "builtin") return "builtin";
+          if (c.patternSource === "custom") return "custom";
           if (c.body?.includes("DiffSentry built-in pattern check")) return "builtin";
           if (c.body?.includes("Project anti-pattern")) return "custom";
           return "ai";
@@ -954,7 +960,7 @@ export class Reviewer {
             ...safetyFindings.map((f) => ({ ruleName: f.title ?? "safety", source: "safety" as const, fingerprint: f.fingerprint })),
             ...patternFindings.map((f) => ({
               ruleName: f.title ?? "pattern",
-              source: (f.body?.includes("Project anti-pattern") ? "custom" : "builtin") as "builtin" | "custom",
+              source: (f.patternSource ?? (f.body?.includes("Project anti-pattern") ? "custom" : "builtin")) as "builtin" | "custom",
               fingerprint: f.fingerprint,
             })),
           ],

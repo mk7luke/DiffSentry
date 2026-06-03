@@ -170,13 +170,52 @@ function compile(rule: { pattern: string; flags?: string }): RegExp | null {
   }
 }
 
+/**
+ * Validate a regex (and optional flags) without running it. Used by the API so
+ * a bad rule is rejected at author time instead of silently dropped at review
+ * time. Returns the error message on failure.
+ */
+export function validatePattern(pattern: string, flags?: string): { ok: boolean; error?: string } {
+  if (typeof pattern !== "string" || pattern.length === 0) {
+    return { ok: false, error: "Pattern must be a non-empty string." };
+  }
+  try {
+    new RegExp(pattern, flags ?? "");
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Invalid regular expression." };
+  }
+}
+
+// Where a compiled pattern came from. "builtin" = shipped heuristic; "config" =
+// a `.diffsentry.yaml` anti_pattern; "custom" = an admin-authored command-center
+// rule. The last two both record as source='custom' but render distinct footers.
+type PatternOrigin = "builtin" | "config" | "custom";
+
 type CompiledPattern = {
   rule: AntiPattern & { severity: CommentSeverity; type: CommentType };
   regex: RegExp;
-  isBuiltin: boolean;
+  origin: PatternOrigin;
 };
 
-function buildPatterns(repoConfig: RepoConfig | undefined): CompiledPattern[] {
+function compileUserPattern(r: AntiPattern, origin: PatternOrigin): CompiledPattern | null {
+  const rx = compile(r);
+  if (!rx) return null;
+  return {
+    rule: {
+      ...r,
+      severity: (r.severity ?? "minor") as CommentSeverity,
+      type: (r.type ?? "suggestion") as CommentType,
+    },
+    regex: rx,
+    origin,
+  };
+}
+
+function buildPatterns(
+  repoConfig: RepoConfig | undefined,
+  customRules: AntiPattern[] = [],
+): CompiledPattern[] {
   const out: CompiledPattern[] = [];
   const builtinEnabled = repoConfig?.reviews?.builtin_patterns !== false;
   if (builtinEnabled) {
@@ -186,22 +225,19 @@ function buildPatterns(repoConfig: RepoConfig | undefined): CompiledPattern[] {
       out.push({
         rule: { ...r, severity: r.severity, type: r.type },
         regex: rx,
-        isBuiltin: true,
+        origin: "builtin",
       });
     }
   }
   for (const r of repoConfig?.reviews?.anti_patterns ?? []) {
-    const rx = compile(r);
-    if (!rx) continue;
-    out.push({
-      rule: {
-        ...r,
-        severity: (r.severity ?? "minor") as CommentSeverity,
-        type: (r.type ?? "suggestion") as CommentType,
-      },
-      regex: rx,
-      isBuiltin: false,
-    });
+    const c = compileUserPattern(r, "config");
+    if (c) out.push(c);
+  }
+  // Admin-authored rules from the command center (already filtered to enabled +
+  // applicable scope by the DAO). They compose with built-ins and file rules.
+  for (const r of customRules) {
+    const c = compileUserPattern(r, "custom");
+    if (c) out.push(c);
   }
   return out;
 }
@@ -209,8 +245,9 @@ function buildPatterns(repoConfig: RepoConfig | undefined): CompiledPattern[] {
 export function runPatternChecks(
   files: FileChange[],
   repoConfig: RepoConfig | undefined,
+  customRules: AntiPattern[] = [],
 ): ReviewComment[] {
-  const patterns = buildPatterns(repoConfig);
+  const patterns = buildPatterns(repoConfig, customRules);
   if (patterns.length === 0) return [];
 
   const comments: ReviewComment[] = [];
@@ -240,9 +277,11 @@ export function runPatternChecks(
             if (p.rule.message) bodyParts.push(p.rule.message);
             if (p.rule.advice) bodyParts.push(`**Suggested fix:** ${p.rule.advice}`);
             bodyParts.push(
-              p.isBuiltin
+              p.origin === "builtin"
                 ? "_DiffSentry built-in pattern check — disable globally with `reviews.builtin_patterns: false`._"
-                : "_Project anti-pattern from `.diffsentry.yaml`._",
+                : p.origin === "custom"
+                  ? "_Custom rule (managed in the DiffSentry command center)._"
+                  : "_Project anti-pattern from `.diffsentry.yaml`._",
             );
             const body = bodyParts.join("\n\n");
             const aiAgentPrompt =
@@ -258,6 +297,7 @@ export function runPatternChecks(
               title,
               aiAgentPrompt,
               fingerprint,
+              patternSource: p.origin === "builtin" ? "builtin" : "custom",
               body: renderInlineCommentBody({
                 title,
                 body,
@@ -275,4 +315,75 @@ export function runPatternChecks(
   }
 
   return comments;
+}
+
+// ─── Live rule tester (no persistence) ─────────────────────────────
+
+export interface PatternTestInput {
+  pattern: string;
+  flags?: string;
+  /** Optional minimatch glob — when set, matching only runs if `filename` fits. */
+  path?: string;
+}
+
+export interface PatternTestMatch {
+  /** 1-based line number within the pasted snippet. */
+  line: number;
+  /** The full source line (leading diff "+" stripped). */
+  text: string;
+  /** The exact substring the regex matched. */
+  match: string;
+}
+
+export interface PatternTestResult {
+  /** False when the regex failed to compile (`error` carries why). */
+  ok: boolean;
+  error?: string;
+  /** False when a path glob is set and `filename` doesn't satisfy it. */
+  applies: boolean;
+  matches: PatternTestMatch[];
+}
+
+/** Hard cap so a pathological rule + huge paste can't balloon the response. */
+const MAX_TEST_MATCHES = 200;
+
+/**
+ * Run a candidate rule against a pasted snippet without touching the database.
+ * Mirrors runPatternChecks' per-line semantics: each line is treated as an
+ * added line (a leading "+" is tolerated so a raw diff can be pasted), and the
+ * optional path glob is honored against `filename`. Returns every matching line
+ * (capped) plus the matched substring, or a compile error.
+ */
+export function testPattern(input: PatternTestInput, snippet: string, filename?: string): PatternTestResult {
+  const regex = compile(input);
+  if (!regex) {
+    const v = validatePattern(input.pattern, input.flags);
+    return { ok: false, error: v.error ?? "Invalid regular expression.", applies: false, matches: [] };
+  }
+  // If a glob is set we need a filename to judge applicability. With no filename
+  // we still run (so the tester is useful), but report applies=false so the UI
+  // can hint that scope wasn't exercised.
+  const applies = !input.path || (!!filename && minimatch(filename, input.path));
+  if (input.path && !applies) {
+    return { ok: true, applies: false, matches: [] };
+  }
+
+  const matches: PatternTestMatch[] = [];
+  const lines = snippet.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (matches.length >= MAX_TEST_MATCHES) break;
+    const raw = lines[i];
+    // Tolerate pasted diffs: skip hunk/headers and removed lines, strip the
+    // leading marker so the regex sees the real source.
+    if (raw.startsWith("@@") || raw.startsWith("---") || raw.startsWith("+++")) continue;
+    if (raw.startsWith("-")) continue;
+    const content = raw.startsWith("+") || raw.startsWith(" ") ? raw.slice(1) : raw;
+    // Fresh lastIndex per line — a global-flagged regex is stateful otherwise.
+    regex.lastIndex = 0;
+    const m = regex.exec(content);
+    if (m) {
+      matches.push({ line: i + 1, text: content, match: m[0] });
+    }
+  }
+  return { ok: true, applies: true, matches };
 }

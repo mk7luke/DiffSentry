@@ -18,6 +18,7 @@ import {
 import { insertAuditLog, setRole } from "../storage/dao.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
+import { registerRuleRoutes } from "./rules.js";
 import {
   getApprovalMix,
   getAuditActions,
@@ -182,6 +183,12 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   if (deps.reviewer) {
     registerActionRoutes(router, { reviewer: deps.reviewer, requireRole, csrf });
   }
+
+  // ─── Custom anti-pattern rules (admin) ─────────────────────────────
+  // CRUD + a no-persist tester. Independent of the reviewer surface, so it is
+  // always mounted: the same write contract (requireRole('admin') + CSRF +
+  // audit_log + bus event) as the command actions above.
+  registerRuleRoutes(router, { requireRole, csrf });
 
   // ─── /me ───────────────────────────────────────────────────────────
   // The role resolves from the roles table > admin env > author env > viewer

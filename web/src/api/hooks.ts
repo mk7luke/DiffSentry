@@ -4,6 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiSend } from "./client";
 import type {
   AuditResponse,
+  CustomRuleInput,
+  CustomRuleRow,
+  CustomRulesResponse,
   FindingsResponse,
   HealthResponse,
   MeResponse,
@@ -12,6 +15,7 @@ import type {
   RepoDetailResponse,
   ReposResponse,
   Role,
+  RuleTestResult,
 } from "./types";
 
 export function useMe() {
@@ -111,6 +115,68 @@ export function useAudit(query: AuditQuery, enabled: boolean) {
       }),
     enabled,
     placeholderData: (prev) => prev,
+  });
+}
+
+// ─── Custom rules (admin) ───────────────────────────────────────────
+
+/** Admin: list custom anti-pattern rules with their hit-counts. */
+export function useCustomRules(enabled: boolean) {
+  return useQuery({
+    queryKey: ["rules"],
+    queryFn: () => apiGet<CustomRulesResponse>("/rules"),
+    enabled,
+  });
+}
+
+/** Admin: create a custom rule. */
+export function useCreateRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: CustomRuleInput) => apiSend<{ rule: CustomRuleRow }>("/rules", { body: vars }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["rules"] });
+    },
+  });
+}
+
+/** Admin: update an existing custom rule (partial fields). */
+export function useUpdateRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number } & Partial<CustomRuleInput>) => {
+      const { id, ...body } = vars;
+      return apiSend<{ rule: CustomRuleRow }>(`/rules/${id}`, { method: "PUT", body });
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["rules"] });
+    },
+  });
+}
+
+/** Admin: delete a custom rule. */
+export function useDeleteRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend<{ id: number }>(`/rules/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["rules"] });
+    },
+  });
+}
+
+export interface RuleTestVars {
+  pattern: string;
+  flags?: string;
+  pathGlob?: string;
+  filename?: string;
+  snippet: string;
+}
+
+/** Admin: test a candidate rule against a pasted snippet (no persistence). */
+export function useTestRule() {
+  return useMutation({
+    mutationFn: (vars: RuleTestVars) => apiSend<RuleTestResult>("/rules/test", { body: vars }),
   });
 }
 

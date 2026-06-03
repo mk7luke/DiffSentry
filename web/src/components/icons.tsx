@@ -42,6 +42,15 @@ export function PatternsIcon(props: IconProps) {
   );
 }
 
+export function RulesIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 2 4 5v6c0 4.5 3.2 7.8 8 9 4.8-1.2 8-4.5 8-9V5z" />
+      <path d="m9 12 2 2 4-4" />
+    </svg>
+  );
+}
+
 export function SettingsIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...props}>

@@ -250,6 +250,39 @@ CREATE TABLE IF NOT EXISTS roles (
 // migration 2's `post` step — SQLite ADD COLUMN has no IF NOT EXISTS, so we
 // guard each add against PRAGMA table_info to stay idempotent.
 
+/**
+ * Migration 3 — admin-authored custom anti-pattern rules. The built-in pattern
+ * checks (src/pattern-checks.ts) and `.diffsentry.yaml` anti_patterns are
+ * static; this lets an admin add/edit/disable rules from the command center.
+ * Each enabled rule (global, or scoped to one owner/repo) is compiled into the
+ * pattern engine alongside the built-ins, and its hits are recorded in
+ * pattern_hits with source='custom' (joined back here for hit-counts).
+ *
+ * Strictly additive: one new table (IF NOT EXISTS).
+ */
+const SCHEMA_V3 = `
+CREATE TABLE IF NOT EXISTS custom_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  scope TEXT NOT NULL DEFAULT 'global',   -- 'global' | 'owner/repo'
+  kind TEXT NOT NULL DEFAULT 'regex',     -- 'regex' (AST reserved for later)
+  name TEXT NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'minor', -- critical | major | minor | trivial
+  type TEXT NOT NULL DEFAULT 'suggestion',-- issue | suggestion | nitpick | documentation | security
+  pattern TEXT NOT NULL,                  -- regex source
+  flags TEXT,                             -- optional regex flags
+  path_glob TEXT,                         -- optional minimatch glob restricting scope
+  message TEXT,                           -- plain-English explanation
+  advice TEXT,                            -- optional fix recipe
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT,
+  created_at TEXT,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_custom_rules_scope ON custom_rules(scope);
+CREATE INDEX IF NOT EXISTS idx_custom_rules_enabled ON custom_rules(enabled);
+CREATE INDEX IF NOT EXISTS idx_custom_rules_name ON custom_rules(name);
+`;
+
 export interface Migration {
   version: number;
   name: string;
@@ -304,6 +337,7 @@ function ensureFindingsTriageColumns(db: DB): void {
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "v1_baseline", sql: SCHEMA_V1 },
   { version: 2, name: "command_center", sql: SCHEMA_V2, post: ensureFindingsTriageColumns },
+  { version: 3, name: "custom_rules", sql: SCHEMA_V3 },
 ];
 
 /** Highest version this binary knows how to migrate to. */

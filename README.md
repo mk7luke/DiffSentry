@@ -697,6 +697,10 @@ untouched.
 - `/findings` — cross-repo filterable explorer (severity, source, repo,
   free-text, age) with a "recurring fingerprints" group.
 - `/patterns` — every pattern-rule hit with 30d + all-time counts.
+- `/rules` — **admin only** — author custom anti-pattern rules (name, severity,
+  scope, regex, optional path glob, message/advice). A live tester runs the
+  pattern against a pasted snippet and highlights matches without persisting,
+  and the active-rules table joins each rule to its pattern-hit counts.
 - `/audit` — **admin only** — the audit trail (who did what, when) plus a
   per-login role-override editor.
 - `/settings` — runtime + storage health, the signed-in session with its
@@ -707,11 +711,13 @@ untouched.
 
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
-`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, and `/audit`
-(admin). Write endpoints: `POST /roles` (admin) sets/clears a role override.
-When OAuth is configured every endpoint requires a valid session (401 JSON
-otherwise); the queries reuse the same SQL as the legacy dashboard and no-op
-gracefully when persistence is disabled.
+`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, `/rules` (admin),
+and `/audit` (admin). Write endpoints: `POST /roles` (admin) sets/clears a role
+override; `POST/PUT/DELETE /rules` (admin) manage custom rules and `POST
+/rules/test` (admin) tests a candidate pattern against a snippet without
+persisting. When OAuth is configured every endpoint requires a valid session
+(401 JSON otherwise); the queries reuse the same SQL as the legacy dashboard and
+no-op gracefully when persistence is disabled.
 
 **Command actions** (`author`+) drive the review engine from the dashboard. Each
 is `requireRole('author')` + CSRF gated, writes an `audit_log` row, and emits an
@@ -724,9 +730,20 @@ SSE event:
 | `POST .../prs/:number/pause` / `.../resume` | Pause / resume automatic + manual reviews. |
 | `POST .../prs/:number/cancel` | Abort any in-flight review (handlePRClose semantics). |
 
+**Custom rules** (`admin`) extend the pattern engine from the UI. `POST /rules`,
+`PUT /rules/:id`, and `DELETE /rules/:id` manage admin-authored anti-patterns
+(stored in the `custom_rules` table, migration v3); each is `requireRole('admin')`
++ CSRF gated, writes an `audit_log` row, and publishes a `rule.changed` SSE event.
+Enabled rules — global, or scoped to one `owner/repo` — compile into the review
+engine alongside the built-ins and the `.diffsentry.yaml` `anti_patterns`, and
+their hits are recorded with `source='custom'` so they show up in pattern
+analytics. `POST /rules/test` compiles + runs a candidate pattern against a
+pasted snippet (no persistence) for the live tester.
+
 **Realtime** (`GET /api/v1/stream`) is a Server-Sent Events feed on an in-process
 event bus. The review engine publishes `review.started` / `review.finished` /
-`review.failed`, and every command action publishes `action.performed`. The SPA
+`review.failed`, every command action publishes `action.performed`, and a custom
+rule change publishes `rule.changed`. The SPA
 opens one `EventSource`, surfaces events as toasts, and live-refetches the
 affected PR — so a re-review's findings appear without a refresh. The stream
 heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed

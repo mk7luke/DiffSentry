@@ -1,4 +1,5 @@
 import { openDatabase } from "../storage/db.js";
+import { logger } from "../logger.js";
 
 export interface RepoOverviewRow {
   owner: string;
@@ -719,6 +720,69 @@ export function getPatternRules(limit = 100): PatternRuleRow[] {
        LIMIT ?`,
     )
     .all(thirty, limit) as PatternRuleRow[];
+}
+
+// ─── Custom rules + their hit-counts ───────────────────────────────
+
+/** A custom_rules row augmented with its lifetime / recent pattern-hit counts. */
+export interface CustomRuleWithHits {
+  id: number;
+  scope: string;
+  kind: string;
+  name: string;
+  severity: string;
+  type: string;
+  pattern: string;
+  flags: string | null;
+  path_glob: string | null;
+  message: string | null;
+  advice: string | null;
+  enabled: number;
+  created_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  hits_total: number;
+  hits_30d: number;
+  last_hit: string | null;
+}
+
+/**
+ * List every custom rule joined to its hit-counts (source='custom' rows in
+ * pattern_hits keyed by rule name). Newest rule first. Empty when persistence
+ * is off — the table may not exist yet, so this degrades to [] rather than
+ * throwing.
+ */
+export function listCustomRulesWithHits(): CustomRuleWithHits[] {
+  const db = openDatabase();
+  if (!db) return [];
+  const thirty = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    return db
+      .prepare(
+        `SELECT cr.*,
+                COALESCE(h.hits_total, 0) AS hits_total,
+                COALESCE(h.hits_30d, 0)  AS hits_30d,
+                h.last_hit               AS last_hit
+         FROM custom_rules cr
+         LEFT JOIN (
+           SELECT ph.rule_name,
+                  COUNT(*) AS hits_total,
+                  SUM(CASE WHEN rv.created_at >= ? THEN 1 ELSE 0 END) AS hits_30d,
+                  MAX(rv.created_at) AS last_hit
+           FROM pattern_hits ph
+           LEFT JOIN reviews rv ON rv.id = ph.review_id
+           WHERE ph.source = 'custom'
+           GROUP BY ph.rule_name
+         ) h ON h.rule_name = cr.name
+         ORDER BY cr.id DESC`,
+      )
+      .all(thirty) as CustomRuleWithHits[];
+  } catch (err) {
+    // The custom_rules table arrives in migration v3; on an older DB the join
+    // throws. Treat that exactly like "no rules yet".
+    logger.debug({ err }, "queries.listCustomRulesWithHits failed");
+    return [];
+  }
 }
 
 export interface AuditLogRow {
