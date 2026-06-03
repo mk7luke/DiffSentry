@@ -18,12 +18,14 @@ marked.setOptions({ gfm: true, breaks: false });
 // list (which also permits tel:, sms:, and — for image elements — data:) so
 // that data:/javascript:/tel:/etc. cannot survive in any attribute.
 //
-// The leading `(?![/\\]{2})` guard rejects protocol-relative URLs such as
-// `//evil.example/x` (and the `/\`, `\/`, `\\` browser-normalized variants),
-// which would otherwise slip through the `[^a-z]` relative branch and point at
-// a cross-origin host. The hyphen in the char classes is escaped on purpose —
-// an unescaped `.-:` would be a range spanning `.`–`:` (i.e. `/` and digits).
-const ALLOWED_URI_REGEXP = /^(?![/\\]{2})(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+// The leading guards reject anything a browser could resolve cross-origin via
+// the `[^a-z]` relative branch:
+//   `(?!\\)`        — no leading backslash (browsers normalize `\` → `/`)
+//   `(?![/\\]{2})`  — no protocol-relative `//` or its `/\`, `\/`, `\\` variants
+// Same-origin absolute (`/repos`) and relative (`repo/1`) paths are still
+// allowed. The hyphen in the char classes is escaped on purpose — an unescaped
+// `.-:` would be a range spanning `.`–`:` (i.e. `/` and digits).
+const ALLOWED_URI_REGEXP = /^(?!\\)(?![/\\]{2})(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
 
 export function renderMarkdown(input: string | null | undefined): string {
   if (!input) return "";
