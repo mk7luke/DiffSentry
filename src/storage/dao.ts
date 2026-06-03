@@ -1,3 +1,4 @@
+import type { Database as DB } from "better-sqlite3";
 import { openDatabase } from "./db.js";
 import type { IssueContext, PRContext, ReviewComment, ReviewResult } from "../types.js";
 import type { RiskAssessment } from "../insights.js";
@@ -279,6 +280,43 @@ function safeJsonStringify(value: unknown): string | null {
   }
 }
 
+let _v2SchemaChecked = false;
+let _v2SchemaOk = false;
+
+/**
+ * Guard for command-center (schema v2) writes. `openDatabase()` runs the
+ * migration runner on first open, so a successfully-opened DB is normally at
+ * the latest version — this is a defensive check so that an un-migrated DB
+ * surfaces a distinct, loud warning instead of every v2 write silently
+ * no-opping as if persistence were merely disabled (a `null` db). Returns true
+ * when the v2 tables/columns are present.
+ *
+ * The result is cached for the process: the schema only moves forward within a
+ * run, so the PRAGMA lookups happen at most once.
+ */
+function ensureCommandCenterSchema(db: DB): boolean {
+  if (_v2SchemaChecked) return _v2SchemaOk;
+  _v2SchemaChecked = true;
+  try {
+    const hasAuditLog = db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'audit_log'")
+      .get();
+    const findingsCols = new Set(
+      (db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    _v2SchemaOk = Boolean(hasAuditLog) && findingsCols.has("triaged_at");
+    if (!_v2SchemaOk) {
+      logger.warn(
+        "Command-center (v2) schema is missing — migrations may not have run. v2 DAO writes will be skipped.",
+      );
+    }
+  } catch (err) {
+    _v2SchemaOk = false;
+    logger.warn({ err }, "Command-center (v2) schema check failed");
+  }
+  return _v2SchemaOk;
+}
+
 /**
  * Append an audit_log row. Every role-gated write endpoint must call this.
  * Returns the new rowid, or null when persistence is disabled.
@@ -294,6 +332,7 @@ export function insertAuditLog(opts: {
 }): number | null {
   const db = openDatabase();
   if (!db) return null;
+  if (!ensureCommandCenterSchema(db)) return null;
   try {
     const payloadJson = safeJsonStringify(opts.payload);
     const info = db.prepare(
@@ -328,6 +367,7 @@ export function upsertSettingOverride(opts: {
 }): void {
   const db = openDatabase();
   if (!db) return;
+  if (!ensureCommandCenterSchema(db)) return;
   try {
     // Settings overrides are meaningful config (not best-effort logs), so an
     // unrepresentable value is rejected rather than silently coerced to null.
@@ -373,7 +413,14 @@ export function getSettingOverride<T = unknown>(scope: string, key: string): T |
       .prepare(`SELECT value_json FROM settings_overrides WHERE scope = ? AND key = ?`)
       .get(scope, key) as { value_json?: string } | undefined;
     if (!row || row.value_json == null) return undefined;
-    return JSON.parse(row.value_json) as T | null;
+    try {
+      return JSON.parse(row.value_json) as T | null;
+    } catch (parseErr) {
+      // A corrupted persisted override must be distinguishable in logs from a
+      // normal miss (which logs nothing and also returns undefined).
+      logger.warn({ err: parseErr, scope, key }, "dao.getSettingOverride: invalid stored JSON — ignoring override");
+      return undefined;
+    }
   } catch (err) {
     logger.debug({ err }, "dao.getSettingOverride failed");
     return undefined;
@@ -384,6 +431,7 @@ export function getSettingOverride<T = unknown>(scope: string, key: string): T |
 export function deleteSettingOverride(scope: string, key: string): void {
   const db = openDatabase();
   if (!db) return;
+  if (!ensureCommandCenterSchema(db)) return;
   try {
     db.prepare(`DELETE FROM settings_overrides WHERE scope = ? AND key = ?`).run(scope, key);
   } catch (err) {
@@ -407,6 +455,7 @@ export function recordCostEvent(opts: {
 }): number | null {
   const db = openDatabase();
   if (!db) return null;
+  if (!ensureCommandCenterSchema(db)) return null;
   try {
     const info = db.prepare(
       `INSERT INTO cost_events (ts, owner, repo, number, review_id, provider, model, input_tokens, output_tokens, cost_usd, kind)
@@ -449,6 +498,7 @@ export function recordWebhookDelivery(opts: {
 }): number | null {
   const db = openDatabase();
   if (!db) return null;
+  if (!ensureCommandCenterSchema(db)) return null;
   try {
     const payloadJson = safeJsonStringify(opts.payload);
     const info = db.prepare(
@@ -490,6 +540,7 @@ export function triageFinding(opts: {
 }): boolean {
   const db = openDatabase();
   if (!db) return false;
+  if (!ensureCommandCenterSchema(db)) return false;
   try {
     const sets: string[] = [];
     const params: unknown[] = [];
@@ -532,6 +583,7 @@ const VALID_ROLE_SET = new Set<string>(VALID_ROLES);
 export function setRole(opts: { login: string; role: string | null; grantedBy?: string | null }): void {
   const db = openDatabase();
   if (!db) return;
+  if (!ensureCommandCenterSchema(db)) return;
   try {
     if (opts.role == null) {
       db.prepare(`DELETE FROM roles WHERE login = ?`).run(opts.login);
@@ -554,13 +606,23 @@ export function setRole(opts: { login: string; role: string | null; grantedBy?: 
   }
 }
 
-/** Read a role override for a login, or undefined when unset/disabled. */
+/**
+ * Read a role override for a login. Returns undefined when unset, disabled, or
+ * when the stored role is not a recognized value — so downstream authorization
+ * falls back to the safe default rather than trusting an unknown role string.
+ */
 export function getRole(login: string): string | undefined {
   const db = openDatabase();
   if (!db) return undefined;
   try {
     const row = db.prepare(`SELECT role FROM roles WHERE login = ?`).get(login) as { role?: string } | undefined;
-    return row?.role ?? undefined;
+    const role = row?.role;
+    if (role == null) return undefined;
+    if (!VALID_ROLE_SET.has(role)) {
+      logger.warn({ login, role }, "dao.getRole: stored role is not recognized — ignoring");
+      return undefined;
+    }
+    return role;
   } catch (err) {
     logger.debug({ err }, "dao.getRole failed");
     return undefined;
