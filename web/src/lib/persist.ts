@@ -17,12 +17,18 @@ import type { PersistedClient } from "@tanstack/react-query-persist-client";
 // wrong user on a shared device, so restore is split into two phases:
 //
 //   1. boot (initPersistence): read the persisted blob but DON'T hydrate it
-//      into the live cache — except, when already offline, hydrate immediately
-//      so a cold offline launch still shows last-viewed data (the device's own
-//      owner is the best signal we have with no network).
+//      into the live cache yet — just stash it and start persisting writes.
 //   2. after /me resolves (applyPersistedDataForOwner): only NOW, with the live
 //      authenticated login in hand, do we hydrate the data — and only if it
 //      matches the login the cache was written under. A mismatch wipes it.
+//
+// We deliberately do NOT hydrate at boot when offline: with no network there's
+// no way to prove the current session still belongs to the cache's owner (a
+// cookie could have expired or the account switched while the app wasn't open
+// to purge), so rendering it would risk showing the previous user's data.
+// Offline therefore shows the cached app shell only; authenticated data paints
+// once connectivity lets /me verify the owner. (The PWA acceptance bar is a
+// graceful cached shell — not stale authed data shown without verification.)
 //
 // The identity query (["me"]) is never persisted: it must always be fetched
 // fresh online so a stale cached identity can't make user B look like user A
@@ -76,11 +82,12 @@ function isFresh(client: PersistedClient | undefined): client is PersistedClient
 }
 
 /**
- * Boot phase. Read (but don't yet trust) the persisted cache and start
- * persisting future writes. When already offline we hydrate right away —
- * with no network there's no way to verify the user, and the device's own
- * last owner is the safest signal; a later /me will reconcile/​wipe it.
- * Awaited before first paint. No-ops gracefully when storage is unavailable.
+ * Boot phase. Read (but don't yet hydrate) the persisted cache and start
+ * persisting future writes. Hydration is always deferred to
+ * applyPersistedDataForOwner, which runs once /me verifies the owner — so a
+ * user's cached data is never rendered before the active session is confirmed,
+ * online or offline. Awaited before first paint. No-ops gracefully when
+ * storage is unavailable.
  */
 export async function initPersistence(queryClient: QueryClient): Promise<void> {
   if (!persister) return;
@@ -88,10 +95,6 @@ export async function initPersistence(queryClient: QueryClient): Promise<void> {
     const restored = await persister.restoreClient();
     if (isFresh(restored)) {
       pendingRestore = restored;
-      const offlineAtBoot = typeof navigator !== "undefined" && navigator.onLine === false;
-      if (offlineAtBoot && store?.getItem(OWNER_KEY)) {
-        hydrate(queryClient, pendingRestore.clientState);
-      }
     } else if (restored) {
       await persister.removeClient(); // stale / busted — drop it.
     }
