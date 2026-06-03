@@ -140,6 +140,50 @@ async function main() {
     const health = await get("/api/v1/health");
     ok("health → counts + logs", health.status === 200 && health.json.data.counts.repos === 2 && Array.isArray(health.json.data.logs));
 
+    // ── Analytics ──────────────────────────────────────────────────
+    const authors = await get("/api/v1/analytics/authors");
+    const aliceRow = authors.json.data.authors.find((a: any) => a.author === "alice");
+    const unknownRow = authors.json.data.authors.find((a: any) => a.author === "(unknown)");
+    const sumFindings = authors.json.data.authors.reduce((n: number, a: any) => n + a.findings, 0);
+    const sumPRs = authors.json.data.authors.reduce((n: number, a: any) => n + a.prs_reviewed, 0);
+    ok(
+      "analytics authors → per-author stats; sums match org totals",
+      authors.status === 200 &&
+        aliceRow &&
+        aliceRow.prs_reviewed === 1 &&
+        aliceRow.findings === 2 &&
+        aliceRow.critical === 1 &&
+        aliceRow.major === 1 &&
+        aliceRow.triaged === 0 && // nothing triaged in the seed → acceptance is null in the UI
+        unknownRow &&
+        unknownRow.critical === 1 && // other-repo review has no prs row → '(unknown)' bucket
+        sumFindings === 3 && // 2 (alice) + 1 (unknown) = every finding in the DB
+        sumPRs === 2 &&
+        Array.isArray(authors.json.data.series),
+    );
+
+    const aliceDetail = await get("/api/v1/analytics/authors/alice");
+    ok(
+      "analytics author detail → stat + hot paths + PRs",
+      aliceDetail.status === 200 &&
+        aliceDetail.json.data.stat.findings === 2 &&
+        aliceDetail.json.data.hotPaths.some((p: any) => p.path === "src/limiter.ts") &&
+        aliceDetail.json.data.prs.some((p: any) => p.number === 42),
+    );
+
+    const noAuthor = await get("/api/v1/analytics/authors/nobody");
+    ok("analytics unknown author → 404 JSON", noAuthor.status === 404 && noAuthor.json.error.code === "not_found");
+
+    const trends = await get("/api/v1/analytics/trends");
+    ok(
+      "analytics trends → activity + risk distribution + hot paths over time",
+      trends.status === 200 &&
+        Array.isArray(trends.json.data.activity) &&
+        trends.json.data.riskDistribution.some((b: any) => b.level === "critical") &&
+        trends.json.data.hotPaths.some((p: any) => p.path === "src/limiter.ts") &&
+        Array.isArray(trends.json.data.hotPathSeries),
+    );
+
     const missing = await get("/api/v1/repos/unknown/unknown");
     ok("unknown repo → 404 JSON", missing.status === 404 && missing.json.error.code === "not_found");
 

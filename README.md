@@ -697,6 +697,12 @@ untouched.
 - `/findings` — cross-repo filterable explorer (severity, source, repo,
   free-text, age) with a "recurring fingerprints" group.
 - `/patterns` — every pattern-rule hit with 30d + all-time counts.
+- `/leaderboard` — per-author review activity over a 7/30/90-day window
+  (PRs reviewed, avg risk, findings/PR by severity, acceptance rate, trend
+  sparkline), sortable, with a click-through author drill-down (severity mix,
+  hot paths, recent PRs). Framed as where review effort lands, not a scoreboard.
+- `/trends` — org-wide activity over time, risk-level distribution, and
+  hot-paths-over-time (top paths by critical+major with a per-path trend line).
 - `/audit` — **admin only** — the audit trail (who did what, when) plus a
   per-login role-override editor.
 - `/settings` — runtime + storage health, the signed-in session with its
@@ -707,8 +713,10 @@ untouched.
 
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
-`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, and `/audit`
-(admin). Write endpoints: `POST /roles` (admin) sets/clears a role override.
+`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, `/audit` (admin),
+and the analytics trio `/analytics/authors`, `/analytics/authors/:author`,
+`/analytics/trends` (all accept `?days=`, default 30, clamped 1–365). Write
+endpoints: `POST /roles` (admin) sets/clears a role override.
 When OAuth is configured every endpoint requires a valid session (401 JSON
 otherwise); the queries reuse the same SQL as the legacy dashboard and no-op
 gracefully when persistence is disabled.

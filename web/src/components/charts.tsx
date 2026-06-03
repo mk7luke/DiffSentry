@@ -177,6 +177,42 @@ export function Hbar({ label, critical, major, total, max, href }: { label: stri
   );
 }
 
+/**
+ * Compact SVG line sparkline for a single numeric series — used for per-author
+ * activity trends and hot-path-over-time rows. Renders a flat baseline when the
+ * series is empty/all-zero so sparse histories don't collapse to nothing.
+ */
+export function LineSpark({
+  values,
+  color = "var(--accent)",
+  width = 120,
+  height = 28,
+  title,
+}: {
+  values: number[];
+  color?: string;
+  width?: number;
+  height?: number;
+  title?: string;
+}) {
+  const n = values.length;
+  const max = Math.max(1, ...values);
+  const pad = 2;
+  const innerH = height - pad * 2;
+  const pts = values.map((v, i) => {
+    const x = n <= 1 ? width / 2 : (i * width) / (n - 1);
+    const y = pad + innerH - (v / max) * innerH;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const line = n <= 1 ? `0,${(pad + innerH).toFixed(1)} ${width},${(pad + innerH).toFixed(1)}` : pts.join(" ");
+  return (
+    <svg className="line-spark" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
+      {title ? <title>{title}</title> : null}
+      <polyline points={line} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export interface DonutSlice {
   label: string;
   value: number;

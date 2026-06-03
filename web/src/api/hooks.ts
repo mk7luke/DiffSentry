@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiSend } from "./client";
 import type {
   AuditResponse,
+  AuthorDetailResponse,
+  AuthorsResponse,
   FindingsResponse,
   HealthResponse,
   MeResponse,
@@ -12,6 +14,7 @@ import type {
   RepoDetailResponse,
   ReposResponse,
   Role,
+  TrendsResponse,
 } from "./types";
 
 export function useMe() {
@@ -82,6 +85,31 @@ export function usePatterns() {
   return useQuery({
     queryKey: ["patterns"],
     queryFn: () => apiGet<PatternsResponse>("/patterns"),
+  });
+}
+
+export function useAuthorAnalytics(days: number) {
+  return useQuery({
+    queryKey: ["analytics", "authors", days],
+    queryFn: () => apiGet<AuthorsResponse>("/analytics/authors", { days }),
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useAuthorDetail(author: string | null, days: number) {
+  return useQuery({
+    queryKey: ["analytics", "author", author, days],
+    queryFn: () =>
+      apiGet<AuthorDetailResponse>(`/analytics/authors/${encodeURIComponent(author ?? "")}`, { days }),
+    enabled: !!author,
+  });
+}
+
+export function useTrends(days: number) {
+  return useQuery({
+    queryKey: ["analytics", "trends", days],
+    queryFn: () => apiGet<TrendsResponse>("/analytics/trends", { days }),
+    placeholderData: (prev) => prev,
   });
 }
 
