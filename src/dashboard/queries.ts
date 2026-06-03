@@ -839,7 +839,10 @@ export interface ImpactWindow {
   repos: number;
   findings: number;
   bySeverity: { critical: number; major: number; minor: number; nit: number };
-  /** critical+major findings raised on PRs that subsequently merged. */
+  /** Severity split of findings raised on PRs that subsequently merged. */
+  mergedBySeverity: { critical: number; major: number; minor: number; nit: number };
+  /** critical+major findings raised on PRs that subsequently merged
+   * (== mergedBySeverity.critical + mergedBySeverity.major). */
   criticalMajorCaughtBeforeMerge: number;
   accepted: number; // findings triaged accepted (accepted = 1)
   dismissed: number; // findings triaged dismissed (accepted = 0)
@@ -875,6 +878,7 @@ const EMPTY_WINDOW: ImpactWindow = {
   repos: 0,
   findings: 0,
   bySeverity: { critical: 0, major: 0, minor: 0, nit: 0 },
+  mergedBySeverity: { critical: 0, major: 0, minor: 0, nit: 0 },
   criticalMajorCaughtBeforeMerge: 0,
   accepted: 0,
   dismissed: 0,
@@ -946,15 +950,32 @@ function computeImpactWindow(
     dismissed: number | null;
   };
 
-  const caught = db
+  // Severity split of findings on PRs that went on to merge — the donut on the
+  // "Caught before merge" card, and the source of criticalMajorCaughtBeforeMerge.
+  const merged = db
     .prepare(
-      `SELECT COUNT(*) AS n
+      `SELECT
+         SUM(CASE WHEN f.severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+         SUM(CASE WHEN f.severity = 'major'    THEN 1 ELSE 0 END) AS major,
+         SUM(CASE WHEN f.severity = 'minor'    THEN 1 ELSE 0 END) AS minor,
+         SUM(CASE WHEN f.severity = 'nit'      THEN 1 ELSE 0 END) AS nit
        FROM findings f
        JOIN reviews rv ON rv.id = f.review_id
        JOIN prs p ON p.owner = rv.owner AND p.repo = rv.repo AND p.number = rv.number
-       WHERE ${clause} AND p.merged_at IS NOT NULL AND f.severity IN ('critical', 'major')`,
+       WHERE ${clause} AND p.merged_at IS NOT NULL`,
     )
-    .get(...params) as { n: number };
+    .get(...params) as {
+    critical: number | null;
+    major: number | null;
+    minor: number | null;
+    nit: number | null;
+  };
+  const mergedBySeverity = {
+    critical: merged.critical ?? 0,
+    major: merged.major ?? 0,
+    minor: merged.minor ?? 0,
+    nit: merged.nit ?? 0,
+  };
 
   const mergedCovered = db
     .prepare(
@@ -981,7 +1002,8 @@ function computeImpactWindow(
       minor: sev.minor ?? 0,
       nit: sev.nit ?? 0,
     },
-    criticalMajorCaughtBeforeMerge: caught.n,
+    mergedBySeverity,
+    criticalMajorCaughtBeforeMerge: mergedBySeverity.critical + mergedBySeverity.major,
     accepted,
     dismissed,
     pending: findings - triaged,

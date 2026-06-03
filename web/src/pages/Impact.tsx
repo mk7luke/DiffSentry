@@ -142,6 +142,8 @@ export function ImpactPage() {
           const saved = formatMinutesSaved(c.timeSavedMinutes);
           const series = buildTrendSeries(report);
           const totalFindings = c.findings;
+          const mergedFindings =
+            c.mergedBySeverity.critical + c.mergedBySeverity.major + c.mergedBySeverity.minor + c.mergedBySeverity.nit;
           const acceptancePct = c.acceptanceRate == null ? null : Math.round(c.acceptanceRate * 100);
           const rec = report.recurring;
           const recurDown = rec.secondHalf < rec.firstHalf;
@@ -266,15 +268,15 @@ export function ImpactPage() {
                   }
                   subtitle="Severity of findings on PRs that merged"
                 >
-                  {totalFindings === 0 ? (
-                    <EmptyState title="Nothing caught yet" hint="No findings recorded in this range." />
+                  {mergedFindings === 0 ? (
+                    <EmptyState title="Nothing caught yet" hint="No findings on merged PRs in this range." />
                   ) : (
                     <Donut
                       slices={[
-                        { label: "Critical", value: c.bySeverity.critical, color: "#fb6d82" },
-                        { label: "Major", value: c.bySeverity.major, color: "#fb923c" },
-                        { label: "Minor", value: c.bySeverity.minor, color: "#fbbf24" },
-                        { label: "Nit", value: c.bySeverity.nit, color: "#64748b" },
+                        { label: "Critical", value: c.mergedBySeverity.critical, color: "#fb6d82" },
+                        { label: "Major", value: c.mergedBySeverity.major, color: "#fb923c" },
+                        { label: "Minor", value: c.mergedBySeverity.minor, color: "#fbbf24" },
+                        { label: "Nit", value: c.mergedBySeverity.nit, color: "#64748b" },
                       ]}
                     />
                   )}

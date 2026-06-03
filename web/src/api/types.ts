@@ -313,6 +313,7 @@ export interface ImpactWindow {
   repos: number;
   findings: number;
   bySeverity: { critical: number; major: number; minor: number; nit: number };
+  mergedBySeverity: { critical: number; major: number; minor: number; nit: number };
   criticalMajorCaughtBeforeMerge: number;
   accepted: number;
   dismissed: number;
