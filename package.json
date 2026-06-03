@@ -10,7 +10,8 @@
     "e2e": "tsx tests/e2e/cli.ts",
     "backfill": "node dist/cli/backfill.js",
     "backfill:dev": "tsx src/cli/backfill.ts",
-    "smoke:dashboard": "tsx scripts/smoke-dashboard.ts"
+    "smoke:dashboard": "tsx scripts/smoke-dashboard.ts",
+    "smoke:migrate": "tsx scripts/migrate-smoke.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

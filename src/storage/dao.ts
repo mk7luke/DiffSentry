@@ -255,6 +255,265 @@ export function recordIssueAction(opts: {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Command-center writes (schema v2). All best-effort no-ops when the DB is
+// disabled, matching the helpers above. Reads/queries for the dashboard live
+// in src/dashboard/queries.ts; these are the mutating helpers other worktrees
+// (API routes, alerting, cost tracking) compose on top of.
+// ---------------------------------------------------------------------------
+
+/**
+ * Append an audit_log row. Every role-gated write endpoint must call this.
+ * Returns the new rowid, or null when persistence is disabled.
+ */
+export function insertAuditLog(opts: {
+  actorLogin?: string | null;
+  actorRole?: string | null;
+  action: string;
+  targetType?: string | null;
+  targetRef?: string | null;
+  payload?: unknown;
+  result?: string | null;
+}): number | null {
+  const db = openDatabase();
+  if (!db) return null;
+  try {
+    const info = db.prepare(
+      `INSERT INTO audit_log (ts, actor_login, actor_role, action, target_type, target_ref, payload_json, result)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      new Date().toISOString(),
+      opts.actorLogin ?? null,
+      opts.actorRole ?? null,
+      opts.action,
+      opts.targetType ?? null,
+      opts.targetRef ?? null,
+      opts.payload === undefined ? null : JSON.stringify(opts.payload).slice(0, 100_000),
+      opts.result ?? null,
+    );
+    return Number(info.lastInsertRowid);
+  } catch (err) {
+    logger.debug({ err }, "dao.insertAuditLog failed");
+    return null;
+  }
+}
+
+/**
+ * Upsert a settings override. `scope` is 'global' or 'owner/repo'. `value` is
+ * JSON-serialized before storage.
+ */
+export function upsertSettingOverride(opts: {
+  scope: string;
+  key: string;
+  value: unknown;
+  updatedBy?: string | null;
+}): void {
+  const db = openDatabase();
+  if (!db) return;
+  try {
+    db.prepare(
+      `INSERT INTO settings_overrides (scope, key, value_json, updated_by, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(scope, key) DO UPDATE SET
+         value_json = excluded.value_json,
+         updated_by = excluded.updated_by,
+         updated_at = excluded.updated_at`,
+    ).run(
+      opts.scope,
+      opts.key,
+      JSON.stringify(opts.value ?? null),
+      opts.updatedBy ?? null,
+      new Date().toISOString(),
+    );
+  } catch (err) {
+    logger.debug({ err }, "dao.upsertSettingOverride failed");
+  }
+}
+
+/**
+ * Read a single settings override, JSON-parsed. Returns undefined when the
+ * key is unset or persistence is disabled.
+ */
+export function getSettingOverride<T = unknown>(scope: string, key: string): T | undefined {
+  const db = openDatabase();
+  if (!db) return undefined;
+  try {
+    const row = db
+      .prepare(`SELECT value_json FROM settings_overrides WHERE scope = ? AND key = ?`)
+      .get(scope, key) as { value_json?: string } | undefined;
+    if (!row || row.value_json == null) return undefined;
+    return JSON.parse(row.value_json) as T;
+  } catch (err) {
+    logger.debug({ err }, "dao.getSettingOverride failed");
+    return undefined;
+  }
+}
+
+/** Delete a settings override (revert to the file-based default). */
+export function deleteSettingOverride(scope: string, key: string): void {
+  const db = openDatabase();
+  if (!db) return;
+  try {
+    db.prepare(`DELETE FROM settings_overrides WHERE scope = ? AND key = ?`).run(scope, key);
+  } catch (err) {
+    logger.debug({ err }, "dao.deleteSettingOverride failed");
+  }
+}
+
+/** Record an AI cost/usage event. Returns the rowid, or null when disabled. */
+export function recordCostEvent(opts: {
+  owner?: string | null;
+  repo?: string | null;
+  number?: number | null;
+  reviewId?: number | null;
+  provider?: string | null;
+  model?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  costUsd?: number | null;
+  /** e.g. "review", "summary", "chat", "plan". */
+  kind?: string | null;
+}): number | null {
+  const db = openDatabase();
+  if (!db) return null;
+  try {
+    const info = db.prepare(
+      `INSERT INTO cost_events (ts, owner, repo, number, review_id, provider, model, input_tokens, output_tokens, cost_usd, kind)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      new Date().toISOString(),
+      opts.owner ?? null,
+      opts.repo ?? null,
+      opts.number ?? null,
+      opts.reviewId ?? null,
+      opts.provider ?? null,
+      opts.model ?? null,
+      opts.inputTokens ?? null,
+      opts.outputTokens ?? null,
+      opts.costUsd ?? null,
+      opts.kind ?? null,
+    );
+    return Number(info.lastInsertRowid);
+  } catch (err) {
+    logger.debug({ err }, "dao.recordCostEvent failed");
+    return null;
+  }
+}
+
+/**
+ * Record a raw webhook delivery (for the deliveries view + replay). Returns the
+ * rowid, or null when disabled.
+ */
+export function recordWebhookDelivery(opts: {
+  event: string;
+  action?: string | null;
+  owner?: string | null;
+  repo?: string | null;
+  number?: number | null;
+  deliveryId?: string | null;
+  signatureOk?: boolean | null;
+  payload?: unknown;
+  /** rowid of the delivery this is a replay of, if any. */
+  replayedFrom?: number | null;
+}): number | null {
+  const db = openDatabase();
+  if (!db) return null;
+  try {
+    const info = db.prepare(
+      `INSERT INTO webhook_deliveries (ts, event, action, owner, repo, number, delivery_id, signature_ok, payload_json, replayed_from)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      new Date().toISOString(),
+      opts.event,
+      opts.action ?? null,
+      opts.owner ?? null,
+      opts.repo ?? null,
+      opts.number ?? null,
+      opts.deliveryId ?? null,
+      opts.signatureOk == null ? null : opts.signatureOk ? 1 : 0,
+      opts.payload === undefined ? null : JSON.stringify(opts.payload).slice(0, 1_000_000),
+      opts.replayedFrom ?? null,
+    );
+    return Number(info.lastInsertRowid);
+  } catch (err) {
+    logger.debug({ err }, "dao.recordWebhookDelivery failed");
+    return null;
+  }
+}
+
+/**
+ * Apply triage state to a finding (snooze, accept/dismiss note, triager).
+ * Only the provided fields are written; omitted fields are left untouched.
+ */
+export function triageFinding(opts: {
+  findingId: number;
+  accepted?: boolean | null;
+  snoozedUntil?: string | null;
+  triagedBy?: string | null;
+  triageNote?: string | null;
+}): void {
+  const db = openDatabase();
+  if (!db) return;
+  try {
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    if (opts.accepted !== undefined) {
+      sets.push("accepted = ?");
+      params.push(opts.accepted == null ? null : opts.accepted ? 1 : 0);
+    }
+    if (opts.snoozedUntil !== undefined) {
+      sets.push("snoozed_until = ?");
+      params.push(opts.snoozedUntil);
+    }
+    if (opts.triageNote !== undefined) {
+      sets.push("triage_note = ?");
+      params.push(opts.triageNote);
+    }
+    // Always stamp who/when when any triage action is taken.
+    sets.push("triaged_by = ?", "triaged_at = ?");
+    params.push(opts.triagedBy ?? null, new Date().toISOString());
+    params.push(opts.findingId);
+    db.prepare(`UPDATE findings SET ${sets.join(", ")} WHERE id = ?`).run(...params);
+  } catch (err) {
+    logger.debug({ err }, "dao.triageFinding failed");
+  }
+}
+
+/** Set (or clear) a role override for a login. role=null removes the override. */
+export function setRole(opts: { login: string; role: string | null; grantedBy?: string | null }): void {
+  const db = openDatabase();
+  if (!db) return;
+  try {
+    if (opts.role == null) {
+      db.prepare(`DELETE FROM roles WHERE login = ?`).run(opts.login);
+      return;
+    }
+    db.prepare(
+      `INSERT INTO roles (login, role, granted_by, granted_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(login) DO UPDATE SET
+         role = excluded.role,
+         granted_by = excluded.granted_by,
+         granted_at = excluded.granted_at`,
+    ).run(opts.login, opts.role, opts.grantedBy ?? null, new Date().toISOString());
+  } catch (err) {
+    logger.debug({ err }, "dao.setRole failed");
+  }
+}
+
+/** Read a role override for a login, or undefined when unset/disabled. */
+export function getRole(login: string): string | undefined {
+  const db = openDatabase();
+  if (!db) return undefined;
+  try {
+    const row = db.prepare(`SELECT role FROM roles WHERE login = ?`).get(login) as { role?: string } | undefined;
+    return row?.role ?? undefined;
+  } catch (err) {
+    logger.debug({ err }, "dao.getRole failed");
+    return undefined;
+  }
+}
+
 /** Bulk insert pattern hits — every pattern-checks / safety-scanner finding. */
 export function recordPatternHits(opts: {
   owner: string;

@@ -102,6 +102,45 @@ pattern_hits       (id PK, owner, repo, rule_name, source, fingerprint,
 mirror the in-comment internal-state blob but live outside GitHub so we can
 query across PRs.
 
+### Command-center tables (schema v2)
+
+The team-facing command center adds write actions, audit, cost tracking, and
+alerting on top of the read-only v1 model. These ship as migration 2 (see
+`docs/MIGRATIONS.md`) and are strictly additive:
+
+```
+audit_log          (id PK, ts, actor_login, actor_role, action,
+                    target_type, target_ref, payload_json, result)
+settings_overrides (scope /* 'global' | 'owner/repo' */, key, value_json,
+                    updated_by, updated_at, PK(scope,key))
+api_tokens         (id PK, name, token_hash, created_by, created_at,
+                    last_used_at, scopes_json, revoked_at)
+cost_events        (id PK, ts, owner, repo, number, review_id, provider,
+                    model, input_tokens, output_tokens, cost_usd, kind)
+notification_channels (id PK, type /* slack|discord|email|webhook */, name,
+                    config_json, enabled, created_by, created_at)
+alert_rules        (id PK, name, scope, condition_json, channel_id FK,
+                    enabled, created_by, created_at)
+saved_views        (id PK, owner_login, name, route, query_json, created_at)
+webhook_deliveries (id PK, ts, event, action, owner, repo, number,
+                    delivery_id, signature_ok, payload_json, replayed_from)
+roles              (login PK, role, granted_by, granted_at)
+```
+
+`findings` also gains the triage columns that complete the existing
+`accepted` flag: `snoozed_until`, `triaged_by`, `triaged_at`, `triage_note`.
+
+- **audit_log** — every role-gated write endpoint appends one row.
+- **settings_overrides** — answers open question 2: dashboard-side overrides
+  of `.diffsentry.yaml` keys, scoped globally or per `owner/repo`, instead of
+  committing back to the repo.
+- **cost_events** — answers open question 3: per-call token/cost ledger for
+  the health page's "AI token spend per repo / day".
+- **roles** — optional override store backing the viewer/author/admin gate;
+  empty by default (OAuth allowlist still applies).
+- **webhook_deliveries** — raw delivery log enabling the deliveries view and
+  replay (`replayed_from` points at the original row).
+
 ## Tech
 
 - **Server:** extend the existing Express server with a separate router

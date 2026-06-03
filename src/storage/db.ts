@@ -6,8 +6,15 @@ import { logger } from "../logger.js";
 let _db: DB | null = null;
 let _disabled = false;
 
-const SCHEMA_VERSION = 1;
-
+/**
+ * Migration 1 — the original v1 schema. Kept verbatim and idempotent
+ * (CREATE TABLE IF NOT EXISTS) so existing databases that already carry these
+ * tables skip it cleanly, and fresh databases get the full baseline.
+ *
+ * Note: the runner bootstraps an extended `schema_version` ledger before any
+ * migration runs, so the bare `schema_version` CREATE below is a harmless
+ * no-op (the table already exists with extra columns).
+ */
 const SCHEMA_V1 = `
 CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER PRIMARY KEY
@@ -121,6 +128,221 @@ CREATE INDEX IF NOT EXISTS idx_issues_last_action ON issues(owner, repo, last_ac
 `;
 
 /**
+ * Migration 2 — command-center storage. Everything the team-facing dashboard
+ * needs: audit trail, settings overrides, API tokens, cost tracking,
+ * notification/alerting config, saved views, raw webhook deliveries, the
+ * triage model on findings, and an optional role override store.
+ *
+ * Strictly additive: new tables (IF NOT EXISTS) plus ADD COLUMN on findings.
+ * The ADD COLUMNs are plain (no IF NOT EXISTS — unsupported by older SQLite)
+ * because the runner guarantees each migration body executes at most once.
+ */
+const SCHEMA_V2 = `
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,
+  actor_login TEXT,
+  actor_role TEXT,
+  action TEXT NOT NULL,
+  target_type TEXT,
+  target_ref TEXT,
+  payload_json TEXT,
+  result TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
+CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_login);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
+
+CREATE TABLE IF NOT EXISTS settings_overrides (
+  scope TEXT NOT NULL,            -- 'global' | 'owner/repo'
+  key TEXT NOT NULL,
+  value_json TEXT,
+  updated_by TEXT,
+  updated_at TEXT,
+  PRIMARY KEY (scope, key)
+);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT,
+  token_hash TEXT NOT NULL,
+  created_by TEXT,
+  created_at TEXT,
+  last_used_at TEXT,
+  scopes_json TEXT,
+  revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
+
+CREATE TABLE IF NOT EXISTS cost_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,
+  owner TEXT,
+  repo TEXT,
+  number INTEGER,
+  review_id INTEGER,
+  provider TEXT,
+  model TEXT,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  cost_usd REAL,
+  kind TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_cost_ts ON cost_events(ts);
+CREATE INDEX IF NOT EXISTS idx_cost_repo ON cost_events(owner, repo);
+CREATE INDEX IF NOT EXISTS idx_cost_review ON cost_events(review_id);
+
+CREATE TABLE IF NOT EXISTS notification_channels (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL,            -- slack | discord | email | webhook
+  name TEXT,
+  config_json TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT,
+  created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS alert_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT,
+  scope TEXT,
+  condition_json TEXT,
+  channel_id INTEGER REFERENCES notification_channels(id) ON DELETE SET NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT,
+  created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_alert_rules_channel ON alert_rules(channel_id);
+
+CREATE TABLE IF NOT EXISTS saved_views (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_login TEXT,
+  name TEXT,
+  route TEXT,
+  query_json TEXT,
+  created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_saved_views_owner ON saved_views(owner_login);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,
+  event TEXT,
+  action TEXT,
+  owner TEXT,
+  repo TEXT,
+  number INTEGER,
+  delivery_id TEXT,
+  signature_ok INTEGER,
+  payload_json TEXT,
+  replayed_from INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_ts ON webhook_deliveries(ts);
+CREATE INDEX IF NOT EXISTS idx_webhook_delivery ON webhook_deliveries(delivery_id);
+
+CREATE TABLE IF NOT EXISTS roles (
+  login TEXT PRIMARY KEY,
+  role TEXT,
+  granted_by TEXT,
+  granted_at TEXT
+);
+
+ALTER TABLE findings ADD COLUMN snoozed_until TEXT;
+ALTER TABLE findings ADD COLUMN triaged_by TEXT;
+ALTER TABLE findings ADD COLUMN triaged_at TEXT;
+ALTER TABLE findings ADD COLUMN triage_note TEXT;
+`;
+
+export interface Migration {
+  version: number;
+  name: string;
+  sql: string;
+}
+
+/**
+ * Ordered migration set. Applied in array order inside a transaction each, and
+ * tracked in the `schema_version` ledger by version number. Append new
+ * migrations here with the next contiguous version — never edit or reorder an
+ * already-released one.
+ */
+export const MIGRATIONS: Migration[] = [
+  { version: 1, name: "v1_baseline", sql: SCHEMA_V1 },
+  { version: 2, name: "command_center", sql: SCHEMA_V2 },
+];
+
+/** Highest version this binary knows how to migrate to. */
+export const LATEST_SCHEMA_VERSION = MIGRATIONS.reduce((m, x) => Math.max(m, x.version), 0);
+
+/**
+ * Ensure `schema_version` exists as a ledger: one row per applied migration,
+ * recording the version, its name, and when it was applied. Existing v1
+ * databases carry a single-column `schema_version (version)` table — we add
+ * the missing columns in place so the ledger shape is uniform.
+ */
+function ensureLedger(db: DB): void {
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS schema_version (
+       version INTEGER PRIMARY KEY,
+       name TEXT,
+       applied_at TEXT
+     )`,
+  );
+  const cols = new Set(
+    (db.prepare("PRAGMA table_info(schema_version)").all() as Array<{ name: string }>).map((c) => c.name),
+  );
+  if (!cols.has("name")) db.exec("ALTER TABLE schema_version ADD COLUMN name TEXT");
+  if (!cols.has("applied_at")) db.exec("ALTER TABLE schema_version ADD COLUMN applied_at TEXT");
+}
+
+/** Versions already recorded as applied. */
+function appliedVersions(db: DB): Set<number> {
+  const rows = db.prepare("SELECT version FROM schema_version").all() as Array<{ version: number }>;
+  return new Set(rows.map((r) => r.version));
+}
+
+/** Current schema version (max applied), or 0 for a brand-new database. */
+export function currentSchemaVersion(db: DB): number {
+  ensureLedger(db);
+  const versions = appliedVersions(db);
+  return versions.size === 0 ? 0 : Math.max(...versions);
+}
+
+/**
+ * Apply every pending migration in order. Each runs in its own transaction so
+ * a failure rolls back that migration only; the ledger row is written in the
+ * same transaction. Idempotent: already-applied versions are skipped, so
+ * running twice is a no-op. Never downgrades — if the database is ahead of
+ * this binary we log and leave it untouched.
+ */
+export function applyMigrations(db: DB): void {
+  ensureLedger(db);
+  const applied = appliedVersions(db);
+
+  const dbVersion = applied.size === 0 ? 0 : Math.max(...applied);
+  if (dbVersion > LATEST_SCHEMA_VERSION) {
+    logger.warn(
+      { dbVersion, supported: LATEST_SCHEMA_VERSION },
+      "Database schema is newer than this binary — refusing to downgrade, leaving as-is",
+    );
+    return;
+  }
+
+  const insertLedger = db.prepare(
+    "INSERT OR REPLACE INTO schema_version (version, name, applied_at) VALUES (?, ?, ?)",
+  );
+
+  for (const migration of MIGRATIONS) {
+    if (applied.has(migration.version)) continue;
+    const run = db.transaction(() => {
+      db.exec(migration.sql);
+      insertLedger.run(migration.version, migration.name, new Date().toISOString());
+    });
+    run();
+    logger.info({ version: migration.version, name: migration.name }, "Applied schema migration");
+  }
+}
+
+/**
  * Open (or create) the SQLite database. Honors the DB_PATH env var; an
  * empty value disables persistence entirely (the dao becomes a no-op).
  * Default path: ./data/diffsentry.db.
@@ -141,13 +363,9 @@ export function openDatabase(): DB | null {
     db.pragma("journal_mode = WAL");
     db.pragma("synchronous = NORMAL");
     db.pragma("foreign_keys = ON");
-    db.exec(SCHEMA_V1);
-    const row = db.prepare("SELECT version FROM schema_version LIMIT 1").get() as { version?: number } | undefined;
-    if (!row) {
-      db.prepare("INSERT INTO schema_version (version) VALUES (?)").run(SCHEMA_VERSION);
-    }
+    applyMigrations(db);
     _db = db;
-    logger.info({ dbPath }, "SQLite persistence opened");
+    logger.info({ dbPath, schemaVersion: currentSchemaVersion(db) }, "SQLite persistence opened");
     return db;
   } catch (err) {
     logger.warn({ err, dbPath }, "Failed to open SQLite — persistence disabled");
