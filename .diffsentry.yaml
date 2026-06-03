@@ -226,7 +226,7 @@ reviews:
       pattern: '^(?!.*\bsignal\b).*\bfetch\s*\('
       severity: "major"
       type: "issue"
-      message: "We already make 3 unguarded fetch() calls to github.com in src/dashboard/auth.ts. A hung GitHub request will stall the OAuth flow. New outbound fetches should be bounded."
+      message: "An unbounded outbound fetch() can hang indefinitely — a slow GitHub request would stall the request that's awaiting it (e.g. the OAuth flow). All outbound fetches should be bounded with a timeout."
       advice: "Pass `signal: AbortSignal.timeout(10_000)` (or longer for known-slow endpoints). Wrap in try/catch and log on AbortError."
       path: "src/**"
 
