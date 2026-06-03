@@ -177,8 +177,23 @@ async function main() {
     );
 
     // ─── A token can never reach admin endpoints ───────────────────────
+    // Denied at the scope gate (defense in depth on top of requireRole('admin')),
+    // so even a read-scoped token is rejected on GET admin routes.
     const auditByToken = await req("GET", "/audit", { bearer: readToken });
-    ok("audit(token) → 403 forbidden", auditByToken.status === 403 && auditByToken.json.error.code === "forbidden");
+    ok(
+      "audit(read token) → 403 admin-only",
+      auditByToken.status === 403 &&
+        auditByToken.json.error.code === "forbidden" &&
+        /admin endpoints/.test(auditByToken.json.error.message),
+    );
+
+    const listByToken = await req("GET", "/tokens", { bearer: readToken });
+    ok(
+      "list tokens(read token) → 403 admin-only",
+      listByToken.status === 403 &&
+        listByToken.json.error.code === "forbidden" &&
+        /admin endpoints/.test(listByToken.json.error.message),
+    );
 
     const createByToken = await req("POST", "/tokens", { bearer: readToken, body: { name: "x", scopes: ["read"] } });
     ok("create(token) → 403 forbidden", createByToken.status === 403 && createByToken.json.error.code === "forbidden");

@@ -7,7 +7,6 @@ import { LearningsStore } from "../learnings.js";
 import type { Learning } from "../types.js";
 import { createNoopCsrf, type AuthRuntime, type CsrfRuntime } from "../dashboard/auth.js";
 import {
-  capabilitiesFor,
   createRequireRole,
   getPrincipal,
   isRole,
@@ -210,13 +209,25 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   });
 
   // ─── Token scope gate ──────────────────────────────────────────────
-  // For token principals only, enforce the per-method scope: GET/HEAD need
-  // `read`, every mutating method needs `review`. Cookie sessions skip this —
-  // they are gated by RBAC (requireRole) instead. A token still cannot reach
-  // admin endpoints: those use requireRole('admin'), which a token never meets.
+  // For token principals only: (1) deny admin-only endpoints outright, then
+  // (2) enforce the per-method scope — GET/HEAD need `read`, every mutating
+  // method needs `review`. Cookie sessions skip this and are gated by RBAC
+  // (requireRole) instead.
+  //
+  // The admin deny is defense in depth: each admin route already carries
+  // requireRole('admin'), which a token (role ≤ author) never meets — but
+  // denying here keeps the invariant "API tokens never reach admin endpoints"
+  // enforced in one obvious place rather than emerging from the role math.
+  // `req.path` is relative to the /api/v1 mount, so it matches `/audit`,
+  // `/roles`, `/tokens`, and `/tokens/:id`.
+  const ADMIN_ONLY_PATH = /^\/(audit|roles|tokens)(\/|$)/;
   router.use((req, res, next) => {
     const principal = getPrincipal(req);
     if (principal?.kind !== "token") return next();
+    if (ADMIN_ONLY_PATH.test(req.path)) {
+      sendError(res, 403, "forbidden", "API tokens cannot access admin endpoints; use a dashboard session.");
+      return;
+    }
     const needed = requiredScopeForMethod(req.method);
     if (!principal.scopes.includes(needed)) {
       sendError(res, 403, "forbidden", `This API token lacks the '${needed}' scope.`);

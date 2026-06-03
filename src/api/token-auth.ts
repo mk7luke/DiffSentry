@@ -83,11 +83,15 @@ export function authenticateBearer(authorizationHeader: string | undefined): Tok
   const row = findActiveApiTokenByHash(hashApiToken(token));
   if (!row) return null;
 
-  let scopes: string[] = [];
+  // Run the stored scopes back through the canonical normalizer so the
+  // principal only ever carries known scopes (unknown strings dropped) typed as
+  // ApiScope[]. Malformed JSON falls through to an empty scope list — the token
+  // then has no usable scope and is denied everywhere by the scope gate.
+  let scopes: ApiScope[] = [];
   if (row.scopes_json) {
     try {
       const parsed = JSON.parse(row.scopes_json);
-      if (Array.isArray(parsed)) scopes = parsed.filter((s): s is string => typeof s === "string");
+      if (Array.isArray(parsed)) scopes = normalizeScopes(parsed);
     } catch (err) {
       logger.debug({ err, tokenId: row.id }, "token-auth: malformed scopes_json — treating as no scopes");
     }

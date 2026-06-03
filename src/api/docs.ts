@@ -209,12 +209,18 @@ export function renderDocsPage(opts: { specUrl?: string } = {}): string {
     });
   }
 
-  fetch(SPEC_URL, { headers: { Accept: "application/json" }, credentials: "same-origin" })
+  // Bound the request so a stalled connection can't leave "Loading spec…"
+  // forever; AbortSignal.timeout rejects after the deadline and the catch
+  // renders the (timeout or HTTP) error. Guard the API in case an older
+  // browser lacks AbortSignal.timeout.
+  var signal = typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined;
+  fetch(SPEC_URL, { headers: { Accept: "application/json" }, credentials: "same-origin", signal: signal })
     .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
     .then(render)
     .catch(function (e) {
       document.getElementById("root").innerHTML = "";
-      var err = el("div", "error", "Failed to load the API spec: " + e.message);
+      var msg = e && e.name === "TimeoutError" ? "timed out after 10s" : e.message;
+      var err = el("div", "error", "Failed to load the API spec: " + msg);
       document.getElementById("root").appendChild(err);
     });
 })();
