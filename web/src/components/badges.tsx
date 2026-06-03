@@ -66,3 +66,9 @@ export function ApprovalBadge({ approval }: { approval: string | null | undefine
   const label = APPROVAL_LABEL[k] ?? k ?? "—";
   return <span className={`chip ${cls} uppercase`}>{label || "—"}</span>;
 }
+
+export function RoleBadge({ role }: { role: string | null | undefined }) {
+  const k = (role ?? "").toLowerCase();
+  const label = k || "—";
+  return <span className={`rolechip role-${k || "none"}`}>{label}</span>;
+}

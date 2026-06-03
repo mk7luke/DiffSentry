@@ -15,6 +15,7 @@
     "backfill:dev": "tsx src/cli/backfill.ts",
     "smoke:dashboard": "tsx scripts/smoke-dashboard.ts",
     "smoke:api": "tsx scripts/smoke-api.ts",
+    "smoke:rbac": "tsx scripts/smoke-rbac.ts",
     "smoke:migrate": "tsx scripts/migrate-smoke.ts",
     "smoke:dao": "tsx scripts/smoke-dao.ts"
   },

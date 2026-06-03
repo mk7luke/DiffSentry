@@ -209,9 +209,44 @@ export interface PatternRuleRow {
 
 export type Role = "viewer" | "author" | "admin";
 
+export interface Capabilities {
+  viewDashboard: boolean;
+  triageFindings: boolean;
+  triggerReview: boolean;
+  manageConfig: boolean;
+  manageRoles: boolean;
+  viewAudit: boolean;
+}
+
 export interface MeResponse {
-  user: { login: string; id: number; role: Role };
+  user: { login: string; id: number; role: Role; capabilities: Capabilities };
   authEnabled: boolean;
+}
+
+export interface AuditLogRow {
+  id: number;
+  ts: string;
+  actor_login: string | null;
+  actor_role: string | null;
+  action: string;
+  target_type: string | null;
+  target_ref: string | null;
+  payload_json: string | null;
+  result: string | null;
+}
+
+export interface RoleOverrideRow {
+  login: string;
+  role: string;
+  granted_by: string | null;
+  granted_at: string | null;
+}
+
+export interface AuditResponse {
+  rows: AuditLogRow[];
+  total: number;
+  actions: string[];
+  roles: RoleOverrideRow[];
 }
 
 export interface HealthResponse {

@@ -5,9 +5,21 @@ import fs from "node:fs/promises";
 import { getRecentLogs, logger } from "../logger.js";
 import { LearningsStore } from "../learnings.js";
 import type { Learning } from "../types.js";
-import type { AuthRuntime } from "../dashboard/auth.js";
+import { createNoopCsrf, type AuthRuntime, type CsrfRuntime } from "../dashboard/auth.js";
+import {
+  capabilitiesFor,
+  createRequireRole,
+  isRole,
+  loadRoleConfigFromEnv,
+  resolveActor,
+  getActor,
+  type RoleConfig,
+} from "../dashboard/roles.js";
+import { insertAuditLog, setRole } from "../storage/dao.js";
 import {
   getApprovalMix,
+  getAuditActions,
+  getAuditLog,
   getDailyActivity,
   getEvents,
   getFindingsForPR,
@@ -20,6 +32,7 @@ import {
   getRecentIssues,
   getRecentPRsWithReviews,
   getRepoOverview,
+  getRoleOverrides,
   getSparkline,
   getTopRules,
   queryFindings,
@@ -43,10 +56,13 @@ export interface ApiDeps {
   getInstallationOctokit?: (installationId: number) => Promise<import("@octokit/rest").Octokit>;
   /** OAuth runtime. When present, every endpoint requires a valid session. */
   auth?: AuthRuntime | null;
+  /** Env-derived role allowlists. Defaults to loadRoleConfigFromEnv(). */
+  roleConfig?: RoleConfig;
 }
 
 type ErrorCode =
   | "unauthorized"
+  | "forbidden"
   | "not_found"
   | "bad_request"
   | "internal";
@@ -124,7 +140,18 @@ function parseFindingFilters(q: Record<string, unknown>): FindingFilters {
 
 export function createApiRouter(deps: ApiDeps): express.Router {
   const router = express.Router();
-  void new LearningsStore(deps.learningsDir); // reserved for future write endpoints (W0.3)
+  void new LearningsStore(deps.learningsDir); // reserved for future write endpoints
+
+  const authEnabled = !!deps.auth;
+  const roleConfig = deps.roleConfig ?? loadRoleConfigFromEnv();
+  // CSRF verify is bound to the session secret when auth is on; in open mode
+  // (no OAuth) there is no session to bind against, so writes pass freely.
+  const csrf: CsrfRuntime = deps.auth ? deps.auth.csrf : createNoopCsrf();
+  const requireRole = createRequireRole((req) => resolveActor(req, roleConfig, authEnabled));
+
+  // Parse JSON bodies for write endpoints. Scoped to /api/v1 only — the raw
+  // webhook body parser on /webhook is mounted separately and untouched.
+  router.use(express.json({ limit: "1mb" }));
 
   // Auth gate — JSON 401 instead of the HTML-redirect the dashboard uses.
   // `req.path` here is relative to the /api/v1 mount.
@@ -140,13 +167,20 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   });
 
   // ─── /me ───────────────────────────────────────────────────────────
-  // RBAC arrives in W0.3 — every authenticated user is 'admin' for now.
+  // The role resolves from the roles table > admin env > author env > viewer
+  // floor; capabilities are the client-side mirror the SPA gates controls on.
+  // In open mode (no OAuth) the local operator is treated as admin.
   router.get("/me", (req, res) => {
-    const u = (req as Request & { dsUser?: { login: string; id: number } }).dsUser ?? null;
-    const user = u
-      ? { login: u.login, id: u.id, role: "admin" as const }
-      : { login: "local", id: 0, role: "admin" as const };
-    sendData(res, { user, authEnabled: !!deps.auth });
+    const actor = resolveActor(req, roleConfig, authEnabled);
+    sendData(res, {
+      user: {
+        login: actor.login,
+        id: actor.id,
+        role: actor.role,
+        capabilities: actor.capabilities,
+      },
+      authEnabled,
+    });
   });
 
   // ─── /health ───────────────────────────────────────────────────────
@@ -255,6 +289,72 @@ export function createApiRouter(deps: ApiDeps): express.Router {
     } catch (err) {
       logger.error({ err }, "api /patterns failed");
       sendError(res, 500, "internal", "Failed to load patterns.");
+    }
+  });
+
+  // ─── /audit (admin) ─────────────────────────────────────────────────
+  // Read the audit trail + current role overrides. Admin-gated: a viewer or
+  // author gets a 403 here (and the SPA hides the screen for them entirely).
+  router.get("/audit", requireRole("admin"), (req, res) => {
+    try {
+      const q = req.query as Record<string, unknown>;
+      const num = (k: string, dflt: number) => {
+        const v = q[k];
+        if (typeof v !== "string") return dflt;
+        const n = Number.parseInt(v, 10);
+        return Number.isFinite(n) ? n : dflt;
+      };
+      const str = (k: string) => {
+        const v = q[k];
+        return typeof v === "string" && v.length > 0 ? v : undefined;
+      };
+      const { rows, total } = getAuditLog({
+        limit: num("limit", 100),
+        offset: num("offset", 0),
+        action: str("action"),
+        actor: str("actor"),
+      });
+      sendData(res, { rows, total, actions: getAuditActions(), roles: getRoleOverrides() });
+    } catch (err) {
+      logger.error({ err }, "api /audit failed");
+      sendError(res, 500, "internal", "Failed to load audit log.");
+    }
+  });
+
+  // ─── /roles (admin write) ───────────────────────────────────────────
+  // Grant or clear a per-login role override. Demonstrates the full write
+  // contract: requireRole('admin') + CSRF (X-CSRF-Token header) + audit_log.
+  router.post("/roles", requireRole("admin"), csrf.verify, (req, res) => {
+    const actor = getActor(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const login = typeof body.login === "string" ? body.login.trim() : "";
+    // `role` may be a valid role to set, or null/"" to clear the override.
+    const rawRole = body.role;
+    const clearing = rawRole == null || rawRole === "";
+    if (!login) {
+      sendError(res, 400, "bad_request", "A non-empty 'login' is required.");
+      return;
+    }
+    if (!clearing && !isRole(rawRole)) {
+      sendError(res, 400, "bad_request", "'role' must be one of viewer, author, admin (or null to clear).");
+      return;
+    }
+    try {
+      const role = clearing ? null : (rawRole as string);
+      setRole({ login, role, grantedBy: actor?.login ?? null });
+      insertAuditLog({
+        actorLogin: actor?.login ?? null,
+        actorRole: actor?.role ?? null,
+        action: clearing ? "role.clear" : "role.set",
+        targetType: "login",
+        targetRef: login.toLowerCase(),
+        payload: { role },
+        result: "ok",
+      });
+      sendData(res, { login: login.toLowerCase(), role: clearing ? null : role });
+    } catch (err) {
+      logger.error({ err, login }, "api POST /roles failed");
+      sendError(res, 500, "internal", "Failed to update role.");
     }
   });
 

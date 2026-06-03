@@ -87,7 +87,13 @@ async function main() {
 
   try {
     const me = await get("/api/v1/me");
-    ok("me → 200 envelope", me.status === 200 && me.json.data.user.role === "admin" && me.json.data.authEnabled === false);
+    ok(
+      "me → 200 envelope (local admin + capabilities)",
+      me.status === 200 &&
+        me.json.data.user.role === "admin" &&
+        me.json.data.user.capabilities.viewAudit === true &&
+        me.json.data.authEnabled === false,
+    );
 
     const repos = await get("/api/v1/repos");
     ok(

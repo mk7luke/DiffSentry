@@ -532,9 +532,11 @@ GitHub webhook
 | `DASHBOARD_URL` | If dashboard auth | | Full URL the dashboard is reachable at (e.g. `https://diffsentry.example.com/dashboard`). Used to build the OAuth callback. |
 | `GITHUB_OAUTH_CLIENT_ID` | If dashboard auth | | GitHub App's OAuth client ID (on the App's General tab). |
 | `GITHUB_OAUTH_CLIENT_SECRET` | If dashboard auth | | GitHub App's OAuth client secret. |
-| `DASHBOARD_ALLOWED_LOGINS` | One of logins/orgs required | | Comma-separated GitHub user logins allowed to sign in. |
-| `DASHBOARD_ALLOWED_ORGS` | One of logins/orgs required | | Comma-separated GitHub org slugs whose members may sign in. |
-| `DASHBOARD_SESSION_SECRET` | No | `GITHUB_WEBHOOK_SECRET` | HMAC key for the dashboard session cookie. |
+| `DASHBOARD_ALLOWED_LOGINS` | One of logins/orgs required | | Comma-separated GitHub user logins allowed to sign in (granted the `viewer` role by default). |
+| `DASHBOARD_ALLOWED_ORGS` | One of logins/orgs required | | Comma-separated GitHub org slugs whose members may sign in (granted `viewer`). |
+| `DASHBOARD_ADMIN_LOGINS` | No | | Comma-separated logins granted the `admin` role. |
+| `DASHBOARD_AUTHOR_LOGINS` | No | | Comma-separated logins granted the `author` role. |
+| `DASHBOARD_SESSION_SECRET` | No | `GITHUB_WEBHOOK_SECRET` | HMAC key for the dashboard session + CSRF cookies. |
 
 \* One of `GITHUB_PRIVATE_KEY_PATH` or `GITHUB_PRIVATE_KEY` is required.
 
@@ -694,17 +696,50 @@ untouched.
 - `/findings` — cross-repo filterable explorer (severity, source, repo,
   free-text, age) with a "recurring fingerprints" group.
 - `/patterns` — every pattern-rule hit with 30d + all-time counts.
-- `/settings` — runtime + storage health, signed-in session, and a recent
-  warn/error log tail captured via an in-process pino ring buffer.
+- `/audit` — **admin only** — the audit trail (who did what, when) plus a
+  per-login role-override editor.
+- `/settings` — runtime + storage health, the signed-in session with its
+  resolved role + capabilities, and a recent warn/error log tail captured via
+  an in-process pino ring buffer.
 
-**JSON API** (`/api/v1`, read-only)
+**JSON API** (`/api/v1`)
 
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
-failure. Endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
-`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`. When OAuth is
-configured every endpoint requires a valid session (401 JSON otherwise); the
-queries reuse the same SQL as the legacy dashboard and no-op gracefully when
-persistence is disabled.
+failure. Read endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
+`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, and `/audit`
+(admin). Write endpoints: `POST /roles` (admin) sets/clears a role override.
+When OAuth is configured every endpoint requires a valid session (401 JSON
+otherwise); the queries reuse the same SQL as the legacy dashboard and no-op
+gracefully when persistence is disabled.
+
+**Roles & access control (RBAC)**
+
+Every signed-in user has a role — `viewer` < `author` < `admin`. A login's role
+resolves with this precedence (first match wins):
+
+1. **roles table** — a per-login override set from the Audit screen (`POST /roles`).
+2. **`DASHBOARD_ADMIN_LOGINS`** env allowlist → `admin`.
+3. **`DASHBOARD_AUTHOR_LOGINS`** env allowlist → `author`.
+4. passed the sign-in allowlist (`DASHBOARD_ALLOWED_LOGINS` / `_ORGS`) → `viewer`.
+
+`GET /api/v1/me` returns `{ login, id, role, capabilities }`; the SPA fetches it
+once into an auth context and hides/disables controls a role can't use. Each
+capability is **also** enforced server-side — write endpoints are wrapped in
+`requireRole(...)` (JSON 403 on failure), so hiding a button is a convenience,
+never the security boundary. Cookie-authenticated writes carry the `ds_csrf`
+double-submit token as an `X-CSRF-Token` header.
+
+| Capability | viewer | author | admin |
+|---|:--:|:--:|:--:|
+| View dashboard & findings | ✅ | ✅ | ✅ |
+| Triage findings | — | ✅ | ✅ |
+| Trigger reviews | — | ✅ | ✅ |
+| Manage config | — | — | ✅ |
+| Manage role overrides | — | — | ✅ |
+| View audit log | — | — | ✅ |
+
+When OAuth is disabled (open/local mode) there is no session to gate on, so the
+local operator is treated as `admin`.
 
 **Local development**
 

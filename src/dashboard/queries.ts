@@ -720,3 +720,96 @@ export function getPatternRules(limit = 100): PatternRuleRow[] {
     )
     .all(thirty, limit) as PatternRuleRow[];
 }
+
+export interface AuditLogRow {
+  id: number;
+  ts: string;
+  actor_login: string | null;
+  actor_role: string | null;
+  action: string;
+  target_type: string | null;
+  target_ref: string | null;
+  payload_json: string | null;
+  result: string | null;
+}
+
+/**
+ * Page the audit_log, newest first, with optional `action` / `actor` filters.
+ * Returns `{ rows, total }` where total ignores limit/offset. Degrades to an
+ * empty page when persistence is disabled or the v2 `audit_log` table is
+ * absent (a v1 database that never ran migration 2), so the admin screen shows
+ * "no entries" rather than erroring.
+ */
+export function getAuditLog(opts: {
+  limit?: number;
+  offset?: number;
+  action?: string;
+  actor?: string;
+} = {}): { rows: AuditLogRow[]; total: number } {
+  const db = openDatabase();
+  if (!db) return { rows: [], total: 0 };
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
+  const offset = Math.max(opts.offset ?? 0, 0);
+  const where: string[] = [];
+  const args: unknown[] = [];
+  if (opts.action) {
+    where.push("action = ?");
+    args.push(opts.action);
+  }
+  if (opts.actor) {
+    where.push("actor_login = ?");
+    args.push(opts.actor);
+  }
+  const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  try {
+    const total = (
+      db.prepare(`SELECT COUNT(*) AS n FROM audit_log ${whereSql}`).get(...args) as { n: number }
+    ).n;
+    const rows = db
+      .prepare(
+        `SELECT id, ts, actor_login, actor_role, action, target_type, target_ref, payload_json, result
+         FROM audit_log ${whereSql}
+         ORDER BY ts DESC, id DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(...args, limit, offset) as AuditLogRow[];
+    return { rows, total };
+  } catch {
+    // audit_log table missing (un-migrated v1 DB) — treat as empty.
+    return { rows: [], total: 0 };
+  }
+}
+
+/** Distinct action names present in the audit_log, for the filter dropdown. */
+export function getAuditActions(): string[] {
+  const db = openDatabase();
+  if (!db) return [];
+  try {
+    const rows = db
+      .prepare(`SELECT DISTINCT action FROM audit_log ORDER BY action`)
+      .all() as Array<{ action: string }>;
+    return rows.map((r) => r.action);
+  } catch {
+    return [];
+  }
+}
+
+/** Current role overrides in the roles table (for the admin roles screen). */
+export interface RoleOverrideRow {
+  login: string;
+  role: string;
+  granted_by: string | null;
+  granted_at: string | null;
+}
+
+export function getRoleOverrides(): RoleOverrideRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  try {
+    return db
+      .prepare(`SELECT login, role, granted_by, granted_at FROM roles ORDER BY login`)
+      .all() as RoleOverrideRow[];
+  } catch {
+    return [];
+  }
+}

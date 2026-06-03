@@ -1,8 +1,9 @@
 // TanStack Query hooks — one per API endpoint, all read-only.
 
-import { useQuery } from "@tanstack/react-query";
-import { apiGet } from "./client";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiGet, apiSend } from "./client";
 import type {
+  AuditResponse,
   FindingsResponse,
   HealthResponse,
   MeResponse,
@@ -10,6 +11,7 @@ import type {
   PRDetailResponse,
   RepoDetailResponse,
   ReposResponse,
+  Role,
 } from "./types";
 
 export function useMe() {
@@ -87,5 +89,40 @@ export function useHealth() {
   return useQuery({
     queryKey: ["health"],
     queryFn: () => apiGet<HealthResponse>("/health"),
+  });
+}
+
+export interface AuditQuery {
+  action?: string;
+  actor?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export function useAudit(query: AuditQuery, enabled: boolean) {
+  return useQuery({
+    queryKey: ["audit", query],
+    queryFn: () =>
+      apiGet<AuditResponse>("/audit", {
+        action: query.action,
+        actor: query.actor,
+        limit: query.limit,
+        offset: query.offset,
+      }),
+    enabled,
+    placeholderData: (prev) => prev,
+  });
+}
+
+/** Admin: grant or clear a per-login role override. `role: null` clears it. */
+export function useSetRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { login: string; role: Role | null }) =>
+      apiSend<{ login: string; role: Role | null }>("/roles", { body: vars }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["audit"] });
+      void qc.invalidateQueries({ queryKey: ["me"] });
+    },
   });
 }
