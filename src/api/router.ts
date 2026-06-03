@@ -302,8 +302,9 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   });
 
   // ─── /activity ─────────────────────────────────────────────────────
-  // The Ops Console backfill: a unified, newest-first feed of events + reviews,
-  // cursor-paginated on `ts` (pass ?before=<iso> to page older). Any
+  // The Ops Console backfill: a unified, newest-first feed of events + reviews.
+  // Page older by passing ?before=<nextBefore> — an opaque cursor returned by
+  // the previous response (a bare ISO timestamp is also accepted, legacy). Any
   // authenticated role may read it — the live tail is the SSE /stream above.
   router.get("/activity", (req, res) => {
     try {
@@ -314,8 +315,10 @@ export function createApiRouter(deps: ApiDeps): express.Router {
       };
       const num = (k: string) => {
         const v = q[k];
-        if (typeof v !== "string") return undefined;
-        const n = Number.parseInt(v, 10);
+        // Digit-only: reject partially-numeric junk like "10abc" so it falls
+        // back to the default rather than silently parsing to 10.
+        if (typeof v !== "string" || !/^\d+$/.test(v)) return undefined;
+        const n = Number(v);
         return Number.isFinite(n) ? n : undefined;
       };
       const result = getActivity({

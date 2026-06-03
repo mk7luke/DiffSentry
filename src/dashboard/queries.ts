@@ -851,7 +851,11 @@ export interface ActivityFilters {
   kind?: string;
   /** Exact worst-severity match (reviews only). */
   severity?: string;
-  /** Exclusive upper bound on `ts` (ISO) — return rows strictly older. */
+  /**
+   * Pagination cursor — pass the previous result's `nextBefore` to get the
+   * next (older) page. Opaque "ts|source|id" tuple; a bare ISO timestamp is
+   * accepted as a legacy cursor (`act.ts < ts`).
+   */
   before?: string;
   limit?: number;
 }
@@ -884,8 +888,20 @@ export function getActivity(filters: ActivityFilters = {}): ActivityResult {
     params.push(filters.severity);
   }
   if (filters.before) {
-    where.push("act.ts < ?");
-    params.push(filters.before);
+    // The cursor is an opaque "ts|source|id" tuple matching the ORDER BY below,
+    // so rows that share a millisecond `ts` are never skipped or repeated across
+    // a page boundary. A bare ISO timestamp is still accepted as a legacy cursor.
+    const parts = filters.before.split("|");
+    if (parts.length === 3 && /^\d+$/.test(parts[2])) {
+      const [cts, csource, cid] = parts;
+      where.push(
+        "(act.ts < ? OR (act.ts = ? AND act.source < ?) OR (act.ts = ? AND act.source = ? AND act.id < ?))",
+      );
+      params.push(cts, cts, csource, cts, csource, Number.parseInt(cid, 10));
+    } else {
+      where.push("act.ts < ?");
+      params.push(filters.before);
+    }
   }
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
 
@@ -942,7 +958,8 @@ export function getActivity(filters: ActivityFilters = {}): ActivityResult {
 
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
-  const nextBefore = hasMore ? page[page.length - 1]?.ts ?? null : null;
+  const last = page[page.length - 1];
+  const nextBefore = hasMore && last ? `${last.ts}|${last.source}|${last.id}` : null;
   return { rows: page, nextBefore, hasMore };
 }
 

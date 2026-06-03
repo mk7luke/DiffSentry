@@ -191,12 +191,15 @@ export function OpsConsolePage() {
   const [older, setOlder] = useState<FeedItem[]>([]);
   const [live, setLive] = useState<FeedItem[]>([]);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const cursor = useRef<{ before: string | null; hasMore: boolean }>({ before: null, hasMore: true });
+  // Server-driven pagination cursor (opaque). Reactive state, not a ref, so the
+  // "Load older" button reflects exhaustion immediately. `before` is whatever
+  // the API returned as `nextBefore` — never derived from the rendered list.
+  const [cursor, setCursor] = useState<{ before: string | null; hasMore: boolean }>({ before: null, hasMore: true });
 
   useEffect(() => {
     setOlder([]);
     setLive([]);
-    cursor.current = { before: null, hasMore: true };
+    setCursor({ before: null, hasMore: true });
   }, [repo]);
 
   // Seed the "load older" cursor from each fresh backfill page. Runs only when
@@ -204,7 +207,7 @@ export function OpsConsolePage() {
   // (which mutates `older`, not backfill.data), so manual paging is preserved.
   useEffect(() => {
     if (backfill.data) {
-      cursor.current = { before: backfill.data.nextBefore, hasMore: backfill.data.hasMore };
+      setCursor({ before: backfill.data.nextBefore, hasMore: backfill.data.hasMore });
     }
   }, [backfill.data]);
 
@@ -295,13 +298,14 @@ export function OpsConsolePage() {
 
   const loadOlder = useCallback(async () => {
     if (loadingOlder) return;
-    const oldest = merged[0];
-    const before = oldest?.ts;
+    // Page strictly by the server cursor — never the oldest *rendered* row,
+    // which the ring cap can trim ahead of the true history boundary.
+    const before = cursor.before;
     if (!before) return;
     setLoadingOlder(true);
     try {
       const res = await fetchActivity({ repo: repo || undefined, before, limit: PAGE });
-      cursor.current = { before: res.nextBefore, hasMore: res.hasMore };
+      setCursor({ before: res.nextBefore, hasMore: res.hasMore });
       setOlder((prev) => {
         const byKey = new Map(prev.map((i) => [i.key, i] as const));
         for (const r of res.rows) {
@@ -313,7 +317,7 @@ export function OpsConsolePage() {
     } finally {
       setLoadingOlder(false);
     }
-  }, [loadingOlder, merged, repo]);
+  }, [loadingOlder, repo, cursor.before]);
 
   const repoOptions = repos.data?.repos.map((r) => `${r.owner}/${r.repo}`) ?? [];
   const hasFilters = !!(repo || kind || severity);
@@ -399,7 +403,7 @@ export function OpsConsolePage() {
         id="ops-feed-card"
       >
         <div className="ops-feed-wrap">
-          {merged.length > 0 && cursor.current.hasMore ? (
+          {cursor.hasMore && cursor.before ? (
             <div className="ops-older">
               <button className="btn btn-link" onClick={() => void loadOlder()} disabled={loadingOlder}>
                 {loadingOlder ? "Loading…" : "↑ Load older"}
@@ -448,7 +452,18 @@ function FeedRow({ item, onOpen, now }: { item: FeedItem; onOpen: (i: FeedItem) 
       onClick={clickable ? () => onOpen(item) : undefined}
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
-      onKeyDown={clickable ? (e) => (e.key === "Enter" ? onOpen(item) : undefined) : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              // Activate on Enter or Space like a native button; preventDefault
+              // stops Space from scrolling the feed.
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onOpen(item);
+              }
+            }
+          : undefined
+      }
     >
       <span className="when" title={item.ts}>
         {relativeTime(item.ts) || "now"}

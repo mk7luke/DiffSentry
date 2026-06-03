@@ -183,11 +183,38 @@ async function main() {
 
     const activityPaged = await get("/api/v1/activity?limit=1");
     ok(
-      "activity?limit=1 → paginates with a cursor",
+      "activity?limit=1 → paginates with an opaque cursor",
       activityPaged.status === 200 &&
         activityPaged.json.data.rows.length === 1 &&
         activityPaged.json.data.hasMore === true &&
         typeof activityPaged.json.data.nextBefore === "string",
+    );
+
+    // Page with the returned cursor (opaque string) — the next page must be a
+    // strictly different row, never an overlap or a skip at the ts boundary.
+    const cursorKey = (r: any) => `${r.source}:${r.id}`;
+    const page1Key = cursorKey(activityPaged.json.data.rows[0]);
+    const activityPage2 = await get(`/api/v1/activity?limit=1&before=${encodeURIComponent(activityPaged.json.data.nextBefore)}`);
+    ok(
+      "activity cursor → next page is a distinct row",
+      activityPage2.status === 200 &&
+        activityPage2.json.data.rows.length === 1 &&
+        cursorKey(activityPage2.json.data.rows[0]) !== page1Key,
+    );
+
+    // Legacy bare-ISO cursor still works (back-compat).
+    const activityLegacy = await get(`/api/v1/activity?before=${encodeURIComponent(now)}`);
+    ok(
+      "activity?before=<iso> → legacy cursor still accepted",
+      activityLegacy.status === 200 && Array.isArray(activityLegacy.json.data.rows),
+    );
+
+    // Partially-numeric junk is rejected — falls back to the default limit
+    // rather than silently parsing to 10 (so all 3 seeded rows come back).
+    const activityBadLimit = await get("/api/v1/activity?limit=10abc");
+    ok(
+      "activity?limit=10abc → rejects junk, uses default",
+      activityBadLimit.status === 200 && activityBadLimit.json.data.rows.length === 3,
     );
 
     const missing = await get("/api/v1/repos/unknown/unknown");
