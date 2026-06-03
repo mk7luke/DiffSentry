@@ -1778,10 +1778,16 @@ label.field {
 }
 .ops-older {
   display: flex;
+  align-items: center;
   justify-content: center;
+  gap: 12px;
   padding: 6px;
   border-bottom: 1px solid var(--line-soft);
   flex-shrink: 0;
+}
+.ops-older-err {
+  font-size: 11.5px;
+  color: var(--sev-crit);
 }
 .ops-feed {
   flex: 1;

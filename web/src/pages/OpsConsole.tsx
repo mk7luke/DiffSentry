@@ -199,6 +199,7 @@ export function OpsConsolePage() {
   const [older, setOlder] = useState<FeedItem[]>([]);
   const [live, setLive] = useState<FeedItem[]>([]);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState<string | null>(null);
   // Every live kind ever seen this session, recorded before the filter is
   // applied — keeps the kind dropdown complete (incl. live-only kinds like
   // review.started / action.*) even while a kind/severity filter is active.
@@ -232,7 +233,8 @@ export function OpsConsolePage() {
       const item = envToItem(env);
       if (!item) return;
       setLiveKinds((prev) => (prev.has(item.kind) ? prev : new Set(prev).add(item.kind)));
-      if (repo && `${item.owner}/${item.repo}` !== repo) return;
+      // Guard nullable metadata before coercing — never compare "null/null".
+      if (repo && (!item.owner || !item.repo || `${item.owner}/${item.repo}` !== repo)) return;
       if (kind && item.kind !== kind) return;
       if (severity && (item.severity ?? "").toLowerCase() !== severity) return;
       setLive((prev) => {
@@ -274,7 +276,7 @@ export function OpsConsolePage() {
 
   const visible = useMemo(() => {
     return merged.filter((it) => {
-      if (repo && `${it.owner}/${it.repo}` !== repo) return false;
+      if (repo && (!it.owner || !it.repo || `${it.owner}/${it.repo}` !== repo)) return false;
       if (kind && it.kind !== kind) return false;
       if (severity && (it.severity ?? "").toLowerCase() !== severity) return false;
       return true;
@@ -327,6 +329,7 @@ export function OpsConsolePage() {
     const before = cursor.before;
     if (!cursor.hasMore || !before) return;
     setLoadingOlder(true);
+    setOlderError(null);
     try {
       const res = await fetchActivity({
         repo: repo || undefined,
@@ -344,6 +347,10 @@ export function OpsConsolePage() {
         }
         return Array.from(byKey.values()).sort((a, b) => a.sortTs - b.sortTs);
       });
+    } catch (err) {
+      // The click handler discards the promise (`void loadOlder()`), so surface
+      // the failure here rather than letting it vanish into the event boundary.
+      setOlderError(err instanceof Error ? err.message : "Failed to load older activity.");
     } finally {
       setLoadingOlder(false);
     }
@@ -433,11 +440,14 @@ export function OpsConsolePage() {
         id="ops-feed-card"
       >
         <div className="ops-feed-wrap">
-          {cursor.hasMore && cursor.before ? (
+          {(cursor.hasMore && cursor.before) || olderError ? (
             <div className="ops-older">
-              <button className="btn btn-link" onClick={() => void loadOlder()} disabled={loadingOlder}>
-                {loadingOlder ? "Loading…" : "↑ Load older"}
-              </button>
+              {cursor.hasMore && cursor.before ? (
+                <button className="btn btn-link" onClick={() => void loadOlder()} disabled={loadingOlder}>
+                  {loadingOlder ? "Loading…" : olderError ? "↑ Retry" : "↑ Load older"}
+                </button>
+              ) : null}
+              {olderError ? <span className="ops-older-err">{olderError}</span> : null}
             </div>
           ) : null}
           <div
