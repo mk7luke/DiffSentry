@@ -1,12 +1,24 @@
-import { useHealth, useMe } from "../api/hooks";
+import { useHealth } from "../api/hooks";
+import { useAuth } from "../auth/useAuth";
 import { Breadcrumbs } from "../components/Shell";
 import { Card, Metric, PageHeader } from "../components/primitives";
+import { RoleBadge } from "../components/badges";
 import { EmptyState, QueryBoundary } from "../components/states";
+import type { Capabilities } from "../api/types";
 import { formatBytes, relativeTime } from "../lib/format";
+
+const CAPABILITY_LABELS: { key: keyof Capabilities; label: string }[] = [
+  { key: "viewDashboard", label: "View dashboard" },
+  { key: "triageFindings", label: "Triage findings" },
+  { key: "triggerReview", label: "Trigger reviews" },
+  { key: "manageConfig", label: "Manage config" },
+  { key: "manageRoles", label: "Manage roles" },
+  { key: "viewAudit", label: "View audit log" },
+];
 
 export function SettingsPage() {
   const query = useHealth();
-  const me = useMe();
+  const auth = useAuth();
   return (
     <>
       <Breadcrumbs crumbs={[{ label: "Settings" }]} />
@@ -51,23 +63,33 @@ export function SettingsPage() {
                     </div>
                   </dl>
                 </Card>
-                <Card title="Session">
+                <Card title="Session & access">
                   <dl className="kv">
                     <div>
                       <dt>Signed in as</dt>
-                      <dd className="mono">{me.data ? `@${me.data.user.login}` : "—"}</dd>
+                      <dd className="mono">{auth.login ? `@${auth.login}` : "—"}</dd>
                     </div>
                     <div>
                       <dt>Role</dt>
-                      <dd>{me.data?.user.role ?? "—"}</dd>
+                      <dd>{auth.role ? <RoleBadge role={auth.role} /> : "—"}</dd>
                     </div>
                     <div>
                       <dt>OAuth</dt>
-                      <dd>{me.data ? (me.data.authEnabled ? "enabled" : "disabled (local)") : "—"}</dd>
+                      <dd>{auth.authEnabled ? "enabled" : "disabled (local — admin)"}</dd>
                     </div>
                   </dl>
+                  <div className="caps">
+                    {CAPABILITY_LABELS.map(({ key, label }) => (
+                      <div key={key} className={`cap${auth.capabilities[key] ? " on" : ""}`}>
+                        <span className="cap-dot" aria-hidden="true" />
+                        <span>{label}</span>
+                      </div>
+                    ))}
+                  </div>
                   <p className="muted" style={{ fontSize: 11.5, marginTop: 12 }}>
-                    Role-based access control arrives in W0.3 — every authenticated user is currently treated as admin.
+                    Roles resolve from the roles table, then the{" "}
+                    <span className="mono">DASHBOARD_ADMIN_LOGINS</span> /{" "}
+                    <span className="mono">DASHBOARD_AUTHOR_LOGINS</span> env allowlists, then viewer.
                   </p>
                 </Card>
               </div>

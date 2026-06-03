@@ -1654,3 +1654,77 @@ label.field {
 .raw-toggle.show-raw .md-raw {
   display: block;
 }
+
+/* ─── Roles & capabilities (RBAC) ──────────────────────────────────── */
+.rolechip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  border: 1px solid transparent;
+  vertical-align: middle;
+}
+.rolechip.role-admin {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  border-color: var(--accent-line);
+}
+.rolechip.role-author {
+  background: var(--good-soft);
+  color: #bff5d1;
+  border-color: var(--good-line);
+}
+.rolechip.role-viewer,
+.rolechip.role-none {
+  background: var(--bg-elev-2);
+  color: var(--text-3);
+  border-color: var(--line-strong);
+}
+/* Tighter inline role chip inside the sidebar login line. */
+.sidebar-foot .login .rolechip {
+  margin-left: 6px;
+}
+
+/* Capability checklist on the Settings session card. */
+.caps {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 14px;
+  margin-top: 14px;
+}
+.caps .cap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.caps .cap.on {
+  color: var(--text-1);
+}
+.caps .cap .cap-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  flex-shrink: 0;
+}
+.caps .cap.on .cap-dot {
+  background: var(--accent-bright);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Role-grant form on the Audit screen. */
+.role-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+.role-form .field {
+  margin-bottom: 0;
+}

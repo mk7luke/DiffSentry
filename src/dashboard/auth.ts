@@ -58,6 +58,11 @@ export function loadAuthConfigFromEnv(): AuthConfig | null {
 const SESSION_COOKIE = "ds_session";
 const STATE_COOKIE = "ds_oauth_state";
 const SESSION_MAX_AGE_SECS = 7 * 24 * 60 * 60;
+// Cookies are scoped to the whole origin (not just /dashboard) so they reach
+// the SPA at `/` and the JSON API at `/api/v1` as well as the legacy
+// server-rendered dashboard at `/dashboard`. Single container, single origin —
+// a site-wide path is correct and lets the SPA read ds_csrf via document.cookie.
+const COOKIE_PATH = "/";
 
 interface SessionPayload {
   login: string;
@@ -117,7 +122,7 @@ function parseCookies(header: string | undefined): Record<string, string> {
 function setCookie(res: Response, name: string, value: string, maxAgeSec: number) {
   const parts = [
     `${name}=${encodeURIComponent(value)}`,
-    "Path=/dashboard",
+    `Path=${COOKIE_PATH}`,
     "HttpOnly",
     "SameSite=Lax",
     `Max-Age=${maxAgeSec}`,
@@ -127,7 +132,7 @@ function setCookie(res: Response, name: string, value: string, maxAgeSec: number
 }
 
 function clearCookie(res: Response, name: string) {
-  res.append("Set-Cookie", `${name}=; Path=/dashboard; HttpOnly; SameSite=Lax; Max-Age=0`);
+  res.append("Set-Cookie", `${name}=; Path=${COOKIE_PATH}; HttpOnly; SameSite=Lax; Max-Age=0`);
 }
 
 function renderLoginPage(opts: { baseUrl: string; error?: string; next?: string }): string {
@@ -344,8 +349,10 @@ export interface CsrfRuntime {
   ensure: RequestHandler<any>;
   /** Reads the current request's CSRF token (after `ensure` ran). */
   tokenFor: (req: Request) => string;
-  /** Validates `_csrf` body field against the cookie + session. Use as
-   * middleware on POST/PUT/DELETE routes that mutate state. */
+  /** Validates the submitted CSRF token against the cookie + session. The
+   * token may arrive as the `_csrf` form field (server-rendered forms) or the
+   * `X-CSRF-Token` header (the SPA, which reads the ds_csrf cookie via JS).
+   * Use as middleware on POST/PUT/DELETE routes that mutate state. */
   verify: RequestHandler<any>;
 }
 
@@ -365,7 +372,7 @@ export function createCsrf(sessionSecret: string): CsrfRuntime {
       // (HttpOnly) session cookie via HMAC.
       const parts = [
         `${CSRF_COOKIE}=${encodeURIComponent(expected)}`,
-        "Path=/dashboard",
+        `Path=${COOKIE_PATH}`,
         "SameSite=Lax",
         `Max-Age=${SESSION_MAX_AGE_SECS}`,
       ];
@@ -389,9 +396,14 @@ export function createCsrf(sessionSecret: string): CsrfRuntime {
     const cookieToken = cookies[CSRF_COOKIE] ?? "";
     const body = (req.body ?? {}) as Record<string, unknown>;
     const formToken = typeof body._csrf === "string" ? body._csrf : "";
+    // The SPA can't set a form field on a JSON request, so it echoes the
+    // ds_csrf cookie value in this header instead. Either source is accepted.
+    const headerRaw = req.headers["x-csrf-token"];
+    const headerToken = typeof headerRaw === "string" ? headerRaw : Array.isArray(headerRaw) ? headerRaw[0] ?? "" : "";
+    const submittedToken = formToken || headerToken;
     const expected = tokenFromSession(session);
     const a = Buffer.from(cookieToken);
-    const b = Buffer.from(formToken);
+    const b = Buffer.from(submittedToken);
     const c = Buffer.from(expected);
     if (
       a.length !== c.length ||
