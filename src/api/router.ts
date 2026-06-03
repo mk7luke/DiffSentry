@@ -16,6 +16,8 @@ import {
   type RoleConfig,
 } from "../dashboard/roles.js";
 import { insertAuditLog, setRole } from "../storage/dao.js";
+import { registerStreamRoute } from "./stream.js";
+import { registerActionRoutes, type ReviewerActions } from "./actions.js";
 import {
   getApprovalMix,
   getAuditActions,
@@ -58,6 +60,10 @@ export interface ApiDeps {
   auth?: AuthRuntime | null;
   /** Env-derived role allowlists. Defaults to loadRoleConfigFromEnv(). */
   roleConfig?: RoleConfig;
+  /** Reviewer action surface. When omitted, the command (write) endpoints and
+   * the SSE stream are still mounted, but actions have nothing to drive — so
+   * they are only registered when a reviewer is provided. */
+  reviewer?: ReviewerActions;
 }
 
 type ErrorCode =
@@ -165,6 +171,17 @@ export function createApiRouter(deps: ApiDeps): express.Router {
     (req as Request & { dsUser?: { login: string; id: number } }).dsUser = user;
     next();
   });
+
+  // ─── /stream (SSE) ─────────────────────────────────────────────────
+  // Mounted behind the auth gate above; any authenticated role may subscribe.
+  registerStreamRoute(router);
+
+  // ─── Command actions (write, author+) ──────────────────────────────
+  // Only when a reviewer is wired in (server.ts). The full write contract —
+  // requireRole + CSRF + audit_log + bus event — lives in registerActionRoutes.
+  if (deps.reviewer) {
+    registerActionRoutes(router, { reviewer: deps.reviewer, requireRole, csrf });
+  }
 
   // ─── /me ───────────────────────────────────────────────────────────
   // The role resolves from the roles table > admin env > author env > viewer
