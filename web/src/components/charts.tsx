@@ -205,8 +205,16 @@ export function LineSpark({
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
   const line = n <= 1 ? `0,${(pad + innerH).toFixed(1)} ${width},${(pad + innerH).toFixed(1)}` : pts.join(" ");
+  // With a title the sparkline is a labelled image for assistive tech; without
+  // one it's decorative and hidden so screen readers don't announce empty SVG.
   return (
-    <svg className="line-spark" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
+    <svg
+      className="line-spark"
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      role={title ? "img" : undefined}
+      aria-hidden={title ? undefined : true}
+    >
       {title ? <title>{title}</title> : null}
       <polyline points={line} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
     </svg>

@@ -318,12 +318,13 @@ export function createApiRouter(deps: ApiDeps): express.Router {
 
   // ─── /analytics/* ───────────────────────────────────────────────────
   // Read-only org analytics, behind the auth gate above (any role). `days`
-  // defaults to 30 and is clamped to 1..365 by the query layer.
+  // defaults to 30 and is clamped to 1..365 here so the value echoed in the
+  // response matches the window the query layer actually applies.
   const parseDays = (req: Request, dflt = 30): number => {
     const raw = (req.query as Record<string, unknown>).days;
-    if (typeof raw !== "string") return dflt;
-    const n = Number.parseInt(raw, 10);
-    return Number.isFinite(n) ? n : dflt;
+    const n = typeof raw === "string" ? Number.parseInt(raw, 10) : NaN;
+    const days = Number.isFinite(n) ? n : dflt;
+    return Math.min(Math.max(days, 1), 365);
   };
 
   // Per-author leaderboard + daily sparkline series.
@@ -374,7 +375,7 @@ export function createApiRouter(deps: ApiDeps): express.Router {
       const hotPaths = getHotPathTrends(days, 8);
       sendData(res, {
         days,
-        activity: getDailyActivity(null, null, Math.min(Math.max(days, 1), 365)),
+        activity: getDailyActivity(null, null, days),
         riskDistribution: getRiskDistribution(days),
         hotPaths: hotPaths.paths,
         hotPathSeries: hotPaths.series,
