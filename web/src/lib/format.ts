@@ -28,11 +28,15 @@ export function relativeTime(iso: string | null | undefined): string {
   return new Date(ts).toISOString().slice(0, 10);
 }
 
-/** Build an empty N-day series ending today, then merge real bins into it. */
-export function buildDaySeries(bins: DayBin[], days: number): DayBin[] {
+/**
+ * Build an empty N-day series ending on `endDate` (default: today), then merge
+ * the real bins into it. Pass a server-supplied end date to keep the series
+ * tied to the backend's time axis rather than the browser clock.
+ */
+export function buildDaySeries(bins: DayBin[], days: number, endDate?: Date): DayBin[] {
   const byDay = new Map(bins.map((b) => [b.day, b]));
   const out: DayBin[] = [];
-  const now = new Date();
+  const now = endDate ?? new Date();
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setUTCDate(d.getUTCDate() - i);

@@ -69,6 +69,10 @@ function StatCard({
 
 // Daily severity bins → a readable series; long ranges bucket into ~weekly bars.
 function buildTrendSeries(report: ImpactReport): DayBin[] {
+  // Anchor on the report's own `until` timestamp (not the browser clock) so the
+  // trend window stays aligned with the backend metrics even on a skewed clock
+  // or a page left open across a day boundary on cached data.
+  const until = new Date(report.range.until || report.generatedAt);
   let days: number;
   if (report.range.days != null) {
     days = report.range.days;
@@ -76,9 +80,9 @@ function buildTrendSeries(report: ImpactReport): DayBin[] {
     days = 30;
   } else {
     const first = Date.parse(`${report.trend[0].day}T00:00:00Z`);
-    days = Math.max(7, Math.round((Date.now() - first) / 86_400_000) + 1);
+    days = Math.max(7, Math.round((until.getTime() - first) / 86_400_000) + 1);
   }
-  let series = buildDaySeries(report.trend, Math.min(days, 3660));
+  let series = buildDaySeries(report.trend, Math.min(days, 3660), until);
   if (series.length > 92) {
     const size = Math.ceil(series.length / 90);
     const out: DayBin[] = [];
