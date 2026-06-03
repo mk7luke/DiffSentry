@@ -263,6 +263,23 @@ export function recordIssueAction(opts: {
 // ---------------------------------------------------------------------------
 
 /**
+ * Best-effort JSON serialization for optional payload columns. Returns `null`
+ * instead of throwing whenever the value can't be represented as JSON —
+ * `undefined`, an unsupported top-level value (function/symbol), a circular
+ * structure, or a `BigInt` — so the surrounding row is still inserted with a
+ * NULL payload rather than being lost to the catch block.
+ */
+function safeJsonStringify(value: unknown): string | null {
+  if (value === undefined) return null;
+  try {
+    // Top-level function/symbol/undefined yield undefined; circular and BigInt throw.
+    return JSON.stringify(value) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Append an audit_log row. Every role-gated write endpoint must call this.
  * Returns the new rowid, or null when persistence is disabled.
  */
@@ -278,9 +295,7 @@ export function insertAuditLog(opts: {
   const db = openDatabase();
   if (!db) return null;
   try {
-    // JSON.stringify returns undefined for functions/symbols/undefined, so
-    // null-check before slicing rather than calling .slice on undefined.
-    const payloadJson = opts.payload === undefined ? null : JSON.stringify(opts.payload);
+    const payloadJson = safeJsonStringify(opts.payload);
     const info = db.prepare(
       `INSERT INTO audit_log (ts, actor_login, actor_role, action, target_type, target_ref, payload_json, result)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -422,8 +437,7 @@ export function recordWebhookDelivery(opts: {
   const db = openDatabase();
   if (!db) return null;
   try {
-    // JSON.stringify can return undefined (functions/symbols/undefined) — null-check before slicing.
-    const payloadJson = opts.payload === undefined ? null : JSON.stringify(opts.payload);
+    const payloadJson = safeJsonStringify(opts.payload);
     const info = db.prepare(
       `INSERT INTO webhook_deliveries (ts, event, action, owner, repo, number, delivery_id, signature_ok, payload_json, replayed_from)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
