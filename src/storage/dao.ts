@@ -389,15 +389,16 @@ export function insertAuditLog(opts: {
 }
 
 /**
- * A settings-override scope is either the literal 'global' or a well-formed
- * 'owner/repo' (each segment using GitHub's allowed name characters). Anything
- * else is rejected so a typo can't silently write a row no read will ever match.
+ * A settings-override scope is either the literal 'global' or an 'owner/repo'
+ * pair — exactly two non-empty segments. We enforce only the shape (not a
+ * character allow-list) so legitimate repository names are never dropped;
+ * anything else is rejected so a typo can't silently write a row no read will
+ * ever match.
  */
-const SCOPE_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
 function isValidScope(scope: string): boolean {
   if (scope === "global") return true;
   const parts = scope.split("/");
-  return parts.length === 2 && parts.every((p) => SCOPE_SEGMENT_RE.test(p));
+  return parts.length === 2 && parts.every((p) => p.length > 0);
 }
 
 /** A settings-override key must be a non-empty, non-whitespace string. */
@@ -661,7 +662,9 @@ export function setRole(opts: { login: string; role: Role | null; grantedBy?: st
   const db = openDatabase();
   if (!db) return;
   if (!ensureCommandCenterSchema(db)) return;
-  const login = (opts.login ?? "").trim();
+  // GitHub logins are case-insensitive — canonicalize to lowercase so a value
+  // set as "Alice" is read back by getRole("alice").
+  const login = (opts.login ?? "").trim().toLowerCase();
   if (login.length === 0) {
     logger.debug({ login: opts.login }, "dao.setRole: empty login — skipping");
     return;
@@ -697,7 +700,8 @@ export function getRole(login: string): Role | undefined {
   const db = openDatabase();
   if (!db) return undefined;
   if (!ensureCommandCenterSchema(db)) return undefined;
-  const normalizedLogin = (login ?? "").trim();
+  // Match setRole's canonicalization (trim + lowercase) so reads hit the same key.
+  const normalizedLogin = (login ?? "").trim().toLowerCase();
   if (normalizedLogin.length === 0) return undefined;
   try {
     const row = db.prepare(`SELECT role FROM roles WHERE login = ?`).get(normalizedLogin) as
