@@ -134,10 +134,15 @@ async function currentFileSha(octokit: Octokit, owner: string, repo: string, ref
   try {
     const { data } = await octokit.repos.getContent({ owner, repo, path: PATH, ref });
     if (!Array.isArray(data) && "sha" in data) return data.sha;
-  } catch {
-    // absent — fine, it's a create
+    return undefined;
+  } catch (err) {
+    // Only a 404 means the file doesn't exist yet (a legitimate "create").
+    // Any other error (rate limit, 5xx, auth) must propagate so the commit
+    // fails with the real cause instead of silently committing without a sha
+    // (which GitHub would reject for an existing file with a confusing 422).
+    if ((err as { status?: number }).status === 404) return undefined;
+    throw err;
   }
-  return undefined;
 }
 
 async function commitDirect(
@@ -166,12 +171,27 @@ async function commitViaPr(
   owner: string,
   repo: string,
   defaultBranch: string,
-  branch: string,
+  branchFactory: () => string,
   content: string,
   message: string,
 ): Promise<CommitResult> {
   const ref = await octokit.git.getRef({ owner, repo, ref: `heads/${defaultBranch}` });
-  await octokit.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: ref.data.object.sha });
+  // Create a fresh branch, regenerating the name if GitHub reports the ref
+  // already exists (422). The random suffix already makes a collision unlikely;
+  // the retry makes it a non-issue. Any other error (or a final 422) propagates.
+  let branch = branchFactory();
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await octokit.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: ref.data.object.sha });
+      break;
+    } catch (err) {
+      if ((err as { status?: number }).status === 422 && attempt < 4) {
+        branch = branchFactory();
+        continue;
+      }
+      throw err;
+    }
+  }
   const sha = await currentFileSha(octokit, owner, repo, branch);
   await octokit.repos.createOrUpdateFileContents({
     owner,
@@ -326,7 +346,7 @@ export function registerConfigRoutes(router: Router, deps: ConfigRouteDeps): voi
 
       let result: CommitResult;
       if (mode === "pr") {
-        result = await commitViaPr(octokit, owner, repo, defaultBranch, branchName(), newYaml, message);
+        result = await commitViaPr(octokit, owner, repo, defaultBranch, branchName, newYaml, message);
       } else {
         result = await commitDirect(octokit, owner, repo, defaultBranch, newYaml, message);
         // Only a direct commit changes what the read path serves immediately.

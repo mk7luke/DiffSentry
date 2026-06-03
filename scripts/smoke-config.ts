@@ -72,6 +72,7 @@ async function main() {
   let fileContent: string | null = "reviews:\n  profile: chill\n";
   let fileSha = "sha-0";
   let transientFail = false;
+  let failCreateRefOnce = false;
   const octokit = {
     repos: {
       get: (args: unknown) => {
@@ -112,6 +113,12 @@ async function main() {
       },
       createRef: (args: unknown) => {
         calls.push({ method: "git.createRef", args: [args] });
+        if (failCreateRefOnce) {
+          // Simulate a one-shot ref-already-exists collision; commitViaPr should
+          // regenerate the branch name and retry.
+          failCreateRefOnce = false;
+          return Promise.reject(Object.assign(new Error("Reference already exists"), { status: 422 }));
+        }
         return Promise.resolve({ data: {} });
       },
     },
@@ -295,6 +302,13 @@ async function main() {
     ok("PUT(admin, pr) → 200 mode=pr", prRes.status === 200 && prRes.json.data.mode === "pr" && prRes.json.data.prNumber === 99);
     ok("pr → git.createRef + pulls.create called", calls.some((c) => c.method === "git.createRef") && calls.some((c) => c.method === "pulls.create"));
     ok("bus emitted config.updated (pr)", await waitForEvent((e) => e.topic === "config.updated" && e.payload.mode === "pr"));
+
+    // ── PR branch collision (422) is retried with a fresh name ─────────
+    failCreateRefOnce = true;
+    const refsBefore = calls.filter((c) => c.method === "git.createRef").length;
+    const prRetry = await req("PUT", CFG, { session: adminSess, csrf: true, body: { yaml: "chat:\n  auto_reply: true\n", mode: "pr" } });
+    const refsAfter = calls.filter((c) => c.method === "git.createRef").length;
+    ok("pr branch 422 → retried + succeeds", prRetry.status === 200 && prRetry.json.data.mode === "pr" && refsAfter - refsBefore === 2);
 
     // ── Transient GitHub errors are NOT cached as "no config" ──────────
     // First GET hits a one-shot 500 → null (uncached); the next GET recovers.
