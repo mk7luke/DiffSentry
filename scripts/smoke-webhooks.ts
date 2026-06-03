@@ -305,12 +305,14 @@ async function main() {
     // ── SSE delivers webhook.replayed live ─────────────────────────────
     const sseSeen = await new Promise<string>((resolve, reject) => {
       let buf = "";
-      let timeout: ReturnType<typeof setTimeout>;
+      // Undefined until the fallback timer is armed below; finish() guards so a
+      // completion path that runs before then doesn't clearTimeout(undefined).
+      let timeout: ReturnType<typeof setTimeout> | undefined;
       // Clear the timeout on every completion path so a stale timer can't fire
       // reject() after the promise already settled (which would keep the
       // process alive ~3s and risk an unhandled rejection).
       const finish = (fn: () => void) => {
-        clearTimeout(timeout);
+        if (timeout) clearTimeout(timeout);
         fn();
       };
       const r = http.request(
