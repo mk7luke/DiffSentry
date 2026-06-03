@@ -304,9 +304,13 @@ export function registerActionRoutes(router: Router, deps: ActionDeps): void {
       // Record the trigger now; the command performs its own GitHub-side work.
       recordAction(ctx, "command", "ok", token);
       sendData(res, { owner, repo, number, action: "command", result: "accepted", command: token }, 202);
-      reviewer.runCommand(installationId, owner, repo, number, phrase).catch((err) => {
-        logger.error({ err, owner, repo, pr: number, command: token }, "command-triggered action failed");
-      });
+      // Fire-and-forget — Promise.resolve().then(...) so a synchronous throw from
+      // runCommand is funneled into the same .catch() as a rejected promise.
+      Promise.resolve()
+        .then(() => reviewer.runCommand(installationId, owner, repo, number, phrase))
+        .catch((err) => {
+          logger.error({ err, owner, repo, pr: number, command: token }, "command-triggered action failed");
+        });
     },
   );
 }

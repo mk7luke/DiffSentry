@@ -194,6 +194,8 @@ async function main() {
       "command → reviewer.runCommand(42, acme, web, 7, 'generate tests')",
       !!ranCommand &&
         ranCommand.args[0] === 42 &&
+        ranCommand.args[1] === "acme" &&
+        ranCommand.args[2] === "web" &&
         ranCommand.args[3] === 7 &&
         ranCommand.args[4] === "generate tests",
     );
