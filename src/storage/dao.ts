@@ -474,12 +474,16 @@ export function triageFinding(opts: {
       sets.push("triage_note = ?");
       params.push(opts.triageNote);
     }
-    // No actual triage action supplied — don't stamp triaged_by/triaged_at
-    // (or touch the row at all) for a no-op call.
+    if (opts.triagedBy !== undefined) {
+      sets.push("triaged_by = ?");
+      params.push(opts.triagedBy);
+    }
+    // No actual triage field supplied — don't stamp triaged_at (or touch the
+    // row at all) for a no-op call (e.g. only `findingId` was passed).
     if (sets.length === 0) return;
-    // Always stamp who/when when any triage action is taken.
-    sets.push("triaged_by = ?", "triaged_at = ?");
-    params.push(opts.triagedBy ?? null, new Date().toISOString());
+    // Stamp when any field is updated.
+    sets.push("triaged_at = ?");
+    params.push(new Date().toISOString());
     params.push(opts.findingId);
     db.prepare(`UPDATE findings SET ${sets.join(", ")} WHERE id = ?`).run(...params);
   } catch (err) {

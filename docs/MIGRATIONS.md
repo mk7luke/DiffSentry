@@ -6,7 +6,7 @@ tool — migrations are plain SQL strings applied in order at startup.
 
 ## How it works
 
-- `MIGRATIONS` is an ordered array of `{ version, name, sql }`. Each entry is
+- `MIGRATIONS` is an ordered array of `{ version, name, sql, post? }`. Each entry is
   applied **in array order, inside its own transaction**. If a migration's SQL
   fails, that transaction rolls back and startup aborts — the database is never
   left half-migrated.
@@ -43,14 +43,15 @@ baseline is not re-run), and applies migration 2 onward. No data is touched.
 ## Adding a migration
 
 1. Append a new entry to `MIGRATIONS` with the **next contiguous version**.
-   Never edit, reorder, or delete an already-released migration — write a new
-   one that alters state forward.
+   The entry shape is `{ version, name, sql, post? }`, where `post?` is an
+   optional `(db) => void` hook (see step 2). Never edit, reorder, or delete an
+   already-released migration — write a new one that alters state forward.
 2. Keep it **additive**: prefer `CREATE TABLE IF NOT EXISTS`. SQLite's `ADD
    COLUMN` has no `IF NOT EXISTS`, so for column adds use the optional `post`
-   hook on the migration — a `(db) => void` run inside the same transaction
-   after the SQL — and guard each add against `PRAGMA table_info` (see
-   `ensureFindingsTriageColumns` in migration 2). That stays idempotent even if
-   a column already exists.
+   hook on the migration — a `(db) => void` that runs inside the same
+   transaction, after `sql` and before the ledger row is written — and guard
+   each add against `PRAGMA table_info` (see `ensureFindingsTriageColumns` in
+   migration 2). That stays idempotent even if a column already exists.
 3. Run the smoke test: `npm run smoke:migrate`. It verifies a fresh DB reaches
    the latest version, that re-running is a no-op, and that an existing v1 DB
    upgrades in place without data loss
