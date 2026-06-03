@@ -37,7 +37,6 @@ export const router = createBrowserRouter([
       { path: "/", element: <OverviewPage /> },
       { path: "/impact", element: <ImpactPage /> },
       { path: "/queue", element: <QueuePage /> },
-      { path: "/repos/:owner/:repo", element: <RepoDetailPage /> },
       {
         path: "/repos/:owner/:repo/config",
         element: (
@@ -46,6 +45,7 @@ export const router = createBrowserRouter([
           </Suspense>
         ),
       },
+      { path: "/repos/:owner/:repo", element: <RepoDetailPage /> },
       { path: "/repos/:owner/:repo/pr/:number", element: <PRDetailPage /> },
       { path: "/findings", element: <FindingsPage /> },
       { path: "/patterns", element: <PatternsPage /> },

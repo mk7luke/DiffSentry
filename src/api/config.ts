@@ -235,11 +235,14 @@ export function registerConfigRoutes(router: Router, deps: ConfigRouteDeps): voi
       let editable = false;
       const installationId = getInstallationId(owner, repo);
       if (getInstallationOctokit && installationId != null) {
-        editable = true;
         try {
           const octokit = await getInstallationOctokit(installationId);
           const meta = await octokit.repos.get({ owner, repo });
           defaultBranch = meta.data.default_branch ?? null;
+          // Only claim editability once we've confirmed read access AND a branch
+          // to commit against; a failed lookup leaves editable false so the SPA
+          // doesn't offer a commit UI we can't actually fulfill.
+          editable = defaultBranch != null;
         } catch (err) {
           logger.debug({ err, owner, repo }, "api: failed to read repo default branch");
         }
