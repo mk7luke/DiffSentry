@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode } from "react";
+import type { ReviewQueueEntry } from "../api/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // useEventStream — a single shared EventSource over /api/v1/stream.
@@ -46,21 +47,9 @@ export interface ActionPayload {
   detail?: string;
 }
 
-/** Mirrors ReviewQueueEntry in src/realtime/bus.ts. */
-export interface QueueUpdatedPayload {
-  key: string;
-  owner: string;
-  repo: string;
-  number: number;
-  mode: "full" | "incremental";
-  state: "queued" | "running" | "done" | "failed" | "canceled";
-  phase: string | null;
-  enqueuedAt: string;
-  startedAt: string | null;
-  finishedAt: string | null;
-  error: string | null;
-  attempt: number;
-}
+/** Payload of a `queue.updated` event — the canonical board entry shape, kept
+ * in one place to avoid drift. */
+export type QueueUpdatedPayload = ReviewQueueEntry;
 
 /** Every topic the server emits — the SSE `event:` names we listen for. */
 const TOPICS: StreamTopic[] = [

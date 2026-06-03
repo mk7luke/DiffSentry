@@ -29,14 +29,28 @@ const STATE_RANK: Record<ReviewQueueState, number> = {
   failed: 2,
   canceled: 2,
 };
+// Monotonic rank: attempt dominates (×10 ≫ the max state rank of 2), then the
+// lifecycle only moves forward. A higher attempt or a later state always wins;
+// equal rank means the same attempt *and* the same state class.
 function rank(e: ReviewQueueEntry): number {
   return e.attempt * 10 + STATE_RANK[e.state];
 }
-function mergeEntry(existing: ReviewQueueEntry | undefined, incoming: ReviewQueueEntry): ReviewQueueEntry {
+
+// Live (SSE) merge — events arrive in order on the single EventSource, so a
+// same-rank update (a running phase change, or a terminal re-delivery) is by
+// definition newer and takes precedence.
+function mergeLive(existing: ReviewQueueEntry | undefined, incoming: ReviewQueueEntry): ReviewQueueEntry {
   if (!existing) return incoming;
-  // `>=` lets same-rank updates (e.g. a phase change while running) take the
-  // newest copy, while a strictly-older event is ignored.
   return rank(incoming) >= rank(existing) ? incoming : existing;
+}
+
+// Hydration (GET /queue) merge — a snapshot may have been captured before a
+// live event that already advanced the card (e.g. a phase change has the same
+// rank but is fresher), so a refetch may only move a card *forward*, never
+// overwrite a same-rank entry the live stream may have updated in the meantime.
+function mergeHydrate(existing: ReviewQueueEntry | undefined, incoming: ReviewQueueEntry): ReviewQueueEntry {
+  if (!existing) return incoming;
+  return rank(incoming) > rank(existing) ? incoming : existing;
 }
 
 function isTerminal(state: ReviewQueueState): boolean {
@@ -158,13 +172,14 @@ export function QueuePage() {
   const [entries, setEntries] = useState<Record<string, ReviewQueueEntry>>({});
   const seeded = useRef(false);
 
-  // Hydrate (and re-merge on any refetch) from the snapshot endpoint. mergeEntry
-  // guarantees a stale snapshot can never overwrite a fresher live SSE update.
+  // Hydrate (and re-merge on any refetch) from the snapshot endpoint. The
+  // forward-only hydrate merge guarantees a stale snapshot can never overwrite a
+  // fresher live SSE update.
   useEffect(() => {
     if (!query.data) return;
     setEntries((prev) => {
       const next = { ...prev };
-      for (const e of query.data.entries) next[e.key] = mergeEntry(next[e.key], e);
+      for (const e of query.data.entries) next[e.key] = mergeHydrate(next[e.key], e);
       return next;
     });
     seeded.current = true;
@@ -174,7 +189,7 @@ export function QueuePage() {
   const onEvent = useCallback((env: StreamEnvelope) => {
     if (env.topic !== "queue.updated") return;
     const e = env.payload as ReviewQueueEntry;
-    setEntries((prev) => ({ ...prev, [e.key]: mergeEntry(prev[e.key], e) }));
+    setEntries((prev) => ({ ...prev, [e.key]: mergeLive(prev[e.key], e) }));
   }, []);
   useEventStream(onEvent);
 
