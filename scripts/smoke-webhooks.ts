@@ -232,6 +232,8 @@ async function main() {
     ok("GET /webhooks?offset=<huge> → 400", hugeOffset.status === 400 && hugeOffset.json.error.code === "bad_request");
     const badRepo = await req("GET", "/webhooks?repo=acme", { session: adminSess });
     ok("GET /webhooks?repo=acme (no slash) → 400", badRepo.status === 400 && badRepo.json.error.code === "bad_request");
+    const repeatedEvent = await req("GET", "/webhooks?event=pull_request&event=issues", { session: adminSess });
+    ok("GET /webhooks?event=…&event=… (repeated) → 400", repeatedEvent.status === 400 && repeatedEvent.json.error.code === "bad_request");
     const goodRepo = await req("GET", "/webhooks?repo=acme/web", { session: adminSess });
     ok("GET /webhooks?repo=acme/web → 200", goodRepo.status === 200 && goodRepo.json.data.total === 2);
 

@@ -65,9 +65,15 @@ export function registerWebhookRoutes(router: Router, deps: WebhookRouteDeps): v
   // ── GET /webhooks — list + filter (event, repo) ────────────────────
   router.get("/webhooks", admin, (req, res) => {
     const q = req.query as Record<string, unknown>;
-    const str = (k: string) => {
+    // String filter parse: undefined = absent; null = present but invalid (a
+    // repeated `?event=a&event=b` arrives as an array, i.e. non-string). A
+    // repeated/non-string filter is rejected with 400 rather than silently
+    // dropped — otherwise the result would broaden instead of narrow.
+    const strParam = (k: string): string | null | undefined => {
       const v = q[k];
-      return typeof v === "string" && v.length > 0 ? v : undefined;
+      if (v === undefined) return undefined;
+      if (typeof v !== "string") return null;
+      return v.length > 0 ? v : undefined;
     };
     // Strict, non-negative decimal-integer parsing for pagination (matches the
     // :id parser): an absent value uses the default; a malformed/negative value
@@ -79,6 +85,13 @@ export function registerWebhookRoutes(router: Router, deps: WebhookRouteDeps): v
       const n = Number(v);
       return Number.isSafeInteger(n) ? n : null;
     };
+    // Parse event/repo once, up front, and pass the validated values through.
+    const event = strParam("event");
+    const repo = strParam("repo");
+    if (event === null || repo === null) {
+      sendError(res, 400, "bad_request", "'event' and 'repo' must each be a single string value.");
+      return;
+    }
     const limit = count("limit", 100);
     const offset = count("offset", 0);
     // limit must be a positive, bounded page size (matches the query layer's
@@ -97,13 +110,12 @@ export function registerWebhookRoutes(router: Router, deps: WebhookRouteDeps): v
     // A repo filter must be a full "owner/repo" slug (exactly two non-empty
     // segments); a typo like "?repo=acme" is rejected instead of silently
     // dropping the filter and broadening the result to every repo.
-    const repo = str("repo");
     if (repo !== undefined && !/^[^/]+\/[^/]+$/.test(repo)) {
       sendError(res, 400, "bad_request", "'repo' must be a full 'owner/repo' slug.");
       return;
     }
     try {
-      const { rows, total } = getWebhookDeliveries({ event: str("event"), repo, limit, offset });
+      const { rows, total } = getWebhookDeliveries({ event, repo, limit, offset });
       sendData(res, { rows, total, events: getWebhookEventTypes(), repos: getWebhookRepos() });
     } catch (err) {
       logger.error({ err }, "api /webhooks failed");
@@ -183,12 +195,30 @@ export function registerWebhookRoutes(router: Router, deps: WebhookRouteDeps): v
         return;
       }
 
+      // Only the redispatch itself gates the 500 path. Once it returns a
+      // result, the replay has happened — so the audit/bus bookkeeping below
+      // must not be able to turn a successful replay into a failure.
+      let result: { newDeliveryId: number | null; status: number };
       try {
-        const { newDeliveryId, status } = await deps.replayWebhook({
-          event: row.event,
-          payload,
-          replayedFrom: id,
+        result = await deps.replayWebhook({ event: row.event, payload, replayedFrom: id });
+      } catch (err) {
+        logger.error({ err, id }, "webhook replay failed");
+        insertAuditLog({
+          actorLogin: actor?.login ?? null,
+          actorRole: actor?.role ?? null,
+          action: "webhook.replay",
+          targetType: "webhook_delivery",
+          targetRef: String(id),
+          result: "error",
         });
+        sendError(res, 500, "internal", "Replay failed.");
+        return;
+      }
+
+      const { newDeliveryId, status } = result;
+      // Post-dispatch bookkeeping: the redispatch already succeeded, so a
+      // failure here is logged but never returns 500 or reclassifies the replay.
+      try {
         insertAuditLog({
           actorLogin: actor?.login ?? null,
           actorRole: actor?.role ?? null,
@@ -205,19 +235,10 @@ export function registerWebhookRoutes(router: Router, deps: WebhookRouteDeps): v
           action: row.action,
           actor: actor?.login ?? null,
         });
-        sendData(res, { id, newDeliveryId, event: row.event, dispatchStatus: status, result: "replayed" }, 202);
       } catch (err) {
-        logger.error({ err, id }, "webhook replay failed");
-        insertAuditLog({
-          actorLogin: actor?.login ?? null,
-          actorRole: actor?.role ?? null,
-          action: "webhook.replay",
-          targetType: "webhook_delivery",
-          targetRef: String(id),
-          result: "error",
-        });
-        sendError(res, 500, "internal", "Replay failed.");
+        logger.error({ err, id }, "webhook replay post-dispatch bookkeeping failed (replay itself succeeded)");
       }
+      sendData(res, { id, newDeliveryId, event: row.event, dispatchStatus: status, result: "replayed" }, 202);
     },
   );
 }
