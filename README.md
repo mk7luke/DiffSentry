@@ -538,6 +538,7 @@ GitHub webhook
 | `DASHBOARD_AUTHOR_LOGINS` | No | | Comma-separated logins granted the `author` role. |
 | `DASHBOARD_SESSION_SECRET` | No | `GITHUB_WEBHOOK_SECRET` | HMAC key for the dashboard session + CSRF cookies. |
 | `DASHBOARD_SSE_HEARTBEAT_MS` | No | `25000` | Heartbeat interval (ms, min 1000) for the `/api/v1/stream` SSE feed. |
+| `DASHBOARD_CONFIG_PR_BRANCH_PREFIX` | No | `diffsentry/config` | Branch-name prefix used when an admin edits `.diffsentry.yaml` from the dashboard and chooses "open a PR". |
 
 \* One of `GITHUB_PRIVATE_KEY_PATH` or `GITHUB_PRIVATE_KEY` is required.
 
@@ -707,8 +708,10 @@ untouched.
 
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
-`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, and `/audit`
-(admin). Write endpoints: `POST /roles` (admin) sets/clears a role override.
+`/repos/:owner/:repo/prs/:number`, `/repos/:owner/:repo/config`, `/findings`,
+`/patterns`, and `/audit` (admin). Write endpoints: `POST /roles` (admin)
+sets/clears a role override; `PUT /repos/:owner/:repo/config` (admin) edits
+`.diffsentry.yaml`.
 When OAuth is configured every endpoint requires a valid session (401 JSON
 otherwise); the queries reuse the same SQL as the legacy dashboard and no-op
 gracefully when persistence is disabled.
@@ -724,9 +727,22 @@ SSE event:
 | `POST .../prs/:number/pause` / `.../resume` | Pause / resume automatic + manual reviews. |
 | `POST .../prs/:number/cancel` | Abort any in-flight review (handlePRClose semantics). |
 
+**Config editor** (`admin`) — edit a repo's `.diffsentry.yaml` from the dashboard
+(`/repos/:owner/:repo/config`). `GET .../config` returns the current YAML on the
+default branch, the parsed + merged-with-defaults effective config, and a JSON
+schema derived from `RepoConfig`. The editor offers a **schema-aware form** and a
+**raw YAML editor** (CodeMirror) kept in sync, with live validation and a
+side-by-side diff preview. `PUT .../config` (admin + CSRF) validates the YAML
+(syntax + schema — invalid configs are rejected with field-level errors before
+anything is written) and then either **commits directly** to the default branch
+or **opens a PR** (your choice). The change is audit-logged with a diff
+(`config.update`) and announced on the bus as `config.updated`; a direct commit
+also invalidates the 5-minute config read cache.
+
 **Realtime** (`GET /api/v1/stream`) is a Server-Sent Events feed on an in-process
 event bus. The review engine publishes `review.started` / `review.finished` /
-`review.failed`, and every command action publishes `action.performed`. The SPA
+`review.failed`, every command action publishes `action.performed`, and a config
+edit publishes `config.updated`. The SPA
 opens one `EventSource`, surfaces events as toasts, and live-refetches the
 affected PR — so a re-review's findings appear without a refresh. The stream
 heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed

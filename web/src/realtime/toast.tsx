@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useEventStream, type ActionPayload, type ReviewLifecyclePayload, type StreamEnvelope } from "./useEventStream";
+import { useEventStream, type ActionPayload, type ConfigUpdatePayload, type ReviewLifecyclePayload, type StreamEnvelope } from "./useEventStream";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Toast / live feed primitive.
@@ -151,6 +151,16 @@ function StreamToasts() {
           tone: p.result === "ok" || p.result === "accepted" ? "info" : "danger",
           title: `${who} · ${p.action} · ${ref}`,
           body: p.detail,
+        });
+        return;
+      }
+      if (env.topic === "config.updated") {
+        const p = env.payload as ConfigUpdatePayload;
+        const who = p.actor ? `@${p.actor}` : "someone";
+        push({
+          tone: "info",
+          title: `${who} updated config · ${p.owner}/${p.repo}`,
+          body: p.mode === "pr" ? `Opened PR #${p.prNumber}` : `Committed to ${p.branch}`,
         });
       }
     },

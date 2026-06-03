@@ -279,6 +279,14 @@ export function RepoDetailPage() {
                 <Card
                   title=".diffsentry.yaml"
                   subtitle={a.config === null ? "Default branch · repo defaults" : "Default branch · enforced for all PRs"}
+                  right={
+                    <Link
+                      className="btn btn-ghost"
+                      to={`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/config`}
+                    >
+                      Edit
+                    </Link>
+                  }
                 >
                   {a.config === null ? (
                     <EmptyState title="Using defaults" hint="No .diffsentry.yaml on the default branch." />

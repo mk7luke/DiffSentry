@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { createBrowserRouter } from "react-router-dom";
 import { Shell } from "./components/Shell";
 import { OverviewPage } from "./pages/Overview";
@@ -7,7 +8,11 @@ import { FindingsPage } from "./pages/Findings";
 import { PatternsPage } from "./pages/Patterns";
 import { SettingsPage } from "./pages/Settings";
 import { AuditPage } from "./pages/Audit";
-import { NotFoundState } from "./components/states";
+import { LoadingState, NotFoundState } from "./components/states";
+
+// Code editor (CodeMirror) only loads on the config screen, so split it out of
+// the main bundle.
+const RepoConfigPage = lazy(() => import("./pages/RepoConfig").then((m) => ({ default: m.RepoConfigPage })));
 
 function NotFoundPage() {
   return (
@@ -28,6 +33,14 @@ export const router = createBrowserRouter([
     children: [
       { path: "/", element: <OverviewPage /> },
       { path: "/repos/:owner/:repo", element: <RepoDetailPage /> },
+      {
+        path: "/repos/:owner/:repo/config",
+        element: (
+          <Suspense fallback={<LoadingState label="Loading config editor…" />}>
+            <RepoConfigPage />
+          </Suspense>
+        ),
+      },
       { path: "/repos/:owner/:repo/pr/:number", element: <PRDetailPage /> },
       { path: "/findings", element: <FindingsPage /> },
       { path: "/patterns", element: <PatternsPage /> },

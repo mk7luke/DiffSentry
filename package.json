@@ -17,6 +17,7 @@
     "smoke:api": "tsx scripts/smoke-api.ts",
     "smoke:rbac": "tsx scripts/smoke-rbac.ts",
     "smoke:actions": "tsx scripts/smoke-actions.ts",
+    "smoke:config": "tsx scripts/smoke-config.ts",
     "smoke:migrate": "tsx scripts/migrate-smoke.ts",
     "smoke:dao": "tsx scripts/smoke-dao.ts"
   },
