@@ -1,7 +1,9 @@
 import { Link, useParams } from "react-router-dom";
 import { useRepoDetail } from "../api/hooks";
+import { useAuth } from "../auth/useAuth";
 import { Breadcrumbs } from "../components/Shell";
 import { Card, PageHeader } from "../components/primitives";
+import { RepoSettingsCard } from "../components/SettingsControls";
 import { ApprovalBadge, RiskBadge } from "../components/badges";
 import { Donut, Hbar, RiskLine, StackedSeverityBar } from "../components/charts";
 import { EmptyState, QueryBoundary } from "../components/states";
@@ -107,6 +109,7 @@ export function RepoDetailPage() {
   const owner = params.owner ?? "";
   const repo = params.repo ?? "";
   const query = useRepoDetail(owner, repo);
+  const { capabilities } = useAuth();
 
   return (
     <>
@@ -303,6 +306,12 @@ export function RepoDetailPage() {
                   )}
                 </Card>
               </div>
+
+              {capabilities.manageConfig ? (
+                <div style={{ marginTop: 16 }}>
+                  <RepoSettingsCard owner={owner} repo={repo} />
+                </div>
+              ) : null}
             </>
           );
         }}

@@ -5,13 +5,17 @@ import { apiGet, apiSend } from "./client";
 import type {
   AuditResponse,
   FindingsResponse,
+  GlobalSettingsPatch,
   HealthResponse,
   MeResponse,
   PatternsResponse,
   PRDetailResponse,
   RepoDetailResponse,
+  RepoSettingsPatch,
+  RepoSettingsResponse,
   ReposResponse,
   Role,
+  SettingsResponse,
 } from "./types";
 
 export function useMe() {
@@ -111,6 +115,55 @@ export function useAudit(query: AuditQuery, enabled: boolean) {
       }),
     enabled,
     placeholderData: (prev) => prev,
+  });
+}
+
+// ─── Settings (operator controls, admin) ────────────────────────────
+
+/** Admin: resolved global settings. Only fetched when `enabled` (i.e. admin). */
+export function useSettings(enabled: boolean) {
+  return useQuery({
+    queryKey: ["settings"],
+    queryFn: () => apiGet<SettingsResponse>("/settings"),
+    enabled,
+  });
+}
+
+/** Admin: set/clear global settings. Returns the refreshed resolved settings. */
+export function useUpdateSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: GlobalSettingsPatch) => apiSend<SettingsResponse>("/settings", { method: "PUT", body: patch }),
+    onSuccess: (data) => {
+      qc.setQueryData(["settings"], data);
+      void qc.invalidateQueries({ queryKey: ["audit"] });
+    },
+  });
+}
+
+/** Admin: resolved per-repo overrides. */
+export function useRepoSettings(owner: string, repo: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["repoSettings", owner, repo],
+    queryFn: () =>
+      apiGet<RepoSettingsResponse>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/settings`),
+    enabled: enabled && !!owner && !!repo,
+  });
+}
+
+/** Admin: set/clear per-repo overrides. */
+export function useUpdateRepoSettings(owner: string, repo: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: RepoSettingsPatch) =>
+      apiSend<RepoSettingsResponse>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/settings`,
+        { method: "PUT", body: patch },
+      ),
+    onSuccess: (data) => {
+      qc.setQueryData(["repoSettings", owner, repo], data);
+      void qc.invalidateQueries({ queryKey: ["audit"] });
+    },
   });
 }
 

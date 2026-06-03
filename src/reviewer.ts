@@ -30,6 +30,7 @@ import { detectDescriptionDrift, renderDriftBlock, reviewCommitMessages, renderC
 import { createHash } from "node:crypto";
 import { logger } from "./logger.js";
 import { bus } from "./realtime/bus.js";
+import { isPauseAll, resolveProfileOverride, resolveMaxFilesOverride } from "./settings/overrides.js";
 
 function normalizePatchForHash(patch: string): string {
   // Strip metadata lines + leading +/- markers, collapse all whitespace,
@@ -286,6 +287,15 @@ export class Reviewer {
       return;
     }
 
+    // Global Pause-All kill switch (operator control, persisted in
+    // settings_overrides). Honored on every trigger path — webhook, chat
+    // `@bot review`, and the dashboard's trigger action all funnel here — so a
+    // single switch reliably halts new reviews. No-ops when persistence is off.
+    if (isPauseAll()) {
+      log.info("Pause-All is active; skipping review");
+      return;
+    }
+
     // Set up abort controller
     const abortController = new AbortController();
     activeReviews.set(key, abortController);
@@ -299,10 +309,16 @@ export class Reviewer {
     let reviewError: string | undefined;
 
     try {
+      // Operator max-files override (repo > global > env default). Resolved
+      // before fetching context so the file cap is applied at fetch time.
+      const maxFilesOverride = resolveMaxFilesOverride(owner, repo);
+
       // Fetch PR context first so we have the repo's default branch on hand.
       log.info("Fetching PR context");
       const octokit = await this.github.getInstallationOctokit(installationId);
-      const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
+      const context = await this.github.getPRContext(
+        installationId, owner, repo, pullNumber, maxFilesOverride ?? undefined,
+      );
 
       // Load repo config from the default branch — NOT the PR head. This makes
       // the .diffsentry.yaml on the default branch authoritative for every PR,
@@ -311,6 +327,14 @@ export class Reviewer {
       log.info("Loading repo configuration");
       const rawConfig = await loadRepoConfig(octokit, owner, repo, context.defaultBranch || "HEAD");
       const repoConfig = mergeWithDefaults(rawConfig);
+
+      // Operator profile override (repo > global default) wins over the
+      // .diffsentry.yaml profile. Applied onto repoConfig so it flows through
+      // the AI prompt, the rendered review body, and the persisted review row.
+      const profileOverride = resolveProfileOverride(owner, repo);
+      if (profileOverride) {
+        repoConfig.reviews = { ...(repoConfig.reviews ?? {}), profile: profileOverride };
+      }
 
       // Check auto-review controls
       if (!shouldReviewPR(repoConfig, {

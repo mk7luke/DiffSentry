@@ -24,7 +24,8 @@ export type StreamTopic =
   | "review.started"
   | "review.finished"
   | "review.failed"
-  | "action.performed";
+  | "action.performed"
+  | "settings.changed";
 
 export interface ReviewLifecyclePayload {
   owner: string;
@@ -45,8 +46,21 @@ export interface ActionPayload {
   detail?: string;
 }
 
+export interface SettingsChangedPayload {
+  scope: string;
+  key: string;
+  value: unknown;
+  actor: string | null;
+}
+
 /** Every topic the server emits — the SSE `event:` names we listen for. */
-const TOPICS: StreamTopic[] = ["review.started", "review.finished", "review.failed", "action.performed"];
+const TOPICS: StreamTopic[] = [
+  "review.started",
+  "review.finished",
+  "review.failed",
+  "action.performed",
+  "settings.changed",
+];
 
 type Listener = (env: StreamEnvelope) => void;
 

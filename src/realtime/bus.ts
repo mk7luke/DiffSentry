@@ -40,12 +40,24 @@ export interface ActionPayload {
   detail?: string;
 }
 
+/** An operator settings override changed — emitted from the settings API. */
+export interface SettingsChangedPayload {
+  /** 'global' or 'owner/repo'. */
+  scope: string;
+  /** The setting key that changed (e.g. "pauseAll", "profile"). */
+  key: string;
+  /** The new value, or null when the override was cleared. */
+  value: unknown;
+  actor: string | null;
+}
+
 /** Topic → payload map. Add new topics here so publish/subscribe stay typed. */
 export interface BusEventMap {
   "review.started": ReviewLifecyclePayload;
   "review.finished": ReviewLifecyclePayload;
   "review.failed": ReviewLifecyclePayload;
   "action.performed": ActionPayload;
+  "settings.changed": SettingsChangedPayload;
 }
 
 export type BusTopic = keyof BusEventMap;

@@ -37,7 +37,9 @@ export class GitHubClient {
     installationId: number,
     owner: string,
     repo: string,
-    pullNumber: number
+    pullNumber: number,
+    /** Per-review max-files override (operator setting); falls back to config. */
+    maxFiles?: number
   ): Promise<PRContext> {
     const octokit = await this.getInstallationOctokit(installationId);
 
@@ -46,9 +48,10 @@ export class GitHubClient {
       octokit.pulls.listFiles({ owner, repo, pull_number: pullNumber, per_page: 100 }),
     ]);
 
+    const fileCap = maxFiles != null && maxFiles > 0 ? maxFiles : this.config.maxFilesPerReview;
     const files: FileChange[] = filesResponse.data
       .filter((f) => !this.isIgnored(f.filename))
-      .slice(0, this.config.maxFilesPerReview)
+      .slice(0, fileCap)
       .map((f) => ({
         filename: f.filename,
         status: f.status as FileChange["status"],

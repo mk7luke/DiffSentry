@@ -8,11 +8,28 @@ import { recordEvent } from "./storage/dao.js";
 import { createDashboardRouter } from "./dashboard/routes.js";
 import { createApiRouter } from "./api/router.js";
 import { createAuth, loadAuthConfigFromEnv } from "./dashboard/auth.js";
+import { applyPersistedSettings, isPauseAll, isAutoReviewEnabled } from "./settings/overrides.js";
+
+/**
+ * Whether an automatic (webhook-triggered) review should be queued for a repo,
+ * or a reason it's blocked. The global Pause-All kill switch wins, then the
+ * per-repo auto-review toggle. Both are operator settings persisted in
+ * settings_overrides and no-op (return "allowed") when persistence is off.
+ */
+function reviewQueueBlockedReason(owner: string, repo: string): "paused" | "auto_review_disabled" | null {
+  if (isPauseAll()) return "paused";
+  if (!isAutoReviewEnabled(owner, repo)) return "auto_review_disabled";
+  return null;
+}
 
 export function createServer(config: Config) {
   const app = express();
   const webhooks = new Webhooks({ secret: config.githubWebhookSecret });
   const reviewer = new Reviewer(config);
+
+  // Apply any persisted runtime settings (e.g. log level) on boot so a value
+  // set via the dashboard survives restarts. No-ops when persistence is off.
+  applyPersistedSettings();
 
   // Parse raw body for webhook signature verification
   app.use("/webhook", express.raw({ type: "application/json" }));
@@ -136,6 +153,12 @@ export function createServer(config: Config) {
       }
 
       if (action === "opened") {
+        const blocked = reviewQueueBlockedReason(owner, repo);
+        if (blocked) {
+          logger.info({ owner, repo, pr: number, action, blocked }, "Not queuing full review (operator control)");
+          res.status(200).json({ status: blocked });
+          return;
+        }
         logger.info({ owner, repo, pr: number, action }, "PR opened, queuing full review");
         res.status(202).json({ status: "accepted" });
 
@@ -146,7 +169,7 @@ export function createServer(config: Config) {
       }
 
       if (action === "synchronize") {
-        logger.info({ owner, repo, pr: number, action }, "PR updated, queuing incremental review");
+        logger.info({ owner, repo, pr: number, action }, "PR updated");
         res.status(202).json({ status: "accepted" });
 
         // Run push-driven auto-resolve unconditionally (not gated by pause/draft/auto-review),
@@ -154,6 +177,14 @@ export function createServer(config: Config) {
         reviewer.autoResolveOnPush(installationId, owner, repo, number).catch((err) => {
           logger.error({ err, owner, repo, pr: number }, "Push auto-resolve failed");
         });
+
+        // Gate only the re-review queue behind the operator controls — the
+        // auto-resolve above still runs so addressed threads close.
+        const blocked = reviewQueueBlockedReason(owner, repo);
+        if (blocked) {
+          logger.info({ owner, repo, pr: number, action, blocked }, "Not queuing incremental review (operator control)");
+          return;
+        }
 
         reviewer.handlePullRequest(installationId, owner, repo, number, "incremental").catch((err) => {
           logger.error({ err, owner, repo, pr: number }, "Background review failed");
@@ -171,6 +202,12 @@ export function createServer(config: Config) {
 
       // ready_for_review — draft PR became ready
       if (action === "ready_for_review") {
+        const blocked = reviewQueueBlockedReason(owner, repo);
+        if (blocked) {
+          logger.info({ owner, repo, pr: number, action, blocked }, "Not queuing review (operator control)");
+          res.status(200).json({ status: blocked });
+          return;
+        }
         logger.info({ owner, repo, pr: number, action }, "PR ready for review, queuing full review");
         res.status(202).json({ status: "accepted" });
 

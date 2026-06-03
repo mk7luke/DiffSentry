@@ -2,6 +2,7 @@ import { useHealth } from "../api/hooks";
 import { useAuth } from "../auth/useAuth";
 import { Breadcrumbs } from "../components/Shell";
 import { Card, Metric, PageHeader } from "../components/primitives";
+import { GlobalSettingsControls } from "../components/SettingsControls";
 import { RoleBadge } from "../components/badges";
 import { EmptyState, QueryBoundary } from "../components/states";
 import type { Capabilities } from "../api/types";
@@ -22,7 +23,20 @@ export function SettingsPage() {
   return (
     <>
       <Breadcrumbs crumbs={[{ label: "Settings" }]} />
-      <PageHeader title="Settings & health" subtitle="Persistence stats, recent warnings, and the signed-in session." />
+      <PageHeader
+        title="Settings & health"
+        subtitle="Operator controls, persistence stats, recent warnings, and the signed-in session."
+      />
+
+      {/* Operator controls — admin only. The server enforces requireRole('admin')
+          on every settings endpoint; this gate just avoids fetching/showing them
+          to non-admins (who would otherwise get a 403). */}
+      {auth.capabilities.manageConfig ? (
+        <div style={{ marginBottom: 16 }}>
+          <GlobalSettingsControls />
+        </div>
+      ) : null}
+
       <QueryBoundary query={query} loadingLabel="Loading health…">
         {(data) => {
           const c = data.counts;

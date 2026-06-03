@@ -18,6 +18,7 @@ import {
 import { insertAuditLog, setRole } from "../storage/dao.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
+import { registerSettingsRoutes } from "./settings.js";
 import {
   getApprovalMix,
   getAuditActions,
@@ -182,6 +183,12 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   if (deps.reviewer) {
     registerActionRoutes(router, { reviewer: deps.reviewer, requireRole, csrf });
   }
+
+  // ─── Settings (operator controls, admin) ───────────────────────────
+  // Global + per-repo overrides (pause-all, auto-review, profile, log level,
+  // max files). Same write contract as the actions above. Always mounted —
+  // unlike actions, settings don't need a reviewer to be useful.
+  registerSettingsRoutes(router, { requireRole, csrf });
 
   // ─── /me ───────────────────────────────────────────────────────────
   // The role resolves from the roles table > admin env > author env > viewer
