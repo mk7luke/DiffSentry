@@ -117,6 +117,40 @@ function hostLiteralIsPrivate(host: string): boolean {
   return false;
 }
 
+/** Hop-by-hop / request-controlled headers a stored webhook config must not set. */
+const FORBIDDEN_WEBHOOK_HEADERS = new Set([
+  "host",
+  "content-length",
+  "content-type", // the adapter sets this itself
+  "connection",
+  "transfer-encoding",
+  "upgrade",
+  "proxy-authorization",
+  "proxy-authenticate",
+]);
+
+/**
+ * Validate custom webhook headers before storing them. Only valid HTTP token
+ * header names with single-line string values are accepted, and hop-by-hop /
+ * request-controlled headers are rejected (they'd corrupt the outbound request
+ * or could be abused). Returns the cleaned map, {} when absent, or an error.
+ */
+function validateWebhookHeaders(raw: unknown): { headers?: Record<string, string> } | { error: string } {
+  if (raw === undefined) return {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { error: "headers must be an object." };
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^[!#$%&'*+.^_`|~0-9a-z-]+$/i.test(name) || FORBIDDEN_WEBHOOK_HEADERS.has(name.toLowerCase())) {
+      return { error: `Unsupported webhook header: ${name}.` };
+    }
+    if (typeof value !== "string" || /[\r\n]/.test(value)) {
+      return { error: `Webhook header ${name} must be a single-line string.` };
+    }
+    headers[name] = value;
+  }
+  return { headers };
+}
+
 /**
  * Validate an outbound webhook URL the server will later POST to. It is a stored
  * egress target (SSRF surface), so by default we require `https` and reject any
@@ -187,7 +221,9 @@ async function validateChannelConfig(
       const error = await validateWebhookUrl(url);
       if (error) return { error };
       const out: Record<string, unknown> = { url };
-      if (c.headers && typeof c.headers === "object" && !Array.isArray(c.headers)) out.headers = c.headers;
+      const validatedHeaders = validateWebhookHeaders(c.headers);
+      if ("error" in validatedHeaders) return { error: validatedHeaders.error };
+      if (validatedHeaders.headers) out.headers = validatedHeaders.headers;
       return { config: out };
     }
     case "email": {

@@ -200,6 +200,14 @@ async function main() {
     ok("create channel(IPv4-mapped IPv6 loopback) → 400 (SSRF blocked)", mappedReject.status === 400);
     process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS = "true"; // restore for the rest
 
+    // ── Webhook custom headers: hop-by-hop / request-controlled are rejected ──
+    const badHeader = await req("POST", "/notifications/channels", {
+      session: admin,
+      csrf: true,
+      body: { type: "webhook", name: "h", config: { url: slackUrl, headers: { Host: "evil" } } },
+    });
+    ok("create channel(forbidden webhook header) → 400", badHeader.status === 400 && badHeader.json.error.code === "bad_request");
+
     // ── Admin creates a rule: critical finding in acme/web → channel ───
     const rule = await req("POST", "/notifications/rules", {
       session: admin,
@@ -310,6 +318,11 @@ async function main() {
     closeDatabase();
     try {
       fs.unlinkSync(tmpDb);
+    } catch {
+      // best effort
+    }
+    try {
+      fs.rmSync(learningsDir, { recursive: true, force: true });
     } catch {
       // best effort
     }
