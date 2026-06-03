@@ -56,11 +56,14 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" && v.length > 0 ? v : undefined;
 }
 
-/** Parse a positive integer route id (tolerating the string|string[] param type). */
+/** Parse a positive integer route id. The whole parameter must be digits —
+ * Number.parseInt would otherwise accept "123abc" as 123 and act on a real
+ * rule. Tolerates the string|string[] param type. */
 function parseId(raw: unknown): number | null {
   const s = Array.isArray(raw) ? raw[0] : raw;
-  const n = Number.parseInt(typeof s === "string" ? s : "", 10);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  if (typeof s !== "string" || !/^\d+$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
 interface ParsedRule {
@@ -84,9 +87,11 @@ function parseRuleBody(body: Record<string, unknown>, partial: boolean): ParsedR
   const kind = str(body.kind) ?? (partial ? undefined : "regex");
   const severity = str(body.severity);
   const type = str(body.type);
-  const pathGlob = str(body.pathGlob ?? body.path_glob);
-  const message = str(body.message);
-  const advice = str(body.advice);
+  // Trim optional text so a whitespace-only value clears the field (via the
+  // `?? null` assignments below) instead of being stored as blanks.
+  const pathGlob = str(body.pathGlob ?? body.path_glob)?.trim() || undefined;
+  const message = str(body.message)?.trim() || undefined;
+  const advice = str(body.advice)?.trim() || undefined;
   const enabled = typeof body.enabled === "boolean" ? body.enabled : undefined;
 
   if (!partial) {
