@@ -723,6 +723,13 @@ SSE event:
 | `POST .../prs/:number/resolve` | Resolve all DiffSentry review threads on the PR. |
 | `POST .../prs/:number/pause` / `.../resume` | Pause / resume automatic + manual reviews. |
 | `POST .../prs/:number/cancel` | Abort any in-flight review (handlePRClose semantics). |
+| `POST .../prs/:number/command` `{ command }` | Run a chat command on the PR by synthesizing an `@bot <cmd>` through `handleComment` — returns `202`, runs in the background. `command` is allowlisted: `summary`, `tldr`, `ship`, `changelog`, `generate_tests`, `generate_docstrings`. |
+
+The PR-detail and repo-detail screens render an **action bar** wiring up these
+endpoints — re-review (full/incremental), resolve/pause/resume/cancel, and the
+chat commands as buttons. The repo screen's bar targets the most recent PR. The
+whole write surface is hidden for viewers; each button shows a spinner +
+optimistic toast and reports the audit-logged result.
 
 **Realtime** (`GET /api/v1/stream`) is a Server-Sent Events feed on an in-process
 event bus. The review engine publishes `review.started` / `review.finished` /

@@ -41,7 +41,24 @@ export interface ReviewerActions {
   resumeReviews(owner: string, repo: string, pullNumber: number): void;
   /** Abort any in-flight review (handlePRClose semantics). */
   cancelReview(owner: string, repo: string, pullNumber: number): void;
+  /** Run a chat command (synthesized "@bot <cmd>") through handleComment. */
+  runCommand(installationId: number, owner: string, repo: string, pullNumber: number, command: string): Promise<void>;
 }
+
+/**
+ * Chat commands the dashboard surfaces as buttons. Each maps a stable token
+ * (sent in the request body) to the raw phrase parseCommand understands. The
+ * allowlist is the trust boundary: only these run, so the endpoint can never be
+ * used to inject an arbitrary "@bot …" free-text chat message.
+ */
+const COMMAND_PHRASES: Record<string, string> = {
+  summary: "summary",
+  tldr: "tldr",
+  ship: "ship",
+  changelog: "changelog",
+  generate_tests: "generate tests",
+  generate_docstrings: "generate docstrings",
+};
 
 export interface ActionDeps {
   reviewer: ReviewerActions;
@@ -242,5 +259,54 @@ export function registerActionRoutes(router: Router, deps: ActionDeps): void {
     handler(deps, "cancel", (ctx) => {
       reviewer.cancelReview(ctx.owner, ctx.repo, ctx.number);
     }),
+  );
+
+  // ── Chat command (summary / tldr / ship / changelog / generate …) ────
+  // Surfaces the existing "@bot <cmd>" commands as buttons. Like /review it
+  // runs the AI in the background, so it answers 202 immediately; the audit row
+  // + action.performed are written at trigger time, and the command's own
+  // GitHub-side replies arrive asynchronously.
+  router.post(
+    `${base}/command`,
+    author,
+    csrf.verify,
+    async (req: PrRequest, res: Response) => {
+      const actor = getActor(req);
+      const number = parsePrNumber(req.params.number);
+      if (number == null) {
+        sendError(res, 400, "bad_request", "Invalid PR number.");
+        return;
+      }
+      const owner = req.params.owner;
+      const repo = req.params.repo;
+      const rawCommand = (req.body as { command?: unknown } | undefined)?.command;
+      const token = typeof rawCommand === "string" ? rawCommand.trim().toLowerCase() : "";
+      const phrase = COMMAND_PHRASES[token];
+      if (!phrase) {
+        sendError(res, 400, "bad_request", `Unknown command '${token || "(empty)"}'.`);
+        return;
+      }
+      const ctx: ActionContext = {
+        owner,
+        repo,
+        number,
+        actorLogin: actor?.login ?? null,
+        actorRole: actor?.role ?? null,
+      };
+      let installationId: number;
+      try {
+        installationId = requireInstallation(owner, repo);
+      } catch {
+        recordAction(ctx, "command", "error", "no_installation");
+        sendError(res, 404, "not_found", `No installation on record for ${owner}/${repo}.`);
+        return;
+      }
+      // Record the trigger now; the command performs its own GitHub-side work.
+      recordAction(ctx, "command", "ok", token);
+      sendData(res, { owner, repo, number, action: "command", result: "accepted", command: token }, 202);
+      reviewer.runCommand(installationId, owner, repo, number, phrase).catch((err) => {
+        logger.error({ err, owner, repo, pr: number, command: token }, "command-triggered action failed");
+      });
+    },
   );
 }

@@ -1656,6 +1656,48 @@ label.field {
 }
 
 /* ─── Command actions + realtime (W0.4) ────────────────────────────── */
+/* Action bar — the command strip on PR + repo detail (W1.A3). A wrapping
+   toolbar so the full + incremental re-review, resolve/pause/resume/cancel,
+   and the chat-command buttons stay on one anchored surface. */
+.action-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+}
+.action-bar-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.action-bar-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 20px;
+  background: var(--line);
+  margin: 0 2px;
+}
+.action-bar-spacer {
+  flex: 1 1 auto;
+}
+.action-bar-note {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.action-bar-note a {
+  color: var(--accent-bright);
+  text-decoration: none;
+}
+.action-bar-note a:hover {
+  text-decoration: underline;
+}
+
 .btn-danger {
   background: var(--bg-elev);
   color: var(--sev-crit);
