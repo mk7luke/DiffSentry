@@ -1826,3 +1826,137 @@ label.field {
 .role-form .field {
   margin-bottom: 0;
 }
+
+/* ── Learnings screen ──────────────────────────────────────────── */
+.learn-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+.learn-form .field {
+  margin-bottom: 0;
+}
+.learn-form textarea {
+  resize: vertical;
+  min-height: 38px;
+}
+.learn-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.learn-err {
+  color: var(--sev-crit);
+  font-size: 12.5px;
+  margin: 8px 0 0;
+}
+.learn-group + .learn-group {
+  border-top: 1px solid var(--line);
+}
+.learn-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 16px;
+  background: var(--bg-deep);
+  border-bottom: 1px solid var(--line-soft);
+}
+.learn-group-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.learn-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 12px;
+  align-items: start;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.learn-row:last-child {
+  border-bottom: none;
+}
+.learn-check {
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+}
+input[type="checkbox"].learn-check {
+  width: 14px;
+  accent-color: var(--accent);
+}
+.learn-main {
+  min-width: 0;
+}
+.learn-content {
+  color: var(--text-1);
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+.learn-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.learn-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.btn-link.danger {
+  color: var(--sev-crit);
+}
+.learn-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.learn-edit textarea {
+  resize: vertical;
+}
+.learn-edit-actions {
+  display: flex;
+  gap: 8px;
+}
+.learn-dup {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.learn-dup:last-child {
+  border-bottom: none;
+}
+.learn-dup-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 12.5px;
+}
+.learn-dup-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-1);
+  word-break: break-word;
+}
+.learn-test-results {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.learn-test-results li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--text-1);
+}

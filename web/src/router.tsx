@@ -5,6 +5,7 @@ import { RepoDetailPage } from "./pages/RepoDetail";
 import { PRDetailPage } from "./pages/PRDetail";
 import { FindingsPage } from "./pages/Findings";
 import { PatternsPage } from "./pages/Patterns";
+import { LearningsPage } from "./pages/Learnings";
 import { SettingsPage } from "./pages/Settings";
 import { AuditPage } from "./pages/Audit";
 import { NotFoundState } from "./components/states";
@@ -31,6 +32,7 @@ export const router = createBrowserRouter([
       { path: "/repos/:owner/:repo/pr/:number", element: <PRDetailPage /> },
       { path: "/findings", element: <FindingsPage /> },
       { path: "/patterns", element: <PatternsPage /> },
+      { path: "/learnings", element: <LearningsPage /> },
       { path: "/audit", element: <AuditPage /> },
       { path: "/settings", element: <SettingsPage /> },
       { path: "*", element: <NotFoundPage /> },

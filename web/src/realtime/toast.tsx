@@ -1,5 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useEventStream, type ActionPayload, type ReviewLifecyclePayload, type StreamEnvelope } from "./useEventStream";
+import {
+  useEventStream,
+  type ActionPayload,
+  type LearningChangePayload,
+  type ReviewLifecyclePayload,
+  type StreamEnvelope,
+} from "./useEventStream";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Toast / live feed primitive.
@@ -152,6 +158,14 @@ function StreamToasts() {
           title: `${who} · ${p.action} · ${ref}`,
           body: p.detail,
         });
+        return;
+      }
+      if (env.topic === "learning.changed") {
+        const p = env.payload as LearningChangePayload;
+        const who = p.actor ? `@${p.actor}` : "someone";
+        const where = p.scope === "global" ? "global" : `${p.owner}/${p.repo}`;
+        const what = p.action === "bulk_delete" ? `deleted ${p.count ?? 0} learnings` : `learning ${p.action}`;
+        push({ tone: "info", title: `${who} · ${what}`, body: where });
       }
     },
     [push],

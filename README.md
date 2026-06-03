@@ -697,6 +697,11 @@ untouched.
 - `/findings` — cross-repo filterable explorer (severity, source, repo,
   free-text, age) with a "recurring fingerprints" group.
 - `/patterns` — every pattern-rule hit with 30d + all-time counts.
+- `/learnings` — manage the `@bot learn` learnings the reviewer applies:
+  searchable list of global + per-repo learnings, inline edit, path-glob
+  badges, create, bulk delete, dedupe suggestions, "promote to global", and a
+  "test against a file path" preview. Reads are open to viewers; create/edit/
+  delete require `author`.
 - `/audit` — **admin only** — the audit trail (who did what, when) plus a
   per-login role-override editor.
 - `/settings` — runtime + storage health, the signed-in session with its

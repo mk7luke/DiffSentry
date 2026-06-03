@@ -294,3 +294,38 @@ export interface FindingsResponse {
 export interface PatternsResponse {
   rules: PatternRuleRow[];
 }
+
+// ─── Learnings management ────────────────────────────────────────────
+
+export type LearningScope = "global" | "repo";
+
+export interface RepoLearnings {
+  owner: string;
+  repo: string;
+  learnings: Learning[];
+}
+
+/** A learning flattened across scopes, as returned inside dedupe groups. */
+export interface FlatLearning {
+  scope: LearningScope;
+  owner?: string;
+  repo?: string;
+  id: string;
+  content: string;
+  path?: string;
+}
+
+export interface DuplicateGroup {
+  members: FlatLearning[];
+}
+
+export interface LearningsResponse {
+  global: Learning[];
+  repos: RepoLearnings[];
+  duplicates: DuplicateGroup[];
+}
+
+export interface LearningTestResponse {
+  path: string;
+  matched: Learning[];
+}
