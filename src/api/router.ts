@@ -29,6 +29,7 @@ import {
   getFindingsForPR,
   getHealthCounts,
   getHotPaths,
+  getImpact,
   getInstallationId,
   getPR,
   getPRReviews,
@@ -150,6 +151,39 @@ function parseFindingFilters(q: Record<string, unknown>): FindingFilters {
     limit: num("limit") ?? 100,
     offset: num("offset") ?? 0,
   };
+}
+
+// Supported impact ranges. Bare numbers (e.g. "30") are also accepted and
+// clamped to [1, 365]; "all" / "max" means all-time (no lower bound).
+const IMPACT_RANGES: Record<string, { days: number | null; label: string }> = {
+  "7d": { days: 7, label: "Last 7 days" },
+  "14d": { days: 14, label: "Last 14 days" },
+  "30d": { days: 30, label: "Last 30 days" },
+  "90d": { days: 90, label: "Last 90 days" },
+  "180d": { days: 180, label: "Last 180 days" },
+  "365d": { days: 365, label: "Last 12 months" },
+  all: { days: null, label: "All time" },
+  max: { days: null, label: "All time" },
+};
+
+function parseImpactRange(raw: unknown): { days: number | null; label: string } {
+  if (typeof raw !== "string" || raw.length === 0) return IMPACT_RANGES["30d"];
+  const key = raw.toLowerCase();
+  if (key in IMPACT_RANGES) return IMPACT_RANGES[key];
+  const n = Number.parseInt(key, 10);
+  if (Number.isFinite(n) && n > 0) {
+    const days = Math.min(Math.max(n, 1), 365);
+    return { days, label: `Last ${days} days` };
+  }
+  return IMPACT_RANGES["30d"];
+}
+
+/** Reviewer-minutes saved per finding heuristic, from env (default 15). */
+function impactMinutesPerFinding(): number {
+  const raw = process.env.IMPACT_MINUTES_PER_FINDING;
+  if (!raw) return 15;
+  const n = Number.parseFloat(raw);
+  return Number.isFinite(n) && n > 0 ? n : 15;
 }
 
 // ─── Search ranking ─────────────────────────────────────────────────────────
@@ -302,6 +336,28 @@ export function createApiRouter(deps: ApiDeps): express.Router {
     } catch (err) {
       logger.error({ err }, "api /repos failed");
       sendError(res, 500, "internal", "Failed to load repos.");
+    }
+  });
+
+  // ─── /impact ───────────────────────────────────────────────────────
+  // The shareable impact report: headline numbers, period-over-period deltas,
+  // severity trend, recurring-issue prevention, and estimated reviewer-time
+  // saved. Read-only; any authenticated role may view it.
+  router.get("/impact", (req, res) => {
+    try {
+      const q = req.query as Record<string, unknown>;
+      const range = parseImpactRange(q.range);
+      const repo = typeof q.repo === "string" && q.repo.includes("/") ? q.repo : null;
+      const report = getImpact({
+        days: range.days,
+        label: range.label,
+        repo,
+        minutesPerFinding: impactMinutesPerFinding(),
+      });
+      sendData(res, report);
+    } catch (err) {
+      logger.error({ err }, "api /impact failed");
+      sendError(res, 500, "internal", "Failed to load impact report.");
     }
   });
 

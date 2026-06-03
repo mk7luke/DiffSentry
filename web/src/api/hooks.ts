@@ -6,6 +6,7 @@ import type {
   AuditResponse,
   FindingsResponse,
   HealthResponse,
+  ImpactReport,
   MeResponse,
   PatternsResponse,
   PRDetailResponse,
@@ -79,6 +80,14 @@ export function useFindings(query: FindingsQuery) {
         limit: query.limit,
         offset: query.offset,
       }),
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useImpact(range: string, repo?: string) {
+  return useQuery({
+    queryKey: ["impact", range, repo ?? null],
+    queryFn: () => apiGet<ImpactReport>("/impact", { range, repo }),
     placeholderData: (prev) => prev,
   });
 }

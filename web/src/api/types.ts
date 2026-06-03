@@ -295,6 +295,52 @@ export interface PatternsResponse {
   rules: PatternRuleRow[];
 }
 
+// ─── Impact report (mirror ImpactReport in src/dashboard/queries.ts) ──
+
+export interface ImpactDayBin {
+  day: string;
+  reviews: number;
+  critical: number;
+  major: number;
+  minor: number;
+  nit: number;
+}
+
+export interface ImpactWindow {
+  reviews: number;
+  prsCovered: number;
+  mergedPrsCovered: number;
+  repos: number;
+  findings: number;
+  bySeverity: { critical: number; major: number; minor: number; nit: number };
+  mergedBySeverity: { critical: number; major: number; minor: number; nit: number };
+  criticalMajorCaughtBeforeMerge: number;
+  accepted: number;
+  dismissed: number;
+  pending: number;
+  acceptanceRate: number | null;
+  timeSavedMinutes: number;
+}
+
+export interface ImpactRecurring {
+  distinctFingerprints: number;
+  totalOccurrences: number;
+  repeatsPrevented: number;
+  firstHalf: number;
+  secondHalf: number;
+}
+
+export interface ImpactReport {
+  range: { days: number | null; label: string; since: string | null; until: string };
+  repo: string | null;
+  minutesPerFinding: number;
+  current: ImpactWindow;
+  previous: ImpactWindow | null;
+  recurring: ImpactRecurring;
+  trend: ImpactDayBin[];
+  generatedAt: string;
+}
+
 // ─── Review queue board (mirror src/realtime/bus.ts) ─────────────────
 
 export type ReviewQueueState = "queued" | "running" | "done" | "failed" | "canceled";

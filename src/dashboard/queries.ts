@@ -814,6 +814,355 @@ export function getRoleOverrides(): RoleOverrideRow[] {
   }
 }
 
+// ─── Impact report ──────────────────────────────────────────────────
+// The marketing/leadership surface: "what DiffSentry has done for you" over a
+// time range. Every metric is derived from the raw reviews/findings/prs tables
+// using `reviews.created_at` as the single time axis (consistent with the rest
+// of the dashboard), so the headline numbers reconcile against a plain
+// COUNT(*) on those tables. Degrades to an all-zero report when persistence is
+// off so the page renders cleanly empty.
+
+export interface ImpactDayBin {
+  day: string; // YYYY-MM-DD
+  reviews: number;
+  critical: number;
+  major: number;
+  minor: number;
+  nit: number;
+}
+
+/** Headline counters for one time window (current period or the prior one). */
+export interface ImpactWindow {
+  reviews: number;
+  prsCovered: number;
+  mergedPrsCovered: number;
+  repos: number;
+  findings: number;
+  bySeverity: { critical: number; major: number; minor: number; nit: number };
+  /** Severity split of findings raised on PRs that subsequently merged. */
+  mergedBySeverity: { critical: number; major: number; minor: number; nit: number };
+  /** critical+major findings raised on PRs that subsequently merged
+   * (== mergedBySeverity.critical + mergedBySeverity.major). */
+  criticalMajorCaughtBeforeMerge: number;
+  accepted: number; // findings triaged accepted (accepted = 1)
+  dismissed: number; // findings triaged dismissed (accepted = 0)
+  pending: number; // findings never triaged (accepted IS NULL)
+  acceptanceRate: number | null; // accepted / (accepted + dismissed), or null when none triaged
+  timeSavedMinutes: number; // findings * minutesPerFinding heuristic
+}
+
+export interface ImpactRecurring {
+  distinctFingerprints: number; // fingerprints seen ≥2× in the window
+  totalOccurrences: number; // total findings carrying a recurring fingerprint
+  repeatsPrevented: number; // occurrences beyond the first of each fingerprint
+  firstHalf: number; // recurring-fingerprint occurrences in the older half
+  secondHalf: number; // recurring-fingerprint occurrences in the newer half
+}
+
+export interface ImpactReport {
+  range: { days: number | null; label: string; since: string | null; until: string };
+  repo: string | null;
+  minutesPerFinding: number;
+  current: ImpactWindow;
+  /** Equal-length window immediately before `current`; null for the all-time range. */
+  previous: ImpactWindow | null;
+  recurring: ImpactRecurring;
+  trend: ImpactDayBin[];
+  generatedAt: string;
+}
+
+const EMPTY_WINDOW: ImpactWindow = {
+  reviews: 0,
+  prsCovered: 0,
+  mergedPrsCovered: 0,
+  repos: 0,
+  findings: 0,
+  bySeverity: { critical: 0, major: 0, minor: 0, nit: 0 },
+  mergedBySeverity: { critical: 0, major: 0, minor: 0, nit: 0 },
+  criticalMajorCaughtBeforeMerge: 0,
+  accepted: 0,
+  dismissed: 0,
+  pending: 0,
+  acceptanceRate: null,
+  timeSavedMinutes: 0,
+};
+
+/**
+ * A fresh zero `ImpactWindow`. Never hand out a reference to the shared
+ * EMPTY_WINDOW constant — its nested `bySeverity` / `mergedBySeverity` objects
+ * would be aliased across every call, so a mutation by one caller would corrupt
+ * the template for the next. This returns a new object with copied nested
+ * objects each time.
+ */
+function emptyImpactWindow(): ImpactWindow {
+  return {
+    ...EMPTY_WINDOW,
+    bySeverity: { ...EMPTY_WINDOW.bySeverity },
+    mergedBySeverity: { ...EMPTY_WINDOW.mergedBySeverity },
+  };
+}
+
+/** A `[since, until)` window predicate over reviews, optionally scoped to a repo. */
+function impactWindowClause(
+  repo: string | null,
+  since: string | null,
+  until: string,
+): { clause: string; params: unknown[] } {
+  const clauses = ["rv.created_at < ?"];
+  const params: unknown[] = [until];
+  if (since) {
+    clauses.push("rv.created_at >= ?");
+    params.push(since);
+  }
+  if (repo && repo.includes("/")) {
+    const [o, r] = repo.split("/", 2);
+    clauses.push("rv.owner = ? AND rv.repo = ?");
+    params.push(o, r);
+  }
+  return { clause: clauses.join(" AND "), params };
+}
+
+function computeImpactWindow(
+  db: import("better-sqlite3").Database,
+  repo: string | null,
+  since: string | null,
+  until: string,
+  minutesPerFinding: number,
+): ImpactWindow {
+  const { clause, params } = impactWindowClause(repo, since, until);
+
+  const coverage = db
+    .prepare(
+      `SELECT COUNT(DISTINCT rv.id) AS reviews,
+              COUNT(DISTINCT rv.owner || '/' || rv.repo) AS repos,
+              COUNT(DISTINCT rv.owner || '/' || rv.repo || '#' || rv.number) AS prs
+       FROM reviews rv
+       WHERE ${clause}`,
+    )
+    .get(...params) as { reviews: number; repos: number; prs: number };
+
+  const sev = db
+    .prepare(
+      `SELECT
+         SUM(CASE WHEN f.severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+         SUM(CASE WHEN f.severity = 'major'    THEN 1 ELSE 0 END) AS major,
+         SUM(CASE WHEN f.severity = 'minor'    THEN 1 ELSE 0 END) AS minor,
+         SUM(CASE WHEN f.severity = 'nit'      THEN 1 ELSE 0 END) AS nit,
+         COUNT(*) AS findings,
+         SUM(CASE WHEN f.accepted = 1 THEN 1 ELSE 0 END) AS accepted,
+         SUM(CASE WHEN f.accepted = 0 THEN 1 ELSE 0 END) AS dismissed
+       FROM findings f
+       JOIN reviews rv ON rv.id = f.review_id
+       WHERE ${clause}`,
+    )
+    .get(...params) as {
+    critical: number | null;
+    major: number | null;
+    minor: number | null;
+    nit: number | null;
+    findings: number | null;
+    accepted: number | null;
+    dismissed: number | null;
+  };
+
+  // Severity split of findings on PRs that went on to merge — the donut on the
+  // "Caught before merge" card, and the source of criticalMajorCaughtBeforeMerge.
+  const merged = db
+    .prepare(
+      `SELECT
+         SUM(CASE WHEN f.severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+         SUM(CASE WHEN f.severity = 'major'    THEN 1 ELSE 0 END) AS major,
+         SUM(CASE WHEN f.severity = 'minor'    THEN 1 ELSE 0 END) AS minor,
+         SUM(CASE WHEN f.severity = 'nit'      THEN 1 ELSE 0 END) AS nit
+       FROM findings f
+       JOIN reviews rv ON rv.id = f.review_id
+       JOIN prs p ON p.owner = rv.owner AND p.repo = rv.repo AND p.number = rv.number
+       WHERE ${clause} AND p.merged_at IS NOT NULL`,
+    )
+    .get(...params) as {
+    critical: number | null;
+    major: number | null;
+    minor: number | null;
+    nit: number | null;
+  };
+  const mergedBySeverity = {
+    critical: merged.critical ?? 0,
+    major: merged.major ?? 0,
+    minor: merged.minor ?? 0,
+    nit: merged.nit ?? 0,
+  };
+
+  const mergedCovered = db
+    .prepare(
+      `SELECT COUNT(DISTINCT rv.owner || '/' || rv.repo || '#' || rv.number) AS n
+       FROM reviews rv
+       JOIN prs p ON p.owner = rv.owner AND p.repo = rv.repo AND p.number = rv.number
+       WHERE ${clause} AND p.merged_at IS NOT NULL`,
+    )
+    .get(...params) as { n: number };
+
+  const findings = sev.findings ?? 0;
+  const accepted = sev.accepted ?? 0;
+  const dismissed = sev.dismissed ?? 0;
+  const triaged = accepted + dismissed;
+  return {
+    reviews: coverage.reviews,
+    prsCovered: coverage.prs,
+    mergedPrsCovered: mergedCovered.n,
+    repos: coverage.repos,
+    findings,
+    bySeverity: {
+      critical: sev.critical ?? 0,
+      major: sev.major ?? 0,
+      minor: sev.minor ?? 0,
+      nit: sev.nit ?? 0,
+    },
+    mergedBySeverity,
+    criticalMajorCaughtBeforeMerge: mergedBySeverity.critical + mergedBySeverity.major,
+    accepted,
+    dismissed,
+    pending: findings - triaged,
+    acceptanceRate: triaged > 0 ? accepted / triaged : null,
+    timeSavedMinutes: findings * minutesPerFinding,
+  };
+}
+
+function computeImpactTrend(
+  db: import("better-sqlite3").Database,
+  repo: string | null,
+  since: string | null,
+  until: string,
+): ImpactDayBin[] {
+  const { clause, params } = impactWindowClause(repo, since, until);
+  return db
+    .prepare(
+      `SELECT substr(rv.created_at, 1, 10) AS day,
+              COUNT(DISTINCT rv.id) AS reviews,
+              SUM(CASE WHEN f.severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+              SUM(CASE WHEN f.severity = 'major'    THEN 1 ELSE 0 END) AS major,
+              SUM(CASE WHEN f.severity = 'minor'    THEN 1 ELSE 0 END) AS minor,
+              SUM(CASE WHEN f.severity = 'nit'      THEN 1 ELSE 0 END) AS nit
+       FROM reviews rv
+       LEFT JOIN findings f ON f.review_id = rv.id
+       WHERE ${clause}
+       GROUP BY day
+       ORDER BY day ASC`,
+    )
+    .all(...params) as ImpactDayBin[];
+}
+
+function computeImpactRecurring(
+  db: import("better-sqlite3").Database,
+  repo: string | null,
+  since: string | null,
+  until: string,
+): ImpactRecurring {
+  const { clause, params } = impactWindowClause(repo, since, until);
+  // Fingerprints that fired ≥2× in the window: each repeat after the first is a
+  // bug pattern DiffSentry caught again before it could ship.
+  const groups = db
+    .prepare(
+      `SELECT fi.fingerprint AS fp, COUNT(*) AS c
+       FROM findings fi
+       JOIN reviews rv ON rv.id = fi.review_id
+       WHERE ${clause} AND fi.fingerprint IS NOT NULL AND fi.fingerprint <> ''
+       GROUP BY fi.fingerprint
+       HAVING c >= 2`,
+    )
+    .all(...params) as Array<{ fp: string; c: number }>;
+  const distinctFingerprints = groups.length;
+  const totalOccurrences = groups.reduce((n, g) => n + g.c, 0);
+  const repeatsPrevented = totalOccurrences - distinctFingerprints;
+
+  // Split the window at its midpoint to show whether repeat-offenders are
+  // trending down. For the all-time range (`since` null) we anchor on the
+  // oldest review in scope so the midpoint is well-defined.
+  let lowerIso = since;
+  if (!lowerIso) {
+    const oldest = db
+      .prepare(`SELECT MIN(rv.created_at) AS mn FROM reviews rv WHERE ${clause}`)
+      .get(...params) as { mn: string | null };
+    lowerIso = oldest.mn;
+  }
+  let firstHalf = 0;
+  let secondHalf = 0;
+  if (lowerIso && distinctFingerprints > 0) {
+    const mid = new Date((Date.parse(lowerIso) + Date.parse(until)) / 2).toISOString();
+    // Derive both the placeholders and the bound values from one `fingerprints`
+    // array so they can't drift. Bind order matches the SQL placeholder order:
+    // the two `mid` CASE params in SELECT, then the `clause` window params, then
+    // the fingerprint IN(...) list.
+    const fingerprints = groups.map((g) => g.fp);
+    const placeholders = fingerprints.map(() => "?").join(", ");
+    const halves = db
+      .prepare(
+        `SELECT SUM(CASE WHEN rv.created_at < ? THEN 1 ELSE 0 END) AS first_half,
+                SUM(CASE WHEN rv.created_at >= ? THEN 1 ELSE 0 END) AS second_half
+         FROM findings fi
+         JOIN reviews rv ON rv.id = fi.review_id
+         WHERE ${clause} AND fi.fingerprint IN (${placeholders})`,
+      )
+      .get(mid, mid, ...params, ...fingerprints) as {
+      first_half: number | null;
+      second_half: number | null;
+    };
+    firstHalf = halves.first_half ?? 0;
+    secondHalf = halves.second_half ?? 0;
+  }
+  return { distinctFingerprints, totalOccurrences, repeatsPrevented, firstHalf, secondHalf };
+}
+
+export interface ImpactOptions {
+  /** Window length in days; null means all-time (no lower bound, no prior period). */
+  days: number | null;
+  label: string;
+  /** "owner/repo" to scope the report, or null for every repo. */
+  repo?: string | null;
+  /** Reviewer-minutes saved per finding heuristic (default 15). */
+  minutesPerFinding?: number;
+  /** Injected wall-clock for the window math; defaults to Date.now(). */
+  now?: number;
+}
+
+/**
+ * Build the impact report for a time range. The current window is
+ * `[now - days, now)`; the previous window is the equal-length span before it
+ * (null for the all-time range). Recurring + trend are computed for the current
+ * window only.
+ */
+export function getImpact(opts: ImpactOptions): ImpactReport {
+  const minutesPerFinding = opts.minutesPerFinding && opts.minutesPerFinding > 0 ? opts.minutesPerFinding : 15;
+  const repo = opts.repo ?? null;
+  const nowMs = opts.now ?? Date.now();
+  const until = new Date(nowMs).toISOString();
+  const since = opts.days == null ? null : new Date(nowMs - opts.days * 24 * 60 * 60 * 1000).toISOString();
+
+  const base: ImpactReport = {
+    range: { days: opts.days, label: opts.label, since, until },
+    repo,
+    minutesPerFinding,
+    current: emptyImpactWindow(),
+    previous: null,
+    recurring: { distinctFingerprints: 0, totalOccurrences: 0, repeatsPrevented: 0, firstHalf: 0, secondHalf: 0 },
+    trend: [],
+    generatedAt: until,
+  };
+
+  const db = openDatabase();
+  if (!db) return base;
+
+  const current = computeImpactWindow(db, repo, since, until, minutesPerFinding);
+  let previous: ImpactWindow | null = null;
+  if (opts.days != null && since) {
+    const prevSince = new Date(nowMs - 2 * opts.days * 24 * 60 * 60 * 1000).toISOString();
+    previous = computeImpactWindow(db, repo, prevSince, since, minutesPerFinding);
+  }
+  const recurring = computeImpactRecurring(db, repo, since, until);
+  const trend = computeImpactTrend(db, repo, since, until);
+
+  return { ...base, current, previous, recurring, trend };
+}
+
 // ─── Webhook deliveries ─────────────────────────────────────────────
 
 /**

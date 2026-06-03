@@ -1,6 +1,7 @@
 import { createBrowserRouter } from "react-router-dom";
 import { Shell } from "./components/Shell";
 import { OverviewPage } from "./pages/Overview";
+import { ImpactPage } from "./pages/Impact";
 import { QueuePage } from "./pages/Queue";
 import { RepoDetailPage } from "./pages/RepoDetail";
 import { PRDetailPage } from "./pages/PRDetail";
@@ -29,6 +30,7 @@ export const router = createBrowserRouter([
     element: <Shell />,
     children: [
       { path: "/", element: <OverviewPage /> },
+      { path: "/impact", element: <ImpactPage /> },
       { path: "/queue", element: <QueuePage /> },
       { path: "/repos/:owner/:repo", element: <RepoDetailPage /> },
       { path: "/repos/:owner/:repo/pr/:number", element: <PRDetailPage /> },
