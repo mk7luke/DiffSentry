@@ -67,6 +67,7 @@ function cleanup(file: string): void {
 // --- 1 & 2: fresh DB + idempotency -----------------------------------------
 function testFreshAndIdempotent(): void {
   const file = tmpPath();
+  try {
   withDb(file, (db) => {
     applyMigrations(db);
     assert.equal(currentSchemaVersion(db), LATEST_SCHEMA_VERSION, "fresh DB should reach latest version");
@@ -97,13 +98,16 @@ function testFreshAndIdempotent(): void {
       "re-running migrations must not add or change ledger rows",
     );
   });
-  cleanup(file);
   console.log("ok  fresh DB migrates to latest + idempotent re-run");
+  } finally {
+    cleanup(file);
+  }
 }
 
 // --- 3: existing v1 DB upgrades in place -----------------------------------
 function testExistingV1Upgrade(): void {
   const file = tmpPath();
+  try {
   // Simulate a DB created by the OLD code: legacy single-column schema_version
   // plus the v1 baseline tables, with a real findings row to protect.
   withDb(file, (db) => {
@@ -143,13 +147,16 @@ function testExistingV1Upgrade(): void {
     const ledger = db.prepare("SELECT version FROM schema_version ORDER BY version").all() as Array<{ version: number }>;
     assert.deepEqual(ledger.map((r) => r.version), MIGRATIONS.map((m) => m.version), "ledger has all versions");
   });
-  cleanup(file);
   console.log("ok  existing v1 DB upgrades in place without data loss");
+  } finally {
+    cleanup(file);
+  }
 }
 
 // --- 4: migration 2 tolerates a pre-existing triage column -----------------
 function testPreExistingTriageColumn(): void {
   const file = tmpPath();
+  try {
   // A v1 DB where someone already hand-added one of the triage columns. The
   // plain ALTER would throw "duplicate column"; the guarded `post` step must
   // skip it and add only the missing ones.
@@ -166,8 +173,10 @@ function testPreExistingTriageColumn(): void {
     const cols = columnNames(db, "findings");
     for (const c of EXPECTED_TRIAGE_COLS) assert.ok(cols.has(c), `expected findings.${c}`);
   });
-  cleanup(file);
   console.log("ok  migration 2 skips a pre-existing triage column (idempotent ADD COLUMN)");
+  } finally {
+    cleanup(file);
+  }
 }
 
 testFreshAndIdempotent();

@@ -266,8 +266,16 @@ export interface Migration {
  * Idempotently add the findings triage columns. SQLite's ALTER TABLE ADD
  * COLUMN has no IF NOT EXISTS, so we inspect the current columns and add only
  * the missing ones. Column names are fixed literals (no user input).
+ *
+ * Self-contained: if `findings` doesn't exist yet (e.g. a ledger that marks
+ * v1 applied without the table actually present), apply the idempotent v1
+ * baseline first so this step never depends on migration 1 having run.
  */
 function ensureFindingsTriageColumns(db: DB): void {
+  const hasFindings = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'findings'")
+    .get();
+  if (!hasFindings) db.exec(SCHEMA_V1);
   const cols = new Set(
     (db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>).map((c) => c.name),
   );
@@ -295,6 +303,24 @@ export const MIGRATIONS: Migration[] = [
 
 /** Highest version this binary knows how to migrate to. */
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.reduce((m, x) => Math.max(m, x.version), 0);
+
+/**
+ * Validate the MIGRATIONS metadata: versions must start at 1, be contiguous,
+ * and contain no duplicates (since the runner applies them in array order and
+ * tracks them by version). Throws on violation so CI and startup fail fast on
+ * a bad migration set rather than silently skipping or double-applying.
+ */
+export function validateMigrations(): void {
+  MIGRATIONS.forEach((m, i) => {
+    const expected = i + 1;
+    if (m.version !== expected) {
+      throw new Error(
+        `Invalid MIGRATIONS metadata: expected version ${expected} at index ${i} but found ${m.version} ` +
+          `(versions must start at 1, be contiguous, and have no duplicates)`,
+      );
+    }
+  });
+}
 
 /**
  * Ensure `schema_version` exists as a ledger: one row per applied migration,
@@ -338,6 +364,7 @@ export function currentSchemaVersion(db: DB): number {
  * this binary we log and leave it untouched.
  */
 export function applyMigrations(db: DB): void {
+  validateMigrations();
   ensureLedger(db);
   const applied = appliedVersions(db);
 
