@@ -208,6 +208,18 @@ async function main() {
       });
       ok(`create channel(compressed IPv6 ${label}) → 400 (SSRF blocked)`, r.status === 400);
     }
+    const docReject = await req("POST", "/notifications/channels", {
+      session: admin,
+      csrf: true,
+      body: { type: "webhook", name: "bad", config: { url: "https://[2001:db8::1]/x" } },
+    });
+    ok("create channel(2001:db8::/32 docs IPv6) → 400 (SSRF blocked)", docReject.status === 400);
+    const publicV6 = await req("POST", "/notifications/channels", {
+      session: admin,
+      csrf: true,
+      body: { type: "webhook", name: "ok", config: { url: "https://[2606:4700::1]/x" } },
+    });
+    ok("create channel(public global-unicast IPv6) → 201 (not over-blocked)", publicV6.status === 201);
     const dotReject = await req("POST", "/notifications/channels", {
       session: admin,
       csrf: true,

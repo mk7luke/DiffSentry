@@ -90,22 +90,29 @@ export function ipv6ToBytes(ip: string): number[] | null {
   return bytes;
 }
 
-/** Is an IPv6 literal loopback/unspecified/unique-local/link-local/multicast —
- *  or an IPv4-mapped address whose embedded IPv4 is private? Fails closed on an
- *  unparseable value. */
+/**
+ * Is an IPv6 address unsafe as an outbound egress target? Fails closed: only
+ * global-unicast (2000::/3) public addresses are allowed; everything else is
+ * blocked (unspecified, loopback, ULA, link-local, multicast, discard, …).
+ * Transition forms that embed an IPv4 (IPv4-mapped, 6to4, NAT64) are classified
+ * by that embedded IPv4 so a private target can't be tunnelled through them.
+ * Unparseable input fails closed.
+ */
 export function ipv6IsPrivate(ip: string): boolean {
   const b = ipv6ToBytes(ip);
   if (!b) return true; // unparseable → treat as unsafe
-  // IPv4-mapped ::ffff:a.b.c.d (first 10 bytes zero, bytes 10-11 = 0xff).
-  if (b.slice(0, 10).every((x) => x === 0) && b[10] === 0xff && b[11] === 0xff) {
-    return ipv4IsPrivate(b.slice(12).join("."));
-  }
-  if (b.every((x) => x === 0)) return true; // :: unspecified
-  if (b.slice(0, 15).every((x) => x === 0) && b[15] === 1) return true; // ::1 loopback
-  if ((b[0] & 0xfe) === 0xfc) return true; // fc00::/7 unique-local
-  if (b[0] === 0xfe && (b[1] & 0xc0) === 0x80) return true; // fe80::/10 link-local
-  if (b[0] === 0xff) return true; // ff00::/8 multicast
-  return false;
+  const embeddedV4 = (start: number) => ipv4IsPrivate(b.slice(start, start + 4).join("."));
+  // IPv4-mapped ::ffff:a.b.c.d (bytes 0-9 zero, 10-11 = 0xff) → embedded IPv4.
+  if (b.slice(0, 10).every((x) => x === 0) && b[10] === 0xff && b[11] === 0xff) return embeddedV4(12);
+  // 6to4 2002::/16 → IPv4 in bytes 2-5.
+  if (b[0] === 0x20 && b[1] === 0x02) return embeddedV4(2);
+  // NAT64 well-known prefix 64:ff9b::/96 → IPv4 in the last 4 bytes.
+  if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b) return embeddedV4(12);
+  // Documentation 2001:db8::/32 — never a real target.
+  if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x0d && b[3] === 0xb8) return true;
+  // Everything outside global unicast 2000::/3 is non-public → block. This
+  // subsumes :: / ::1 / fc00::/7 / fe80::/10 / ff00::/8 / 100::/8 / etc.
+  return (b[0] & 0xe0) !== 0x20;
 }
 
 /** Block a host that is itself a private/loopback IP literal (any family) or
