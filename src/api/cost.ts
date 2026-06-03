@@ -60,11 +60,13 @@ function round(n: number): number {
   return Math.round(n * 1e6) / 1e6;
 }
 
-/** 'global' or exactly 'owner/repo' (two non-empty segments). */
+/** 'global' or exactly 'owner/repo' — two non-empty, untrimmable segments (no
+ * leading/trailing whitespace, so a typo'd scope can't be stored then silently
+ * never match any cost_events row). */
 function isValidScope(scope: string): boolean {
   if (scope === "global") return true;
   const parts = scope.split("/");
-  return parts.length === 2 && parts.every((p) => p.length > 0);
+  return parts.length === 2 && parts.every((p) => p.length > 0 && p === p.trim());
 }
 
 /** Month-to-date spend for a budget scope. */

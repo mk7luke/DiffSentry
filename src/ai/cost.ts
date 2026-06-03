@@ -94,7 +94,13 @@ export function flushCostEvents(): void {
   const buffered = ctx.pending;
   ctx.pending = undefined;
   for (const ev of buffered) {
-    writeCostEvent(ctx, ev);
+    // Each write is isolated: a failure on one event must not abort the rest,
+    // and flushCostEvents must never throw — it runs in a reviewer finally block.
+    try {
+      writeCostEvent(ctx, ev);
+    } catch (err) {
+      logger.debug({ err }, "flushCostEvents: writeCostEvent failed");
+    }
   }
 }
 

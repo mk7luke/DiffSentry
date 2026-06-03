@@ -17,28 +17,43 @@ const RANGES: { key: string; label: string }[] = [
   { key: "mtd", label: "Month to date" },
 ];
 
-/** Number of day-columns the stacked chart should span for a given range. */
-function rangeDays(range: string, dayOfMonth: number): number {
-  if (range === "mtd") return Math.max(1, dayOfMonth);
+/** Number of day-columns a rolling range should span. */
+function rollingDays(range: string): number {
   const m = /^(\d+)d$/.exec(range);
   return m ? Math.min(Number.parseInt(m[1], 10), 90) : 30;
 }
 
-/** Bucket the per-day-per-model rows into a contiguous N-day axis ending today. */
-function buildStackedDays(daily: CostDailyModelRow[], days: number): StackedDay[] {
+/**
+ * Bucket the per-day-per-model rows into a contiguous UTC day axis. For a rolling
+ * range pass `days` (columns ending today); for month-to-date pass `startIso`
+ * (the API's UTC month start) so the axis is anchored to the same window the API
+ * summed — not `dayOfMonth - 1` days off the client clock, which can drift by a
+ * day across a month boundary.
+ */
+function buildStackedDays(daily: CostDailyModelRow[], opts: { days?: number; startIso?: string | null }): StackedDay[] {
   const byDay = new Map<string, Record<string, number>>();
   for (const r of daily) {
     const parts = byDay.get(r.day) ?? {};
     parts[r.model] = (parts[r.model] ?? 0) + r.cost_usd;
     byDay.set(r.day, parts);
   }
+  const todayKey = new Date().toISOString().slice(0, 10);
+  let startKey: string;
+  if (opts.startIso) {
+    startKey = opts.startIso.slice(0, 10);
+  } else {
+    const d = new Date(`${todayKey}T00:00:00.000Z`);
+    d.setUTCDate(d.getUTCDate() - ((opts.days ?? 30) - 1));
+    startKey = d.toISOString().slice(0, 10);
+  }
   const out: StackedDay[] = [];
-  const now = new Date();
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(now);
-    d.setUTCDate(d.getUTCDate() - i);
-    const key = d.toISOString().slice(0, 10);
+  const cur = new Date(`${startKey}T00:00:00.000Z`);
+  const end = new Date(`${todayKey}T00:00:00.000Z`);
+  // Walk start→today inclusive. The cap guards against a malformed startIso.
+  while (cur <= end && out.length < 400) {
+    const key = cur.toISOString().slice(0, 10);
     out.push({ day: key, parts: byDay.get(key) ?? {} });
+    cur.setUTCDate(cur.getUTCDate() + 1);
   }
   return out;
 }
@@ -78,8 +93,12 @@ export function CostPage() {
 function CostBody({ data, range }: { data: CostResponse; range: string }) {
   const colors = useMemo(() => assignColors(data.models), [data.models]);
   const days = useMemo(
-    () => buildStackedDays(data.daily, rangeDays(range, data.dayOfMonth)),
-    [data.daily, range, data.dayOfMonth],
+    () =>
+      buildStackedDays(
+        data.daily,
+        range === "mtd" ? { startIso: data.since } : { days: rollingDays(range) },
+      ),
+    [data.daily, range, data.since],
   );
 
   const totalTokens = data.totals.input_tokens + data.totals.output_tokens;
