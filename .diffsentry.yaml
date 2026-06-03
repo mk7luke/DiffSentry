@@ -252,7 +252,11 @@ reviews:
       path: "src/**"
 
     - name: "String-interpolated SQL"
-      pattern: 'db\.(prepare|exec)\s*\(\s*[`"''][^)]*\$\{'
+      # Scan inside the template literal (`[^`]*`) rather than `[^)]*`: the old
+      # form stopped at the first `)`, so it MISSED interpolation when a SQL
+      # function call preceded it, e.g. `SELECT COUNT(*) ... WHERE id=${id}`.
+      # `${` only interpolates in backtick strings, so we anchor to a backtick.
+      pattern: 'db\.(prepare|exec)\s*\(\s*`[^`]*\$\{'
       severity: "critical"
       type: "security"
       message: "Building SQL with template-literal interpolation defeats better-sqlite3's parameter binding and opens SQL injection. The schema in src/storage/db.ts is parameter-free DDL — everything else must use `?` placeholders."
@@ -260,7 +264,12 @@ reviews:
       path: "src/**"
 
     - name: "Octokit call without error handling"
-      pattern: 'await\s+octokit\.[a-zA-Z.]+\([^)]*\)(?!\s*\.(catch|then))'
+      # Line-level: flag `await octokit.x.y(` only when the line has no
+      # `.catch`/`.then` anywhere. The old `\)(?!...)` form anchored the
+      # lookahead to the first `)`, so a nested call like
+      # `.createComment({ body: render() }).catch(...)` truncated early and
+      # false-fired despite being handled.
+      pattern: '^(?!.*\.(catch|then)\b).*await\s+octokit\.[a-zA-Z.]+\('
       severity: "minor"
       type: "suggestion"
       message: "Some Octokit calls in this codebase intentionally let errors bubble (fatal-on-startup), but most are inside a review pass where a single 4xx shouldn't abort the whole job."
