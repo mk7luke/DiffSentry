@@ -6,6 +6,8 @@ import { router } from "./router";
 import { AuthProvider } from "./auth/useAuth";
 import { EventStreamProvider } from "./realtime/useEventStream";
 import { ToastProvider } from "./realtime/toast";
+import { ThemeProvider } from "./theme/useTheme";
+import { BrandingProvider } from "./theme/useBranding";
 import "./styles/tokens.css";
 import "./styles/base.css";
 
@@ -21,14 +23,18 @@ const queryClient = new QueryClient({
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <EventStreamProvider>
-          <ToastProvider>
-            <RouterProvider router={router} />
-          </ToastProvider>
-        </EventStreamProvider>
-      </AuthProvider>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <EventStreamProvider>
+            <BrandingProvider>
+              <ToastProvider>
+                <RouterProvider router={router} />
+              </ToastProvider>
+            </BrandingProvider>
+          </EventStreamProvider>
+        </AuthProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   </StrictMode>,
 );

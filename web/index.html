@@ -3,8 +3,82 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="light dark" />
     <title>DiffSentry</title>
+    <!--
+      No-flash theming: apply the persisted theme / density / brand accent to
+      <html> BEFORE the stylesheet paints, so a light-mode or custom-brand user
+      never sees a dark/default flash on load. Mirrors the math in
+      web/src/theme/theme.ts — keep the two in sync.
+    -->
+    <script>
+      (function () {
+        try {
+          var ls = window.localStorage;
+          var get = function (k) {
+            try {
+              return ls.getItem(k);
+            } catch (e) {
+              return null;
+            }
+          };
+          var root = document.documentElement;
+          var DEFAULT_ACCENT = "#5a8dff";
+
+          var pref = get("ds-theme") || "dark";
+          var resolved =
+            pref === "system"
+              ? window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark"
+              : pref === "light"
+                ? "light"
+                : "dark";
+          root.setAttribute("data-theme", resolved);
+          root.style.colorScheme = resolved;
+
+          root.setAttribute("data-density", get("ds-density") === "compact" ? "compact" : "comfortable");
+
+          var parseHex = function (hex) {
+            if (typeof hex !== "string") return null;
+            var h = hex.trim().replace(/^#/, "");
+            if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+            if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
+            return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+          };
+          var clamp = function (n) {
+            return Math.max(0, Math.min(255, Math.round(n)));
+          };
+          var hx = function (c) {
+            return ("0" + clamp(c).toString(16)).slice(-2);
+          };
+          var toHex = function (rgb) {
+            return "#" + hx(rgb[0]) + hx(rgb[1]) + hx(rgb[2]);
+          };
+          var mix = function (rgb, t, a) {
+            return [rgb[0] + (t[0] - rgb[0]) * a, rgb[1] + (t[1] - rgb[1]) * a, rgb[2] + (t[2] - rgb[2]) * a];
+          };
+          var rgba = function (rgb, a) {
+            return "rgba(" + clamp(rgb[0]) + ", " + clamp(rgb[1]) + ", " + clamp(rgb[2]) + ", " + a + ")";
+          };
+          var accent = (get("ds-accent") || "").trim().toLowerCase();
+          var rgb = parseHex(accent);
+          if (rgb && accent !== DEFAULT_ACCENT) {
+            root.style.setProperty("--accent", toHex(rgb));
+            root.style.setProperty("--accent-bright", toHex(mix(rgb, [255, 255, 255], 0.18)));
+            root.style.setProperty("--accent-deep", toHex(mix(rgb, [0, 0, 0], 0.16)));
+            root.style.setProperty("--accent-glow", rgba(rgb, 0.32));
+            root.style.setProperty("--accent-soft", rgba(rgb, 0.1));
+            root.style.setProperty("--accent-line", rgba(rgb, 0.28));
+          }
+
+          var name = get("ds-instance");
+          if (name) document.title = name;
+        } catch (e) {
+          /* theming is best-effort; never block the app from booting */
+        }
+      })();
+    </script>
     <link
       rel="icon"
       type="image/svg+xml"

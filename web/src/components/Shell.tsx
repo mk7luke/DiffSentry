@@ -1,6 +1,8 @@
 import type { ComponentType, ReactNode, SVGProps } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
+import { useInstanceBranding } from "../theme/useBranding";
+import { SidebarThemeToggle } from "./appearance";
 import type { Capabilities } from "../api/types";
 import { AuditIcon, FindingsIcon, LogoIcon, OverviewIcon, PatternsIcon, SettingsIcon } from "./icons";
 
@@ -26,6 +28,7 @@ const NAV: NavItem[] = [
 
 function Sidebar() {
   const { login, role, capabilities, authEnabled } = useAuth();
+  const { instanceName } = useInstanceBranding();
   const showUser = !!login && (authEnabled || login !== "local");
   const initial = login ? login.slice(0, 1).toUpperCase() : "?";
   const items = NAV.filter((n) => !n.cap || capabilities[n.cap]);
@@ -35,7 +38,7 @@ function Sidebar() {
       <NavLink to="/" className="sidebar-head">
         <LogoIcon />
         <div>
-          <div className="wordmark">DiffSentry</div>
+          <div className="wordmark">{instanceName}</div>
           <div className="wordmark-sub">REVIEW OPS</div>
         </div>
       </NavLink>
@@ -47,20 +50,25 @@ function Sidebar() {
           </NavLink>
         ))}
       </nav>
-      {showUser ? (
-        <div className="sidebar-foot">
-          <span className="avatar">{initial}</span>
-          <span className="login" title={`@${login}`}>
-            @{login}
-            {role ? <span className={`rolechip role-${role}`}>{role}</span> : null}
-          </span>
-          {authEnabled ? (
-            <a className="signout" href="/dashboard/auth/logout">
-              Sign out
-            </a>
-          ) : null}
-        </div>
-      ) : null}
+      <div className="sidebar-foot">
+        {showUser ? (
+          <>
+            <span className="avatar">{initial}</span>
+            <span className="login" title={`@${login}`}>
+              @{login}
+              {role ? <span className={`rolechip role-${role}`}>{role}</span> : null}
+            </span>
+          </>
+        ) : (
+          <span className="login muted">Appearance</span>
+        )}
+        <SidebarThemeToggle />
+        {showUser && authEnabled ? (
+          <a className="signout" href="/dashboard/auth/logout">
+            Sign out
+          </a>
+        ) : null}
+      </div>
     </aside>
   );
 }

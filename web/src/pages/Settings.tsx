@@ -3,6 +3,7 @@ import { useAuth } from "../auth/useAuth";
 import { Breadcrumbs } from "../components/Shell";
 import { Card, Metric, PageHeader } from "../components/primitives";
 import { RoleBadge } from "../components/badges";
+import { BrandingForm, ThemeControls } from "../components/appearance";
 import { EmptyState, QueryBoundary } from "../components/states";
 import type { Capabilities } from "../api/types";
 import { formatBytes, relativeTime } from "../lib/format";
@@ -22,7 +23,17 @@ export function SettingsPage() {
   return (
     <>
       <Breadcrumbs crumbs={[{ label: "Settings" }]} />
-      <PageHeader title="Settings & health" subtitle="Persistence stats, recent warnings, and the signed-in session." />
+      <PageHeader title="Settings & health" subtitle="Appearance, persistence stats, recent warnings, and the signed-in session." />
+      <div className="grid two" style={{ marginBottom: 16 }}>
+        <Card title="Appearance" subtitle="theme · density">
+          <ThemeControls />
+        </Card>
+        {auth.capabilities.manageConfig ? (
+          <Card title="Branding" subtitle="admin · instance-wide">
+            <BrandingForm />
+          </Card>
+        ) : null}
+      </div>
       <QueryBoundary query={query} loadingLabel="Loading health…">
         {(data) => {
           const c = data.counts;

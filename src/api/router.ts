@@ -16,6 +16,17 @@ import {
   type RoleConfig,
 } from "../dashboard/roles.js";
 import { insertAuditLog, setRole } from "../storage/dao.js";
+import {
+  clearAccentColorOverride,
+  clearInstanceNameOverride,
+  isValidAccent,
+  normalizeAccent,
+  resolveBranding,
+  sanitizeInstanceName,
+  setAccentColorOverride,
+  setInstanceNameOverride,
+} from "../dashboard/branding.js";
+import { bus } from "../realtime/bus.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
 import {
@@ -372,6 +383,91 @@ export function createApiRouter(deps: ApiDeps): express.Router {
     } catch (err) {
       logger.error({ err, login }, "api POST /roles failed");
       sendError(res, 500, "internal", "Failed to update role.");
+    }
+  });
+
+  // ─── /settings/branding ─────────────────────────────────────────────
+  // Read the resolved instance branding (name + accent). Any authenticated
+  // role may read it — the SPA applies it as the theme accent + wordmark.
+  router.get("/settings/branding", (_req, res) => {
+    try {
+      sendData(res, resolveBranding());
+    } catch (err) {
+      logger.error({ err }, "api /settings/branding failed");
+      sendError(res, 500, "internal", "Failed to load branding.");
+    }
+  });
+
+  // ─── /settings/branding (admin write) ────────────────────────────────
+  // Set or clear the instance name / accent color. Same write contract as
+  // /roles: requireRole('admin') + CSRF + audit_log, plus a 'settings.updated'
+  // bus event so connected dashboards re-brand live. Validation runs for both
+  // fields before any write, so a bad accent can't leave a half-applied change.
+  router.post("/settings/branding", requireRole("admin"), csrf.verify, (req, res) => {
+    const actor = getActor(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const hasName = Object.prototype.hasOwnProperty.call(body, "instanceName");
+    const hasAccent = Object.prototype.hasOwnProperty.call(body, "accentColor");
+    if (!hasName && !hasAccent) {
+      sendError(res, 400, "bad_request", "Provide 'instanceName' and/or 'accentColor'.");
+      return;
+    }
+
+    // Phase 1 — validate everything and stage the writes (no mutation yet).
+    const writes: Array<() => void> = [];
+    const changes: Record<string, string | null> = {};
+    if (hasName) {
+      const raw = body.instanceName;
+      if (raw == null || raw === "") {
+        writes.push(() => clearInstanceNameOverride());
+        changes.instanceName = null;
+      } else {
+        const name = sanitizeInstanceName(raw);
+        if (!name) {
+          sendError(res, 400, "bad_request", "'instanceName' must be a non-empty string.");
+          return;
+        }
+        writes.push(() => setInstanceNameOverride(name, actor?.login ?? null));
+        changes.instanceName = name;
+      }
+    }
+    if (hasAccent) {
+      const raw = body.accentColor;
+      if (raw == null || raw === "") {
+        writes.push(() => clearAccentColorOverride());
+        changes.accentColor = null;
+      } else if (!isValidAccent(raw)) {
+        sendError(res, 400, "bad_request", "'accentColor' must be a hex color like #5a8dff.");
+        return;
+      } else {
+        const color = normalizeAccent(raw);
+        writes.push(() => setAccentColorOverride(color, actor?.login ?? null));
+        changes.accentColor = color;
+      }
+    }
+
+    // Phase 2 — apply, audit, and broadcast.
+    try {
+      for (const write of writes) write();
+      const resolved = resolveBranding();
+      insertAuditLog({
+        actorLogin: actor?.login ?? null,
+        actorRole: actor?.role ?? null,
+        action: "settings.branding",
+        targetType: "settings",
+        targetRef: "global",
+        payload: changes,
+        result: "ok",
+      });
+      bus.publish("settings.updated", {
+        instanceName: resolved.instanceName,
+        accentColor: resolved.accentColor,
+        updatedBy: actor?.login ?? null,
+      });
+      sendData(res, resolved);
+    } catch (err) {
+      logger.error({ err }, "api POST /settings/branding failed");
+      sendError(res, 500, "internal", "Failed to update branding.");
     }
   });
 

@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiSend } from "./client";
 import type {
   AuditResponse,
+  BrandingResponse,
+  BrandingUpdate,
   FindingsResponse,
   HealthResponse,
   MeResponse,
@@ -13,6 +15,8 @@ import type {
   ReposResponse,
   Role,
 } from "./types";
+
+export const BRANDING_QUERY_KEY = ["branding"] as const;
 
 export function useMe() {
   return useQuery({
@@ -111,6 +115,28 @@ export function useAudit(query: AuditQuery, enabled: boolean) {
       }),
     enabled,
     placeholderData: (prev) => prev,
+  });
+}
+
+/** Instance branding (name + accent). Readable by any authenticated role; the
+ * SPA applies it as the theme accent + sidebar wordmark + document title. */
+export function useBranding() {
+  return useQuery({
+    queryKey: BRANDING_QUERY_KEY,
+    queryFn: () => apiGet<BrandingResponse>("/settings/branding"),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Admin: update instance branding. Returns the resolved branding. */
+export function useSetBranding() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: BrandingUpdate) => apiSend<BrandingResponse>("/settings/branding", { body: vars }),
+    onSuccess: (data) => {
+      qc.setQueryData(BRANDING_QUERY_KEY, data);
+      void qc.invalidateQueries({ queryKey: ["audit"] });
+    },
   });
 }
 

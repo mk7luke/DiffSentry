@@ -40,12 +40,24 @@ export interface ActionPayload {
   detail?: string;
 }
 
+/** Instance settings changed (e.g. branding) — emitted from the admin write
+ * endpoint so every connected dashboard can re-brand live without a refresh. */
+export interface SettingsUpdatedPayload {
+  /** Resolved instance name after the change. */
+  instanceName: string;
+  /** Resolved accent color (hex) after the change. */
+  accentColor: string;
+  /** The admin who made the change, if known. */
+  updatedBy: string | null;
+}
+
 /** Topic → payload map. Add new topics here so publish/subscribe stay typed. */
 export interface BusEventMap {
   "review.started": ReviewLifecyclePayload;
   "review.finished": ReviewLifecyclePayload;
   "review.failed": ReviewLifecyclePayload;
   "action.performed": ActionPayload;
+  "settings.updated": SettingsUpdatedPayload;
 }
 
 export type BusTopic = keyof BusEventMap;
