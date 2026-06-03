@@ -6,6 +6,9 @@ import { router } from "./router";
 import { AuthProvider } from "./auth/useAuth";
 import { EventStreamProvider } from "./realtime/useEventStream";
 import { ToastProvider } from "./realtime/toast";
+import { PWAProvider } from "./pwa/usePWA";
+import { PWAPrompts } from "./pwa/PWAPrompts";
+import { initPersistence } from "./lib/persist";
 import "./styles/tokens.css";
 import "./styles/base.css";
 
@@ -15,20 +18,34 @@ const queryClient = new QueryClient({
       staleTime: 30_000,
       retry: 1,
       refetchOnWindowFocus: false,
+      // Offline: keep cached data usable for a day so a cold PWA launch can
+      // paint last-viewed data (see lib/persist.ts) before the network returns.
+      gcTime: 1000 * 60 * 60 * 24,
     },
   },
 });
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <EventStreamProvider>
-          <ToastProvider>
-            <RouterProvider router={router} />
-          </ToastProvider>
-        </EventStreamProvider>
-      </AuthProvider>
-    </QueryClientProvider>
-  </StrictMode>,
-);
+// Restore the persisted (user-scoped) query cache before first paint so an
+// offline launch shows last-viewed data instead of empty skeletons.
+async function bootstrap() {
+  await initPersistence(queryClient);
+
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <PWAProvider>
+          <AuthProvider>
+            <EventStreamProvider>
+              <ToastProvider>
+                <RouterProvider router={router} />
+                <PWAPrompts />
+              </ToastProvider>
+            </EventStreamProvider>
+          </AuthProvider>
+        </PWAProvider>
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+}
+
+void bootstrap();

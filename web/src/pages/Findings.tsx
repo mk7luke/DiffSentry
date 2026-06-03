@@ -152,7 +152,7 @@ export function FindingsPage() {
                   <tbody>
                     {data.groups.map((g) => (
                       <tr key={g.fingerprint}>
-                        <td>
+                        <td data-label="Severity">
                           <SeverityBadge severity={g.severity} />
                         </td>
                         <td>
@@ -169,9 +169,9 @@ export function FindingsPage() {
                             {g.title ?? "(untitled)"}
                           </button>
                         </td>
-                        <td className="num strong">{g.occurrences}</td>
-                        <td className="num">{g.repos}</td>
-                        <td className="right muted">{relativeTime(g.last_seen)}</td>
+                        <td className="num strong" data-label="Occurrences">{g.occurrences}</td>
+                        <td className="num" data-label="Repos">{g.repos}</td>
+                        <td className="right muted" data-label="Last seen">{relativeTime(g.last_seen)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -200,15 +200,15 @@ export function FindingsPage() {
                       <tbody>
                         {data.rows.map((f) => (
                           <tr key={f.id} data-sev={(f.severity ?? "").toLowerCase()}>
-                            <td>
+                            <td data-label="Severity">
                               <SeverityBadge severity={f.severity} />
                             </td>
-                            <td className="mono">
+                            <td className="mono" data-label="Repo">
                               <Link className="link" to={`/repos/${encodeURIComponent(f.owner)}/${encodeURIComponent(f.repo)}`}>
                                 {f.owner}/{f.repo}
                               </Link>
                             </td>
-                            <td className="mono">
+                            <td className="mono" data-label="PR">
                               <Link
                                 className="link"
                                 to={`/repos/${encodeURIComponent(f.owner)}/${encodeURIComponent(f.repo)}/pr/${f.number}`}
@@ -216,13 +216,13 @@ export function FindingsPage() {
                                 #{f.number}
                               </Link>
                             </td>
-                            <td className="mono">
+                            <td className="mono" data-label="Location">
                               {f.path ?? ""}
                               {f.line ? <span className="line-num">:{f.line}</span> : null}
                             </td>
                             <td className="strong">{f.title ?? "—"}</td>
-                            <td className="muted">{f.source ?? "—"}</td>
-                            <td className="right muted">{relativeTime(f.created_at)}</td>
+                            <td className="muted" data-label="Source">{f.source ?? "—"}</td>
+                            <td className="right muted" data-label="When">{relativeTime(f.created_at)}</td>
                           </tr>
                         ))}
                       </tbody>

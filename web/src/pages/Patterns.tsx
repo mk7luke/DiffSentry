@@ -43,15 +43,15 @@ export function PatternsPage() {
                       {rules.map((r, i) => (
                         <tr key={i}>
                           <td className="mono strong">{r.rule_name}</td>
-                          <td className="muted">{r.source}</td>
-                          <td className="mono">
+                          <td className="muted" data-label="Source">{r.source}</td>
+                          <td className="mono" data-label="Repo">
                             <Link className="link" to={`/repos/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.repo)}`}>
                               {r.owner}/{r.repo}
                             </Link>
                           </td>
-                          <td className={`num ${r.hits_30d > 0 ? "strong" : "zero"}`}>{r.hits_30d}</td>
-                          <td className="num">{r.hits_total}</td>
-                          <td className="right muted">{r.last_hit ? relativeTime(r.last_hit) : "—"}</td>
+                          <td className={`num ${r.hits_30d > 0 ? "strong" : "zero"}`} data-label="Hits · 30d">{r.hits_30d}</td>
+                          <td className="num" data-label="Hits · total">{r.hits_total}</td>
+                          <td className="right muted" data-label="Last hit">{r.last_hit ? relativeTime(r.last_hit) : "—"}</td>
                         </tr>
                       ))}
                     </tbody>

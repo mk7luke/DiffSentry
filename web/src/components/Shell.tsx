@@ -1,11 +1,26 @@
-import type { ComponentType, ReactNode, SVGProps } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { useEffect, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../auth/useAuth";
+import { usePWA } from "../pwa/usePWA";
+import { purgePersistedCache } from "../lib/persist";
 import type { Capabilities } from "../api/types";
-import { AuditIcon, FindingsIcon, LogoIcon, OverviewIcon, PatternsIcon, SettingsIcon } from "./icons";
+import {
+  AuditIcon,
+  CloseIcon,
+  FindingsIcon,
+  LogoIcon,
+  MenuIcon,
+  OfflineIcon,
+  OverviewIcon,
+  PatternsIcon,
+  SettingsIcon,
+} from "./icons";
 
-// Page shell: sticky left sidebar (brand + primary nav + signed-in user) and
-// the main content column. Mirrors renderLayout() from src/dashboard/layout.ts.
+// Page shell: a left sidebar (brand + primary nav + signed-in user) and the
+// main content column. On phones the sidebar collapses into an off-canvas
+// drawer opened from a sticky top bar. Mirrors renderLayout() from
+// src/dashboard/layout.ts.
 
 interface NavItem {
   to: string;
@@ -24,15 +39,38 @@ const NAV: NavItem[] = [
   { to: "/settings", label: "Settings", Icon: SettingsIcon, end: false },
 ];
 
-function Sidebar() {
+/** Small "offline" pill, shown in the sidebar foot and the mobile top bar. */
+function OfflinePill() {
+  const { offline } = usePWA();
+  if (!offline) return null;
+  return (
+    <span className="offline-pill" title="You're offline — showing last-viewed data.">
+      <OfflineIcon />
+      Offline
+    </span>
+  );
+}
+
+function Sidebar({ onNavigate }: { onNavigate: () => void }) {
   const { login, role, capabilities, authEnabled } = useAuth();
+  const queryClient = useQueryClient();
   const showUser = !!login && (authEnabled || login !== "local");
   const initial = login ? login.slice(0, 1).toUpperCase() : "?";
   const items = NAV.filter((n) => !n.cap || capabilities[n.cap]);
 
+  // Sign-out clears the user-scoped offline cache before the full-page redirect
+  // so the next visitor on this device can't read this user's cached data.
+  const signOut = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    const href = e.currentTarget.href;
+    void purgePersistedCache(queryClient).finally(() => {
+      window.location.href = href;
+    });
+  };
+
   return (
-    <aside className="sidebar">
-      <NavLink to="/" className="sidebar-head">
+    <aside className="sidebar" aria-label="Sidebar">
+      <NavLink to="/" className="sidebar-head" onClick={onNavigate}>
         <LogoIcon />
         <div>
           <div className="wordmark">DiffSentry</div>
@@ -41,7 +79,13 @@ function Sidebar() {
       </NavLink>
       <nav className="sidebar-nav" aria-label="Primary">
         {items.map(({ to, label, Icon, end }) => (
-          <NavLink key={to} to={to} end={end} className={({ isActive }) => `snav${isActive ? " active" : ""}`}>
+          <NavLink
+            key={to}
+            to={to}
+            end={end}
+            onClick={onNavigate}
+            className={({ isActive }) => `snav${isActive ? " active" : ""}`}
+          >
             <Icon />
             <span>{label}</span>
           </NavLink>
@@ -55,20 +99,78 @@ function Sidebar() {
             {role ? <span className={`rolechip role-${role}`}>{role}</span> : null}
           </span>
           {authEnabled ? (
-            <a className="signout" href="/dashboard/auth/logout">
+            <a className="signout" href="/dashboard/auth/logout" onClick={signOut}>
               Sign out
             </a>
           ) : null}
         </div>
-      ) : null}
+      ) : (
+        <div className="sidebar-foot offline-only">
+          <OfflinePill />
+        </div>
+      )}
     </aside>
   );
 }
 
 export function Shell() {
+  const [navOpen, setNavOpen] = useState(false);
+  const location = useLocation();
+
+  // Close the drawer on any route change so a tapped nav link doesn't leave it
+  // hanging open over the new page.
+  useEffect(() => {
+    setNavOpen(false);
+  }, [location.pathname]);
+
+  // Escape closes the drawer; lock body scroll while it's open on mobile.
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setNavOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    document.body.classList.add("nav-locked");
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.classList.remove("nav-locked");
+    };
+  }, [navOpen]);
+
   return (
-    <div className="app">
-      <Sidebar />
+    <div className={`app${navOpen ? " nav-open" : ""}`}>
+      <header className="topbar">
+        <button
+          className="topbar-menu"
+          aria-label="Open navigation"
+          aria-expanded={navOpen}
+          aria-controls="app-sidebar"
+          onClick={() => setNavOpen(true)}
+        >
+          <MenuIcon />
+        </button>
+        <NavLink to="/" className="topbar-brand">
+          <LogoIcon />
+          <span>DiffSentry</span>
+        </NavLink>
+        <OfflinePill />
+      </header>
+
+      <div id="app-sidebar" className="sidebar-wrap">
+        <Sidebar onNavigate={() => setNavOpen(false)} />
+        {/* Close button lives inside the drawer on mobile (hidden on desktop). */}
+        <button className="drawer-close" aria-label="Close navigation" onClick={() => setNavOpen(false)}>
+          <CloseIcon />
+        </button>
+      </div>
+
+      <div
+        className="nav-backdrop"
+        hidden={!navOpen}
+        onClick={() => setNavOpen(false)}
+        aria-hidden="true"
+      />
+
       <main className="main">
         <Outlet />
       </main>

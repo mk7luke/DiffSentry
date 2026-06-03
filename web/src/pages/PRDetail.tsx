@@ -210,10 +210,10 @@ export function PRDetailPage() {
                           const sha = (f.review_sha ?? "").slice(0, 7);
                           return (
                             <tr key={f.id} data-sev={(f.severity ?? "").toLowerCase()}>
-                              <td>
+                              <td data-label="Severity">
                                 <SeverityBadge severity={f.severity} />
                               </td>
-                              <td className="mono">
+                              <td className="mono" data-label="Location">
                                 {f.path ?? ""}
                                 {f.line ? <span className="line-num">:{f.line}</span> : null}
                               </td>
@@ -228,7 +228,7 @@ export function PRDetailPage() {
                                   </details>
                                 ) : null}
                               </td>
-                              <td className="nowrap">
+                              <td className="nowrap" data-label="Review">
                                 <span className="mono" style={{ color: isLatest ? "var(--accent-bright)" : "var(--text-3)" }} title={f.review_at}>
                                   {sha || "—"}
                                 </span>
@@ -242,7 +242,7 @@ export function PRDetailPage() {
                                   </span>
                                 )}
                               </td>
-                              <td className="muted">{f.source ?? "—"}</td>
+                              <td className="muted" data-label="Source">{f.source ?? "—"}</td>
                             </tr>
                           );
                         })}
@@ -267,16 +267,16 @@ export function PRDetailPage() {
                       <tbody>
                         {a.reviews.map((rv) => (
                           <tr key={rv.id}>
-                            <td className="right muted">{relativeTime(rv.created_at)}</td>
-                            <td className="mono" style={{ color: "var(--accent-bright)" }}>
+                            <td className="right muted" data-label="When">{relativeTime(rv.created_at)}</td>
+                            <td className="mono" style={{ color: "var(--accent-bright)" }} data-label="SHA">
                               {(rv.sha ?? "").slice(0, 7)}
                             </td>
-                            <td className="muted">{rv.profile ?? "—"}</td>
-                            <td>
+                            <td className="muted" data-label="Profile">{rv.profile ?? "—"}</td>
+                            <td data-label="Risk">
                               <RiskBadge level={rv.risk_level} score={rv.risk_score} />
                             </td>
-                            <td className={`num ${rv.finding_count > 0 ? "strong" : "zero"}`}>{rv.finding_count}</td>
-                            <td>
+                            <td className={`num ${rv.finding_count > 0 ? "strong" : "zero"}`} data-label="Findings">{rv.finding_count}</td>
+                            <td data-label="Approval">
                               <ApprovalBadge approval={rv.approval} />
                             </td>
                           </tr>
