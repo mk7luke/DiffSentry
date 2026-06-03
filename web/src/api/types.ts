@@ -329,3 +329,25 @@ export interface ReplayResponse {
   dispatchStatus: number;
   result: string;
 }
+
+// ─── Search (Cmd-K palette) ─────────────────────────────────────────
+
+export type SearchResultType = "repo" | "pr" | "finding" | "learning";
+
+export interface SearchResult {
+  type: SearchResultType;
+  title: string;
+  subtitle: string | null;
+  /** SPA client-side route to navigate to on Enter. */
+  to: string;
+  owner: string;
+  repo: string;
+  number: number | null;
+  severity: string | null;
+  score: number;
+}
+
+export interface SearchResponse {
+  q: string;
+  results: SearchResult[];
+}
