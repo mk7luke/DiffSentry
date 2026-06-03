@@ -91,13 +91,17 @@ interface LaneDef {
   title: string;
   match: (s: ReviewQueueState) => boolean;
   tone: "neutral" | "accent" | "good" | "danger";
+  /** Terminal lanes sort newest-finished first; active lanes oldest-queued
+   * first (longest-waiting at top). Declared per-lane so the comparator never
+   * has to infer it from an individual card's state. */
+  terminal: boolean;
 }
 
 const LANES: LaneDef[] = [
-  { key: "queued", title: "Queued", match: (s) => s === "queued", tone: "neutral" },
-  { key: "running", title: "Running", match: (s) => s === "running", tone: "accent" },
-  { key: "done", title: "Done", match: (s) => s === "done" || s === "canceled", tone: "good" },
-  { key: "failed", title: "Failed", match: (s) => s === "failed", tone: "danger" },
+  { key: "queued", title: "Queued", match: (s) => s === "queued", tone: "neutral", terminal: false },
+  { key: "running", title: "Running", match: (s) => s === "running", tone: "accent", terminal: false },
+  { key: "done", title: "Done", match: (s) => s === "done" || s === "canceled", tone: "good", terminal: true },
+  { key: "failed", title: "Failed", match: (s) => s === "failed", tone: "danger", terminal: true },
 ];
 
 function QueueCard({ entry, now }: { entry: ReviewQueueEntry; now: number }) {
@@ -209,7 +213,7 @@ export function QueuePage() {
       const items = all
         .filter((e) => lane.match(e.state))
         .sort((a, b) =>
-          isTerminal(a.state)
+          lane.terminal
             ? (b.finishedAt ?? "").localeCompare(a.finishedAt ?? "")
             : a.enqueuedAt.localeCompare(b.enqueuedAt),
         );
