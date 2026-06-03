@@ -287,8 +287,19 @@ const v2SchemaOkDbs = new WeakSet<DB>();
  *  schema result), so a missing v2 schema doesn't log on every v2 access. */
 let _v2SchemaMissingWarned = false;
 
-/** v2 tables the command-center DAO helpers read/write. */
-const REQUIRED_V2_TABLES = ["audit_log", "settings_overrides", "cost_events", "webhook_deliveries", "roles"];
+/** Every table introduced by the command-center (v2) migration — a full
+ *  "did migration 2 run" check, not just the subset the DAO helpers touch. */
+const REQUIRED_V2_TABLES = [
+  "audit_log",
+  "settings_overrides",
+  "api_tokens",
+  "cost_events",
+  "notification_channels",
+  "alert_rules",
+  "saved_views",
+  "webhook_deliveries",
+  "roles",
+];
 /** Triage columns the v2 helpers depend on (`accepted` is v1; the rest are v2). */
 const REQUIRED_FINDINGS_COLUMNS = ["accepted", "snoozed_until", "triaged_by", "triaged_at", "triage_note"];
 
@@ -389,6 +400,11 @@ function isValidScope(scope: string): boolean {
   return parts.length === 2 && parts.every((p) => SCOPE_SEGMENT_RE.test(p));
 }
 
+/** A settings-override key must be a non-empty, non-whitespace string. */
+function isValidKey(key: string): boolean {
+  return typeof key === "string" && key.trim().length > 0;
+}
+
 /**
  * Upsert a settings override. `scope` is 'global' or 'owner/repo'. `value` is
  * JSON-serialized before storage.
@@ -404,6 +420,10 @@ export function upsertSettingOverride(opts: {
   if (!ensureCommandCenterSchema(db)) return;
   if (!isValidScope(opts.scope)) {
     logger.debug({ scope: opts.scope, key: opts.key }, "dao.upsertSettingOverride: invalid scope — skipping write");
+    return;
+  }
+  if (!isValidKey(opts.key)) {
+    logger.debug({ scope: opts.scope, key: opts.key }, "dao.upsertSettingOverride: invalid key — skipping write");
     return;
   }
   try {
@@ -451,6 +471,10 @@ export function getSettingOverride<T = unknown>(scope: string, key: string): T |
     logger.debug({ scope, key }, "dao.getSettingOverride: invalid scope — ignoring");
     return undefined;
   }
+  if (!isValidKey(key)) {
+    logger.debug({ scope, key }, "dao.getSettingOverride: invalid key — ignoring");
+    return undefined;
+  }
   try {
     const row = db
       .prepare(`SELECT value_json FROM settings_overrides WHERE scope = ? AND key = ?`)
@@ -477,6 +501,10 @@ export function deleteSettingOverride(scope: string, key: string): void {
   if (!ensureCommandCenterSchema(db)) return;
   if (!isValidScope(scope)) {
     logger.debug({ scope, key }, "dao.deleteSettingOverride: invalid scope — skipping");
+    return;
+  }
+  if (!isValidKey(key)) {
+    logger.debug({ scope, key }, "dao.deleteSettingOverride: invalid key — skipping");
     return;
   }
   try {
@@ -590,31 +618,32 @@ export function triageFinding(opts: {
   if (!ensureCommandCenterSchema(db)) return false;
   try {
     const sets: string[] = [];
-    const params: unknown[] = [];
-    if (opts.accepted !== undefined) {
-      sets.push("accepted = ?");
-      params.push(opts.accepted == null ? null : opts.accepted ? 1 : 0);
-    }
-    if (opts.snoozedUntil !== undefined) {
-      sets.push("snoozed_until = ?");
-      params.push(opts.snoozedUntil);
-    }
-    if (opts.triageNote !== undefined) {
-      sets.push("triage_note = ?");
-      params.push(opts.triageNote);
-    }
-    if (opts.triagedBy !== undefined) {
-      sets.push("triaged_by = ?");
-      params.push(opts.triagedBy);
-    }
+    const setParams: unknown[] = [];
+    // Parallel "<col> IS NOT ?" predicates so the UPDATE only matches when at
+    // least one supplied field actually differs — repeat calls with identical
+    // values then leave the row (and triaged_at) untouched. `IS NOT` is the
+    // null-safe inequality SQLite needs to compare against NULL columns.
+    const diffPredicates: string[] = [];
+    const diffParams: unknown[] = [];
+    const field = (col: string, value: unknown): void => {
+      sets.push(`${col} = ?`);
+      setParams.push(value);
+      diffPredicates.push(`${col} IS NOT ?`);
+      diffParams.push(value);
+    };
+    if (opts.accepted !== undefined) field("accepted", opts.accepted == null ? null : opts.accepted ? 1 : 0);
+    if (opts.snoozedUntil !== undefined) field("snoozed_until", opts.snoozedUntil);
+    if (opts.triageNote !== undefined) field("triage_note", opts.triageNote);
+    if (opts.triagedBy !== undefined) field("triaged_by", opts.triagedBy);
     // No actual triage field supplied — don't stamp triaged_at (or touch the
     // row at all) for a no-op call (e.g. only `findingId` was passed).
     if (sets.length === 0) return false;
-    // Stamp when any field is updated.
+    // Stamp the time only on a row we actually update.
     sets.push("triaged_at = ?");
-    params.push(new Date().toISOString());
-    params.push(opts.findingId);
-    const info = db.prepare(`UPDATE findings SET ${sets.join(", ")} WHERE id = ?`).run(...params);
+    setParams.push(new Date().toISOString());
+    const info = db
+      .prepare(`UPDATE findings SET ${sets.join(", ")} WHERE id = ? AND (${diffPredicates.join(" OR ")})`)
+      .run(...setParams, opts.findingId, ...diffParams);
     return info.changes > 0;
   } catch (err) {
     logger.debug({ err }, "dao.triageFinding failed");
@@ -632,13 +661,18 @@ export function setRole(opts: { login: string; role: Role | null; grantedBy?: st
   const db = openDatabase();
   if (!db) return;
   if (!ensureCommandCenterSchema(db)) return;
+  const login = (opts.login ?? "").trim();
+  if (login.length === 0) {
+    logger.debug({ login: opts.login }, "dao.setRole: empty login — skipping");
+    return;
+  }
   try {
     if (opts.role == null) {
-      db.prepare(`DELETE FROM roles WHERE login = ?`).run(opts.login);
+      db.prepare(`DELETE FROM roles WHERE login = ?`).run(login);
       return;
     }
     if (!VALID_ROLE_SET.has(opts.role)) {
-      logger.debug({ login: opts.login, role: opts.role }, "dao.setRole: unknown role — refusing to persist");
+      logger.debug({ login, role: opts.role }, "dao.setRole: unknown role — refusing to persist");
       return;
     }
     db.prepare(
@@ -648,7 +682,7 @@ export function setRole(opts: { login: string; role: Role | null; grantedBy?: st
          role = excluded.role,
          granted_by = excluded.granted_by,
          granted_at = excluded.granted_at`,
-    ).run(opts.login, opts.role, opts.grantedBy ?? null, new Date().toISOString());
+    ).run(login, opts.role, opts.grantedBy ?? null, new Date().toISOString());
   } catch (err) {
     logger.debug({ err }, "dao.setRole failed");
   }
@@ -663,12 +697,16 @@ export function getRole(login: string): Role | undefined {
   const db = openDatabase();
   if (!db) return undefined;
   if (!ensureCommandCenterSchema(db)) return undefined;
+  const normalizedLogin = (login ?? "").trim();
+  if (normalizedLogin.length === 0) return undefined;
   try {
-    const row = db.prepare(`SELECT role FROM roles WHERE login = ?`).get(login) as { role?: string } | undefined;
+    const row = db.prepare(`SELECT role FROM roles WHERE login = ?`).get(normalizedLogin) as
+      | { role?: string }
+      | undefined;
     const role = row?.role;
     if (role == null) return undefined;
     if (!VALID_ROLE_SET.has(role)) {
-      logger.warn({ login, role }, "dao.getRole: stored role is not recognized — ignoring");
+      logger.warn({ login: normalizedLogin, role }, "dao.getRole: stored role is not recognized — ignoring");
       return undefined;
     }
     // Safe: VALID_ROLE_SET.has(role) just confirmed role is one of VALID_ROLES.
