@@ -295,6 +295,29 @@ export interface PatternsResponse {
   rules: PatternRuleRow[];
 }
 
+// ─── Review queue board (mirror src/realtime/bus.ts) ─────────────────
+
+export type ReviewQueueState = "queued" | "running" | "done" | "failed" | "canceled";
+
+export interface ReviewQueueEntry {
+  key: string;
+  owner: string;
+  repo: string;
+  number: number;
+  mode: "full" | "incremental";
+  state: ReviewQueueState;
+  phase: string | null;
+  enqueuedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  attempt: number;
+}
+
+export interface QueueResponse {
+  entries: ReviewQueueEntry[];
+}
+
 // ─── Webhook deliveries (mirror src/dashboard/queries.ts) ────────────
 
 export interface WebhookDeliveryRow {

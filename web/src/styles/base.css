@@ -2173,3 +2173,244 @@ label.field {
   align-items: center;
   gap: 5px;
 }
+
+/* ─── Review queue board (W1.x) ────────────────────────────────────── */
+.board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 620px) {
+  .board {
+    grid-template-columns: 1fr;
+  }
+}
+.lane {
+  background: linear-gradient(180deg, var(--bg-elev) 0%, #10131c 100%);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+  overflow: hidden;
+}
+.lane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--line-soft);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent);
+}
+.lane-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.lane-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  min-width: 20px;
+  text-align: center;
+  padding: 1px 7px;
+}
+/* Lane accent on the header underline + title hue. */
+.lane.tone-accent .lane-head {
+  border-bottom-color: var(--accent-line);
+}
+.lane.tone-accent .lane-title {
+  color: var(--accent-bright);
+}
+.lane.tone-good .lane-title {
+  color: #bff5d1;
+}
+.lane.tone-danger .lane-head {
+  border-bottom-color: var(--danger-line);
+}
+.lane.tone-danger .lane-title {
+  color: var(--sev-crit);
+}
+.lane-body {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px;
+  max-height: 640px;
+  overflow-y: auto;
+}
+.lane-empty {
+  color: var(--text-4);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: center;
+  padding: 14px 0;
+}
+
+/* Card */
+.qcard {
+  position: relative;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 10px 11px 10px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+  animation: toast-in 0.16s ease-out;
+}
+.qcard::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--text-4);
+}
+.qcard.state-queued::before {
+  background: var(--text-3);
+}
+.qcard.state-running::before {
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+.qcard.state-done::before {
+  background: var(--good);
+}
+.qcard.state-failed::before {
+  background: var(--sev-crit);
+  box-shadow: 0 0 8px var(--sev-crit-line);
+}
+.qcard.state-canceled::before {
+  background: var(--text-4);
+}
+.qcard.state-canceled {
+  opacity: 0.72;
+}
+.qcard-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.qcard-pr {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.qcard-repo {
+  font-size: 11px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qcard-pr:hover .qcard-repo {
+  color: var(--text-2);
+}
+.qcard-num {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+}
+.qcard-pr:hover .qcard-num {
+  color: var(--accent-bright);
+}
+.qcard-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+.qdot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-4);
+}
+.qdot.state-queued {
+  background: var(--text-3);
+}
+.qdot.state-running {
+  background: var(--accent-bright);
+  box-shadow: 0 0 0 0 var(--accent-glow);
+  animation: qpulse 1.5s ease-out infinite;
+}
+.qdot.state-done {
+  background: var(--good);
+}
+.qdot.state-failed {
+  background: var(--sev-crit);
+}
+.qdot.state-canceled {
+  background: var(--text-4);
+}
+@keyframes qpulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--accent-glow);
+  }
+  70% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.qstate {
+  color: var(--text-1);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qtimer {
+  font-size: 11.5px;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.qcard-error {
+  font-size: 11px;
+  line-height: 1.45;
+  color: #ffc7c7;
+  background: var(--sev-crit-soft);
+  border: 1px solid var(--sev-crit-line);
+  border-radius: var(--r-xs);
+  padding: 5px 7px;
+  max-height: 56px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+.qcard-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.qcard-actions:empty {
+  display: none;
+}
+.qcard-actions .btn {
+  padding: 4px 10px;
+  font-size: 11px;
+}

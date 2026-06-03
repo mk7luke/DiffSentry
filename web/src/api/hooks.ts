@@ -9,6 +9,7 @@ import type {
   MeResponse,
   PatternsResponse,
   PRDetailResponse,
+  QueueResponse,
   RepoDetailResponse,
   ReplayResponse,
   ReposResponse,
@@ -86,6 +87,16 @@ export function usePatterns() {
   return useQuery({
     queryKey: ["patterns"],
     queryFn: () => apiGet<PatternsResponse>("/patterns"),
+  });
+}
+
+/** The review-pipeline board snapshot. Live transitions arrive over SSE
+ * (`queue.updated`); this just hydrates the initial board on load. */
+export function useQueue() {
+  return useQuery({
+    queryKey: ["queue"],
+    queryFn: () => apiGet<QueueResponse>("/queue"),
+    staleTime: 5_000,
   });
 }
 

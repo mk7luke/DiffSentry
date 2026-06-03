@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode } from "react";
+import type { ReviewQueueEntry } from "../api/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // useEventStream — a single shared EventSource over /api/v1/stream.
@@ -25,6 +26,7 @@ export type StreamTopic =
   | "review.finished"
   | "review.failed"
   | "action.performed"
+  | "queue.updated"
   | "webhook.replayed";
 
 export interface ReviewLifecyclePayload {
@@ -46,6 +48,10 @@ export interface ActionPayload {
   detail?: string;
 }
 
+/** Payload of a `queue.updated` event — the canonical board entry shape, kept
+ * in one place to avoid drift. */
+export type QueueUpdatedPayload = ReviewQueueEntry;
+
 export interface WebhookReplayPayload {
   id: number;
   newDeliveryId: number | null;
@@ -60,6 +66,7 @@ const TOPICS: StreamTopic[] = [
   "review.finished",
   "review.failed",
   "action.performed",
+  "queue.updated",
   "webhook.replayed",
 ];
 

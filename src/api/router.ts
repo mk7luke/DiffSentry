@@ -18,6 +18,7 @@ import {
 import { insertAuditLog, setRole } from "../storage/dao.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
+import { reviewQueue } from "../realtime/queue.js";
 import { registerWebhookRoutes, type ReplayWebhook } from "./webhooks.js";
 import {
   getApprovalMix,
@@ -274,6 +275,21 @@ export function createApiRouter(deps: ApiDeps): express.Router {
     } catch (err) {
       logger.error({ err }, "api /health failed");
       sendError(res, 500, "internal", "Failed to load health.");
+    }
+  });
+
+  // ─── /queue ──────────────────────────────────────────────────────────
+  // The live review-pipeline board (queued → running → done/failed). Reads the
+  // in-process registry directly, so it works regardless of persistence and is
+  // available to any authenticated role (read-only, like the SSE stream). State
+  // transitions arrive over /stream as `queue.updated`; this is the initial
+  // snapshot a freshly-loaded board hydrates from.
+  router.get("/queue", (_req, res) => {
+    try {
+      sendData(res, { entries: reviewQueue.snapshot() });
+    } catch (err) {
+      logger.error({ err }, "api /queue failed");
+      sendError(res, 500, "internal", "Failed to load queue.");
     }
   });
 
