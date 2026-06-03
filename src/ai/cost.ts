@@ -210,7 +210,11 @@ function checkBudgets(owner: string | null, repo: string | null): void {
 function evaluateScope(scope: string, owner: string | null, repo: string | null): void {
   const budget = readBudget(scope);
   if (budget == null) return;
-  const dedupeKey = `${scope}|${currentMonth()}`;
+  // Include the ceiling in the dedupe key so a budget *change* mid-month can
+  // alert again once the new ceiling is crossed, while a stable ceiling still
+  // fires only once. (Without `budget`, lowering/raising-then-recrossing a
+  // ceiling would be permanently suppressed for the rest of the process.)
+  const dedupeKey = `${scope}|${currentMonth()}|${budget}`;
   if (alerted.has(dedupeKey)) return;
   const spent = getMonthToDateCost(owner, repo, monthStartIso());
   if (spent <= budget) return;

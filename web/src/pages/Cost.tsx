@@ -253,8 +253,17 @@ function BudgetsCard({ data }: { data: CostResponse }) {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const s = scope.trim();
-    const n = Number.parseFloat(amount);
-    if (!s || !Number.isFinite(n) || n <= 0) return;
+    if (!s) return;
+    // Honor the API's clear contract: an empty amount or 0 clears the scope's
+    // budget (monthlyUsd: null) — same as the per-row Clear button — so a scope
+    // not currently listed can still be cleared from the form.
+    const trimmed = amount.trim();
+    if (trimmed === "" || trimmed === "0") {
+      setBudget.mutate({ scope: s, monthlyUsd: null }, { onSuccess: () => setAmount("") });
+      return;
+    }
+    const n = Number.parseFloat(trimmed);
+    if (!Number.isFinite(n) || n <= 0) return;
     setBudget.mutate({ scope: s, monthlyUsd: n }, { onSuccess: () => setAmount("") });
   };
 
@@ -326,9 +335,13 @@ function BudgetsCard({ data }: { data: CostResponse }) {
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={setBudget.isPending || !scope.trim() || !(Number.parseFloat(amount) > 0)}
+              disabled={setBudget.isPending || !scope.trim()}
             >
-              {setBudget.isPending ? "Saving…" : "Set budget"}
+              {setBudget.isPending
+                ? "Saving…"
+                : amount.trim() === "" || amount.trim() === "0"
+                  ? "Clear budget"
+                  : "Set budget"}
             </button>
           </form>
           {err ? <p style={{ color: "var(--sev-crit)", fontSize: 12.5, marginTop: 10 }}>{err}</p> : null}
