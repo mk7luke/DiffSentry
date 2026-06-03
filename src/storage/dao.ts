@@ -280,7 +280,12 @@ function safeJsonStringify(value: unknown): string | null {
   }
 }
 
-let _v2SchemaOk = false;
+/** DBs whose v2 schema probe has succeeded — keyed by the handle itself so a
+ *  reopened/different DB is re-probed rather than inheriting a stale result. */
+const v2SchemaOkDbs = new WeakSet<DB>();
+/** One-shot throttle for the missing-schema warning (logging only — never the
+ *  schema result), so a missing v2 schema doesn't log on every v2 access. */
+let _v2SchemaMissingWarned = false;
 
 /**
  * Guard for command-center (schema v2) helpers. `openDatabase()` runs the
@@ -290,13 +295,13 @@ let _v2SchemaOk = false;
  * no-opping as if persistence were merely disabled (a `null` db). Returns true
  * when the v2 tables/columns are present.
  *
- * Only a successful probe is cached: the schema only moves forward within a
- * run, so once present it stays present and we skip the PRAGMA lookups. A
- * failed/missing probe is NOT cached, so a DB that migrates after the first
- * call (or a transient error) can recover on a later call.
+ * Only a successful probe is cached, per-DB via a WeakSet: the schema only
+ * moves forward within a run, so once present it stays present and we skip the
+ * PRAGMA lookups. A failed/missing probe is NOT cached, so a DB that migrates
+ * after the first call (or a transient error) can recover on a later call.
  */
 function ensureCommandCenterSchema(db: DB): boolean {
-  if (_v2SchemaOk) return true;
+  if (v2SchemaOkDbs.has(db)) return true;
   try {
     const hasAuditLog = db
       .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'audit_log'")
@@ -304,17 +309,24 @@ function ensureCommandCenterSchema(db: DB): boolean {
     const findingsCols = new Set(
       (db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>).map((c) => c.name),
     );
-    _v2SchemaOk = Boolean(hasAuditLog) && findingsCols.has("triaged_at");
-    if (!_v2SchemaOk) {
+    if (Boolean(hasAuditLog) && findingsCols.has("triaged_at")) {
+      v2SchemaOkDbs.add(db);
+      return true;
+    }
+    if (!_v2SchemaMissingWarned) {
+      _v2SchemaMissingWarned = true;
       logger.warn(
-        "Command-center (v2) schema is missing — migrations may not have run. v2 DAO writes will be skipped.",
+        "Command-center (v2) schema is missing — migrations may not have run. v2 DAO access will be skipped.",
       );
     }
+    return false;
   } catch (err) {
-    _v2SchemaOk = false;
-    logger.warn({ err }, "Command-center (v2) schema check failed");
+    if (!_v2SchemaMissingWarned) {
+      _v2SchemaMissingWarned = true;
+      logger.warn({ err }, "Command-center (v2) schema check failed");
+    }
+    return false;
   }
-  return _v2SchemaOk;
 }
 
 /**
@@ -578,10 +590,11 @@ export function triageFinding(opts: {
 
 /** Canonical command-center roles the dashboard gates write access on. */
 export const VALID_ROLES = ["viewer", "author", "admin"] as const;
+export type Role = (typeof VALID_ROLES)[number];
 const VALID_ROLE_SET = new Set<string>(VALID_ROLES);
 
 /** Set (or clear) a role override for a login. role=null removes the override. */
-export function setRole(opts: { login: string; role: string | null; grantedBy?: string | null }): void {
+export function setRole(opts: { login: string; role: Role | null; grantedBy?: string | null }): void {
   const db = openDatabase();
   if (!db) return;
   if (!ensureCommandCenterSchema(db)) return;
@@ -612,7 +625,7 @@ export function setRole(opts: { login: string; role: string | null; grantedBy?: 
  * when the stored role is not a recognized value — so downstream authorization
  * falls back to the safe default rather than trusting an unknown role string.
  */
-export function getRole(login: string): string | undefined {
+export function getRole(login: string): Role | undefined {
   const db = openDatabase();
   if (!db) return undefined;
   if (!ensureCommandCenterSchema(db)) return undefined;
@@ -624,7 +637,8 @@ export function getRole(login: string): string | undefined {
       logger.warn({ login, role }, "dao.getRole: stored role is not recognized — ignoring");
       return undefined;
     }
-    return role;
+    // Safe: VALID_ROLE_SET.has(role) just confirmed role is one of VALID_ROLES.
+    return role as Role;
   } catch (err) {
     logger.debug({ err }, "dao.getRole failed");
     return undefined;
