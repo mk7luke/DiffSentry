@@ -4,13 +4,17 @@
   "description": "Self-hosted AI-powered PR review bot",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "npm run build:server && npm run build:web",
+    "build:server": "tsc",
+    "build:web": "npm --prefix web ci && npm --prefix web run build",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
+    "dev:web": "npm --prefix web run dev",
     "e2e": "tsx tests/e2e/cli.ts",
     "backfill": "node dist/cli/backfill.js",
     "backfill:dev": "tsx src/cli/backfill.ts",
     "smoke:dashboard": "tsx scripts/smoke-dashboard.ts",
+    "smoke:api": "tsx scripts/smoke-api.ts",
     "smoke:migrate": "tsx scripts/migrate-smoke.ts"
   },
   "dependencies": {

@@ -1,0 +1,80 @@
+/* Design tokens — ported verbatim from DESIGN_TOKENS in src/dashboard/layout.ts.
+   Keep these in sync with the legacy dashboard until the cleanup PR removes it. */
+:root {
+  /* Surface */
+  --bg: #0a0c13;
+  --bg-deep: #070910;
+  --bg-elev: #11141d;
+  --bg-elev-2: #171b26;
+  --bg-hover: #1c212e;
+  --bg-chart: #0d1018;
+
+  /* Line */
+  --line: #1d2230;
+  --line-strong: #2a3043;
+  --line-soft: #141824;
+
+  /* Text */
+  --text: #f1f3f8;
+  --text-1: #d8dbe5;
+  --text-2: #9aa0b2;
+  --text-3: #6a7085;
+  --text-4: #40465a;
+
+  /* Brand */
+  --accent: #5a8dff;
+  --accent-bright: #7aa7ff;
+  --accent-deep: #3d6ee8;
+  --accent-glow: rgba(90, 141, 255, 0.32);
+  --accent-soft: rgba(90, 141, 255, 0.1);
+  --accent-line: rgba(90, 141, 255, 0.28);
+  --accent-2: #9a6bff;
+
+  /* Severity / semantic */
+  --sev-crit: #fb6d82;
+  --sev-crit-soft: rgba(251, 109, 130, 0.14);
+  --sev-crit-line: rgba(251, 109, 130, 0.38);
+  --sev-major: #fb923c;
+  --sev-major-soft: rgba(251, 146, 60, 0.13);
+  --sev-major-line: rgba(251, 146, 60, 0.38);
+  --sev-minor: #fbbf24;
+  --sev-minor-soft: rgba(251, 191, 36, 0.12);
+  --sev-minor-line: rgba(251, 191, 36, 0.36);
+  --sev-nit: #64748b;
+  --sev-nit-soft: rgba(100, 116, 139, 0.15);
+  --sev-nit-line: rgba(100, 116, 139, 0.38);
+
+  --good: #4ade80;
+  --good-soft: rgba(74, 222, 128, 0.13);
+  --good-line: rgba(74, 222, 128, 0.38);
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.13);
+  --warn-line: rgba(251, 191, 36, 0.38);
+  --danger: #ef4444;
+  --danger-soft: rgba(239, 68, 68, 0.13);
+  --danger-line: rgba(239, 68, 68, 0.4);
+
+  /* Typography */
+  --font-sans: "Inter", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  --font-display: "Inter Tight", "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Radius */
+  --r-xs: 3px;
+  --r-sm: 5px;
+  --r-md: 7px;
+  --r-lg: 10px;
+  --r-xl: 14px;
+
+  /* Shadow */
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.025) inset, 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-hover: 0 1px 0 rgba(255, 255, 255, 0.045) inset, 0 8px 24px -12px rgba(0, 0, 0, 0.5);
+  --shadow-accent: 0 0 0 1px var(--accent-line), 0 10px 30px -10px var(--accent-glow);
+
+  /* Layout */
+  --sidebar-w: 228px;
+  --page-max: 1440px;
+  --page-gutter: 28px;
+
+  color-scheme: dark;
+}

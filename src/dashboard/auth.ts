@@ -23,6 +23,10 @@ export interface AuthRuntime {
   /** CSRF runtime bound to this auth's session secret. Use on routes that
    * mutate state. */
   csrf: CsrfRuntime;
+  /** Verify a request's session cookie WITHOUT redirecting. Returns the
+   * authenticated user, or null when there is no valid session. Used by the
+   * JSON API, which must answer 401 rather than 302 to a login page. */
+  authenticate: (req: Request) => { login: string; id: number } | null;
 }
 
 /** Builds auth config from env vars or returns null to signal auth disabled. */
@@ -307,7 +311,13 @@ export function createAuth(cfg: AuthConfig | null): AuthRuntime | null {
     });
   };
 
-  return { middleware, routes, enabled: true, csrf: createCsrf(cfg.sessionSecret) };
+  const authenticate = (req: Request): { login: string; id: number } | null => {
+    const cookies = parseCookies(req.headers.cookie);
+    const session = verifySessionCookie(cfg.sessionSecret, cookies[SESSION_COOKIE]);
+    return session ? { login: session.login, id: session.id } : null;
+  };
+
+  return { middleware, routes, enabled: true, csrf: createCsrf(cfg.sessionSecret), authenticate };
 }
 
 export function getCurrentUser(req: Request): SessionPayload | null {

@@ -528,7 +528,7 @@ GitHub webhook
 | `BOT_NAME` | No | `diffsentry` | Bot mention name for chat commands |
 | `LEARNINGS_DIR` | No | `./data/learnings` | Per-repo learnings storage |
 | `DB_PATH` | No | `./data/diffsentry.db` | SQLite file. Set to `""` to disable persistence (dashboard becomes empty). |
-| `ENABLE_DASHBOARD` | No | | Set to `1` to mount the read-only dashboard at `/dashboard`. Off by default. |
+| `ENABLE_DASHBOARD` | No | | Set to `1` to mount the read-only command-center SPA at `/`, its JSON API at `/api/v1`, and the legacy dashboard at `/dashboard`. Off by default. |
 | `DASHBOARD_URL` | If dashboard auth | | Full URL the dashboard is reachable at (e.g. `https://diffsentry.example.com/dashboard`). Used to build the OAuth callback. |
 | `GITHUB_OAUTH_CLIENT_ID` | If dashboard auth | | GitHub App's OAuth client ID (on the App's General tab). |
 | `GITHUB_OAUTH_CLIENT_SECRET` | If dashboard auth | | GitHub App's OAuth client secret. |
@@ -667,24 +667,63 @@ and the gotchas that have bitten us.
 
 ## Web dashboard
 
-A read-only, server-rendered dashboard ships in-process alongside the webhook
-server. Same container, same port. Scoped in
-[`docs/PRD-web-dashboard.md`](docs/PRD-web-dashboard.md).
+The dashboard ships in-process alongside the webhook server — same container,
+same port. It is being migrated from a server-rendered surface to an API-first
+**Vite + React SPA** (the "command center"). During the transition both run
+side by side:
 
-**Pages**
+- **`/` — the SPA** (new). A typed JSON API at **`/api/v1`** feeds a React +
+  TanStack Query app built from `web/`. This is the surface under active
+  development.
+- **`/dashboard` — legacy server-rendered pages** (kept until the SPA reaches
+  full parity, then removed in a cleanup PR).
 
-- `/dashboard` — repos overview (open PRs reviewed, 7d findings, 7d critical,
-  last review), sortable.
-- `/dashboard/repo/:owner/:repo` — 90-day risk sparkline, hot paths, top
-  firing pattern rules, recent reviews, active `@bot learn` learnings, and
-  the live `.diffsentry.yaml` for the repo.
-- `/dashboard/repo/:owner/:repo/pr/:number` — latest review snapshot, full
-  findings table, all-reviews list, events timeline, link back to GitHub.
-- `/dashboard/findings` — cross-repo filterable explorer (severity, source,
-  repo, free-text, age) with a "recurring fingerprints" group.
-- `/dashboard/patterns` — every pattern-rule hit with 30d + all-time counts.
-- `/dashboard/settings` — runtime + storage health, recent warn/error log
-  tail captured via an in-process pino ring buffer.
+The SPA is a static bundle (`web/dist`) served by the same Express process — no
+second service, no extra port in production. The webhook path and behavior are
+untouched.
+
+**SPA pages** (all read-only)
+
+- `/` — repos overview (PRs reviewed, 7d findings, 7d critical, last review),
+  sortable, with a 14-day aggregate activity chart.
+- `/repos/:owner/:repo` — 90-day risk line, hot paths, top firing pattern
+  rules, recent PRs + issues, active `@bot learn` learnings, and the live
+  `.diffsentry.yaml` for the repo.
+- `/repos/:owner/:repo/pr/:number` — latest review snapshot, full findings
+  table, all-reviews list, events timeline, link back to GitHub.
+- `/findings` — cross-repo filterable explorer (severity, source, repo,
+  free-text, age) with a "recurring fingerprints" group.
+- `/patterns` — every pattern-rule hit with 30d + all-time counts.
+- `/settings` — runtime + storage health, signed-in session, and a recent
+  warn/error log tail captured via an in-process pino ring buffer.
+
+**JSON API** (`/api/v1`, read-only)
+
+Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
+failure. Endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
+`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`. When OAuth is
+configured every endpoint requires a valid session (401 JSON otherwise); the
+queries reuse the same SQL as the legacy dashboard and no-op gracefully when
+persistence is disabled.
+
+**Local development**
+
+The backend serves the API on port **3005**; the SPA runs on the Vite dev
+server with a proxy so `/api` calls hit the backend (single-origin cookies just
+work):
+
+```bash
+# Terminal 1 — backend (API + webhook) with live reload
+ENABLE_DASHBOARD=1 npm run dev          # http://localhost:3005
+
+# Terminal 2 — SPA dev server (proxies /api → :3005)
+npm run dev:web                         # http://localhost:5174
+```
+
+Build everything for production with `npm run build` (compiles the server **and**
+runs `vite build` into `web/dist`). `npm run build:web` builds just the SPA.
+In Docker the multi-stage `Dockerfile` builds the SPA, builds the server, and
+copies `web/dist` into the runtime image — still one container.
 
 **Enabling**
 

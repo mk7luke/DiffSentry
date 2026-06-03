@@ -1,10 +1,12 @@
 import express from "express";
+import path from "node:path";
 import { Webhooks } from "@octokit/webhooks";
 import { Config } from "./types.js";
 import { Reviewer } from "./reviewer.js";
 import { logger } from "./logger.js";
 import { recordEvent } from "./storage/dao.js";
 import { createDashboardRouter } from "./dashboard/routes.js";
+import { createApiRouter } from "./api/router.js";
 import { createAuth, loadAuthConfigFromEnv } from "./dashboard/auth.js";
 
 export function createServer(config: Config) {
@@ -18,9 +20,17 @@ export function createServer(config: Config) {
   // Read-only dashboard (SQLite-backed — see docs/PRD-web-dashboard.md).
   // Gated off by default: the dashboard currently has no auth, so it must be
   // opted into explicitly with ENABLE_DASHBOARD=1. Auth lands in PRD step 6.
+  // Static SPA assets live next to the compiled server. At runtime __dirname is
+  // the build's dist/ dir, so the SPA build output sits at ../web/dist (both
+  // locally after `npm run build` and in the Docker runtime image).
+  const webDist = path.join(__dirname, "..", "web", "dist");
+
   if (process.env.ENABLE_DASHBOARD === "1") {
     const authCfg = loadAuthConfigFromEnv();
     const auth = createAuth(authCfg);
+
+    // Legacy server-rendered dashboard — kept during the SPA transition. A
+    // later cleanup PR removes src/dashboard/*.ts once the SPA reaches parity.
     app.use(
       "/dashboard",
       createDashboardRouter({
@@ -29,9 +39,26 @@ export function createServer(config: Config) {
         auth,
       }),
     );
+
+    // New JSON API consumed by the Vite SPA.
+    app.use(
+      "/api/v1",
+      createApiRouter({
+        learningsDir: config.learningsDir,
+        getInstallationOctokit: (id) => reviewer.getInstallationOctokit(id),
+        auth,
+      }),
+    );
+
+    // Serve built SPA assets (index.html, /assets/*). express.static only
+    // matches files that exist, so it never shadows /webhook, /health, /api,
+    // or /dashboard — those fall through to their handlers. Client-side routes
+    // are handled by the index.html fallback at the end of createServer.
+    app.use(express.static(webDist));
+
     logger.info(
       { authEnabled: !!auth, orgs: authCfg?.allowedOrgs ?? [] },
-      "Dashboard mounted at /dashboard (ENABLE_DASHBOARD=1)",
+      "Dashboard + API mounted (ENABLE_DASHBOARD=1): SPA at /, API at /api/v1, legacy dashboard at /dashboard",
     );
     if (!auth) {
       logger.warn(
@@ -375,6 +402,25 @@ export function createServer(config: Config) {
 
     res.status(200).json({ status: "ignored" });
   });
+
+  // SPA client-side routing fallback. Registered LAST so it never shadows the
+  // webhook, health check, API, legacy dashboard, or static assets. Any other
+  // GET returns the SPA shell; the React router takes over from there.
+  if (process.env.ENABLE_DASHBOARD === "1") {
+    app.get("*", (req, res, next) => {
+      if (
+        req.path.startsWith("/api") ||
+        req.path.startsWith("/webhook") ||
+        req.path.startsWith("/dashboard") ||
+        req.path === "/health"
+      ) {
+        return next();
+      }
+      res.sendFile(path.join(webDist, "index.html"), (err) => {
+        if (err) next();
+      });
+    });
+  }
 
   return app;
 }
