@@ -269,6 +269,25 @@ export class Reviewer {
     return this.handlePullRequest(installationId, owner, repo, pullNumber, mode);
   }
 
+  /**
+   * Run a chat command from the dashboard by synthesizing an "@bot <cmd>"
+   * comment and routing it through the normal command handler — the same path
+   * the webhook and the finishing-touches checkboxes use. The reply lands as a
+   * top-level PR comment (the "issue" kind ignores commentId, so the synthetic
+   * `0` is harmless). `command` is the raw phrase, e.g. "summary" or
+   * "generate tests"; parseCommand maps it to the concrete action.
+   */
+  async runCommand(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    command: string,
+  ): Promise<void> {
+    const synthetic = `@${this.config.botName} ${command}`;
+    await this.handleComment(installationId, owner, repo, pullNumber, synthetic, 0, "issue");
+  }
+
   // ─── Main PR Review Handler ──────────────────────────────────
   async handlePullRequest(
     installationId: number,

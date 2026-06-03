@@ -57,6 +57,8 @@ export function createServer(config: Config) {
           pauseReviews: (owner, repo, number) => reviewer.pauseReviews(owner, repo, number),
           resumeReviews: (owner, repo, number) => reviewer.resumeReviews(owner, repo, number),
           cancelReview: (owner, repo, number) => reviewer.cancelReview(owner, repo, number),
+          runCommand: (installationId, owner, repo, number, command) =>
+            reviewer.runCommand(installationId, owner, repo, number, command),
         },
       }),
     );
