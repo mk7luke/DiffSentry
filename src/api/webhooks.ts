@@ -82,9 +82,16 @@ export function registerWebhookRoutes(router: Router, deps: WebhookRouteDeps): v
     const limit = count("limit", 100);
     const offset = count("offset", 0);
     // limit must be a positive, bounded page size (matches the query layer's
-    // 1..500 clamp); offset must be non-negative. limit=0 / huge values are 400.
-    if (limit == null || offset == null || limit < 1 || limit > 500) {
-      sendError(res, 400, "bad_request", "'limit' must be an integer between 1 and 500, and 'offset' must be a non-negative integer.");
+    // 1..500 clamp); offset must be non-negative and bounded so a giant safe
+    // integer can't drive pathological SQLite pagination. Out-of-range → 400.
+    const MAX_OFFSET = 1_000_000;
+    if (limit == null || offset == null || limit < 1 || limit > 500 || offset > MAX_OFFSET) {
+      sendError(
+        res,
+        400,
+        "bad_request",
+        `'limit' must be an integer between 1 and 500, and 'offset' must be an integer between 0 and ${MAX_OFFSET}.`,
+      );
       return;
     }
     // A repo filter must be a full "owner/repo" slug (exactly two non-empty

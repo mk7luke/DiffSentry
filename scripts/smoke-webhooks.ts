@@ -228,6 +228,8 @@ async function main() {
     ok("GET /webhooks?limit=0 → 400", zeroLimit.status === 400 && zeroLimit.json.error.code === "bad_request");
     const hugeLimit = await req("GET", "/webhooks?limit=100000", { session: adminSess });
     ok("GET /webhooks?limit=100000 → 400", hugeLimit.status === 400 && hugeLimit.json.error.code === "bad_request");
+    const hugeOffset = await req("GET", "/webhooks?offset=9007199254740991", { session: adminSess });
+    ok("GET /webhooks?offset=<huge> → 400", hugeOffset.status === 400 && hugeOffset.json.error.code === "bad_request");
     const badRepo = await req("GET", "/webhooks?repo=acme", { session: adminSess });
     ok("GET /webhooks?repo=acme (no slash) → 400", badRepo.status === 400 && badRepo.json.error.code === "bad_request");
     const goodRepo = await req("GET", "/webhooks?repo=acme/web", { session: adminSess });
@@ -345,7 +347,9 @@ async function main() {
 
     console.log("\nall webhook smoke checks passed ✓");
   } finally {
-    server.close();
+    // Await the server's full shutdown before tearing down the DB / file, so a
+    // still-winding-down request or SSE connection can't race the teardown.
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     closeDatabase();
     try {
       fs.unlinkSync(tmpDb);
