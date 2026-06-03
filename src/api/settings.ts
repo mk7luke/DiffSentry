@@ -170,6 +170,12 @@ export function registerSettingsRoutes(router: Router, deps: SettingsDeps): void
   router.get("/repos/:owner/:repo/settings", admin, (req: Request, res: Response) => {
     const { owner, repo } = req.params as { owner: string; repo: string };
     try {
+      // Match the PUT handler: unknown repos 404 rather than looking like a
+      // valid managed repo with inherited defaults.
+      if (!repoExists(owner, repo)) {
+        sendError(res, 404, "not_found", `No data for ${owner}/${repo}.`);
+        return;
+      }
       sendData(res, { owner, repo, settings: getRepoSettings(owner, repo) });
     } catch (err) {
       logger.error({ err, owner, repo }, "api GET repo settings failed");

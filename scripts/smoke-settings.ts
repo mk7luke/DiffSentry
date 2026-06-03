@@ -11,7 +11,7 @@
  *   - log level is applied to the running logger immediately
  *   - invalid values are rejected 400 and persist nothing
  *   - per-repo overrides win for isAutoReviewEnabled / and clear-to-inherit works
- *   - PUT for an unknown repo → 404
+ *   - GET + PUT for an unknown repo → 404 (consistent semantics)
  *   - CSRF is enforced on writes
  */
 import express from "express";
@@ -200,9 +200,11 @@ async function main() {
     // Global autoReview default is still true → repo now inherits true.
     ok("isAutoReviewEnabled(acme/web) → true after clear (inherits global)", isAutoReviewEnabled("acme", "web") === true);
 
-    // ── Unknown repo → 404 ───────────────────────────────────────────────
+    // ── Unknown repo → 404 (GET + PUT consistent) ────────────────────────
     const ghost = await req("PUT", "/repos/ghost/repo/settings", { session: adminSess, csrf: true, body: { autoReview: false } });
     ok("PUT settings for unknown repo → 404", ghost.status === 404);
+    const ghostGet = await req("GET", "/repos/ghost/repo/settings", { session: adminSess });
+    ok("GET settings for unknown repo → 404", ghostGet.status === 404);
 
     // ── Audit log captured the writes ────────────────────────────────────
     const { getAuditLog } = await import("../src/dashboard/queries.js");
