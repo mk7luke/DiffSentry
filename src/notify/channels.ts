@@ -1,5 +1,6 @@
 import { logger } from "../logger.js";
 import { sendMail, smtpConfigFromEnv } from "./smtp.js";
+import { checkWebhookUrlSafe } from "./ssrf.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Channel adapters — turn a normalized ChannelMessage into a real delivery over
@@ -64,6 +65,11 @@ async function postJson(
   body: unknown,
   headers: Record<string, string> = {},
 ): Promise<DeliveryResult> {
+  // Re-check SSRF safety at send time (not just at config save): a hostname can
+  // be re-pointed to a private address after the channel was created (DNS
+  // rebinding). Resolves + rejects loopback/private/link-local destinations.
+  const blocked = await checkWebhookUrlSafe(url);
+  if (blocked) return { ok: false, detail: `blocked: ${blocked}` };
   try {
     const resp = await fetch(url, {
       method: "POST",
