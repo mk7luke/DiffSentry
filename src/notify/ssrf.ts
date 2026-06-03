@@ -36,7 +36,7 @@ export function allowPrivateEgress(): boolean {
 export function ipv4IsPrivate(ip: string): boolean {
   const parts = ip.split(".").map((p) => Number(p));
   if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) return true;
-  const [a, b] = parts;
+  const [a, b, c] = parts;
   return (
     a === 0 || // 0.0.0.0/8 "this network" / unspecified
     a === 127 || // loopback
@@ -45,7 +45,13 @@ export function ipv4IsPrivate(ip: string): boolean {
     (a === 192 && b === 168) || // private
     (a === 169 && b === 254) || // link-local
     (a === 100 && b >= 64 && b <= 127) || // CGNAT 100.64/10
-    a >= 224 // multicast + reserved
+    (a === 192 && b === 0 && c === 0) || // 192.0.0.0/24 IETF protocol assignments
+    (a === 192 && b === 0 && c === 2) || // 192.0.2.0/24 TEST-NET-1 (docs)
+    (a === 198 && b === 51 && c === 100) || // 198.51.100.0/24 TEST-NET-2 (docs)
+    (a === 203 && b === 0 && c === 113) || // 203.0.113.0/24 TEST-NET-3 (docs)
+    (a === 198 && (b === 18 || b === 19)) || // 198.18.0.0/15 benchmarking
+    (a === 192 && b === 88 && c === 99) || // 192.88.99.0/24 6to4 relay anycast (deprecated)
+    a >= 224 // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved + 255.255.255.255 broadcast
   );
 }
 

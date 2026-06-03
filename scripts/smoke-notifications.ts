@@ -44,7 +44,18 @@ function csrfFor(session: string): string {
   return hmac(`csrf:${session}`);
 }
 
+// Env keys this smoke mutates — snapshotted so the finally can restore them and
+// not leak test config into the surrounding process.
+const MUTATED_ENV = [
+  "DB_PATH",
+  "DASHBOARD_ADMIN_LOGINS",
+  "DASHBOARD_AUTHOR_LOGINS",
+  "NOTIFY_ALLOW_INSECURE_WEBHOOKS",
+  "NOTIFY_ALLOW_PRIVATE_WEBHOOKS",
+] as const;
+
 async function main() {
+  const prevEnv = Object.fromEntries(MUTATED_ENV.map((k) => [k, process.env[k]]));
   const tmpDb = path.join(os.tmpdir(), `ds-notif-smoke-${Date.now()}.db`);
   process.env.DB_PATH = tmpDb;
   process.env.DASHBOARD_ADMIN_LOGINS = "adminuser";
@@ -194,6 +205,12 @@ async function main() {
       body: { type: "webhook", name: "bad", config: { url: "https://169.254.169.254/latest/meta-data" } },
     });
     ok("create channel(link-local metadata IP) → 400 (SSRF blocked)", privReject.status === 400);
+    const reservedReject = await req("POST", "/notifications/channels", {
+      session: admin,
+      csrf: true,
+      body: { type: "webhook", name: "bad", config: { url: "https://203.0.113.5/x" } },
+    });
+    ok("create channel(203.0.113.0/24 TEST-NET-3) → 400 (SSRF blocked)", reservedReject.status === 400);
     const mappedReject = await req("POST", "/notifications/channels", {
       session: admin,
       csrf: true,
@@ -381,6 +398,11 @@ async function main() {
       fs.rmSync(learningsDir, { recursive: true, force: true });
     } catch {
       // best effort
+    }
+    // Restore env so the test doesn't leak config into the process.
+    for (const k of MUTATED_ENV) {
+      if (prevEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = prevEnv[k];
     }
   }
 }
