@@ -77,7 +77,9 @@ interface ParsedRule {
 function parseRuleBody(body: Record<string, unknown>, partial: boolean): ParsedRule {
   const name = str(body.name)?.trim();
   const pattern = typeof body.pattern === "string" ? body.pattern : undefined;
-  const flags = str(body.flags);
+  // Normalize flags: trim, and treat a now-empty string as "no flags" so a
+  // whitespace-only value can't reach the regex engine as an invalid flag set.
+  const flags = str(body.flags)?.trim() || undefined;
   const scope = str(body.scope)?.trim() ?? (partial ? undefined : "global");
   const kind = str(body.kind) ?? (partial ? undefined : "regex");
   const severity = str(body.severity);
@@ -180,10 +182,12 @@ export function registerRuleRoutes(router: Router, deps: RuleDeps): void {
   });
 
   // ── Test a candidate rule against a pasted snippet (no persistence) ──
-  router.post("/rules/test", admin, (req, res) => {
+  // CSRF-verified like the write routes: it's still an authenticated POST that
+  // runs attacker-influenced regex compute, and the SPA already sends the token.
+  router.post("/rules/test", admin, csrf.verify, (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const pattern = typeof body.pattern === "string" ? body.pattern : "";
-    const flags = str(body.flags);
+    const flags = str(body.flags)?.trim() || undefined;
     const pathGlob = str(body.pathGlob ?? body.path_glob);
     const filename = str(body.filename);
     const snippet = typeof body.snippet === "string" ? body.snippet : "";
