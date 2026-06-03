@@ -40,6 +40,14 @@ interface Call {
 }
 
 async function main() {
+  // Capture env we override so the finally block can restore it — keeps the
+  // smoke test from leaking process-wide config to an in-process caller.
+  const envBackup = {
+    DB_PATH: process.env.DB_PATH,
+    DASHBOARD_ADMIN_LOGINS: process.env.DASHBOARD_ADMIN_LOGINS,
+    DASHBOARD_AUTHOR_LOGINS: process.env.DASHBOARD_AUTHOR_LOGINS,
+  };
+
   const tmpDb = path.join(os.tmpdir(), `ds-webhooks-smoke-${Date.now()}.db`);
   process.env.DB_PATH = tmpDb;
   process.env.DASHBOARD_ADMIN_LOGINS = "adminuser";
@@ -303,6 +311,10 @@ async function main() {
     );
 
     // ── SSE delivers webhook.replayed live ─────────────────────────────
+    // The replay request that triggers the event is fired from inside the SSE
+    // promise; keep its Promise so we can await it (don't leave it in flight
+    // when the finally block tears down the server/DB).
+    let replayTrigger: Promise<unknown> | undefined;
     const sseSeen = await new Promise<string>((resolve, reject) => {
       let buf = "";
       // Undefined until the fallback timer is armed below; finish() guards so a
@@ -337,7 +349,7 @@ async function main() {
             }
           });
           setTimeout(() => {
-            void req("POST", `/webhooks/${prDeliveryId}/replay`, { session: adminSess, csrf: true });
+            replayTrigger = req("POST", `/webhooks/${prDeliveryId}/replay`, { session: adminSess, csrf: true });
           }, 30);
         },
       );
@@ -347,6 +359,9 @@ async function main() {
       r.end();
       timeout = setTimeout(() => finish(() => reject(new Error("SSE timeout"))), 3000);
     });
+    // Ensure the replay request has fully completed before we assert / tear
+    // down, so it can't still be in flight when the server + DB close.
+    if (replayTrigger) await replayTrigger;
     ok("SSE stream delivered webhook.replayed live", sseSeen.includes("event: webhook.replayed"));
 
     console.log("\nall webhook smoke checks passed ✓");
@@ -359,6 +374,11 @@ async function main() {
       fs.unlinkSync(tmpDb);
     } catch {
       // best effort
+    }
+    // Restore the env we overrode so we don't leak smoke config process-wide.
+    for (const [k, v] of Object.entries(envBackup)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
     }
   }
 }
