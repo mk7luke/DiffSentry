@@ -194,7 +194,14 @@ async function commitViaPr(
 }
 
 function branchName(): string {
-  const prefix = (process.env.DASHBOARD_CONFIG_PR_BRANCH_PREFIX || "diffsentry/config").replace(/\/+$/, "");
+  // Sanitize the operator-set prefix into a valid git ref segment so a typo
+  // (spaces, "..", or ~^:?*[\\) can't make every PR-mode commit fail with a 422.
+  const cleaned = (process.env.DASHBOARD_CONFIG_PR_BRANCH_PREFIX || "diffsentry/config")
+    .trim()
+    .replace(/[^A-Za-z0-9._/-]+/g, "-") // whitelist ref-safe chars
+    .replace(/\.\.+/g, ".") // git refs can't contain ".."
+    .replace(/^\/+|\/+$/g, ""); // no leading/trailing slash
+  const prefix = cleaned.length > 0 ? cleaned : "diffsentry/config";
   // A random suffix (plus the timestamp) avoids ref-creation collisions when two
   // edits land in the same millisecond or a prior branch with the same name
   // still exists — createRef would 422 otherwise.

@@ -132,10 +132,12 @@ function Editor({ data, owner, repo }: { data: RepoConfigResponse; owner: string
     try {
       const result = await update.mutateAsync({ yaml: yamlText, mode, message: message.trim() || undefined });
       if (result.mode === "pr") {
+        // The toast component renders text only (no link), so surface the URL
+        // itself rather than implying a clickable title.
         push({
           tone: "success",
           title: `Opened PR #${result.prNumber}`,
-          body: result.prUrl ? "Click the toast title in GitHub to review." : undefined,
+          body: result.prUrl ?? undefined,
         });
       } else {
         push({ tone: "success", title: "Config committed", body: `${owner}/${repo} · ${result.branch}` });

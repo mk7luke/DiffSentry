@@ -41,6 +41,13 @@ interface Call {
 }
 
 async function main() {
+  // Snapshot the env we mutate so a harness that imports this script gets its
+  // process.env back (restored in the finally block).
+  const prevEnv = {
+    DB_PATH: process.env.DB_PATH,
+    DASHBOARD_ADMIN_LOGINS: process.env.DASHBOARD_ADMIN_LOGINS,
+    DASHBOARD_AUTHOR_LOGINS: process.env.DASHBOARD_AUTHOR_LOGINS,
+  };
   const tmpDb = path.join(os.tmpdir(), `ds-config-smoke-${Date.now()}.db`);
   process.env.DB_PATH = tmpDb;
   process.env.DASHBOARD_ADMIN_LOGINS = "adminuser";
@@ -310,6 +317,10 @@ async function main() {
       fs.unlinkSync(tmpDb);
     } catch {
       // best effort
+    }
+    for (const [k, v] of Object.entries(prevEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
     }
   }
 }
