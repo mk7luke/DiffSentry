@@ -53,8 +53,26 @@ async function main() {
     JSON.stringify([{ id: "l1", repo: "mk7luke/diffsentry-sandbox", content: "Prefer async/await.", createdAt: hoursAgo(240) }]),
   );
 
+  // Webhook secret so the diagnostics webhook self-test can round-trip.
+  process.env.GITHUB_WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || "smoke-secret";
+
+  // Stub the diagnostics provider — the smoke harness has no real Reviewer, so
+  // we inject canned probe results (the route wiring + envelope is what we test).
+  const diagnosticsStub = {
+    aiTarget: () => ({ provider: "anthropic", model: "claude-test" }),
+    testAiProvider: async () => ({ ok: true, provider: "anthropic", model: "claude-test", latencyMs: 5, reply: "pong" }),
+    getGithubDiagnostics: async () => ({
+      app: { slug: "diffsentry", name: "DiffSentry", htmlUrl: "https://github.com/apps/diffsentry" },
+      installations: [
+        { id: 1, account: "mk7luke", accountType: "User", repositorySelection: "selected", repos: ["mk7luke/diffsentry-sandbox"], repoCount: 1, truncated: false },
+      ],
+      webhook: { configuredUrl: "https://example.com/webhook", deliveries: [{ id: 1, event: "pull_request", action: "opened", status: "OK", statusCode: 200, deliveredAt: now, redelivery: false }] },
+      rateLimit: { limit: 5000, remaining: 4999, reset: now },
+    }),
+  };
+
   const app = express();
-  app.use("/api/v1", createApiRouter({ learningsDir }));
+  app.use("/api/v1", createApiRouter({ learningsDir, diagnostics: diagnosticsStub }));
   const server = app.listen(0);
   const port = (server.address() as { port: number }).port;
 
@@ -77,6 +95,32 @@ async function main() {
           });
         })
         .on("error", reject);
+    });
+  }
+
+  async function post(pathname: string): Promise<{ status: number; json: any }> {
+    return await new Promise((resolve, reject) => {
+      const req = http.request(
+        `http://127.0.0.1:${port}${pathname}`,
+        { method: "POST", headers: { "Content-Type": "application/json" } },
+        (r) => {
+          const chunks: Buffer[] = [];
+          r.on("data", (c) => chunks.push(c));
+          r.on("end", () => {
+            const body = Buffer.concat(chunks).toString("utf8");
+            let json: any = null;
+            try {
+              json = body ? JSON.parse(body) : null;
+            } catch {
+              reject(new Error(`non-JSON body for POST ${pathname}: ${body.slice(0, 120)}`));
+              return;
+            }
+            resolve({ status: r.statusCode ?? 0, json });
+          });
+        },
+      );
+      req.on("error", reject);
+      req.end();
     });
   }
 
@@ -139,6 +183,41 @@ async function main() {
 
     const health = await get("/api/v1/health");
     ok("health → counts + logs", health.status === 200 && health.json.data.counts.repos === 2 && Array.isArray(health.json.data.logs));
+
+    // ── Diagnostics (first-run experience) ─────────────────────────
+    const diag = await get("/api/v1/diagnostics");
+    ok(
+      "diagnostics → checks + summary + config + db",
+      diag.status === 200 &&
+        Array.isArray(diag.json.data.checks) &&
+        diag.json.data.checks.length > 0 &&
+        diag.json.data.checks.some((c: any) => c.id === "ai.provider") &&
+        typeof diag.json.data.summary.fail === "number" &&
+        diag.json.data.config.provider === "anthropic" &&
+        diag.json.data.db.enabled === true,
+    );
+
+    const ghd = await get("/api/v1/diagnostics/github");
+    ok(
+      "diagnostics/github → installations + reachable + counts",
+      ghd.status === 200 &&
+        ghd.json.data.reachable === true &&
+        ghd.json.data.installationCount === 1 &&
+        ghd.json.data.connectedRepos === 1 &&
+        ghd.json.data.installations[0].repos[0] === "mk7luke/diffsentry-sandbox",
+    );
+
+    const testAi = await post("/api/v1/diagnostics/test-ai");
+    ok(
+      "diagnostics test-ai → ok (open-mode admin passes author gate + noop CSRF)",
+      testAi.status === 200 && testAi.json.data.ok === true && testAi.json.data.reply === "pong",
+    );
+
+    const testWh = await post("/api/v1/diagnostics/test-webhook");
+    ok(
+      "diagnostics test-webhook → signature round-trip verified",
+      testWh.status === 200 && testWh.json.data.ok === true && testWh.json.data.secretConfigured === true,
+    );
 
     const missing = await get("/api/v1/repos/unknown/unknown");
     ok("unknown repo → 404 JSON", missing.status === 404 && missing.json.error.code === "not_found");

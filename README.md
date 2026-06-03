@@ -169,6 +169,11 @@ cost surprises).
   all-time hit counts to spot noisy rules.
 - **Operator settings** at `/dashboard/settings` — runtime + storage health +
   a live warn/error log tail captured via an in-process pino ring buffer.
+- **Guided first-run diagnostics** at `/settings/diagnostics` — pinpoints
+  missing/invalid config (GitHub App, AI provider, OAuth, DB) with fix hints,
+  shows App installation + connected-repo status and webhook delivery health,
+  and runs one-click test-AI / test-webhook self-tests. A setup wizard nudges
+  you until the instance is healthy.
 - **GitHub OAuth gating** — the dashboard is opt-in via `ENABLE_DASHBOARD=1`
   and requires a GitHub login matching one of `DASHBOARD_ALLOWED_LOGINS` or
   org membership in `DASHBOARD_ALLOWED_ORGS`.
@@ -702,16 +707,39 @@ untouched.
 - `/settings` — runtime + storage health, the signed-in session with its
   resolved role + capabilities, and a recent warn/error log tail captured via
   an in-process pino ring buffer.
+- `/settings/diagnostics` — the **guided first-run / health screen**: per-area
+  configuration checks (GitHub App, AI provider, dashboard auth, persistence)
+  each with a concrete fix hint, an on-demand **GitHub App probe** (which
+  installations + repos are connected, recent webhook delivery outcomes, and
+  rate-limit headroom), and one-click **test AI call** + **test webhook secret**
+  self-tests. When any check fails, a dismissible **setup wizard** banner
+  appears app-wide pointing to exactly what's missing.
 
 **JSON API** (`/api/v1`)
 
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
-`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, and `/audit`
-(admin). Write endpoints: `POST /roles` (admin) sets/clears a role override.
+`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, `/audit` (admin),
+`/diagnostics` (static config + DB checks), and `/diagnostics/github` (live App
+probe). Write endpoints: `POST /roles` (admin) sets/clears a role override;
+`POST /diagnostics/test-ai` and `POST /diagnostics/test-webhook` (both `author`+,
+CSRF + audited) run the provider reachability and webhook-secret self-tests.
 When OAuth is configured every endpoint requires a valid session (401 JSON
 otherwise); the queries reuse the same SQL as the legacy dashboard and no-op
 gracefully when persistence is disabled.
+
+**First-run diagnostics & setup wizard.** `GET /diagnostics` reads the
+environment (GitHub App, AI provider, OAuth, DB) and reports each as
+`ok`/`warn`/`fail` with a fix hint — no network calls, so it's instant and
+drives the wizard (`incomplete` when any check fails). `GET /diagnostics/github`
+authenticates as the App (JWT) to enumerate installations + connected repos,
+read the configured webhook URL and the last few delivery outcomes, and report
+rate-limit headroom — so a misconfigured instance pinpoints whether the App is
+even installed and whether GitHub's webhooks are reaching you. `test-ai` fires a
+tiny completion at the configured provider (proving the key works), and
+`test-webhook` confirms `GITHUB_WEBHOOK_SECRET` produces a valid HMAC signature
+the verifier accepts. These reuse existing config and the review engine — **no
+new environment variables** are introduced.
 
 **Command actions** (`author`+) drive the review engine from the dashboard. Each
 is `requireRole('author')` + CSRF gated, writes an `audit_log` row, and emits an

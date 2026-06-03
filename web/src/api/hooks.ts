@@ -4,7 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiSend } from "./client";
 import type {
   AuditResponse,
+  DiagnosticsResponse,
   FindingsResponse,
+  GithubDiagnosticsResponse,
   HealthResponse,
   MeResponse,
   PatternsResponse,
@@ -12,6 +14,8 @@ import type {
   RepoDetailResponse,
   ReposResponse,
   Role,
+  TestAiResult,
+  TestWebhookResult,
 } from "./types";
 
 export function useMe() {
@@ -111,6 +115,42 @@ export function useAudit(query: AuditQuery, enabled: boolean) {
       }),
     enabled,
     placeholderData: (prev) => prev,
+  });
+}
+
+// ─── Diagnostics / first-run experience ─────────────────────────────
+
+export function useDiagnostics() {
+  return useQuery({
+    queryKey: ["diagnostics"],
+    queryFn: () => apiGet<DiagnosticsResponse>("/diagnostics"),
+    staleTime: 30_000,
+  });
+}
+
+/** Live GitHub App probe. Lazy: only runs once `enabled` is true (a network
+ * call, so we don't fire it until the user opens the GitHub section). */
+export function useGithubDiagnostics(enabled: boolean) {
+  return useQuery({
+    queryKey: ["diagnostics", "github"],
+    queryFn: () => apiGet<GithubDiagnosticsResponse>("/diagnostics/github"),
+    enabled,
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+/** Author+: fire a tiny completion at the configured provider. */
+export function useTestAi() {
+  return useMutation({
+    mutationFn: () => apiSend<TestAiResult>("/diagnostics/test-ai"),
+  });
+}
+
+/** Author+: round-trip a signed payload through the webhook verifier. */
+export function useTestWebhook() {
+  return useMutation({
+    mutationFn: () => apiSend<TestWebhookResult>("/diagnostics/test-webhook"),
   });
 }
 

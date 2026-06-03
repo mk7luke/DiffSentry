@@ -58,6 +58,14 @@ export function createServer(config: Config) {
           resumeReviews: (owner, repo, number) => reviewer.resumeReviews(owner, repo, number),
           cancelReview: (owner, repo, number) => reviewer.cancelReview(owner, repo, number),
         },
+        // First-run diagnostics: the AI reachability probe + the GitHub App
+        // introspection both run through the reviewer (which owns the provider
+        // and the App-authed Octokit).
+        diagnostics: {
+          aiTarget: () => reviewer.aiTarget(),
+          testAiProvider: () => reviewer.testAiProvider(),
+          getGithubDiagnostics: () => reviewer.getGithubDiagnostics(),
+        },
       }),
     );
 

@@ -3,6 +3,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
 import type { Capabilities } from "../api/types";
 import { AuditIcon, FindingsIcon, LogoIcon, OverviewIcon, PatternsIcon, SettingsIcon } from "./icons";
+import { SetupWizard } from "./SetupWizard";
 
 // Page shell: sticky left sidebar (brand + primary nav + signed-in user) and
 // the main content column. Mirrors renderLayout() from src/dashboard/layout.ts.
@@ -70,6 +71,7 @@ export function Shell() {
     <div className="app">
       <Sidebar />
       <main className="main">
+        <SetupWizard />
         <Outlet />
       </main>
     </div>

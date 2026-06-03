@@ -191,6 +191,57 @@ export class Reviewer {
     return this.github.getInstallationOctokit(installationId);
   }
 
+  // ─── Diagnostics surface (first-run experience) ──────────────
+  /** The provider + model currently in effect (non-secret). */
+  aiTarget(): { provider: Config["aiProvider"]; model: string } {
+    const provider = this.config.aiProvider;
+    const model =
+      provider === "anthropic"
+        ? this.config.anthropicModel
+        : provider === "openai-compatible"
+          ? this.config.localAiModel
+          : this.config.openaiModel;
+    return { provider, model };
+  }
+
+  /**
+   * Fire a tiny, cheap completion at the configured AI provider to prove it is
+   * reachable and the credentials work. Returns timing + a short echo on
+   * success, or the error message on failure — never throws.
+   */
+  async testAiProvider(): Promise<{
+    ok: boolean;
+    provider: Config["aiProvider"];
+    model: string;
+    latencyMs: number;
+    reply?: string;
+    error?: string;
+  }> {
+    const { provider, model } = this.aiTarget();
+    const start = Date.now();
+    try {
+      const reply = await this.ai.complete(
+        "You are a connectivity probe for DiffSentry. Reply with the single word: pong",
+        "ping",
+        { maxTokens: 16 },
+      );
+      return { ok: true, provider, model, latencyMs: Date.now() - start, reply: reply.trim().slice(0, 200) };
+    } catch (err) {
+      return {
+        ok: false,
+        provider,
+        model,
+        latencyMs: Date.now() - start,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  /** Live GitHub-side diagnostics (installations, webhook health, rate limit). */
+  async getGithubDiagnostics() {
+    return this.github.getAppDiagnostics();
+  }
+
   // ─── Push-driven auto-resolve (runs even when reviews are paused) ─────
   async autoResolveOnPush(
     installationId: number,

@@ -18,6 +18,7 @@ import {
 import { insertAuditLog, setRole } from "../storage/dao.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
+import { registerDiagnosticsRoutes, type DiagnosticsProvider } from "./diagnostics.js";
 import {
   getApprovalMix,
   getAuditActions,
@@ -64,6 +65,9 @@ export interface ApiDeps {
    * the SSE stream are still mounted, but actions have nothing to drive — so
    * they are only registered when a reviewer is provided. */
   reviewer?: ReviewerActions;
+  /** First-run diagnostics surface (AI probe + GitHub App introspection).
+   * When omitted, the /diagnostics endpoints are not mounted. */
+  diagnostics?: DiagnosticsProvider;
 }
 
 type ErrorCode =
@@ -181,6 +185,11 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   // requireRole + CSRF + audit_log + bus event — lives in registerActionRoutes.
   if (deps.reviewer) {
     registerActionRoutes(router, { reviewer: deps.reviewer, requireRole, csrf });
+  }
+
+  // ─── Guided first-run diagnostics (read viewer+, tests author+) ─────
+  if (deps.diagnostics) {
+    registerDiagnosticsRoutes(router, { diagnostics: deps.diagnostics, requireRole, csrf, authEnabled });
   }
 
   // ─── /me ───────────────────────────────────────────────────────────

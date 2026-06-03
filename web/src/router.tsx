@@ -6,6 +6,7 @@ import { PRDetailPage } from "./pages/PRDetail";
 import { FindingsPage } from "./pages/Findings";
 import { PatternsPage } from "./pages/Patterns";
 import { SettingsPage } from "./pages/Settings";
+import { DiagnosticsPage } from "./pages/Diagnostics";
 import { AuditPage } from "./pages/Audit";
 import { NotFoundState } from "./components/states";
 
@@ -33,6 +34,7 @@ export const router = createBrowserRouter([
       { path: "/patterns", element: <PatternsPage /> },
       { path: "/audit", element: <AuditPage /> },
       { path: "/settings", element: <SettingsPage /> },
+      { path: "/settings/diagnostics", element: <DiagnosticsPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],
   },
