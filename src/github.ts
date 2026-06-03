@@ -67,6 +67,7 @@ export class GitHubClient {
       baseSha: pr.data.base.sha,
       headBranch: pr.data.head.ref,
       headSha: pr.data.head.sha,
+      defaultBranch: pr.data.base.repo.default_branch,
       files,
       isDraft: pr.data.draft,
       labels: pr.data.labels.map((l) => l.name ?? ""),

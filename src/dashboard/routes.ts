@@ -702,13 +702,13 @@ function renderConfigCard(yaml: string | null): string {
   if (yaml === null) {
     return card({
       title: ".diffsentry.yaml",
-      subtitle: "Repo defaults",
-      body: `<div class="empty"><div class="title">Using defaults</div><div>No <span class="mono">.diffsentry.yaml</span> in this repo.</div></div>`,
+      subtitle: "Default branch · repo defaults",
+      body: `<div class="empty"><div class="title">Using defaults</div><div>No <span class="mono">.diffsentry.yaml</span> on the default branch.</div></div>`,
     });
   }
   return card({
     title: ".diffsentry.yaml",
-    subtitle: "Cached 5m from GitHub",
+    subtitle: "Default branch · enforced for all PRs",
     body: `<pre style="font-family:var(--font-mono);font-size:11.5px;color:var(--text-1);background:var(--bg-deep);border:1px solid var(--line);border-radius:6px;padding:12px;max-height:320px;overflow:auto;margin:0;white-space:pre">${esc(yaml)}</pre>`,
   });
 }
