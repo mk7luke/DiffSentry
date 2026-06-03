@@ -699,6 +699,8 @@ untouched.
 - `/patterns` — every pattern-rule hit with 30d + all-time counts.
 - `/audit` — **admin only** — the audit trail (who did what, when) plus a
   per-login role-override editor.
+- `/tokens` — **admin only** — create / list / revoke platform API tokens
+  (the secret is shown once), with a link to the rendered API docs.
 - `/settings` — runtime + storage health, the signed-in session with its
   resolved role + capabilities, and a recent warn/error log tail captured via
   an in-process pino ring buffer.
@@ -708,10 +710,13 @@ untouched.
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
 `/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, and `/audit`
-(admin). Write endpoints: `POST /roles` (admin) sets/clears a role override.
-When OAuth is configured every endpoint requires a valid session (401 JSON
-otherwise); the queries reuse the same SQL as the legacy dashboard and no-op
-gracefully when persistence is disabled.
+(admin). Write endpoints: `POST /roles` (admin) sets/clears a role override, and
+`GET`/`POST /tokens` + `DELETE /tokens/:id` (admin) manage API tokens. The
+machine-readable **`GET /api/v1/openapi.json`** (OpenAPI 3) and the rendered
+docs page **`GET /api/v1/docs`** are public. When OAuth is configured every other
+endpoint requires a valid session or bearer token (401 JSON otherwise); the
+queries reuse the same SQL as the legacy dashboard and no-op gracefully when
+persistence is disabled.
 
 **Command actions** (`author`+) drive the review engine from the dashboard. Each
 is `requireRole('author')` + CSRF gated, writes an `audit_log` row, and emits an
@@ -731,6 +736,30 @@ opens one `EventSource`, surfaces events as toasts, and live-refetches the
 affected PR — so a re-review's findings appear without a refresh. The stream
 heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed
 events on reconnect via `Last-Event-ID`.
+
+**Platform API (bearer tokens)**
+
+Beyond the cookie-session dashboard, the API accepts **bearer tokens** for
+scripts and integrations. An admin mints tokens from the `/tokens` screen (or
+`POST /api/v1/tokens`); the plaintext (`dsk_…`) is shown **once** and only its
+SHA-256 hash is stored. Send it as `Authorization: Bearer dsk_…`:
+
+```bash
+curl -H "Authorization: Bearer dsk_xxx" https://your-host/api/v1/repos
+```
+
+Tokens carry **scopes**: `read` (every GET endpoint) and `review` (the safe
+action subset — trigger reviews, resolve, pause/resume/cancel; implies `read`).
+The gate enforces them per request — a `read`-only token gets `403` on any write,
+and an unknown or revoked token gets `401`. Tokens **never** reach admin
+endpoints (audit, role/token administration); those stay cookie-session +
+`admin` only. Each authenticated call bumps the token's `last_used_at`, and
+create/revoke land an `audit_log` row plus a `token.changed` SSE event. Bearer
+requests are exempt from CSRF (there's no ambient cookie to forge); cookie
+writes still require the `X-CSRF-Token` header.
+
+Explore the full surface at **`/api/v1/docs`** (a dependency-free viewer that
+renders **`/api/v1/openapi.json`**) — both are public.
 
 **Roles & access control (RBAC)**
 
@@ -757,6 +786,7 @@ double-submit token as an `X-CSRF-Token` header.
 | Manage config | — | — | ✅ |
 | Manage role overrides | — | — | ✅ |
 | View audit log | — | — | ✅ |
+| Manage API tokens | — | — | ✅ |
 
 When OAuth is disabled (open/local mode) there is no session to gate on, so the
 local operator is treated as `admin`.

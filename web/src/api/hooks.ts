@@ -3,7 +3,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiSend } from "./client";
 import type {
+  ApiScope,
   AuditResponse,
+  CreatedToken,
   FindingsResponse,
   HealthResponse,
   MeResponse,
@@ -12,6 +14,7 @@ import type {
   RepoDetailResponse,
   ReposResponse,
   Role,
+  TokensResponse,
 } from "./types";
 
 export function useMe() {
@@ -111,6 +114,38 @@ export function useAudit(query: AuditQuery, enabled: boolean) {
       }),
     enabled,
     placeholderData: (prev) => prev,
+  });
+}
+
+/** Admin: list API tokens (metadata only). */
+export function useTokens(enabled: boolean) {
+  return useQuery({
+    queryKey: ["tokens"],
+    queryFn: () => apiGet<TokensResponse>("/tokens"),
+    enabled,
+  });
+}
+
+/** Admin: create an API token. Resolves with the one-time plaintext secret. */
+export function useCreateToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { name: string; scopes: ApiScope[] }) =>
+      apiSend<CreatedToken>("/tokens", { body: vars }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["tokens"] });
+    },
+  });
+}
+
+/** Admin: revoke an API token by id. */
+export function useRevokeToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend<{ id: number; revoked: boolean }>(`/tokens/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["tokens"] });
+    },
   });
 }
 

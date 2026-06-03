@@ -751,6 +751,123 @@ export function getRole(login: string | null | undefined): Role | undefined {
   }
 }
 
+// ---------------------------------------------------------------------------
+// API tokens — bearer credentials for the platform API. The plaintext token is
+// shown to its creator exactly once; only a SHA-256 hash is persisted. Auth
+// looks a token up by hash (the hash column is indexed), checks it is not
+// revoked, and bumps last_used_at. All best-effort no-ops when the DB is off.
+// Token minting/hashing lives in src/api/token-auth.ts; this layer only stores
+// and retrieves rows.
+// ---------------------------------------------------------------------------
+
+export interface ApiTokenRow {
+  id: number;
+  name: string | null;
+  created_by: string | null;
+  created_at: string | null;
+  last_used_at: string | null;
+  scopes_json: string | null;
+  revoked_at: string | null;
+}
+
+/** Insert an API token (its hash + scopes). Returns the new id, or null when
+ *  persistence is disabled. The caller passes the already-computed hash so the
+ *  plaintext never reaches storage. */
+export function createApiToken(opts: {
+  name?: string | null;
+  tokenHash: string;
+  scopes: string[];
+  createdBy?: string | null;
+}): number | null {
+  const db = openDatabase();
+  if (!db) return null;
+  if (!ensureCommandCenterSchema(db, ["api_tokens"])) return null;
+  try {
+    const info = db.prepare(
+      `INSERT INTO api_tokens (name, token_hash, created_by, created_at, scopes_json)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(
+      opts.name ?? null,
+      opts.tokenHash,
+      opts.createdBy ?? null,
+      new Date().toISOString(),
+      JSON.stringify(opts.scopes ?? []),
+    );
+    return Number(info.lastInsertRowid);
+  } catch (err) {
+    logger.debug({ err }, "dao.createApiToken failed");
+    return null;
+  }
+}
+
+/** List API tokens (metadata only — never the hash). Newest first. */
+export function listApiTokens(): ApiTokenRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  if (!ensureCommandCenterSchema(db, ["api_tokens"])) return [];
+  try {
+    return db.prepare(
+      `SELECT id, name, created_by, created_at, last_used_at, scopes_json, revoked_at
+       FROM api_tokens ORDER BY id DESC`,
+    ).all() as ApiTokenRow[];
+  } catch (err) {
+    logger.debug({ err }, "dao.listApiTokens failed");
+    return [];
+  }
+}
+
+/**
+ * Revoke a token by id. Idempotent: only stamps revoked_at when it is still
+ * NULL, so re-revoking is a harmless no-op. Returns true when a row actually
+ * transitioned from active to revoked.
+ */
+export function revokeApiToken(id: number): boolean {
+  const db = openDatabase();
+  if (!db) return false;
+  if (!ensureCommandCenterSchema(db, ["api_tokens"])) return false;
+  try {
+    const info = db.prepare(
+      `UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
+    ).run(new Date().toISOString(), id);
+    return info.changes > 0;
+  } catch (err) {
+    logger.debug({ err }, "dao.revokeApiToken failed");
+    return false;
+  }
+}
+
+/**
+ * Look up an ACTIVE (non-revoked) token by its hash — the auth hot path.
+ * Returns undefined when the token is unknown, revoked, or persistence is off.
+ */
+export function findActiveApiTokenByHash(tokenHash: string): ApiTokenRow | undefined {
+  const db = openDatabase();
+  if (!db) return undefined;
+  if (!ensureCommandCenterSchema(db, ["api_tokens"])) return undefined;
+  try {
+    const row = db.prepare(
+      `SELECT id, name, created_by, created_at, last_used_at, scopes_json, revoked_at
+       FROM api_tokens WHERE token_hash = ? AND revoked_at IS NULL`,
+    ).get(tokenHash) as ApiTokenRow | undefined;
+    return row ?? undefined;
+  } catch (err) {
+    logger.debug({ err }, "dao.findActiveApiTokenByHash failed");
+    return undefined;
+  }
+}
+
+/** Best-effort bump of a token's last_used_at on a successful authentication. */
+export function touchApiTokenLastUsed(id: number): void {
+  const db = openDatabase();
+  if (!db) return;
+  if (!ensureCommandCenterSchema(db, ["api_tokens"])) return;
+  try {
+    db.prepare(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`).run(new Date().toISOString(), id);
+  } catch (err) {
+    logger.debug({ err }, "dao.touchApiTokenLastUsed failed");
+  }
+}
+
 /** Bulk insert pattern hits — every pattern-checks / safety-scanner finding. */
 export function recordPatternHits(opts: {
   owner: string;

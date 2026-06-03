@@ -14,6 +14,7 @@ const CAPABILITY_LABELS: { key: keyof Capabilities; label: string }[] = [
   { key: "manageConfig", label: "Manage config" },
   { key: "manageRoles", label: "Manage roles" },
   { key: "viewAudit", label: "View audit log" },
+  { key: "manageTokens", label: "Manage API tokens" },
 ];
 
 export function SettingsPage() {

@@ -40,12 +40,25 @@ export interface ActionPayload {
   detail?: string;
 }
 
+/** An API token was created or revoked — emitted from the token admin API. */
+export interface TokenChangePayload {
+  id: number;
+  name: string | null;
+  /** "create" | "revoke". */
+  action: "create" | "revoke";
+  actor: string | null;
+  role: string | null;
+  /** "ok" | "noop" | "error". */
+  result: string;
+}
+
 /** Topic → payload map. Add new topics here so publish/subscribe stay typed. */
 export interface BusEventMap {
   "review.started": ReviewLifecyclePayload;
   "review.finished": ReviewLifecyclePayload;
   "review.failed": ReviewLifecyclePayload;
   "action.performed": ActionPayload;
+  "token.changed": TokenChangePayload;
 }
 
 export type BusTopic = keyof BusEventMap;

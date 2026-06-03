@@ -9,6 +9,7 @@ import { createNoopCsrf, type AuthRuntime, type CsrfRuntime } from "../dashboard
 import {
   capabilitiesFor,
   createRequireRole,
+  getPrincipal,
   isRole,
   loadRoleConfigFromEnv,
   resolveActor,
@@ -18,6 +19,10 @@ import {
 import { insertAuditLog, setRole } from "../storage/dao.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
+import { registerTokenRoutes } from "./tokens.js";
+import { authenticateBearer, extractBearer, requiredScopeForMethod } from "./token-auth.js";
+import { buildOpenApiSpec } from "./openapi.js";
+import { renderDocsPage } from "./docs.js";
 import {
   getApprovalMix,
   getAuditActions,
@@ -159,9 +164,36 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   // webhook body parser on /webhook is mounted separately and untouched.
   router.use(express.json({ limit: "1mb" }));
 
+  // ─── Public API surface (no auth) ──────────────────────────────────
+  // The machine-readable spec and the human docs page sit BEFORE the auth gate
+  // so the API is documented without signing in. Neither exposes data.
+  router.get("/openapi.json", (_req, res) => {
+    res.json(buildOpenApiSpec());
+  });
+  router.get("/docs", (_req, res) => {
+    res.type("html").send(renderDocsPage());
+  });
+
   // Auth gate — JSON 401 instead of the HTML-redirect the dashboard uses.
+  // Accepts EITHER a bearer API token OR a cookie session, attaching the
+  // resolved principal to req.dsPrincipal (RBAC + scope checks read it).
   // `req.path` here is relative to the /api/v1 mount.
   router.use((req, res, next) => {
+    // 1. Bearer token — checked first and honoured even in open mode, so token
+    //    scopes are enforced regardless of whether OAuth is configured.
+    const bearer = extractBearer(req.headers.authorization);
+    if (bearer) {
+      const principal = authenticateBearer(req.headers.authorization);
+      if (!principal) {
+        sendError(res, 401, "unauthorized", "Invalid or revoked API token.");
+        return;
+      }
+      (req as Request & { dsPrincipal?: unknown }).dsPrincipal = principal;
+      next();
+      return;
+    }
+    // 2. Cookie session (when OAuth is enabled). Open mode → no principal; the
+    //    actor resolver treats the local operator as admin.
     if (!deps.auth) return next();
     const user = deps.auth.authenticate(req);
     if (!user) {
@@ -169,8 +201,41 @@ export function createApiRouter(deps: ApiDeps): express.Router {
       return;
     }
     (req as Request & { dsUser?: { login: string; id: number } }).dsUser = user;
+    (req as Request & { dsPrincipal?: unknown }).dsPrincipal = {
+      kind: "session",
+      login: user.login,
+      id: user.id,
+    };
     next();
   });
+
+  // ─── Token scope gate ──────────────────────────────────────────────
+  // For token principals only, enforce the per-method scope: GET/HEAD need
+  // `read`, every mutating method needs `review`. Cookie sessions skip this —
+  // they are gated by RBAC (requireRole) instead. A token still cannot reach
+  // admin endpoints: those use requireRole('admin'), which a token never meets.
+  router.use((req, res, next) => {
+    const principal = getPrincipal(req);
+    if (principal?.kind !== "token") return next();
+    const needed = requiredScopeForMethod(req.method);
+    if (!principal.scopes.includes(needed)) {
+      sendError(res, 403, "forbidden", `This API token lacks the '${needed}' scope.`);
+      return;
+    }
+    next();
+  });
+
+  // CSRF for mutating routes, principal-aware: bearer-token requests are not
+  // CSRF-able (no ambient cookie a browser would auto-send), so they bypass the
+  // double-submit check; cookie sessions still require X-CSRF-Token.
+  const writeCsrf: CsrfRuntime = {
+    ensure: csrf.ensure,
+    tokenFor: csrf.tokenFor,
+    verify: (req, res, next) => {
+      if (getPrincipal(req)?.kind === "token") return next();
+      return csrf.verify(req, res, next);
+    },
+  };
 
   // ─── /stream (SSE) ─────────────────────────────────────────────────
   // Mounted behind the auth gate above; any authenticated role may subscribe.
@@ -180,8 +245,13 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   // Only when a reviewer is wired in (server.ts). The full write contract —
   // requireRole + CSRF + audit_log + bus event — lives in registerActionRoutes.
   if (deps.reviewer) {
-    registerActionRoutes(router, { reviewer: deps.reviewer, requireRole, csrf });
+    registerActionRoutes(router, { reviewer: deps.reviewer, requireRole, csrf: writeCsrf });
   }
+
+  // ─── API token administration (admin, cookie-only) ─────────────────
+  // create/list/revoke. requireRole('admin') keeps tokens out (a token
+  // principal resolves to ≤ author), so these are operator-only.
+  registerTokenRoutes(router, { requireRole, csrf: writeCsrf });
 
   // ─── /me ───────────────────────────────────────────────────────────
   // The role resolves from the roles table > admin env > author env > viewer
