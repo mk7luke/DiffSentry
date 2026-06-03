@@ -280,9 +280,10 @@ function safeJsonStringify(value: unknown): string | null {
   }
 }
 
-/** DBs whose v2 schema probe has succeeded — keyed by the handle itself so a
- *  reopened/different DB is re-probed rather than inheriting a stale result. */
-const v2SchemaOkDbs = new WeakSet<DB>();
+/** Per-DB record of which dependency sets have probed OK — keyed by the handle
+ *  itself so a reopened/different DB is re-probed rather than inheriting a
+ *  stale result. The inner Set holds dependency-set keys (see depsKey below). */
+const v2SchemaOkByDb = new WeakMap<DB, Set<string>>();
 /** One-shot throttle for the missing-schema warning (logging only — never the
  *  schema result), so a missing v2 schema doesn't log on every v2 access. */
 let _v2SchemaMissingWarned = false;
@@ -311,13 +312,20 @@ const REQUIRED_FINDINGS_COLUMNS = ["accepted", "snoozed_until", "triaged_by", "t
  * no-opping as if persistence were merely disabled (a `null` db). Returns true
  * when the v2 tables/columns are present.
  *
- * Only a successful probe is cached, per-DB via a WeakSet: the schema only
- * moves forward within a run, so once present it stays present and we skip the
- * PRAGMA lookups. A failed/missing probe is NOT cached, so a DB that migrates
+ * Each caller declares only the tables/finding-columns it actually touches, so
+ * a missing *unrelated* v2 table doesn't block a helper that doesn't use it
+ * (defaults to the full v2 set). Successful probes are cached per (db,
+ * dependency-set); a failed/missing probe is NOT cached, so a DB that migrates
  * after the first call (or a transient error) can recover on a later call.
  */
-function ensureCommandCenterSchema(db: DB): boolean {
-  if (v2SchemaOkDbs.has(db)) return true;
+function ensureCommandCenterSchema(
+  db: DB,
+  requiredTables: readonly string[] = REQUIRED_V2_TABLES,
+  requiredFindingColumns: readonly string[] = REQUIRED_FINDINGS_COLUMNS,
+): boolean {
+  const depsKey = `${[...requiredTables].sort().join(",")}|${[...requiredFindingColumns].sort().join(",")}`;
+  let okSet = v2SchemaOkByDb.get(db);
+  if (okSet?.has(depsKey)) return true;
   try {
     const tables = new Set(
       (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map(
@@ -327,17 +335,21 @@ function ensureCommandCenterSchema(db: DB): boolean {
     const findingsCols = new Set(
       (db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>).map((c) => c.name),
     );
-    const ok =
-      REQUIRED_V2_TABLES.every((t) => tables.has(t)) &&
-      REQUIRED_FINDINGS_COLUMNS.every((c) => findingsCols.has(c));
-    if (ok) {
-      v2SchemaOkDbs.add(db);
+    const missingTables = requiredTables.filter((t) => !tables.has(t));
+    const missingColumns = requiredFindingColumns.filter((c) => !findingsCols.has(c));
+    if (missingTables.length === 0 && missingColumns.length === 0) {
+      if (!okSet) {
+        okSet = new Set();
+        v2SchemaOkByDb.set(db, okSet);
+      }
+      okSet.add(depsKey);
       return true;
     }
     if (!_v2SchemaMissingWarned) {
       _v2SchemaMissingWarned = true;
       logger.warn(
-        "Command-center (v2) schema is missing — migrations may not have run. v2 DAO access will be skipped.",
+        { missingTables, missingColumns },
+        "Command-center (v2) schema is incomplete — migrations may not have run. Affected DAO access will be skipped.",
       );
     }
     return false;
@@ -365,7 +377,7 @@ export function insertAuditLog(opts: {
 }): number | null {
   const db = openDatabase();
   if (!db) return null;
-  if (!ensureCommandCenterSchema(db)) return null;
+  if (!ensureCommandCenterSchema(db, ["audit_log"])) return null;
   try {
     const payloadJson = safeJsonStringify(opts.payload);
     const info = db.prepare(
@@ -418,7 +430,7 @@ export function upsertSettingOverride(opts: {
 }): void {
   const db = openDatabase();
   if (!db) return;
-  if (!ensureCommandCenterSchema(db)) return;
+  if (!ensureCommandCenterSchema(db, ["settings_overrides"])) return;
   if (!isValidScope(opts.scope)) {
     logger.debug({ scope: opts.scope, key: opts.key }, "dao.upsertSettingOverride: invalid scope — skipping write");
     return;
@@ -467,7 +479,7 @@ export function upsertSettingOverride(opts: {
 export function getSettingOverride<T = unknown>(scope: string, key: string): T | null | undefined {
   const db = openDatabase();
   if (!db) return undefined;
-  if (!ensureCommandCenterSchema(db)) return undefined;
+  if (!ensureCommandCenterSchema(db, ["settings_overrides"])) return undefined;
   if (!isValidScope(scope)) {
     logger.debug({ scope, key }, "dao.getSettingOverride: invalid scope — ignoring");
     return undefined;
@@ -499,7 +511,7 @@ export function getSettingOverride<T = unknown>(scope: string, key: string): T |
 export function deleteSettingOverride(scope: string, key: string): void {
   const db = openDatabase();
   if (!db) return;
-  if (!ensureCommandCenterSchema(db)) return;
+  if (!ensureCommandCenterSchema(db, ["settings_overrides"])) return;
   if (!isValidScope(scope)) {
     logger.debug({ scope, key }, "dao.deleteSettingOverride: invalid scope — skipping");
     return;
@@ -531,7 +543,7 @@ export function recordCostEvent(opts: {
 }): number | null {
   const db = openDatabase();
   if (!db) return null;
-  if (!ensureCommandCenterSchema(db)) return null;
+  if (!ensureCommandCenterSchema(db, ["cost_events"])) return null;
   try {
     const info = db.prepare(
       `INSERT INTO cost_events (ts, owner, repo, number, review_id, provider, model, input_tokens, output_tokens, cost_usd, kind)
@@ -574,7 +586,7 @@ export function recordWebhookDelivery(opts: {
 }): number | null {
   const db = openDatabase();
   if (!db) return null;
-  if (!ensureCommandCenterSchema(db)) return null;
+  if (!ensureCommandCenterSchema(db, ["webhook_deliveries"])) return null;
   try {
     const payloadJson = safeJsonStringify(opts.payload);
     const info = db.prepare(
@@ -616,7 +628,7 @@ export function triageFinding(opts: {
 }): boolean {
   const db = openDatabase();
   if (!db) return false;
-  if (!ensureCommandCenterSchema(db)) return false;
+  if (!ensureCommandCenterSchema(db, [], REQUIRED_FINDINGS_COLUMNS)) return false;
   try {
     // Each supplied triage field contributes a COMPLETE literal SQL fragment
     // (no column name is ever interpolated from a variable) plus the value to
@@ -673,10 +685,10 @@ const VALID_ROLE_SET = new Set<string>(VALID_ROLES);
  * `role` is typed `string` (not `Role`) on purpose: this is a runtime-safe
  * boundary for untyped API input, and `VALID_ROLE_SET` is the real gate.
  */
-export function setRole(opts: { login: string; role: string | null; grantedBy?: string | null }): void {
+export function setRole(opts: { login?: string | null; role: string | null; grantedBy?: string | null }): void {
   const db = openDatabase();
   if (!db) return;
-  if (!ensureCommandCenterSchema(db)) return;
+  if (!ensureCommandCenterSchema(db, ["roles"])) return;
   // GitHub logins are case-insensitive — canonicalize to lowercase so a value
   // set as "Alice" is read back by getRole("alice").
   const login = (opts.login ?? "").trim().toLowerCase();
@@ -714,7 +726,7 @@ export function setRole(opts: { login: string; role: string | null; grantedBy?: 
 export function getRole(login: string): Role | undefined {
   const db = openDatabase();
   if (!db) return undefined;
-  if (!ensureCommandCenterSchema(db)) return undefined;
+  if (!ensureCommandCenterSchema(db, ["roles"])) return undefined;
   // Match setRole's canonicalization (trim + lowercase) so reads hit the same key.
   const normalizedLogin = (login ?? "").trim().toLowerCase();
   if (normalizedLogin.length === 0) return undefined;
