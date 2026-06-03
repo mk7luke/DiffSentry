@@ -233,8 +233,11 @@ Health check: `GET /health`. Webhook endpoint: `POST /webhook`. Default port `30
 Drop a `.diffsentry.yaml` in your repo root. The full template lives in
 `.diffsentry.example.yaml` — every option is documented inline, including
 `anti_patterns`, `license_header`, and the built-in pattern toggle. The file
-is loaded from the PR's HEAD ref, so config changes self-test on the PR
-that introduces them.
+is always loaded from the repository's **default branch**, so the config on
+your default branch is authoritative for *every* PR — including PRs opened
+from stale or feature branches that don't contain it. A `.diffsentry.yaml`
+that exists only on a PR branch is ignored; merge it to the default branch
+to make it take effect.
 
 ### Generating a tailored config with your coding agent
 

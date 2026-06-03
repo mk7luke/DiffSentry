@@ -248,6 +248,8 @@ export interface PRContext {
   baseSha?: string;
   headBranch: string;
   headSha: string;
+  /** Repo default branch (e.g. "main"). Authoritative source for .diffsentry.yaml. */
+  defaultBranch?: string;
   files: FileChange[];
   isDraft?: boolean;
   labels?: string[];

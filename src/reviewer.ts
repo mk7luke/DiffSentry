@@ -247,15 +247,17 @@ export class Reviewer {
     activeReviews.set(key, abortController);
 
     try {
-      // Fetch PR context first so we can load .diffsentry.yaml from the PR's
-      // head ref — that way config changes inside the PR take effect for it.
+      // Fetch PR context first so we have the repo's default branch on hand.
       log.info("Fetching PR context");
       const octokit = await this.github.getInstallationOctokit(installationId);
       const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
 
-      // Load repo config from the PR's head ref
+      // Load repo config from the default branch — NOT the PR head. This makes
+      // the .diffsentry.yaml on the default branch authoritative for every PR,
+      // regardless of which (possibly stale) branch the PR was cut from. A
+      // config file living only in a feature branch is intentionally ignored.
       log.info("Loading repo configuration");
-      const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+      const rawConfig = await loadRepoConfig(octokit, owner, repo, context.defaultBranch || "HEAD");
       const repoConfig = mergeWithDefaults(rawConfig);
 
       // Check auto-review controls
@@ -1090,7 +1092,7 @@ export class Reviewer {
           );
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.defaultBranch || "HEAD");
           const repoConfig = mergeWithDefaults(rawConfig);
 
           const walkthroughResult = await this.ai.generateWalkthrough(context, repoConfig);
@@ -1108,7 +1110,7 @@ export class Reviewer {
         case "configuration": {
           const octokit = await this.github.getInstallationOctokit(installationId);
           const ctxForCfg = await this.github.getPRContext(installationId, owner, repo, pullNumber);
-          const rawConfig = await loadRepoConfig(octokit, owner, repo, ctxForCfg.headSha);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, ctxForCfg.defaultBranch || "HEAD");
           const repoConfig = mergeWithDefaults(rawConfig);
           const configMsg = formatConfigMessage(repoConfig, {
             aiProvider: this.config.aiProvider,
@@ -1232,7 +1234,7 @@ export class Reviewer {
         case "bench": {
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.defaultBranch || "HEAD");
           const repoConfig = mergeWithDefaults(rawConfig);
           const ask = `Identify the single most performance-sensitive function added or modified in this PR. Then write a self-contained micro-benchmark for it.
 
@@ -1252,7 +1254,7 @@ Skip the benchmark code if no changed function is plausibly perf-sensitive — s
         case "changelog": {
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.defaultBranch || "HEAD");
           const repoConfig = mergeWithDefaults(rawConfig);
           const ask = `Write a CHANGELOG.md entry for this PR in the Keep-a-Changelog format. Output a single Markdown code block:
 
@@ -1278,7 +1280,7 @@ Only include sections that have entries. Each bullet is one short past-tense sen
         case "release_notes": {
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.defaultBranch || "HEAD");
           const repoConfig = mergeWithDefaults(rawConfig);
           const ask = `Write public release notes for this PR. Audience: end users / customers, not engineers.
 
@@ -1331,7 +1333,7 @@ Skip sections with no content. No code blocks, no acronyms without expansion, no
         case "rewrite_description": {
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.defaultBranch || "HEAD");
           const repoConfig = mergeWithDefaults(rawConfig);
           const ask = `Propose a clearer replacement for this PR's title and description.
 
@@ -1375,7 +1377,7 @@ Output ONLY valid JSON (no fences, no prose):
         case "chat": {
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.defaultBranch || "HEAD");
           const repoConfig = mergeWithDefaults(rawConfig);
           const response = await this.ai.chat(context, command.message, repoConfig);
           await reply(response);
@@ -1427,7 +1429,7 @@ Output ONLY valid JSON (no fences, no prose):
         case "tldr": {
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.defaultBranch || "HEAD");
           const repoConfig = mergeWithDefaults(rawConfig);
           const ask =
             "Write a single plain-English paragraph (3-5 sentences max) describing this PR. " +
@@ -1443,7 +1445,7 @@ Output ONLY valid JSON (no fences, no prose):
         case "tour": {
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.defaultBranch || "HEAD");
           const repoConfig = mergeWithDefaults(rawConfig);
           const ask = `You are guiding a reviewer through this PR file by file in the order they should read.
 
@@ -1574,7 +1576,7 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
         case "rubber_duck": {
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.defaultBranch || "HEAD");
           const repoConfig = mergeWithDefaults(rawConfig);
           const ask = `You are a Socratic rubber-duck reviewer. Pick the 3 most consequential design choices in this PR — one per section. For each, do NOT advocate or judge. Instead, ask 1-2 sharp questions that force the author to defend or reconsider the choice. End with one open-ended question about an aspect that wasn't addressed at all.
 
@@ -1689,7 +1691,7 @@ Format:
         case "eli5": {
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.defaultBranch || "HEAD");
           const repoConfig = mergeWithDefaults(rawConfig);
           const ask = `Explain this PR as if the reader is intelligent but unfamiliar with the codebase, the language, and the domain. Audience: a stakeholder, designer, or cross-team engineer.
 
@@ -1718,7 +1720,7 @@ Hard rules: no code blocks, no acronyms without expansion, no "leverage"/"utiliz
         case "five_why": {
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.headSha);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.defaultBranch || "HEAD");
           const repoConfig = mergeWithDefaults(rawConfig);
           const target = command.target.trim() || "the most consequential change in this PR";
           const ask = `Apply the Toyota 5-Whys technique to: **${target}**.
