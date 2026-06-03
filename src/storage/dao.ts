@@ -329,6 +329,16 @@ export function upsertSettingOverride(opts: {
   const db = openDatabase();
   if (!db) return;
   try {
+    // Settings overrides are meaningful config (not best-effort logs), so an
+    // unrepresentable value is rejected rather than silently coerced to null.
+    const valueJson = safeJsonStringify(opts.value);
+    if (valueJson == null) {
+      logger.debug(
+        { scope: opts.scope, key: opts.key },
+        "dao.upsertSettingOverride: value not JSON-serializable — skipping write",
+      );
+      return;
+    }
     db.prepare(
       `INSERT INTO settings_overrides (scope, key, value_json, updated_by, updated_at)
        VALUES (?, ?, ?, ?, ?)
@@ -339,9 +349,7 @@ export function upsertSettingOverride(opts: {
     ).run(
       opts.scope,
       opts.key,
-      // Consistent with insertAuditLog/recordWebhookDelivery: an unrepresentable
-      // value stores JSON null rather than throwing and dropping the write.
-      safeJsonStringify(opts.value) ?? "null",
+      valueJson,
       opts.updatedBy ?? null,
       new Date().toISOString(),
     );
@@ -354,8 +362,7 @@ export function upsertSettingOverride(opts: {
  * Read a single settings override, JSON-parsed.
  *
  * `undefined` means the override is missing (no row) or persistence is
- * disabled; `null` means a value was stored explicitly as JSON null (which is
- * also what an unrepresentable value upserts to — see `upsertSettingOverride`).
+ * disabled; `null` means a value was stored explicitly as JSON null.
  * To remove an override entirely, use `deleteSettingOverride`.
  */
 export function getSettingOverride<T = unknown>(scope: string, key: string): T | null | undefined {
@@ -469,6 +476,10 @@ export function recordWebhookDelivery(opts: {
 /**
  * Apply triage state to a finding (snooze, accept/dismiss note, triager).
  * Only the provided fields are written; omitted fields are left untouched.
+ *
+ * Returns true when a row was actually updated; false when persistence is
+ * disabled, no triage field was supplied, the finding id matched nothing, or
+ * an error was caught.
  */
 export function triageFinding(opts: {
   findingId: number;
@@ -476,9 +487,9 @@ export function triageFinding(opts: {
   snoozedUntil?: string | null;
   triagedBy?: string | null;
   triageNote?: string | null;
-}): void {
+}): boolean {
   const db = openDatabase();
-  if (!db) return;
+  if (!db) return false;
   try {
     const sets: string[] = [];
     const params: unknown[] = [];
@@ -500,16 +511,22 @@ export function triageFinding(opts: {
     }
     // No actual triage field supplied — don't stamp triaged_at (or touch the
     // row at all) for a no-op call (e.g. only `findingId` was passed).
-    if (sets.length === 0) return;
+    if (sets.length === 0) return false;
     // Stamp when any field is updated.
     sets.push("triaged_at = ?");
     params.push(new Date().toISOString());
     params.push(opts.findingId);
-    db.prepare(`UPDATE findings SET ${sets.join(", ")} WHERE id = ?`).run(...params);
+    const info = db.prepare(`UPDATE findings SET ${sets.join(", ")} WHERE id = ?`).run(...params);
+    return info.changes > 0;
   } catch (err) {
     logger.debug({ err }, "dao.triageFinding failed");
+    return false;
   }
 }
+
+/** Canonical command-center roles the dashboard gates write access on. */
+export const VALID_ROLES = ["viewer", "author", "admin"] as const;
+const VALID_ROLE_SET = new Set<string>(VALID_ROLES);
 
 /** Set (or clear) a role override for a login. role=null removes the override. */
 export function setRole(opts: { login: string; role: string | null; grantedBy?: string | null }): void {
@@ -518,6 +535,10 @@ export function setRole(opts: { login: string; role: string | null; grantedBy?: 
   try {
     if (opts.role == null) {
       db.prepare(`DELETE FROM roles WHERE login = ?`).run(opts.login);
+      return;
+    }
+    if (!VALID_ROLE_SET.has(opts.role)) {
+      logger.debug({ login: opts.login, role: opts.role }, "dao.setRole: unknown role — refusing to persist");
       return;
     }
     db.prepare(
