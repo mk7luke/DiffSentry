@@ -40,7 +40,7 @@ export interface WebhookRouteDeps {
   replayWebhook?: ReplayWebhook;
 }
 
-type ErrorCode = "forbidden" | "not_found" | "bad_request" | "internal";
+type ErrorCode = "forbidden" | "not_found" | "bad_request" | "internal" | "unavailable";
 
 function sendData(res: Response, data: unknown, status = 200): void {
   res.status(status).json({ data });
@@ -81,8 +81,10 @@ export function registerWebhookRoutes(router: Router, deps: WebhookRouteDeps): v
     };
     const limit = count("limit", 100);
     const offset = count("offset", 0);
-    if (limit == null || offset == null) {
-      sendError(res, 400, "bad_request", "'limit' and 'offset' must be non-negative integers.");
+    // limit must be a positive, bounded page size (matches the query layer's
+    // 1..500 clamp); offset must be non-negative. limit=0 / huge values are 400.
+    if (limit == null || offset == null || limit < 1 || limit > 500) {
+      sendError(res, 400, "bad_request", "'limit' must be an integer between 1 and 500, and 'offset' must be a non-negative integer.");
       return;
     }
     // A repo filter must be a full "owner/repo" slug (exactly two non-empty
@@ -135,7 +137,7 @@ export function registerWebhookRoutes(router: Router, deps: WebhookRouteDeps): v
         return;
       }
       if (!deps.replayWebhook) {
-        sendError(res, 503, "internal", "Replay is unavailable (no reviewer wired in).");
+        sendError(res, 503, "unavailable", "Replay is unavailable (no reviewer wired in).");
         return;
       }
 

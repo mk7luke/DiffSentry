@@ -224,6 +224,10 @@ async function main() {
     ok("GET /webhooks?limit=-5 → 400", badLimit.status === 400 && badLimit.json.error.code === "bad_request");
     const junkLimit = await req("GET", "/webhooks?limit=10abc", { session: adminSess });
     ok("GET /webhooks?limit=10abc → 400", junkLimit.status === 400 && junkLimit.json.error.code === "bad_request");
+    const zeroLimit = await req("GET", "/webhooks?limit=0", { session: adminSess });
+    ok("GET /webhooks?limit=0 → 400", zeroLimit.status === 400 && zeroLimit.json.error.code === "bad_request");
+    const hugeLimit = await req("GET", "/webhooks?limit=100000", { session: adminSess });
+    ok("GET /webhooks?limit=100000 → 400", hugeLimit.status === 400 && hugeLimit.json.error.code === "bad_request");
     const badRepo = await req("GET", "/webhooks?repo=acme", { session: adminSess });
     ok("GET /webhooks?repo=acme (no slash) → 400", badRepo.status === 400 && badRepo.json.error.code === "bad_request");
     const goodRepo = await req("GET", "/webhooks?repo=acme/web", { session: adminSess });
