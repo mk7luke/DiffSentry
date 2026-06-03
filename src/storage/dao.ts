@@ -668,8 +668,12 @@ export const VALID_ROLES = ["viewer", "author", "admin"] as const;
 export type Role = (typeof VALID_ROLES)[number];
 const VALID_ROLE_SET = new Set<string>(VALID_ROLES);
 
-/** Set (or clear) a role override for a login. role=null removes the override. */
-export function setRole(opts: { login: string; role: Role | null; grantedBy?: string | null }): void {
+/**
+ * Set (or clear) a role override for a login. role=null removes the override.
+ * `role` is typed `string` (not `Role`) on purpose: this is a runtime-safe
+ * boundary for untyped API input, and `VALID_ROLE_SET` is the real gate.
+ */
+export function setRole(opts: { login: string; role: string | null; grantedBy?: string | null }): void {
   const db = openDatabase();
   if (!db) return;
   if (!ensureCommandCenterSchema(db)) return;

@@ -12,7 +12,8 @@ import os from "node:os";
 import path from "node:path";
 
 async function main(): Promise<void> {
-  const tmpDb = path.join(os.tmpdir(), `ds-dao-smoke-${process.pid}.db`);
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ds-dao-smoke-"));
+  const tmpDb = path.join(tmpDir, "diffsentry.db");
   process.env.DB_PATH = tmpDb;
 
   const { openDatabase, closeDatabase } = await import("../src/storage/db.js");
@@ -69,12 +70,10 @@ async function main(): Promise<void> {
     console.log("ok  triageFinding: multi-field update, idempotent repeat, change detection, no-op guards");
   } finally {
     closeDatabase();
-    for (const suffix of ["", "-wal", "-shm"]) {
-      try {
-        fs.rmSync(tmpDb + suffix, { force: true });
-      } catch {
-        // ignore
-      }
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      // ignore
     }
   }
 
