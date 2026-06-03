@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useEventStream, type ActionPayload, type ReviewLifecyclePayload, type StreamEnvelope } from "./useEventStream";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -44,6 +44,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   // Track timers so dismiss() can cancel a pending auto-dismiss.
   const timers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  // On unmount, clear every pending auto-dismiss timer so a queued setTimeout
+  // can't fire dismiss() (→ setState) after the provider is gone.
+  useEffect(() => {
+    const timersAtMount = timers.current;
+    return () => {
+      for (const timer of timersAtMount.values()) clearTimeout(timer);
+      timersAtMount.clear();
+    };
+  }, []);
 
   const dismiss = useCallback((id: string) => {
     setToasts((list) => list.filter((t) => t.id !== id));
