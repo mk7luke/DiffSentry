@@ -147,6 +147,30 @@ function testExistingV1Upgrade(): void {
   console.log("ok  existing v1 DB upgrades in place without data loss");
 }
 
+// --- 4: migration 2 tolerates a pre-existing triage column -----------------
+function testPreExistingTriageColumn(): void {
+  const file = tmpPath();
+  // A v1 DB where someone already hand-added one of the triage columns. The
+  // plain ALTER would throw "duplicate column"; the guarded `post` step must
+  // skip it and add only the missing ones.
+  withDb(file, (db) => {
+    db.exec("CREATE TABLE schema_version (version INTEGER PRIMARY KEY)");
+    db.prepare("INSERT INTO schema_version (version) VALUES (1)").run();
+    db.exec(MIGRATIONS[0].sql);
+    db.exec("ALTER TABLE findings ADD COLUMN snoozed_until TEXT"); // pre-existing
+  });
+
+  withDb(file, (db) => {
+    applyMigrations(db); // must not throw on the duplicate column
+    assert.equal(currentSchemaVersion(db), LATEST_SCHEMA_VERSION, "should still reach latest");
+    const cols = columnNames(db, "findings");
+    for (const c of EXPECTED_TRIAGE_COLS) assert.ok(cols.has(c), `expected findings.${c}`);
+  });
+  cleanup(file);
+  console.log("ok  migration 2 skips a pre-existing triage column (idempotent ADD COLUMN)");
+}
+
 testFreshAndIdempotent();
 testExistingV1Upgrade();
+testPreExistingTriageColumn();
 console.log(`\nAll migration smoke tests passed (latest schema version = ${LATEST_SCHEMA_VERSION}).`);

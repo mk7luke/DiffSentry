@@ -133,9 +133,8 @@ CREATE INDEX IF NOT EXISTS idx_issues_last_action ON issues(owner, repo, last_ac
  * notification/alerting config, saved views, raw webhook deliveries, the
  * triage model on findings, and an optional role override store.
  *
- * Strictly additive: new tables (IF NOT EXISTS) plus ADD COLUMN on findings.
- * The ADD COLUMNs are plain (no IF NOT EXISTS — unsupported by older SQLite)
- * because the runner guarantees each migration body executes at most once.
+ * Strictly additive: new tables (IF NOT EXISTS) here, plus the findings triage
+ * columns added idempotently in the `post` step (ensureFindingsTriageColumns).
  */
 const SCHEMA_V2 = `
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -246,17 +245,41 @@ CREATE TABLE IF NOT EXISTS roles (
   granted_by TEXT,
   granted_at TEXT
 );
-
-ALTER TABLE findings ADD COLUMN snoozed_until TEXT;
-ALTER TABLE findings ADD COLUMN triaged_by TEXT;
-ALTER TABLE findings ADD COLUMN triaged_at TEXT;
-ALTER TABLE findings ADD COLUMN triage_note TEXT;
 `;
+// The findings triage columns are added by ensureFindingsTriageColumns() in
+// migration 2's `post` step — SQLite ADD COLUMN has no IF NOT EXISTS, so we
+// guard each add against PRAGMA table_info to stay idempotent.
 
 export interface Migration {
   version: number;
   name: string;
   sql: string;
+  /**
+   * Optional programmatic step run inside the same transaction, immediately
+   * after `sql` and before the ledger row is written. Use for changes plain
+   * SQL can't express idempotently (e.g. conditional ADD COLUMN).
+   */
+  post?: (db: DB) => void;
+}
+
+/**
+ * Idempotently add the findings triage columns. SQLite's ALTER TABLE ADD
+ * COLUMN has no IF NOT EXISTS, so we inspect the current columns and add only
+ * the missing ones. Column names are fixed literals (no user input).
+ */
+function ensureFindingsTriageColumns(db: DB): void {
+  const cols = new Set(
+    (db.prepare("PRAGMA table_info(findings)").all() as Array<{ name: string }>).map((c) => c.name),
+  );
+  const additions: Array<[string, string]> = [
+    ["snoozed_until", "TEXT"],
+    ["triaged_by", "TEXT"],
+    ["triaged_at", "TEXT"],
+    ["triage_note", "TEXT"],
+  ];
+  for (const [name, type] of additions) {
+    if (!cols.has(name)) db.exec(`ALTER TABLE findings ADD COLUMN ${name} ${type}`);
+  }
 }
 
 /**
@@ -267,7 +290,7 @@ export interface Migration {
  */
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "v1_baseline", sql: SCHEMA_V1 },
-  { version: 2, name: "command_center", sql: SCHEMA_V2 },
+  { version: 2, name: "command_center", sql: SCHEMA_V2, post: ensureFindingsTriageColumns },
 ];
 
 /** Highest version this binary knows how to migrate to. */
@@ -335,6 +358,7 @@ export function applyMigrations(db: DB): void {
     if (applied.has(migration.version)) continue;
     const run = db.transaction(() => {
       db.exec(migration.sql);
+      migration.post?.(db);
       insertLedger.run(migration.version, migration.name, new Date().toISOString());
     });
     run();

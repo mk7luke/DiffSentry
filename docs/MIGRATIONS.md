@@ -41,10 +41,12 @@ baseline is not re-run), and applies migration 2 onward. No data is touched.
 1. Append a new entry to `MIGRATIONS` with the **next contiguous version**.
    Never edit, reorder, or delete an already-released migration — write a new
    one that alters state forward.
-2. Keep it **additive and reversible-by-neglect**: prefer `CREATE TABLE IF NOT
-   EXISTS` and `ADD COLUMN`. Plain `ADD COLUMN` (without `IF NOT EXISTS`,
-   unsupported by older SQLite) is fine because the runner guarantees each
-   migration body executes at most once.
+2. Keep it **additive**: prefer `CREATE TABLE IF NOT EXISTS`. SQLite's `ADD
+   COLUMN` has no `IF NOT EXISTS`, so for column adds use the optional `post`
+   hook on the migration — a `(db) => void` run inside the same transaction
+   after the SQL — and guard each add against `PRAGMA table_info` (see
+   `ensureFindingsTriageColumns` in migration 2). That stays idempotent even if
+   a column already exists.
 3. Run the smoke test: `npm run smoke:migrate`. It verifies a fresh DB reaches
    the latest version, that re-running is a no-op, and that an existing v1 DB
    upgrades in place without data loss
