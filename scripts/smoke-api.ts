@@ -223,6 +223,9 @@ async function main() {
     const bulkEmpty = await post(`/api/v1/findings/triage`, { state: "accepted" });
     ok("bulk triage with no targets → 400", bulkEmpty.status === 400 && bulkEmpty.json.error.code === "bad_request");
 
+    const bulkEmptyArr = await post(`/api/v1/findings/triage`, { ids: [], state: "accepted" });
+    ok("bulk triage empty ids array → 400 (distinct from no-target)", bulkEmptyArr.status === 400 && bulkEmptyArr.json.error.code === "bad_request");
+
     const bulkMalformed = await post(`/api/v1/findings/triage`, { ids: [f1Id, "abc", -3], state: "accepted" });
     ok("bulk triage malformed ids → 400 (not silently dropped)", bulkMalformed.status === 400 && bulkMalformed.json.error.code === "bad_request");
 

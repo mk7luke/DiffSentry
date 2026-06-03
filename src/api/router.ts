@@ -425,6 +425,13 @@ export function createApiRouter(deps: ApiDeps): express.Router {
     // list is de-duplicated so a repeated id isn't counted twice.
     let ids: number[];
     if (Array.isArray(body.ids)) {
+      // An explicitly-provided id list must be non-empty — reject `ids: []`
+      // here rather than letting it fall through to the generic
+      // "no ids/fingerprint" error, which conflates it with an unmatched class.
+      if (body.ids.length === 0) {
+        sendError(res, 400, "bad_request", "'ids' must be a non-empty array of positive integers.");
+        return;
+      }
       const parsed = body.ids.map((v) => (typeof v === "number" ? v : Number(v)));
       if (parsed.some((n) => !Number.isInteger(n) || n <= 0)) {
         sendError(res, 400, "bad_request", "'ids' must contain only positive integers.");
@@ -485,14 +492,17 @@ export function createApiRouter(deps: ApiDeps): express.Router {
       return;
     }
     try {
-      // triageFinding returns a boolean; normalize to a 0/1 count so the single
-      // and bulk endpoints share the { changed: number } response shape.
-      const changed = triageFinding({ findingId: id, ...write }) ? 1 : 0;
+      // Resolve coordinates first so the write/audit sequence matches the bulk
+      // endpoint's resolve-then-write contract: a non-existent id is a 404
+      // before any write is attempted.
       const coords = getFindingCoords([id]);
       if (coords.length === 0) {
         sendError(res, 404, "not_found", `No finding with id ${id}.`);
         return;
       }
+      // triageFinding returns a boolean; normalize to a 0/1 count so the single
+      // and bulk endpoints share the { changed: number } response shape.
+      const changed = triageFinding({ findingId: id, ...write }) ? 1 : 0;
       recordTriage(actor?.login ?? null, actor?.role ?? null, coords, body.state as TriageState, {
         until: write.snoozedUntil ?? undefined,
         note: write.triageNote ?? undefined,
