@@ -340,3 +340,83 @@ export interface ImpactReport {
   trend: ImpactDayBin[];
   generatedAt: string;
 }
+
+// ─── Review queue board (mirror src/realtime/bus.ts) ─────────────────
+
+export type ReviewQueueState = "queued" | "running" | "done" | "failed" | "canceled";
+
+export interface ReviewQueueEntry {
+  key: string;
+  owner: string;
+  repo: string;
+  number: number;
+  mode: "full" | "incremental";
+  state: ReviewQueueState;
+  phase: string | null;
+  enqueuedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  attempt: number;
+}
+
+export interface QueueResponse {
+  entries: ReviewQueueEntry[];
+}
+
+// ─── Webhook deliveries (mirror src/dashboard/queries.ts) ────────────
+
+export interface WebhookDeliveryRow {
+  id: number;
+  ts: string;
+  event: string | null;
+  action: string | null;
+  owner: string | null;
+  repo: string | null;
+  number: number | null;
+  delivery_id: string | null;
+  signature_ok: number | null;
+  replayed_from: number | null;
+  payload_bytes: number | null;
+}
+
+export interface WebhookDeliveryDetail extends WebhookDeliveryRow {
+  payload_json: string | null;
+}
+
+export interface WebhooksResponse {
+  rows: WebhookDeliveryRow[];
+  total: number;
+  events: string[];
+  repos: string[];
+}
+
+export interface ReplayResponse {
+  id: number;
+  newDeliveryId: number | null;
+  event: string | null;
+  dispatchStatus: number;
+  result: string;
+}
+
+// ─── Search (Cmd-K palette) ─────────────────────────────────────────
+
+export type SearchResultType = "repo" | "pr" | "finding" | "learning";
+
+export interface SearchResult {
+  type: SearchResultType;
+  title: string;
+  subtitle: string | null;
+  /** SPA client-side route to navigate to on Enter. */
+  to: string;
+  owner: string;
+  repo: string;
+  number: number | null;
+  severity: string | null;
+  score: number;
+}
+
+export interface SearchResponse {
+  q: string;
+  results: SearchResult[];
+}

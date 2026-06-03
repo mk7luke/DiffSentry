@@ -1142,3 +1142,240 @@ export function getImpact(opts: ImpactOptions): ImpactReport {
 
   return { ...base, current, previous, recurring, trend };
 }
+
+// ─── Webhook deliveries ─────────────────────────────────────────────
+
+/**
+ * Delivery list row — metadata only. The (potentially large) payload is omitted
+ * here; `payload_bytes` lets the UI show its size without shipping it. Fetch the
+ * full body lazily via getWebhookDelivery() when a row is expanded.
+ */
+export interface WebhookDeliveryRow {
+  id: number;
+  ts: string;
+  event: string | null;
+  action: string | null;
+  owner: string | null;
+  repo: string | null;
+  number: number | null;
+  delivery_id: string | null;
+  signature_ok: number | null;
+  replayed_from: number | null;
+  payload_bytes: number | null;
+}
+
+export interface WebhookDeliveryDetail extends WebhookDeliveryRow {
+  payload_json: string | null;
+}
+
+/**
+ * Page raw webhook deliveries, newest first, with optional `event` and `repo`
+ * ("owner/repo") filters. Mirrors getAuditLog: returns `{ rows, total }` and
+ * degrades to an empty page when persistence is off or the v2
+ * `webhook_deliveries` table is absent (un-migrated v1 DB).
+ */
+export function getWebhookDeliveries(opts: {
+  event?: string;
+  repo?: string;
+  limit?: number;
+  offset?: number;
+} = {}): { rows: WebhookDeliveryRow[]; total: number } {
+  const db = openDatabase();
+  if (!db) return { rows: [], total: 0 };
+  // Coerce to integers (not just clamp) so a float from a direct caller can't be
+  // bound to LIMIT/OFFSET — the API parser uses parseInt, but this guards every caller.
+  const limit = Math.min(Math.max(Math.floor(opts.limit ?? 100), 1), 500);
+  const offset = Math.max(Math.floor(opts.offset ?? 0), 0);
+  const where: string[] = [];
+  const args: unknown[] = [];
+  if (opts.event) {
+    where.push("event = ?");
+    args.push(opts.event);
+  }
+  if (opts.repo && opts.repo.includes("/")) {
+    const [o, r] = opts.repo.split("/", 2);
+    where.push("owner = ? AND repo = ?");
+    args.push(o, r);
+  }
+  const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  try {
+    const total = (
+      db.prepare(`SELECT COUNT(*) AS n FROM webhook_deliveries ${whereSql}`).get(...args) as { n: number }
+    ).n;
+    const rows = db
+      .prepare(
+        `SELECT id, ts, event, action, owner, repo, number, delivery_id, signature_ok, replayed_from,
+                LENGTH(payload_json) AS payload_bytes
+         FROM webhook_deliveries ${whereSql}
+         ORDER BY ts DESC, id DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(...args, limit, offset) as WebhookDeliveryRow[];
+    return { rows, total };
+  } catch {
+    return { rows: [], total: 0 };
+  }
+}
+
+/** One delivery with its full stored payload (for the JSON viewer + replay). */
+export function getWebhookDelivery(id: number): WebhookDeliveryDetail | null {
+  const db = openDatabase();
+  if (!db) return null;
+  try {
+    const row = db
+      .prepare(
+        `SELECT id, ts, event, action, owner, repo, number, delivery_id, signature_ok, replayed_from,
+                LENGTH(payload_json) AS payload_bytes, payload_json
+         FROM webhook_deliveries WHERE id = ?`,
+      )
+      .get(id) as WebhookDeliveryDetail | undefined;
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Distinct event names present, for the deliveries filter dropdown. */
+export function getWebhookEventTypes(): string[] {
+  const db = openDatabase();
+  if (!db) return [];
+  try {
+    return (
+      db
+        .prepare(`SELECT DISTINCT event FROM webhook_deliveries WHERE event IS NOT NULL ORDER BY event`)
+        .all() as Array<{ event: string }>
+    ).map((r) => r.event);
+  } catch {
+    return [];
+  }
+}
+
+/** Distinct "owner/repo" slugs present, for the deliveries filter dropdown. */
+export function getWebhookRepos(): string[] {
+  const db = openDatabase();
+  if (!db) return [];
+  try {
+    return (
+      db
+        .prepare(
+          `SELECT DISTINCT owner || '/' || repo AS slug FROM webhook_deliveries
+           WHERE owner IS NOT NULL AND repo IS NOT NULL ORDER BY slug`,
+        )
+        .all() as Array<{ slug: string }>
+    ).map((r) => r.slug);
+  } catch {
+    return [];
+  }
+}
+
+// ─── Global search ──────────────────────────────────────────────────
+//
+// Powers the Cmd-K palette: a single LIKE sweep across repos, PRs, and
+// findings. Learnings (which live on disk, not in SQLite) are searched in the
+// router. The DB layer only finds *candidate* rows; ranking happens in the API
+// so the same scoring covers learnings too. Every query degrades to [] when
+// persistence is disabled.
+
+/** Escape LIKE wildcards so a literal `%` / `_` in the query isn't a wildcard.
+ * Pair with `LIKE ? ESCAPE '\'`. */
+export function escapeLike(q: string): string {
+  return q.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+export interface RepoSlug {
+  owner: string;
+  repo: string;
+}
+
+/** Every known (owner, repo) — used to enumerate on-disk learnings files. */
+export function listRepos(): RepoSlug[] {
+  const db = openDatabase();
+  if (!db) return [];
+  return db.prepare(`SELECT owner, repo FROM repos`).all() as RepoSlug[];
+}
+
+export interface RepoSearchHit {
+  owner: string;
+  repo: string;
+  last_review: string | null;
+}
+
+export interface PRSearchHit {
+  owner: string;
+  repo: string;
+  number: number;
+  title: string | null;
+  author: string | null;
+  state: string | null;
+  created_at: string | null;
+}
+
+export interface FindingSearchHit {
+  id: number;
+  owner: string;
+  repo: string;
+  number: number;
+  path: string | null;
+  line: number | null;
+  severity: string | null;
+  title: string | null;
+  fingerprint: string | null;
+  created_at: string;
+}
+
+export interface SearchCandidates {
+  repos: RepoSearchHit[];
+  prs: PRSearchHit[];
+  findings: FindingSearchHit[];
+}
+
+/**
+ * Candidate rows for a search query. `perType` caps each category so a broad
+ * query can't pull thousands of rows; the API re-ranks and trims to a final
+ * page. A blank query returns nothing (the palette shows nav/actions instead).
+ */
+export function searchEntities(q: string, perType = 20): SearchCandidates {
+  const db = openDatabase();
+  const trimmed = q.trim();
+  if (!db || !trimmed) return { repos: [], prs: [], findings: [] };
+  const like = `%${escapeLike(trimmed)}%`;
+  const limit = Math.min(Math.max(perType, 1), 50);
+
+  const repos = db
+    .prepare(
+      `SELECT r.owner, r.repo,
+              (SELECT MAX(created_at) FROM reviews rv WHERE rv.owner = r.owner AND rv.repo = r.repo) AS last_review
+       FROM repos r
+       WHERE (r.owner || '/' || r.repo) LIKE ? ESCAPE '\\'
+       ORDER BY (last_review IS NULL), last_review DESC
+       LIMIT ?`,
+    )
+    .all(like, limit) as RepoSearchHit[];
+
+  const prs = db
+    .prepare(
+      `SELECT owner, repo, number, title, author, state, created_at
+       FROM prs
+       WHERE title LIKE ? ESCAPE '\\'
+          OR author LIKE ? ESCAPE '\\'
+          OR CAST(number AS TEXT) LIKE ? ESCAPE '\\'
+       ORDER BY (created_at IS NULL), created_at DESC
+       LIMIT ?`,
+    )
+    .all(like, like, like, limit) as PRSearchHit[];
+
+  const findings = db
+    .prepare(
+      `SELECT fi.id, rv.owner, rv.repo, rv.number, fi.path, fi.line, fi.severity,
+              fi.title, fi.fingerprint, rv.created_at
+       FROM findings fi
+       JOIN reviews rv ON rv.id = fi.review_id
+       WHERE fi.title LIKE ? ESCAPE '\\'
+          OR fi.path LIKE ? ESCAPE '\\'
+       ORDER BY rv.created_at DESC
+       LIMIT ?`,
+    )
+    .all(like, like, limit) as FindingSearchHit[];
+
+  return { repos, prs, findings };
+}
