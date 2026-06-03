@@ -703,12 +703,27 @@ untouched.
   resolved role + capabilities, and a recent warn/error log tail captured via
   an in-process pino ring buffer.
 
+**Command palette (⌘K / Ctrl-K)** — press `⌘K` anywhere (or click **Search…**
+in the sidebar) to open a keyboard-first palette that combines three things:
+
+- **Navigation** — jump to any screen (capability-filtered, so non-admins don't
+  see the Audit entry).
+- **Quick actions** — when you're on a PR page, the author+ commands
+  (re-review, resolve threads, pause/resume, cancel) are one keystroke away.
+  They run through the same `requireRole` + CSRF + audit + SSE command endpoints
+  as the on-page buttons, so they're hidden for viewers and audited for everyone
+  else.
+- **Search** — `GET /api/v1/search?q=` does a ranked `LIKE` sweep across repos,
+  PRs, findings, and on-disk learnings; each result deep-links to its screen.
+  `↑`/`↓` move, `↵` opens/acts, `esc` closes.
+
 **JSON API** (`/api/v1`)
 
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
-`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, and `/audit`
-(admin). Write endpoints: `POST /roles` (admin) sets/clears a role override.
+`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, `/search?q=`, and
+`/audit` (admin). Write endpoints: `POST /roles` (admin) sets/clears a role
+override.
 When OAuth is configured every endpoint requires a valid session (401 JSON
 otherwise); the queries reuse the same SQL as the legacy dashboard and no-op
 gracefully when persistence is disabled.

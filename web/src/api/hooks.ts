@@ -12,6 +12,7 @@ import type {
   RepoDetailResponse,
   ReposResponse,
   Role,
+  SearchResponse,
 } from "./types";
 
 export function useMe() {
@@ -82,6 +83,19 @@ export function usePatterns() {
   return useQuery({
     queryKey: ["patterns"],
     queryFn: () => apiGet<PatternsResponse>("/patterns"),
+  });
+}
+
+/** Cmd-K palette search. Disabled for blank queries; keeps the prior page of
+ * results visible while the next one loads so the list doesn't flicker. */
+export function useSearch(q: string, enabled = true) {
+  const trimmed = q.trim();
+  return useQuery({
+    queryKey: ["search", trimmed],
+    queryFn: () => apiGet<SearchResponse>("/search", { q: trimmed }),
+    enabled: enabled && trimmed.length > 0,
+    placeholderData: (prev) => prev,
+    staleTime: 15_000,
   });
 }
 

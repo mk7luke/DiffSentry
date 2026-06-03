@@ -2,7 +2,8 @@ import type { ComponentType, ReactNode, SVGProps } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
 import type { Capabilities } from "../api/types";
-import { AuditIcon, FindingsIcon, LogoIcon, OverviewIcon, PatternsIcon, SettingsIcon } from "./icons";
+import { AuditIcon, FindingsIcon, LogoIcon, OverviewIcon, PatternsIcon, SearchIcon, SettingsIcon } from "./icons";
+import { CommandPalette, openCommandPalette } from "./CommandPalette";
 
 // Page shell: sticky left sidebar (brand + primary nav + signed-in user) and
 // the main content column. Mirrors renderLayout() from src/dashboard/layout.ts.
@@ -39,6 +40,11 @@ function Sidebar() {
           <div className="wordmark-sub">REVIEW OPS</div>
         </div>
       </NavLink>
+      <button type="button" className="cmdk-trigger" onClick={openCommandPalette}>
+        <SearchIcon />
+        <span>Search…</span>
+        <kbd className="cmdk-kbd">⌘K</kbd>
+      </button>
       <nav className="sidebar-nav" aria-label="Primary">
         {items.map(({ to, label, Icon, end }) => (
           <NavLink key={to} to={to} end={end} className={({ isActive }) => `snav${isActive ? " active" : ""}`}>
@@ -72,6 +78,7 @@ export function Shell() {
       <main className="main">
         <Outlet />
       </main>
+      <CommandPalette />
     </div>
   );
 }

@@ -813,3 +813,115 @@ export function getRoleOverrides(): RoleOverrideRow[] {
     return [];
   }
 }
+
+// ─── Global search ──────────────────────────────────────────────────
+//
+// Powers the Cmd-K palette: a single LIKE sweep across repos, PRs, and
+// findings. Learnings (which live on disk, not in SQLite) are searched in the
+// router. The DB layer only finds *candidate* rows; ranking happens in the API
+// so the same scoring covers learnings too. Every query degrades to [] when
+// persistence is disabled.
+
+/** Escape LIKE wildcards so a literal `%` / `_` in the query isn't a wildcard.
+ * Pair with `LIKE ? ESCAPE '\'`. */
+export function escapeLike(q: string): string {
+  return q.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+export interface RepoSlug {
+  owner: string;
+  repo: string;
+}
+
+/** Every known (owner, repo) — used to enumerate on-disk learnings files. */
+export function listRepos(): RepoSlug[] {
+  const db = openDatabase();
+  if (!db) return [];
+  return db.prepare(`SELECT owner, repo FROM repos`).all() as RepoSlug[];
+}
+
+export interface RepoSearchHit {
+  owner: string;
+  repo: string;
+  last_review: string | null;
+}
+
+export interface PRSearchHit {
+  owner: string;
+  repo: string;
+  number: number;
+  title: string | null;
+  author: string | null;
+  state: string | null;
+  created_at: string | null;
+}
+
+export interface FindingSearchHit {
+  id: number;
+  owner: string;
+  repo: string;
+  number: number;
+  path: string | null;
+  line: number | null;
+  severity: string | null;
+  title: string | null;
+  fingerprint: string | null;
+  created_at: string;
+}
+
+export interface SearchCandidates {
+  repos: RepoSearchHit[];
+  prs: PRSearchHit[];
+  findings: FindingSearchHit[];
+}
+
+/**
+ * Candidate rows for a search query. `perType` caps each category so a broad
+ * query can't pull thousands of rows; the API re-ranks and trims to a final
+ * page. A blank query returns nothing (the palette shows nav/actions instead).
+ */
+export function searchEntities(q: string, perType = 20): SearchCandidates {
+  const db = openDatabase();
+  const trimmed = q.trim();
+  if (!db || !trimmed) return { repos: [], prs: [], findings: [] };
+  const like = `%${escapeLike(trimmed)}%`;
+  const limit = Math.min(Math.max(perType, 1), 50);
+
+  const repos = db
+    .prepare(
+      `SELECT r.owner, r.repo,
+              (SELECT MAX(created_at) FROM reviews rv WHERE rv.owner = r.owner AND rv.repo = r.repo) AS last_review
+       FROM repos r
+       WHERE (r.owner || '/' || r.repo) LIKE ? ESCAPE '\\'
+       ORDER BY (last_review IS NULL), last_review DESC
+       LIMIT ?`,
+    )
+    .all(like, limit) as RepoSearchHit[];
+
+  const prs = db
+    .prepare(
+      `SELECT owner, repo, number, title, author, state, created_at
+       FROM prs
+       WHERE title LIKE ? ESCAPE '\\'
+          OR author LIKE ? ESCAPE '\\'
+          OR CAST(number AS TEXT) LIKE ? ESCAPE '\\'
+       ORDER BY (created_at IS NULL), created_at DESC
+       LIMIT ?`,
+    )
+    .all(like, like, like, limit) as PRSearchHit[];
+
+  const findings = db
+    .prepare(
+      `SELECT fi.id, rv.owner, rv.repo, rv.number, fi.path, fi.line, fi.severity,
+              fi.title, fi.fingerprint, rv.created_at
+       FROM findings fi
+       JOIN reviews rv ON rv.id = fi.review_id
+       WHERE fi.title LIKE ? ESCAPE '\\'
+          OR fi.path LIKE ? ESCAPE '\\'
+       ORDER BY rv.created_at DESC
+       LIMIT ?`,
+    )
+    .all(like, like, limit) as FindingSearchHit[];
+
+  return { repos, prs, findings };
+}
