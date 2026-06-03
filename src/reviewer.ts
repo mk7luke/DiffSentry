@@ -29,6 +29,7 @@ import { scanDependencyChanges, renderDepBlock } from "./dep-scanner.js";
 import { detectDescriptionDrift, renderDriftBlock, reviewCommitMessages, renderCommitCoachBlock, reviewPRTitle, renderTitleCoachBlock, scanLicenseHeaders, renderLicenseHeaderBlock } from "./drift.js";
 import { createHash } from "node:crypto";
 import { logger } from "./logger.js";
+import { bus } from "./realtime/bus.js";
 
 function normalizePatchForHash(patch: string): string {
   // Strip metadata lines + leading +/- markers, collapse all whitespace,
@@ -225,6 +226,49 @@ export class Reviewer {
     reviewCountByPR.delete(key);
   }
 
+  // ─── Command-center action surface (used by the JSON API) ────
+  // Thin wrappers over the same in-memory state + GitHub client the chat
+  // commands use, exposed as public methods so src/api/actions.ts can drive
+  // them without reaching into module-level state. See ReviewerActions.
+
+  /** Pause automatic + manual reviews for a PR (mirrors the `pause` command). */
+  pauseReviews(owner: string, repo: string, pullNumber: number): void {
+    pausedPRs.add(prKey(owner, repo, pullNumber));
+  }
+
+  /** Resume reviews and reset the auto-pause counter (mirrors `resume`). */
+  resumeReviews(owner: string, repo: string, pullNumber: number): void {
+    const key = prKey(owner, repo, pullNumber);
+    pausedPRs.delete(key);
+    reviewCountByPR.delete(key);
+  }
+
+  /** Whether reviews are currently paused for this PR. */
+  isPaused(owner: string, repo: string, pullNumber: number): boolean {
+    return pausedPRs.has(prKey(owner, repo, pullNumber));
+  }
+
+  /** Resolve all DiffSentry review threads on a PR (mirrors the `resolve` command). */
+  async resolveThreads(installationId: number, owner: string, repo: string, pullNumber: number): Promise<void> {
+    await this.github.resolveAllComments(installationId, owner, repo, pullNumber);
+  }
+
+  /** Abort any in-flight review for a PR. Alias of handlePRClose semantics. */
+  cancelReview(owner: string, repo: string, pullNumber: number): void {
+    this.handlePRClose(owner, repo, pullNumber);
+  }
+
+  /** Run a review (full | incremental). Alias of handlePullRequest for the API. */
+  triggerReview(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    mode: "full" | "incremental",
+  ): Promise<void> {
+    return this.handlePullRequest(installationId, owner, repo, pullNumber, mode);
+  }
+
   // ─── Main PR Review Handler ──────────────────────────────────
   async handlePullRequest(
     installationId: number,
@@ -245,6 +289,14 @@ export class Reviewer {
     // Set up abort controller
     const abortController = new AbortController();
     activeReviews.set(key, abortController);
+
+    // Lifecycle on the bus (command-center realtime). Emitted once we commit to
+    // running — after the pause/abort-state checks above — and balanced by a
+    // terminal event in the finally below. Best-effort: never affects review
+    // logic or output.
+    bus.publish("review.started", { owner, repo, number: pullNumber, mode });
+    let reviewOutcome: "finished" | "failed" = "finished";
+    let reviewError: string | undefined;
 
     try {
       // Fetch PR context first so we have the repo's default branch on hand.
@@ -1003,10 +1055,22 @@ export class Reviewer {
         log.info("Review aborted (PR closed)");
         return;
       }
+      reviewOutcome = "failed";
+      reviewError = err instanceof Error ? err.message : String(err);
       log.error({ err }, "Review failed");
       throw err;
     } finally {
       activeReviews.delete(key);
+      // Always emit a terminal event so subscribers can clear "in progress"
+      // state, whether the run completed, was skipped early, was aborted, or
+      // failed. An aborted run is reported as finished (it terminated cleanly).
+      bus.publish(reviewOutcome === "failed" ? "review.failed" : "review.finished", {
+        owner,
+        repo,
+        number: pullNumber,
+        mode,
+        error: reviewError,
+      });
     }
   }
 

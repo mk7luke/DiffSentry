@@ -537,6 +537,7 @@ GitHub webhook
 | `DASHBOARD_ADMIN_LOGINS` | No | | Comma-separated logins granted the `admin` role. |
 | `DASHBOARD_AUTHOR_LOGINS` | No | | Comma-separated logins granted the `author` role. |
 | `DASHBOARD_SESSION_SECRET` | No | `GITHUB_WEBHOOK_SECRET` | HMAC key for the dashboard session + CSRF cookies. |
+| `DASHBOARD_SSE_HEARTBEAT_MS` | No | `25000` | Heartbeat interval (ms, min 1000) for the `/api/v1/stream` SSE feed. |
 
 \* One of `GITHUB_PRIVATE_KEY_PATH` or `GITHUB_PRIVATE_KEY` is required.
 
@@ -711,6 +712,25 @@ failure. Read endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
 When OAuth is configured every endpoint requires a valid session (401 JSON
 otherwise); the queries reuse the same SQL as the legacy dashboard and no-op
 gracefully when persistence is disabled.
+
+**Command actions** (`author`+) drive the review engine from the dashboard. Each
+is `requireRole('author')` + CSRF gated, writes an `audit_log` row, and emits an
+SSE event:
+
+| Endpoint | Effect |
+|---|---|
+| `POST /repos/:owner/:repo/prs/:number/review` `{ mode: 'full'\|'incremental' }` | Queue a (re-)review — returns `202`, runs in the background. |
+| `POST .../prs/:number/resolve` | Resolve all DiffSentry review threads on the PR. |
+| `POST .../prs/:number/pause` / `.../resume` | Pause / resume automatic + manual reviews. |
+| `POST .../prs/:number/cancel` | Abort any in-flight review (handlePRClose semantics). |
+
+**Realtime** (`GET /api/v1/stream`) is a Server-Sent Events feed on an in-process
+event bus. The review engine publishes `review.started` / `review.finished` /
+`review.failed`, and every command action publishes `action.performed`. The SPA
+opens one `EventSource`, surfaces events as toasts, and live-refetches the
+affected PR — so a re-review's findings appear without a refresh. The stream
+heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed
+events on reconnect via `Last-Event-ID`.
 
 **Roles & access control (RBAC)**
 

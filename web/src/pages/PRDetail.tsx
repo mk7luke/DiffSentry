@@ -1,14 +1,65 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { usePRDetail } from "../api/hooks";
 import { Breadcrumbs } from "../components/Shell";
 import { Card, PageHeader } from "../components/primitives";
+import { ActionButton } from "../components/ActionButton";
 import { ApprovalBadge, RiskBadge, SeverityBadge } from "../components/badges";
 import { EmptyState, QueryBoundary } from "../components/states";
 import { Markdown } from "../components/Markdown";
 import { GithubIcon } from "../components/icons";
+import { useEventStream, type StreamEnvelope } from "../realtime/useEventStream";
 import { pluralize, relativeTime } from "../lib/format";
 import type { PRReviewRow } from "../api/types";
+
+/** The command bar on a PR — author+ controls, capability-gated. */
+function PRActions({ owner, repo, number }: { owner: string; repo: string; number: number }) {
+  const enc = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/prs/${number}`;
+  const prKey = ["pr", owner, repo, number];
+  return (
+    <div className="actions" style={{ display: "inline-flex", gap: 8, flexWrap: "wrap" }}>
+      <ActionButton
+        path={`${enc}/review`}
+        body={{ mode: "full" }}
+        capability="triggerReview"
+        variant="primary"
+        successTitle="Re-review queued"
+        pendingLabel="Queuing…"
+        invalidateKeys={[prKey]}
+      >
+        Re-review
+      </ActionButton>
+      <ActionButton path={`${enc}/resolve`} capability="triggerReview" successTitle="Threads resolved" invalidateKeys={[prKey]}>
+        Resolve threads
+      </ActionButton>
+      <ActionButton path={`${enc}/pause`} capability="triggerReview" successTitle="Reviews paused">
+        Pause
+      </ActionButton>
+      <ActionButton path={`${enc}/resume`} capability="triggerReview" successTitle="Reviews resumed">
+        Resume
+      </ActionButton>
+      <ActionButton
+        path={`${enc}/cancel`}
+        capability="triggerReview"
+        variant="danger"
+        successTitle="Review canceled"
+        confirm="Abort any in-flight review for this PR?"
+      >
+        Cancel
+      </ActionButton>
+      <a
+        href={`https://github.com/${owner}/${repo}/pull/${number}`}
+        className="btn btn-ghost"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <GithubIcon />
+        Open in GitHub
+      </a>
+    </div>
+  );
+}
 
 function LatestReview({ latest }: { latest: PRReviewRow }) {
   const [showRaw, setShowRaw] = useState(false);
@@ -67,6 +118,21 @@ export function PRDetailPage() {
   const repo = params.repo ?? "";
   const number = Number.parseInt(params.number ?? "", 10);
   const query = usePRDetail(owner, repo, number);
+  const qc = useQueryClient();
+
+  // Live updates: when a review for *this* PR finishes/fails or an action is
+  // performed, refetch the detail so findings/events reflect it without a
+  // manual refresh.
+  const onEvent = useCallback(
+    (env: StreamEnvelope) => {
+      const p = env.payload as { owner?: string; repo?: string; number?: number };
+      if (p.owner === owner && p.repo === repo && p.number === number) {
+        void qc.invalidateQueries({ queryKey: ["pr", owner, repo, number] });
+      }
+    },
+    [qc, owner, repo, number],
+  );
+  useEventStream(onEvent);
 
   return (
     <>
@@ -102,17 +168,7 @@ export function PRDetailPage() {
                     {a.pr?.state ? <span className={`chip ${a.pr.state === "open" ? "good" : "muted"} uppercase`}>{a.pr.state}</span> : null}
                   </>
                 }
-                right={
-                  <a
-                    href={`https://github.com/${owner}/${repo}/pull/${a.number}`}
-                    className="btn btn-ghost"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <GithubIcon />
-                    Open in GitHub
-                  </a>
-                }
+                right={<PRActions owner={owner} repo={repo} number={a.number} />}
               />
 
               <div className="grid stack">

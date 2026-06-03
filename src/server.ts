@@ -40,13 +40,24 @@ export function createServer(config: Config) {
       }),
     );
 
-    // New JSON API consumed by the Vite SPA.
+    // New JSON API consumed by the Vite SPA. The reviewer is exposed as a
+    // narrow action surface (mirroring getInstallationOctokit) so the command
+    // endpoints can trigger reviews, resolve threads, and pause/resume/cancel.
     app.use(
       "/api/v1",
       createApiRouter({
         learningsDir: config.learningsDir,
         getInstallationOctokit: (id) => reviewer.getInstallationOctokit(id),
         auth,
+        reviewer: {
+          triggerReview: (installationId, owner, repo, number, mode) =>
+            reviewer.triggerReview(installationId, owner, repo, number, mode),
+          resolveThreads: (installationId, owner, repo, number) =>
+            reviewer.resolveThreads(installationId, owner, repo, number),
+          pauseReviews: (owner, repo, number) => reviewer.pauseReviews(owner, repo, number),
+          resumeReviews: (owner, repo, number) => reviewer.resumeReviews(owner, repo, number),
+          cancelReview: (owner, repo, number) => reviewer.cancelReview(owner, repo, number),
+        },
       }),
     );
 

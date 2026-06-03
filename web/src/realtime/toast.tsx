@@ -1,0 +1,148 @@
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEventStream, type ActionPayload, type ReviewLifecyclePayload, type StreamEnvelope } from "./useEventStream";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Toast / live feed primitive.
+//
+// Two jobs:
+//   1. Imperative toasts — useToast().push(...) from <ActionButton> and any
+//      feature that wants to surface a result.
+//   2. A live feed — it subscribes to the event stream and auto-toasts review
+//      lifecycle + action events, so anything happening server-side shows up
+//      without a refresh (the W0.4 acceptance criterion).
+//
+// Kept deliberately small: a capped list, auto-dismiss, no external deps.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ToastTone = "info" | "success" | "danger" | "pending";
+
+export interface Toast {
+  id: string;
+  tone: ToastTone;
+  title: string;
+  body?: string;
+  /** ms before auto-dismiss; 0 keeps it until dismissed. Default 6000. */
+  ttl?: number;
+}
+
+interface ToastContextValue {
+  push: (t: Omit<Toast, "id"> & { id?: string }) => string;
+  dismiss: (id: string) => void;
+}
+
+const ToastContext = createContext<ToastContextValue | null>(null);
+
+const MAX_TOASTS = 5;
+
+let counter = 0;
+function nextId(): string {
+  counter += 1;
+  return `t${counter}_${Date.now()}`;
+}
+
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  // Track timers so dismiss() can cancel a pending auto-dismiss.
+  const timers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const dismiss = useCallback((id: string) => {
+    setToasts((list) => list.filter((t) => t.id !== id));
+    const timer = timers.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      timers.current.delete(id);
+    }
+  }, []);
+
+  const push = useCallback(
+    (t: Omit<Toast, "id"> & { id?: string }) => {
+      const id = t.id ?? nextId();
+      setToasts((list) => {
+        // Replace an existing toast with the same id (e.g. pending → success).
+        const without = list.filter((x) => x.id !== id);
+        const next = [...without, { ...t, id }];
+        return next.slice(-MAX_TOASTS);
+      });
+      const ttl = t.ttl ?? 6000;
+      const existing = timers.current.get(id);
+      if (existing) clearTimeout(existing);
+      if (ttl > 0) {
+        const timer = setTimeout(() => dismiss(id), ttl);
+        if (typeof timer === "object" && "unref" in timer) (timer as { unref?: () => void }).unref?.();
+        timers.current.set(id, timer);
+      }
+      return id;
+    },
+    [dismiss],
+  );
+
+  const value = useMemo<ToastContextValue>(() => ({ push, dismiss }), [push, dismiss]);
+
+  return (
+    <ToastContext.Provider value={value}>
+      {children}
+      <StreamToasts />
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
+    </ToastContext.Provider>
+  );
+}
+
+export function useToast(): ToastContextValue {
+  const ctx = useContext(ToastContext);
+  if (!ctx) throw new Error("useToast must be used within <ToastProvider>");
+  return ctx;
+}
+
+/** Bridges the SSE stream into toasts. Rendered once inside the provider. */
+function StreamToasts() {
+  const { push } = useToast();
+  const onEvent = useCallback(
+    (env: StreamEnvelope) => {
+      if (env.topic === "review.started" || env.topic === "review.finished" || env.topic === "review.failed") {
+        const p = env.payload as ReviewLifecyclePayload;
+        const ref = `${p.owner}/${p.repo}#${p.number}`;
+        if (env.topic === "review.started") {
+          push({ id: `review-${ref}`, tone: "pending", title: `Review started · ${ref}`, body: p.mode ? `${p.mode} review` : undefined, ttl: 0 });
+        } else if (env.topic === "review.finished") {
+          push({ id: `review-${ref}`, tone: "success", title: `Review finished · ${ref}` });
+        } else {
+          push({ id: `review-${ref}`, tone: "danger", title: `Review failed · ${ref}`, body: p.error });
+        }
+        return;
+      }
+      if (env.topic === "action.performed") {
+        const p = env.payload as ActionPayload;
+        const ref = `${p.owner}/${p.repo}#${p.number}`;
+        const who = p.actor ? `@${p.actor}` : "someone";
+        push({
+          tone: p.result === "ok" || p.result === "accepted" ? "info" : "danger",
+          title: `${who} · ${p.action} · ${ref}`,
+          body: p.detail,
+        });
+      }
+    },
+    [push],
+  );
+  useEventStream(onEvent);
+  return null;
+}
+
+function ToastViewport({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: string) => void }) {
+  if (toasts.length === 0) return null;
+  return (
+    <div className="toast-viewport" role="status" aria-live="polite">
+      {toasts.map((t) => (
+        <div key={t.id} className={`toast toast-${t.tone}`}>
+          {t.tone === "pending" ? <span className="spinner toast-spinner" /> : <span className="toast-dot" />}
+          <div className="toast-text">
+            <div className="toast-title">{t.title}</div>
+            {t.body ? <div className="toast-body">{t.body}</div> : null}
+          </div>
+          <button type="button" className="toast-close" aria-label="Dismiss" onClick={() => onDismiss(t.id)}>
+            ×
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
