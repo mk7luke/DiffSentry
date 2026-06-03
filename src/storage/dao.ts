@@ -726,7 +726,7 @@ export function setRole(opts: { login?: string | null; role: string | null; gran
  * when the stored role is not a recognized value — so downstream authorization
  * falls back to the safe default rather than trusting an unknown role string.
  */
-export function getRole(login: string): Role | undefined {
+export function getRole(login: string | null | undefined): Role | undefined {
   const db = openDatabase();
   if (!db) return undefined;
   if (!ensureCommandCenterSchema(db, ["roles"])) return undefined;
