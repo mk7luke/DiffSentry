@@ -55,6 +55,7 @@ async function main() {
   const db = openDatabase();
   if (!db) throw new Error("failed to open temp db");
   recordRepo({ owner: "acme", repo: "web", installationId: 42 });
+  recordRepo({ owner: "acme", repo: "transient", installationId: 42 });
 
   const learningsDir = path.join(os.tmpdir(), `ds-config-learnings-${Date.now()}`);
   fs.mkdirSync(learningsDir, { recursive: true });
@@ -63,6 +64,7 @@ async function main() {
   const calls: Call[] = [];
   let fileContent: string | null = "reviews:\n  profile: chill\n";
   let fileSha = "sha-0";
+  let transientFail = false;
   const octokit = {
     repos: {
       get: (args: unknown) => {
@@ -71,6 +73,11 @@ async function main() {
       },
       getContent: (args: unknown) => {
         calls.push({ method: "repos.getContent", args: [args] });
+        if (transientFail) {
+          // One-shot transient failure (e.g. rate limit / 5xx) — must NOT be cached.
+          transientFail = false;
+          return Promise.reject(Object.assign(new Error("rate limited"), { status: 500 }));
+        }
         if (fileContent === null) return Promise.reject(Object.assign(new Error("not found"), { status: 404 }));
         return Promise.resolve({
           data: {
@@ -277,6 +284,14 @@ async function main() {
     ok("PUT(admin, pr) → 200 mode=pr", prRes.status === 200 && prRes.json.data.mode === "pr" && prRes.json.data.prNumber === 99);
     ok("pr → git.createRef + pulls.create called", calls.some((c) => c.method === "git.createRef") && calls.some((c) => c.method === "pulls.create"));
     ok("bus emitted config.updated (pr)", await waitForEvent((e) => e.topic === "config.updated" && e.payload.mode === "pr"));
+
+    // ── Transient GitHub errors are NOT cached as "no config" ──────────
+    // First GET hits a one-shot 500 → null (uncached); the next GET recovers.
+    transientFail = true;
+    const transient1 = await req("GET", "/repos/acme/transient/config", { session: adminSess });
+    ok("GET during transient error → yaml null", transient1.status === 200 && transient1.json.data.yaml === null);
+    const transient2 = await req("GET", "/repos/acme/transient/config", { session: adminSess });
+    ok("GET after transient error recovers (null not cached)", transient2.json.data.yaml !== null && /profile:/.test(transient2.json.data.yaml));
 
     // ── CSRF enforced ──────────────────────────────────────────────────
     const noCsrf = await req("PUT", CFG, { session: adminSess, body: { yaml: "chat:\n  auto_reply: true\n" } });

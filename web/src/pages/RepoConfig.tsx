@@ -117,7 +117,11 @@ function Editor({ data, owner, repo }: { data: RepoConfigResponse; owner: string
 
   const dirty = yamlText !== baseline;
   const canManage = capabilities.manageConfig;
-  const blocked = !data.editable || !!parse.error || errors.length > 0 || !dirty || !canManage;
+  // Editing is pointless for a viewer or a repo we can't commit to — keep the
+  // form and YAML editor read-only together so the UI doesn't invite edits it
+  // will then refuse to commit.
+  const editingDisabled = !canManage || !data.editable;
+  const blocked = editingDisabled || !!parse.error || errors.length > 0 || !dirty;
 
   function onFormChange(next: Obj) {
     setYamlText(toYaml(next));
@@ -191,11 +195,11 @@ function Editor({ data, owner, repo }: { data: RepoConfigResponse; owner: string
               <EmptyState title="Fix the YAML first" hint="The raw YAML has a syntax error, so the form can't render. Switch to the YAML tab." />
             ) : (
               <div className="cfg-form-scroll">
-                <ConfigForm schema={schema} value={parse.obj ?? {}} onChange={onFormChange} />
+                <ConfigForm schema={schema} value={parse.obj ?? {}} onChange={onFormChange} disabled={editingDisabled} />
               </div>
             )
           ) : (
-            <CodeEditor value={yamlText} onChange={setYamlText} minHeight={420} readOnly={!canManage} />
+            <CodeEditor value={yamlText} onChange={setYamlText} minHeight={420} readOnly={editingDisabled} />
           )}
           {parse.error ? (
             <div className="cfg-valid bad" style={{ marginTop: 12 }}>
@@ -229,7 +233,7 @@ function Editor({ data, owner, repo }: { data: RepoConfigResponse; owner: string
                   value={message}
                   placeholder="Update .diffsentry.yaml via DiffSentry command center"
                   onChange={(e) => setMessage(e.target.value)}
-                  disabled={!canManage}
+                  disabled={editingDisabled}
                 />
               </label>
               <div className="cfg-commit-actions">

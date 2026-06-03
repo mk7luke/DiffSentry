@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { Request, Response, Router } from "express";
 import yaml from "js-yaml";
 import type { Octokit } from "@octokit/rest";
@@ -70,8 +71,15 @@ export async function loadRepoConfigYaml(
     configCache.set(key, { yaml: content, ts: now });
     return content;
   } catch (err) {
-    logger.debug({ err, owner, repo }, "api: failed to fetch .diffsentry.yaml");
-    configCache.set(key, { yaml: null, ts: now });
+    // Only a genuine 404 (file absent) is a stable result worth caching. Caching
+    // a transient failure (rate limit, 5xx, network) as `null` would wrongly pin
+    // the repo to "no config / defaults" for the whole TTL — so don't.
+    const status = (err as { status?: number }).status;
+    if (status === 404) {
+      configCache.set(key, { yaml: null, ts: now });
+    } else {
+      logger.debug({ err, owner, repo }, "api: failed to fetch .diffsentry.yaml");
+    }
     return null;
   }
 }
@@ -187,8 +195,10 @@ async function commitViaPr(
 
 function branchName(): string {
   const prefix = (process.env.DASHBOARD_CONFIG_PR_BRANCH_PREFIX || "diffsentry/config").replace(/\/+$/, "");
-  // Date.now keeps the branch unique without pulling in a uuid dep.
-  return `${prefix}-${Date.now().toString(36)}`;
+  // A random suffix (plus the timestamp) avoids ref-creation collisions when two
+  // edits land in the same millisecond or a prior branch with the same name
+  // still exists — createRef would 422 otherwise.
+  return `${prefix}-${Date.now().toString(36)}-${randomBytes(3).toString("hex")}`;
 }
 
 /** Register GET + PUT /repos/:owner/:repo/config on the API router. */
