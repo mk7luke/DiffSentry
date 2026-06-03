@@ -13,6 +13,14 @@ import DOMPurify from "dompurify";
 
 marked.setOptions({ gfm: true, breaks: false });
 
+// Allow only http/https/mailto and relative URLs in URL-bearing attributes.
+// This narrows DOMPurify's default scheme list (which also permits tel:, sms:,
+// and — for image tags — data:) so that data:/javascript:/etc. cannot survive
+// in any attribute, including <img src>. Same shape as DOMPurify's built-in
+// regex with the hyphen escaped (an unescaped `.-:` would be a character range
+// spanning `.`–`:`, i.e. `/` and digits, which we don't want).
+const ALLOWED_URI_REGEXP = /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+
 export function renderMarkdown(input: string | null | undefined): string {
   if (!input) return "";
   let html: string;
@@ -32,5 +40,6 @@ export function renderMarkdown(input: string | null | undefined): string {
     // them explicitly so the intent survives any future config tightening.
     ADD_TAGS: ["details", "summary"],
     ADD_ATTR: ["open"],
+    ALLOWED_URI_REGEXP,
   });
 }
