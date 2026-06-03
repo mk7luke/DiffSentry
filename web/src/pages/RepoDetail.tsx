@@ -2,6 +2,7 @@ import { Link, useParams } from "react-router-dom";
 import { useRepoDetail } from "../api/hooks";
 import { Breadcrumbs } from "../components/Shell";
 import { Card, PageHeader } from "../components/primitives";
+import { ActionBar } from "../components/ActionBar";
 import { ApprovalBadge, RiskBadge } from "../components/badges";
 import { Donut, Hbar, RiskLine, StackedSeverityBar } from "../components/charts";
 import { EmptyState, QueryBoundary } from "../components/states";
@@ -149,6 +150,8 @@ export function RepoDetailPage() {
                   </>
                 }
               />
+
+              {latestPR ? <ActionBar owner={owner} repo={repo} number={latestPR.number} variant="repo" /> : null}
 
               <div className="grid hero" style={{ marginBottom: 16 }}>
                 <Card

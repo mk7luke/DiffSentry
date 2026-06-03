@@ -241,6 +241,10 @@ async function main() {
     ok("GET includes merged effective config", get.json.data.effective?.chat?.auto_reply === true);
     ok("GET reports default branch + editable", get.json.data.defaultBranch === "main" && get.json.data.editable === true);
 
+    // ── Unauthenticated GET is rejected (auth gate + requireRole("viewer")) ─
+    const getAnon = await req("GET", CFG);
+    ok("GET config(unauthenticated) → 401", getAnon.status === 401 && getAnon.json.error.code === "unauthorized");
+
     // ── PUT forbidden for viewer + author ──────────────────────────────
     const putViewer = await req("PUT", CFG, { session: viewerSess, csrf: true, body: { yaml: "reviews:\n  profile: assertive\n" } });
     ok("PUT(viewer) → 403", putViewer.status === 403 && putViewer.json.error.code === "forbidden");

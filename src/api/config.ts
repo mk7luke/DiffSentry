@@ -213,7 +213,10 @@ export function registerConfigRoutes(router: Router, deps: ConfigRouteDeps): voi
   const { getInstallationOctokit, requireRole, csrf } = deps;
 
   // ── GET (viewer+) ───────────────────────────────────────────────────
-  router.get("/repos/:owner/:repo/config", async (req: Request, res: Response) => {
+  // The router's global auth gate already 401s unauthenticated callers; the
+  // explicit requireRole("viewer") mirrors the PUT route and keeps the access
+  // contract on the route itself (robust to future route-order changes).
+  router.get("/repos/:owner/:repo/config", requireRole("viewer"), async (req: Request, res: Response) => {
     const { owner, repo } = req.params as { owner: string; repo: string };
     try {
       const rawYaml = await loadRepoConfigYaml(getInstallationOctokit, owner, repo);

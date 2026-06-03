@@ -539,6 +539,7 @@ GitHub webhook
 | `DASHBOARD_SESSION_SECRET` | No | `GITHUB_WEBHOOK_SECRET` | HMAC key for the dashboard session + CSRF cookies. |
 | `DASHBOARD_SSE_HEARTBEAT_MS` | No | `25000` | Heartbeat interval (ms, min 1000) for the `/api/v1/stream` SSE feed. |
 | `DASHBOARD_CONFIG_PR_BRANCH_PREFIX` | No | `diffsentry/config` | Branch-name prefix used when an admin edits `.diffsentry.yaml` from the dashboard and chooses "open a PR". |
+| `IMPACT_MINUTES_PER_FINDING` | No | `15` | Reviewer-minutes-saved-per-finding heuristic for the Impact report's time-saved estimate. The only estimated figure on that page; all other numbers are counted from the raw tables. |
 
 \* One of `GITHUB_PRIVATE_KEY_PATH` or `GITHUB_PRIVATE_KEY` is required.
 
@@ -690,6 +691,10 @@ untouched.
 
 - `/` — repos overview (PRs reviewed, 7d findings, 7d critical, last review),
   sortable, with a 14-day aggregate activity chart.
+- `/queue` — the live **review pipeline board**: Queued → Running → Done /
+  Failed lanes with per-card elapsed timers, a cancel button on in-flight
+  reviews, and a one-click retry on the failed lane. Hydrates from
+  `GET /api/v1/queue` then updates live from the `queue.updated` SSE stream.
 - `/repos/:owner/:repo` — 90-day risk line, hot paths, top firing pattern
   rules, recent PRs + issues, active `@bot learn` learnings, and the live
   `.diffsentry.yaml` for the repo.
@@ -700,21 +705,52 @@ untouched.
 - `/patterns` — every pattern-rule hit with 30d + all-time counts.
 - `/audit` — **admin only** — the audit trail (who did what, when) plus a
   per-login role-override editor.
+- `/webhooks` — **admin only** — every raw webhook delivery GitHub sent
+  (event, repo, signature status, size), with an expandable syntax-highlighted
+  JSON viewer and a one-click **Replay** that re-runs the stored payload through
+  the engine. Filter by event type and repo.
 - `/settings` — runtime + storage health, the signed-in session with its
   resolved role + capabilities, and a recent warn/error log tail captured via
   an in-process pino ring buffer.
 
+**Command palette (⌘K / Ctrl-K)** — press `⌘K` anywhere (or click **Search…**
+in the sidebar) to open a keyboard-first palette that combines three things:
+
+- **Navigation** — jump to any screen (capability-filtered, so non-admins don't
+  see the Audit entry).
+- **Quick actions** — when you're on a PR page, the author+ commands
+  (re-review, resolve threads, pause/resume, cancel) are one keystroke away.
+  They run through the same `requireRole` + CSRF + audit + SSE command endpoints
+  as the on-page buttons, so they're hidden for viewers and audited for everyone
+  else.
+- **Search** — `GET /api/v1/search?q=` does a ranked `LIKE` sweep across repos,
+  PRs, findings, and on-disk learnings; each result deep-links to its screen.
+  `↑`/`↓` move, `↵` opens/acts, `esc` closes.
+
 **JSON API** (`/api/v1`)
 
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
-failure. Read endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
-`/repos/:owner/:repo/prs/:number`, `/repos/:owner/:repo/config`, `/findings`,
-`/patterns`, and `/audit` (admin). Write endpoints: `POST /roles` (admin)
-sets/clears a role override; `PUT /repos/:owner/:repo/config` (admin) edits
-`.diffsentry.yaml`.
-When OAuth is configured every endpoint requires a valid session (401 JSON
-otherwise); the queries reuse the same SQL as the legacy dashboard and no-op
-gracefully when persistence is disabled.
+failure. Read endpoints: `GET /me`, `/health`, `/queue`, `/repos`,
+`/repos/:owner/:repo`, `/repos/:owner/:repo/prs/:number`,
+`/repos/:owner/:repo/config`, `/findings`, `/patterns`, `/search?q=`,
+`/audit` (admin), `/webhooks` + `/webhooks/:id` (admin). `GET /queue` returns the
+live review-pipeline snapshot from an in-process registry (works regardless of
+persistence). Write endpoints: `POST /roles` (admin) sets/clears a role override;
+`PUT /repos/:owner/:repo/config` (admin) edits `.diffsentry.yaml`;
+`POST /webhooks/:id/replay` (admin) re-dispatches a stored delivery. When OAuth is
+configured every endpoint requires a valid session (401 JSON otherwise); the
+queries reuse the same SQL as the legacy dashboard and no-op gracefully when
+persistence is disabled.
+
+**Webhook capture & replay.** Every delivery to `POST /webhook` is persisted to
+`webhook_deliveries` (event, action, repo, PR/issue number, `X-GitHub-Delivery`
+id, whether the signature verified, and a truncated payload) right after
+signature verification — rejected deliveries are recorded too, so the inspection
+view shows everything. `POST /webhooks/:id/replay` (admin + CSRF) records a new
+delivery row flagged `replayed_from` and re-runs the stored payload through the
+exact same engine path the live handler uses, then writes a `webhook.replay`
+audit row and emits `webhook.replayed` over SSE. Replay never re-enters the
+`/webhook` capture path, so it can't loop.
 
 **Command actions** (`author`+) drive the review engine from the dashboard. Each
 is `requireRole('author')` + CSRF gated, writes an `audit_log` row, and emits an
@@ -726,6 +762,13 @@ SSE event:
 | `POST .../prs/:number/resolve` | Resolve all DiffSentry review threads on the PR. |
 | `POST .../prs/:number/pause` / `.../resume` | Pause / resume automatic + manual reviews. |
 | `POST .../prs/:number/cancel` | Abort any in-flight review (handlePRClose semantics). |
+| `POST .../prs/:number/command` `{ command }` | Run a chat command on the PR by synthesizing an `@bot <cmd>` through `handleComment` — returns `202`, runs in the background. `command` is allowlisted: `summary`, `tldr`, `ship`, `changelog`, `generate_tests`, `generate_docstrings`. |
+
+The PR-detail and repo-detail screens render an **action bar** wiring up these
+endpoints — re-review (full/incremental), resolve/pause/resume/cancel, and the
+chat commands as buttons. The repo screen's bar targets the most recent PR. The
+whole write surface is hidden for viewers; each button shows a spinner +
+optimistic toast and reports the audit-logged result.
 
 **Config editor** (`admin`) — edit a repo's `.diffsentry.yaml` from the dashboard
 (`/repos/:owner/:repo/config`). `GET .../config` returns the current YAML on the
@@ -741,10 +784,13 @@ also invalidates the 5-minute config read cache.
 
 **Realtime** (`GET /api/v1/stream`) is a Server-Sent Events feed on an in-process
 event bus. The review engine publishes `review.started` / `review.finished` /
-`review.failed`, every command action publishes `action.performed`, and a config
-edit publishes `config.updated`. The SPA
-opens one `EventSource`, surfaces events as toasts, and live-refetches the
-affected PR — so a re-review's findings appear without a refresh. The stream
+`review.failed`, the in-memory review queue publishes `queue.updated` on every
+state transition (queued → running → done/failed/canceled, including phase
+changes), every command action publishes `action.performed`, a config edit
+publishes `config.updated`, and a webhook replay publishes `webhook.replayed`.
+The SPA opens one `EventSource`, surfaces events as toasts, drives the live queue
+board, and live-refetches the affected PR — so a re-review's findings appear
+without a refresh. The stream
 heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed
 events on reconnect via `Last-Event-ID`.
 

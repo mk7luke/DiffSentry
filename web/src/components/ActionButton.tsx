@@ -40,7 +40,19 @@ export interface ActionButtonProps {
   onDone?: (data: unknown) => void;
   /** Optional leading icon. */
   icon?: ReactNode;
+  /** Render nothing (instead of a disabled button) when the role lacks the
+   * capability. Used by the action bar so write controls are *hidden* for
+   * viewers rather than shown greyed-out. */
+  hideWhenDenied?: boolean;
+  /** Show an immediate pending toast on click (optimistic feedback) that is
+   * replaced by the success/error toast when the request settles. */
+  optimistic?: boolean;
+  /** Tooltip shown when the action is available (the denied-role title still
+   * wins when the button is disabled for lacking the capability). */
+  title?: string;
 }
+
+let optimisticCounter = 0;
 
 interface ActionResult {
   result?: string;
@@ -62,11 +74,18 @@ export function ActionButton(props: ActionButtonProps) {
     if (pending || !allowed) return;
     if (props.confirm && !window.confirm(props.confirm)) return;
     setPending(true);
+    // Optimistic feedback: show a pending toast immediately, keyed so the
+    // success/error toast below replaces it in place when the request settles.
+    const optimisticId = props.optimistic ? `opt-${(optimisticCounter += 1)}` : undefined;
+    if (optimisticId) {
+      push({ id: optimisticId, tone: "pending", title: props.pendingLabel ? String(props.pendingLabel) : "Working…", ttl: 0 });
+    }
     try {
       const data = await apiSend<ActionResult>(props.path, { method: props.method ?? "POST", body: props.body });
       // The endpoint echoes the audit-logged result ("ok" | "accepted").
       const detail = data?.detail;
       push({
+        id: optimisticId,
         tone: data?.result === "accepted" ? "info" : "success",
         title: props.successTitle ?? "Done",
         body: detail,
@@ -82,11 +101,13 @@ export function ActionButton(props: ActionButtonProps) {
             ? "You don't have permission for this action."
             : err.message
           : "Action failed.";
-      push({ tone: "danger", title: "Action failed", body: message });
+      push({ id: optimisticId, tone: "danger", title: "Action failed", body: message });
     } finally {
       setPending(false);
     }
   }
+
+  if (props.hideWhenDenied && !allowed) return null;
 
   return (
     <button
@@ -96,7 +117,7 @@ export function ActionButton(props: ActionButtonProps) {
       disabled={pending || !allowed}
       aria-disabled={pending || !allowed}
       aria-busy={pending}
-      title={!allowed ? "Requires a higher role" : undefined}
+      title={!allowed ? "Requires a higher role" : props.title}
     >
       {pending ? <span className="spinner btn-spinner" /> : props.icon}
       {pending ? props.pendingLabel ?? "Working…" : props.children}

@@ -220,11 +220,23 @@ function Editor({ data, owner, repo }: { data: RepoConfigResponse; owner: string
             <div className="cfg-commit">
               <fieldset className="cfg-mode">
                 <label>
-                  <input type="radio" name="mode" checked={mode === "commit"} onChange={() => setMode("commit")} />
+                  <input
+                    type="radio"
+                    name="mode"
+                    checked={mode === "commit"}
+                    disabled={editingDisabled}
+                    onChange={() => setMode("commit")}
+                  />
                   Commit directly to <span className="mono">{data.defaultBranch ?? "default"}</span>
                 </label>
                 <label>
-                  <input type="radio" name="mode" checked={mode === "pr"} onChange={() => setMode("pr")} />
+                  <input
+                    type="radio"
+                    name="mode"
+                    checked={mode === "pr"}
+                    disabled={editingDisabled}
+                    onChange={() => setMode("pr")}
+                  />
                   Open a pull request
                 </label>
               </fieldset>
