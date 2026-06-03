@@ -1,8 +1,4 @@
-import {
-  deleteSettingOverride,
-  getSettingOverride,
-  upsertSettingOverride,
-} from "../storage/dao.js";
+import { applySettingOverrides, getSettingOverride, type SettingOverrideOp } from "../storage/dao.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Instance branding — the self-hoster-facing "make it theirs" knobs: the
@@ -78,22 +74,37 @@ export function resolveBranding(): Branding {
   return { instanceName, accentColor };
 }
 
-/** Persist an instance-name override (best-effort; no-op when DB disabled). */
-export function setInstanceNameOverride(name: string, updatedBy: string | null): void {
-  upsertSettingOverride({ scope: BRANDING_SCOPE, key: KEY_INSTANCE_NAME, value: name, updatedBy });
+/**
+ * A set of branding changes to apply. A `string` sets that override, `null`
+ * clears it (revert to env / built-in), and `undefined` (field omitted) leaves
+ * it untouched.
+ */
+export interface BrandingChanges {
+  instanceName?: string | null;
+  accentColor?: string | null;
 }
 
-/** Persist an accent-color override (best-effort; no-op when DB disabled). */
-export function setAccentColorOverride(color: string, updatedBy: string | null): void {
-  upsertSettingOverride({ scope: BRANDING_SCOPE, key: KEY_ACCENT_COLOR, value: color, updatedBy });
-}
-
-/** Clear the instance-name override (revert to env / built-in default). */
-export function clearInstanceNameOverride(): void {
-  deleteSettingOverride(BRANDING_SCOPE, KEY_INSTANCE_NAME);
-}
-
-/** Clear the accent-color override (revert to env / built-in default). */
-export function clearAccentColorOverride(): void {
-  deleteSettingOverride(BRANDING_SCOPE, KEY_ACCENT_COLOR);
+/**
+ * Apply branding changes atomically — both fields in one transaction, so a
+ * two-field update can't half-apply. Returns false only on an actual write
+ * error (see applySettingOverrides); true when applied or when persistence is
+ * disabled. The caller should audit + broadcast only on a true result.
+ */
+export function applyBrandingOverrides(changes: BrandingChanges, updatedBy: string | null): boolean {
+  const ops: SettingOverrideOp[] = [];
+  if (changes.instanceName !== undefined) {
+    ops.push(
+      changes.instanceName === null
+        ? { key: KEY_INSTANCE_NAME, clear: true }
+        : { key: KEY_INSTANCE_NAME, value: changes.instanceName },
+    );
+  }
+  if (changes.accentColor !== undefined) {
+    ops.push(
+      changes.accentColor === null
+        ? { key: KEY_ACCENT_COLOR, clear: true }
+        : { key: KEY_ACCENT_COLOR, value: changes.accentColor },
+    );
+  }
+  return applySettingOverrides(BRANDING_SCOPE, ops, updatedBy);
 }

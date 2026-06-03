@@ -73,6 +73,18 @@ function toHex(rgb: Rgb): string {
   return "#" + rgb.map((c) => clamp255(c).toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * Canonical `#rrggbb` form of a hex color input, or null when malformed.
+ * Accepts hashless and 3-digit input but always returns a leading-`#`, 6-digit,
+ * lowercase string — matching the backend's `isValidAccent` contract, so what
+ * the form sends to /settings/branding never trips the server's `#`-required
+ * validation.
+ */
+export function canonicalHex(input: string): string | null {
+  const rgb = parseHex(input);
+  return rgb ? toHex(rgb) : null;
+}
+
 /** Linearly mix `rgb` toward `target` by `amt` (0..1). */
 function mix(rgb: Rgb, target: Rgb, amt: number): Rgb {
   return [

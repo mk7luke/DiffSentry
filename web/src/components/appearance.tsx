@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentType, type CSSProperties, type SVGProps } from "react";
 import { useTheme } from "../theme/useTheme";
-import { accentVars, DEFAULT_ACCENT, DEFAULT_INSTANCE_NAME, parseHex } from "../theme/theme";
+import { accentVars, canonicalHex, DEFAULT_ACCENT, DEFAULT_INSTANCE_NAME } from "../theme/theme";
 import { useBranding, useSetBranding } from "../api/hooks";
 import { useInstanceBranding } from "../theme/useBranding";
 import { useAuth } from "../auth/useAuth";
@@ -126,9 +126,9 @@ export function BrandingForm() {
 
   if (!capabilities.manageConfig) return null;
 
-  const accentValid = !!parseHex(accent);
-  const normalizedAccent = accent.trim().toLowerCase();
-  const previewAccent = accentValid ? normalizedAccent : serverAccent;
+  // Canonical #rrggbb (accepts hashless / 3-digit input); falls back to the
+  // applied color while the field holds a malformed value.
+  const previewAccent = canonicalHex(accent) ?? serverAccent;
   // Derive the full accent var set so the preview chip (bg/border/text/swatch)
   // reflects the candidate color, not the currently-applied one.
   const previewStyle = accentVars(previewAccent) as unknown as CSSProperties;
@@ -159,11 +159,14 @@ export function BrandingForm() {
       push({ tone: "danger", title: "Instance name required", body: "Enter a name or use Reset to defaults." });
       return;
     }
-    if (!accentValid) {
+    // Send the canonical #rrggbb form so the server's (#-required) validation
+    // accepts hashless / 3-digit input the user may have typed.
+    const canonical = canonicalHex(accent);
+    if (!canonical) {
       push({ tone: "danger", title: "Invalid accent color", body: "Use a hex color like #5a8dff." });
       return;
     }
-    update({ instanceName: trimmed, accentColor: normalizedAccent }, "Branding saved");
+    update({ instanceName: trimmed, accentColor: canonical }, "Branding saved");
   }
 
   function onReset() {
@@ -171,7 +174,6 @@ export function BrandingForm() {
   }
 
   const pending = setBranding.isPending;
-  const isCustom = serverName !== DEFAULT_INSTANCE_NAME || serverAccent !== DEFAULT_ACCENT;
 
   return (
     <div className="branding-form">
@@ -195,7 +197,7 @@ export function BrandingForm() {
             <input
               type="color"
               aria-label="Accent color picker"
-              value={accentValid ? normalizedAccent : serverAccent}
+              value={previewAccent}
               onChange={(e) => {
                 setAccent(e.target.value);
                 setDirty(true);
@@ -229,8 +231,8 @@ export function BrandingForm() {
           type="button"
           className="btn btn-ghost"
           onClick={onReset}
-          disabled={pending || !isCustom}
-          title={isCustom ? "Revert to the built-in name and accent" : "Already using defaults"}
+          disabled={pending}
+          title="Clear the saved branding and revert to the instance default"
         >
           Reset to defaults
         </button>

@@ -17,14 +17,12 @@ import {
 } from "../dashboard/roles.js";
 import { insertAuditLog, setRole } from "../storage/dao.js";
 import {
-  clearAccentColorOverride,
-  clearInstanceNameOverride,
+  applyBrandingOverrides,
   isValidAccent,
   normalizeAccent,
   resolveBranding,
   sanitizeInstanceName,
-  setAccentColorOverride,
-  setInstanceNameOverride,
+  type BrandingChanges,
 } from "../dashboard/branding.js";
 import { bus } from "../realtime/bus.js";
 import { registerStreamRoute } from "./stream.js";
@@ -413,13 +411,12 @@ export function createApiRouter(deps: ApiDeps): express.Router {
       return;
     }
 
-    // Phase 1 — validate everything and stage the writes (no mutation yet).
-    const writes: Array<() => void> = [];
-    const changes: Record<string, string | null> = {};
+    // Phase 1 — validate everything before any mutation. A bad value rejects
+    // here, so we never partially apply a two-field change.
+    const changes: BrandingChanges = {};
     if (hasName) {
       const raw = body.instanceName;
       if (raw == null || raw === "") {
-        writes.push(() => clearInstanceNameOverride());
         changes.instanceName = null;
       } else {
         const name = sanitizeInstanceName(raw);
@@ -427,28 +424,28 @@ export function createApiRouter(deps: ApiDeps): express.Router {
           sendError(res, 400, "bad_request", "'instanceName' must be a non-empty string.");
           return;
         }
-        writes.push(() => setInstanceNameOverride(name, actor?.login ?? null));
         changes.instanceName = name;
       }
     }
     if (hasAccent) {
       const raw = body.accentColor;
       if (raw == null || raw === "") {
-        writes.push(() => clearAccentColorOverride());
         changes.accentColor = null;
       } else if (!isValidAccent(raw)) {
         sendError(res, 400, "bad_request", "'accentColor' must be a hex color like #5a8dff.");
         return;
       } else {
-        const color = normalizeAccent(raw);
-        writes.push(() => setAccentColorOverride(color, actor?.login ?? null));
-        changes.accentColor = color;
+        changes.accentColor = normalizeAccent(raw);
       }
     }
 
-    // Phase 2 — apply, audit, and broadcast.
+    // Phase 2 — apply atomically (both fields in one transaction), then audit +
+    // broadcast only once the write succeeds.
     try {
-      for (const write of writes) write();
+      if (!applyBrandingOverrides(changes, actor?.login ?? null)) {
+        sendError(res, 500, "internal", "Failed to update branding.");
+        return;
+      }
       const resolved = resolveBranding();
       insertAuditLog({
         actorLogin: actor?.login ?? null,
