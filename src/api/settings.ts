@@ -103,12 +103,14 @@ function applyChanges(
     } else {
       upsertSettingOverride({ scope, key: c.key, value, updatedBy: actor.login });
     }
-    // Runtime side effect (e.g. log level). Clearing reverts to the resolved
-    // default, which the side effect can't recompute generically — so we only
-    // apply on set. Cleared runtime settings take effect on next restart.
-    if (!clearing && c.apply) {
+    // Runtime side effect (e.g. log level). On set, apply the new value; on
+    // clear, re-resolve the effective value now that the override is gone (read
+    // from getGlobalSettings — the only keys with a side effect are global) so
+    // the runtime reverts to the default immediately rather than on restart.
+    if (c.apply) {
       try {
-        c.apply(value);
+        const effective = clearing ? (getGlobalSettings() as unknown as Record<string, unknown>)[c.key] : value;
+        c.apply(effective);
       } catch (err) {
         logger.debug({ err, key: c.key }, "settings: apply side effect failed");
       }

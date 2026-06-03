@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRepoSettings, useSettings, useUpdateRepoSettings, useUpdateSettings } from "../api/hooks";
 import { ApiError } from "../api/client";
 import { useToast } from "../realtime/toast";
-import { useEventStream } from "../realtime/useEventStream";
+import { useEventStream, type SettingsChangedPayload } from "../realtime/useEventStream";
 import { Card, Switch } from "./primitives";
 import { QueryBoundary } from "./states";
 import type {
@@ -170,9 +170,14 @@ function MaxFilesControl(props: { value: number | null; pending: boolean; onSave
     setRaw(props.value == null ? "" : String(props.value));
   }, [props.value]);
 
-  const parsed = raw.trim() === "" ? null : Number.parseInt(raw, 10);
-  const invalid = raw.trim() !== "" && (!Number.isFinite(parsed as number) || (parsed as number) < 1 || (parsed as number) > 500);
-  const dirty = (props.value == null ? "" : String(props.value)) !== raw.trim();
+  // Strict: only an all-digits string is a valid count. Number.parseInt would
+  // accept "25abc"/"2.5"; Number("25abc") is NaN, and /^\d+$/ rejects decimals.
+  const trimmed = raw.trim();
+  const isNumeric = /^\d+$/.test(trimmed);
+  const parsed = trimmed === "" ? null : isNumeric ? Number(trimmed) : Number.NaN;
+  const invalid =
+    trimmed !== "" && (!isNumeric || !Number.isInteger(parsed as number) || (parsed as number) < 1 || (parsed as number) > 500);
+  const dirty = (props.value == null ? "" : String(props.value)) !== trimmed;
 
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -206,6 +211,23 @@ function MaxFilesControl(props: { value: number | null; pending: boolean; onSave
 
 export function RepoSettingsCard({ owner, repo }: { owner: string; repo: string }) {
   const query = useRepoSettings(owner, repo, true);
+  const qc = useQueryClient();
+
+  // Keep the card live when this repo's overrides change elsewhere. A global
+  // change is included because it can shift the inherited (effective) values.
+  useEventStream(
+    useCallback(
+      (env) => {
+        if (env.topic !== "settings.changed") return;
+        const scope = (env.payload as SettingsChangedPayload).scope;
+        if (scope === `${owner}/${repo}` || scope === "global") {
+          void qc.invalidateQueries({ queryKey: ["repoSettings", owner, repo] });
+        }
+      },
+      [qc, owner, repo],
+    ),
+  );
+
   return (
     <Card title="Operator overrides" subtitle="Per-repo settings that win over the global defaults. Admin only.">
       <QueryBoundary query={query} loadingLabel="Loading overrides…">
