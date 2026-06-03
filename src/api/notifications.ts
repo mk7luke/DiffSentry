@@ -47,6 +47,9 @@ function sendError(res: Response, status: number, code: ErrorCode, message: stri
 }
 
 function parseId(raw: string): number | null {
+  // Full-string digits only — reject "1abc"/"1.5"/"01x" so a malformed path
+  // param can't be silently coerced to a different resource id.
+  if (!/^\d+$/.test(raw)) return null;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : null;
 }

@@ -39,28 +39,63 @@ export function ipv4IsPrivate(ip: string): boolean {
   );
 }
 
-/** Is an IPv6 literal loopback/unique-local/link-local/multicast — or an
- *  IPv4-mapped/-embedded address whose embedded IPv4 is private? */
-export function ipv6IsPrivate(ip: string): boolean {
-  const lower = ip.toLowerCase();
-  // IPv4-mapped (::ffff:127.0.0.1) and IPv4-compatible (::127.0.0.1) dotted forms.
-  const dotted = lower.match(/(?:::ffff:|::)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
-  if (dotted) return ipv4IsPrivate(dotted[1]);
-  // IPv4-mapped in hex form (::ffff:7f00:0001).
-  const hex = lower.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-  if (hex) {
-    const hi = parseInt(hex[1], 16);
-    const lo = parseInt(hex[2], 16);
-    const embedded = [(hi >> 8) & 255, hi & 255, (lo >> 8) & 255, lo & 255].join(".");
-    return ipv4IsPrivate(embedded);
+/**
+ * Expand an IPv6 literal (any valid textual form, incl. `::` compression and a
+ * trailing embedded IPv4) to its 16 bytes, or null if unparseable. Done by
+ * value rather than regex-over-text so compressed forms (`fc00::1`, `fe80::1`)
+ * are classified correctly.
+ */
+export function ipv6ToBytes(ip: string): number[] | null {
+  let s = ip.toLowerCase();
+  const zone = s.indexOf("%"); // strip a scope/zone id (fe80::1%eth0)
+  if (zone >= 0) s = s.slice(0, zone);
+  // A trailing embedded IPv4 (::ffff:1.2.3.4, 64:ff9b::1.2.3.4) → two hextets.
+  const lastColon = s.lastIndexOf(":");
+  if (lastColon >= 0 && s.slice(lastColon + 1).includes(".")) {
+    const v4 = s.slice(lastColon + 1).split(".").map((x) => Number(x));
+    if (v4.length !== 4 || v4.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+    const hi = ((v4[0] << 8) | v4[1]).toString(16);
+    const lo = ((v4[2] << 8) | v4[3]).toString(16);
+    s = `${s.slice(0, lastColon + 1)}${hi}:${lo}`;
   }
-  return (
-    lower === "::" || // unspecified
-    lower === "::1" || // loopback
-    /^f[cd][0-9a-f]{2}:/.test(lower) || // fc00::/7 unique-local
-    /^fe[89ab][0-9a-f]:/.test(lower) || // fe80::/10 link-local
-    lower.startsWith("ff") // multicast
-  );
+  const halves = s.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 ? (halves[1] ? halves[1].split(":") : []) : null;
+  let groups: string[];
+  if (tail === null) {
+    groups = head;
+  } else {
+    const missing = 8 - head.length - tail.length;
+    if (missing < 0) return null;
+    groups = [...head, ...Array<string>(missing).fill("0"), ...tail];
+  }
+  if (groups.length !== 8) return null;
+  const bytes: number[] = [];
+  for (const g of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(g)) return null;
+    const n = parseInt(g, 16);
+    bytes.push((n >> 8) & 255, n & 255);
+  }
+  return bytes;
+}
+
+/** Is an IPv6 literal loopback/unspecified/unique-local/link-local/multicast —
+ *  or an IPv4-mapped address whose embedded IPv4 is private? Fails closed on an
+ *  unparseable value. */
+export function ipv6IsPrivate(ip: string): boolean {
+  const b = ipv6ToBytes(ip);
+  if (!b) return true; // unparseable → treat as unsafe
+  // IPv4-mapped ::ffff:a.b.c.d (first 10 bytes zero, bytes 10-11 = 0xff).
+  if (b.slice(0, 10).every((x) => x === 0) && b[10] === 0xff && b[11] === 0xff) {
+    return ipv4IsPrivate(b.slice(12).join("."));
+  }
+  if (b.every((x) => x === 0)) return true; // :: unspecified
+  if (b.slice(0, 15).every((x) => x === 0) && b[15] === 1) return true; // ::1 loopback
+  if ((b[0] & 0xfe) === 0xfc) return true; // fc00::/7 unique-local
+  if (b[0] === 0xfe && (b[1] & 0xc0) === 0x80) return true; // fe80::/10 link-local
+  if (b[0] === 0xff) return true; // ff00::/8 multicast
+  return false;
 }
 
 /** Block a host that is itself a private/loopback IP literal (any family) or

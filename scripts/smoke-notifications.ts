@@ -198,6 +198,14 @@ async function main() {
       body: { type: "webhook", name: "bad", config: { url: "https://[::ffff:127.0.0.1]/x" } },
     });
     ok("create channel(IPv4-mapped IPv6 loopback) → 400 (SSRF blocked)", mappedReject.status === 400);
+    for (const [label, addr] of [["ULA fc00::1", "fc00::1"], ["link-local fe80::1", "fe80::1"]] as const) {
+      const r = await req("POST", "/notifications/channels", {
+        session: admin,
+        csrf: true,
+        body: { type: "webhook", name: "bad", config: { url: `https://[${addr}]/x` } },
+      });
+      ok(`create channel(compressed IPv6 ${label}) → 400 (SSRF blocked)`, r.status === 400);
+    }
     process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS = "true"; // restore for the rest
 
     // ── Webhook custom headers: hop-by-hop / request-controlled are rejected ──
@@ -238,6 +246,10 @@ async function main() {
       body: { channelId: 99999 },
     });
     ok("update rule(bad channelId) → 400", badRuleUpdate.status === 400 && badRuleUpdate.json.error.code === "bad_request");
+
+    // ── Malformed route id (partially numeric) is rejected ─────────────
+    const badId = await req("PUT", "/notifications/channels/1abc", { session: admin, csrf: true, body: { enabled: false } });
+    ok("update channel(id='1abc') → 400", badId.status === 400 && badId.json.error.code === "bad_request");
 
     // ── A matching event delivers a real Slack message ─────────────────
     received.length = 0;

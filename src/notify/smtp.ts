@@ -294,13 +294,19 @@ export async function sendMail(cfg: SmtpConfig, msg: SmtpMessage): Promise<void>
     }
 
     if (cfg.user && cfg.pass) {
-      if (/AUTH[ -].*PLAIN/i.test(ehlo)) {
+      // Only attempt a mechanism the server actually advertised in EHLO; fail
+      // with a clear error otherwise rather than blindly sending AUTH LOGIN.
+      const hasPlain = /auth[ -][^\n]*\bplain\b/i.test(ehlo);
+      const hasLogin = /auth[ -][^\n]*\blogin\b/i.test(ehlo);
+      if (hasPlain) {
         const token = Buffer.from(`\0${cfg.user}\0${cfg.pass}`, "utf8").toString("base64");
         await session.command(`AUTH PLAIN ${token}`, [235]);
-      } else {
+      } else if (hasLogin) {
         await session.command("AUTH LOGIN", [334]);
         await session.command(Buffer.from(cfg.user, "utf8").toString("base64"), [334]);
         await session.command(Buffer.from(cfg.pass, "utf8").toString("base64"), [235]);
+      } else {
+        throw new Error("SMTP server does not advertise a supported AUTH mechanism (PLAIN or LOGIN)");
       }
     }
 
