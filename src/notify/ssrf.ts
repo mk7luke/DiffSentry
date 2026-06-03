@@ -20,15 +20,19 @@ import dns from "node:dns/promises";
 // NOT also open up private/loopback/metadata egress (and vice-versa). Read
 // lazily so harnesses can set the env before the first call.
 
+// Driven only by explicit env flags — deliberately NOT NODE_ENV, so a misset
+// NODE_ENV=test in production can never silently disable the SSRF/scheme guard.
+// Tests/harnesses opt in by setting the flags directly.
+
 /** Allow a plain `http://` scheme (otherwise https is required). */
 export function allowInsecureScheme(): boolean {
-  return process.env.NODE_ENV === "test" || process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS === "true";
+  return process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS === "true";
 }
 
 /** Allow webhook targets on loopback/private/link-local/reserved networks.
  *  Separate, explicit opt-in for intentional self-hosted internal relays. */
 export function allowPrivateEgress(): boolean {
-  return process.env.NODE_ENV === "test" || process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS === "true";
+  return process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS === "true";
 }
 
 /** Is a dotted-quad IPv4 in a loopback/private/link-local/reserved range?
