@@ -49,6 +49,9 @@ async function main() {
   process.env.DB_PATH = tmpDb;
   process.env.DASHBOARD_ADMIN_LOGINS = "adminuser";
   process.env.DASHBOARD_AUTHOR_LOGINS = "authoruser";
+  // The fake Slack receiver runs on http://127.0.0.1 — allow loopback/plain-http
+  // webhook targets (validateChannelConfig rejects them otherwise / SSRF guard).
+  process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS = "true";
 
   const db = openDatabase();
   if (!db) throw new Error("failed to open temp db");
@@ -174,6 +177,22 @@ async function main() {
     const list = await req("GET", "/notifications", { session: admin });
     const ch = list.json.data.channels.find((c: any) => c.id === channelId);
     ok("GET /notifications redacts webhookUrl", !!ch && typeof ch.config.webhookUrl === "string" && !ch.config.webhookUrl.includes("127.0.0.1"));
+
+    // ── SSRF guard: with the insecure flag OFF, http + private targets 400 ──
+    delete process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS;
+    const httpReject = await req("POST", "/notifications/channels", {
+      session: admin,
+      csrf: true,
+      body: { type: "slack", name: "bad", config: { webhookUrl: "http://hooks.slack.com/x" } },
+    });
+    ok("create channel(plain http) → 400 (https required)", httpReject.status === 400 && httpReject.json.error.code === "bad_request");
+    const privReject = await req("POST", "/notifications/channels", {
+      session: admin,
+      csrf: true,
+      body: { type: "webhook", name: "bad", config: { url: "https://169.254.169.254/latest/meta-data" } },
+    });
+    ok("create channel(link-local metadata IP) → 400 (SSRF blocked)", privReject.status === 400);
+    process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS = "true"; // restore for the rest
 
     // ── Admin creates a rule: critical finding in acme/web → channel ───
     const rule = await req("POST", "/notifications/rules", {

@@ -50,21 +50,65 @@ function parseId(raw: string): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+/**
+ * Validate an outbound webhook URL the server will later POST to. Since this is
+ * a stored egress target (SSRF surface), require `https` and reject loopback /
+ * private / link-local / unspecified hosts by default. Plain-http and local
+ * targets are allowed only behind an explicit env flag (used by smoke tests and
+ * intentional self-hosted internal relays). Returns an error string, or null.
+ */
+// Read lazily (not a module-load const) so tests/harnesses can set the env
+// before the first validation call.
+function allowInsecureWebhooks(): boolean {
+  return process.env.NODE_ENV === "test" || process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS === "true";
+}
+
+function validateWebhookUrl(v: string): string | null {
+  const allowInsecure = allowInsecureWebhooks();
+  let parsed: URL;
+  try {
+    parsed = new URL(v);
+  } catch {
+    return "A valid webhook URL is required.";
+  }
+  if (parsed.protocol !== "https:" && !(allowInsecure && parsed.protocol === "http:")) {
+    return "Webhook URLs must use https.";
+  }
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const isLocal =
+    host === "localhost" ||
+    host === "0.0.0.0" ||
+    host === "::" ||
+    host === "::1" ||
+    host.startsWith("127.") ||
+    host.startsWith("10.") ||
+    host.startsWith("192.168.") ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    /^(fc|fd)[0-9a-f]{2}:/i.test(host) || // unique-local IPv6
+    /^fe80:/i.test(host); // link-local IPv6
+  if (isLocal && !allowInsecure) {
+    return "Webhook URLs may not target local or private network addresses.";
+  }
+  return null;
+}
+
 /** Validate a channel config for its type. Returns the cleaned config or an error. */
 function validateChannelConfig(type: string, config: unknown): { config: Record<string, unknown> } | { error: string } {
   const c = config && typeof config === "object" && !Array.isArray(config) ? (config as Record<string, unknown>) : {};
   const str = (k: string) => (typeof c[k] === "string" ? (c[k] as string).trim() : "");
-  const isHttpUrl = (v: string) => /^https?:\/\//i.test(v);
   switch (type) {
     case "slack":
     case "discord": {
       const webhookUrl = str("webhookUrl");
-      if (!isHttpUrl(webhookUrl)) return { error: "A valid https webhookUrl is required." };
+      const error = validateWebhookUrl(webhookUrl);
+      if (error) return { error };
       return { config: { webhookUrl } };
     }
     case "webhook": {
       const url = str("url");
-      if (!isHttpUrl(url)) return { error: "A valid http(s) url is required." };
+      const error = validateWebhookUrl(url);
+      if (error) return { error };
       const out: Record<string, unknown> = { url };
       if (c.headers && typeof c.headers === "object" && !Array.isArray(c.headers)) out.headers = c.headers;
       return { config: out };

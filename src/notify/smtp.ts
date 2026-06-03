@@ -186,12 +186,27 @@ class SmtpSession {
 function connectPlain(host: string, port: number): Promise<net.Socket> {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ host, port });
-    const onError = (err: Error) => reject(err);
-    socket.once("error", onError);
-    socket.setTimeout(CONNECT_TIMEOUT_MS, () => reject(new Error("SMTP connect timeout")));
-    socket.once("connect", () => {
+    let settled = false;
+    const cleanup = () => {
       socket.setTimeout(0);
       socket.removeListener("error", onError);
+    };
+    // Settle exactly once and destroy the socket on failure, so a timed-out or
+    // errored connect attempt can't leak a live handle (or double-reject).
+    const fail = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      socket.destroy();
+      reject(err);
+    };
+    const onError = (err: Error) => fail(err);
+    socket.once("error", onError);
+    socket.setTimeout(CONNECT_TIMEOUT_MS, () => fail(new Error("SMTP connect timeout")));
+    socket.once("connect", () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       resolve(socket);
     });
   });
@@ -199,11 +214,19 @@ function connectPlain(host: string, port: number): Promise<net.Socket> {
 
 function connectTls(host: string, port: number, existing?: net.Socket): Promise<tls.TLSSocket> {
   return new Promise((resolve, reject) => {
+    let settled = false;
     const socket = tls.connect({ host, port, servername: host, socket: existing }, () => {
+      if (settled) return;
+      settled = true;
       socket.removeListener("error", onError);
       resolve(socket);
     });
-    const onError = (err: Error) => reject(err);
+    const onError = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      reject(err);
+    };
     socket.once("error", onError);
   });
 }
@@ -215,8 +238,30 @@ function encodeHeader(value: string): string {
   return `=?UTF-8?B?${Buffer.from(value, "utf8").toString("base64")}?=`;
 }
 
+/** Reject CR/LF so a value can't break out of an SMTP command or header line
+ *  (header / command injection). */
+function assertNoCrlf(value: string, field: string): void {
+  if (/[\r\n]/.test(value)) {
+    throw new Error(`SMTP ${field} must not contain CR or LF characters`);
+  }
+}
+
+/** Require a single bare email address (no CRLF, no display name / extra
+ *  addresses) for envelope + header use. */
+function assertSingleAddress(value: string, field: string): void {
+  assertNoCrlf(value, field);
+  if (!/^[^<>@\s]+@[^<>@\s]+\.[^<>@\s]+$/.test(value)) {
+    throw new Error(`SMTP ${field} must be a single email address`);
+  }
+}
+
 /** Send one plain-text email. Throws on any protocol/connection failure. */
 export async function sendMail(cfg: SmtpConfig, msg: SmtpMessage): Promise<void> {
+  // Defend the boundary: cfg.from comes from env and sendMail is exported, so
+  // validate here even though the API already checks the channel recipient.
+  assertSingleAddress(cfg.from, "from");
+  assertSingleAddress(msg.to, "to");
+  assertNoCrlf(msg.subject, "subject");
   let socket: net.Socket = cfg.secure
     ? await connectTls(cfg.host, cfg.port)
     : await connectPlain(cfg.host, cfg.port);
