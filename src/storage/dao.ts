@@ -604,6 +604,29 @@ export function getCustomRule(id: number): CustomRuleRow | null {
   }
 }
 
+/**
+ * True when a custom rule with this exact name already exists (optionally
+ * excluding one id, for renames). Custom-rule names must be globally unique
+ * because pattern_hits is joined back to rules by name — two same-named rules
+ * would merge their hit-counts. Returns false when persistence is off; the
+ * UNIQUE index on custom_rules(name) is the hard backstop.
+ */
+export function customRuleNameExists(name: string, excludeId?: number): boolean {
+  const db = openDatabase();
+  if (!db) return false;
+  if (!ensureCommandCenterSchema(db, ["custom_rules"])) return false;
+  try {
+    const row =
+      excludeId != null
+        ? db.prepare(`SELECT 1 FROM custom_rules WHERE name = ? AND id <> ? LIMIT 1`).get(name, excludeId)
+        : db.prepare(`SELECT 1 FROM custom_rules WHERE name = ? LIMIT 1`).get(name);
+    return row != null;
+  } catch (err) {
+    logger.debug({ err }, "dao.customRuleNameExists failed");
+    return false;
+  }
+}
+
 /** Insert a new custom rule. Returns the new id, or null when disabled. */
 export function insertCustomRule(input: CustomRuleInput, createdBy?: string | null): number | null {
   const db = openDatabase();

@@ -280,7 +280,9 @@ CREATE TABLE IF NOT EXISTS custom_rules (
 );
 CREATE INDEX IF NOT EXISTS idx_custom_rules_scope ON custom_rules(scope);
 CREATE INDEX IF NOT EXISTS idx_custom_rules_enabled ON custom_rules(enabled);
-CREATE INDEX IF NOT EXISTS idx_custom_rules_name ON custom_rules(name);
+-- Names must be globally unique: pattern_hits is joined back to a rule by name
+-- for hit-counts, so two same-named rules would conflate their analytics.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_rules_name ON custom_rules(name);
 `;
 
 export interface Migration {

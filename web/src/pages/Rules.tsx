@@ -393,16 +393,19 @@ function LiveTester({ pattern, flags, pathGlob }: { pattern: string; flags: stri
           <span className="hint">Testing…</span>
         ) : result && !result.ok ? (
           <span style={{ color: "var(--sev-crit)" }}>Invalid pattern: {result.error}</span>
-        ) : result && pathGlob.trim() && !result.applies ? (
+        ) : result && pathGlob.trim() && filename.trim() && !result.applies ? (
           <span style={{ color: "var(--sev-major)" }}>
             Path glob <code className="mono">{pathGlob}</code> doesn't match{" "}
-            <code className="mono">{filename || "(no filename)"}</code> — rule wouldn't run on this file.
+            <code className="mono">{filename}</code> — rule wouldn't run on this file.
           </span>
         ) : result ? (
           <span className={result.matches.length > 0 ? "ok" : "hint"}>
             {result.matches.length > 0
               ? `${result.matches.length} ${pluralize(result.matches.length, "match", "matches")} on ${result.matches.length === 1 ? "line" : "lines"} ${result.matches.map((m) => m.line).join(", ")}`
               : "No matches."}
+            {pathGlob.trim() && !filename.trim() ? (
+              <span className="hint"> · add a filename to test the path glob</span>
+            ) : null}
           </span>
         ) : null}
       </div>

@@ -360,13 +360,16 @@ export function testPattern(input: PatternTestInput, snippet: string, filename?:
     const v = validatePattern(input.pattern, input.flags);
     return { ok: false, error: v.error ?? "Invalid regular expression.", applies: false, matches: [] };
   }
-  // If a glob is set we need a filename to judge applicability. With no filename
-  // we still run (so the tester is useful), but report applies=false so the UI
-  // can hint that scope wasn't exercised.
-  const applies = !input.path || (!!filename && minimatch(filename, input.path));
-  if (input.path && !applies) {
+  // Honor the path glob only when a filename is actually supplied: a present
+  // filename that fails the glob means the rule wouldn't run on that file, so
+  // short-circuit with no matches. With no filename we still run the regex (the
+  // tester stays useful) but report applies=false so the UI can hint the glob
+  // wasn't exercised — a missing filename must not suppress matches.
+  const hasFilenameMismatch = !!input.path && !!filename && !minimatch(filename, input.path);
+  if (hasFilenameMismatch) {
     return { ok: true, applies: false, matches: [] };
   }
+  const applies = !input.path || !!filename;
 
   const matches: PatternTestMatch[] = [];
   const lines = snippet.split("\n");
@@ -385,5 +388,5 @@ export function testPattern(input: PatternTestInput, snippet: string, filename?:
       matches.push({ line: i + 1, text: content, match: m[0] });
     }
   }
-  return { ok: true, applies: true, matches };
+  return { ok: true, applies, matches };
 }

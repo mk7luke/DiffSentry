@@ -6,6 +6,7 @@ import {
   CUSTOM_RULE_KINDS,
   CUSTOM_RULE_SEVERITIES,
   CUSTOM_RULE_TYPES,
+  customRuleNameExists,
   type CustomRuleInput,
   deleteCustomRule,
   getCustomRule,
@@ -63,7 +64,9 @@ function parseId(raw: unknown): number | null {
 }
 
 interface ParsedRule {
-  input?: CustomRuleInput;
+  /** Only the fields the body actually provided — so a partial update never
+   * clobbers name/pattern (or anything else) with a default. */
+  input?: Partial<CustomRuleInput>;
   error?: string;
 }
 
@@ -114,8 +117,12 @@ function parseRuleBody(body: Record<string, unknown>, partial: boolean): ParsedR
     if (!v.ok) return { error: `Invalid regex flags: ${v.error}` };
   }
 
-  const input: CustomRuleInput = { name: name ?? "", pattern: pattern ?? "" };
-  // Only set fields that were actually provided so PATCH semantics hold.
+  // Build from only the provided fields. Crucially, name/pattern are set ONLY
+  // when present — a partial update that omits them must not push "" and wipe
+  // the stored values.
+  const input: Partial<CustomRuleInput> = {};
+  if (name !== undefined) input.name = name;
+  if (pattern !== undefined) input.pattern = pattern;
   if (body.scope !== undefined || !partial) input.scope = scope;
   if (body.kind !== undefined || !partial) input.kind = kind;
   if (severity !== undefined) input.severity = severity;
@@ -200,9 +207,21 @@ export function registerRuleRoutes(router: Router, deps: RuleDeps): void {
       sendError(res, 400, "bad_request", error ?? "Invalid rule.");
       return;
     }
+    // A full create always carries name + pattern (validated above); narrow the
+    // Partial back to a create-shaped object for insertCustomRule.
+    if (input.name == null || input.pattern == null) {
+      sendError(res, 400, "bad_request", "A non-empty 'name' and 'pattern' are required.");
+      return;
+    }
+    // Custom-rule names must be globally unique: pattern_hits joins to a rule by
+    // name, so two same-named rules would merge their hit-counts in analytics.
+    if (customRuleNameExists(input.name)) {
+      sendError(res, 400, "bad_request", `A custom rule named '${input.name}' already exists. Names must be unique.`);
+      return;
+    }
     try {
       const actor = getActor(req);
-      const id = insertCustomRule(input, actor?.login ?? null);
+      const id = insertCustomRule({ ...input, name: input.name, pattern: input.pattern }, actor?.login ?? null);
       if (id == null) {
         sendError(res, 503, "internal", "Persistence is disabled — cannot store custom rules.");
         return;
@@ -230,6 +249,11 @@ export function registerRuleRoutes(router: Router, deps: RuleDeps): void {
     const { input, error } = parseRuleBody((req.body ?? {}) as Record<string, unknown>, true);
     if (error || !input) {
       sendError(res, 400, "bad_request", error ?? "Invalid rule.");
+      return;
+    }
+    // A rename must not collide with another rule's name (see create note).
+    if (input.name != null && input.name !== existing.name && customRuleNameExists(input.name, id)) {
+      sendError(res, 400, "bad_request", `A custom rule named '${input.name}' already exists. Names must be unique.`);
       return;
     }
     try {
