@@ -6,6 +6,7 @@ import type {
   AuditResponse,
   AuthorDetailResponse,
   AuthorsResponse,
+  ConfigUpdateResult,
   FindingsResponse,
   HealthResponse,
   ImpactReport,
@@ -17,6 +18,7 @@ import type {
   PatternsResponse,
   PRDetailResponse,
   QueueResponse,
+  RepoConfigResponse,
   RepoDetailResponse,
   ReplayResponse,
   ReposResponse,
@@ -180,6 +182,35 @@ export function useAudit(query: AuditQuery, enabled: boolean) {
       }),
     enabled,
     placeholderData: (prev) => prev,
+  });
+}
+
+export function useRepoConfig(owner: string, repo: string) {
+  return useQuery({
+    queryKey: ["repo-config", owner, repo],
+    queryFn: () =>
+      apiGet<RepoConfigResponse>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/config`),
+    enabled: !!owner && !!repo,
+  });
+}
+
+/** Admin: validate + commit (or open a PR for) a new .diffsentry.yaml. */
+export function useUpdateRepoConfig(owner: string, repo: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { yaml: string; mode: "commit" | "pr"; message?: string }) =>
+      apiSend<ConfigUpdateResult>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/config`, {
+        method: "PUT",
+        body: vars,
+      }),
+    onSuccess: (result) => {
+      // A direct commit changes what the read path serves; a PR doesn't (yet).
+      if (result.mode === "commit") {
+        void qc.invalidateQueries({ queryKey: ["repo-config", owner, repo] });
+        void qc.invalidateQueries({ queryKey: ["repo", owner, repo] });
+      }
+      void qc.invalidateQueries({ queryKey: ["audit"] });
+    },
   });
 }
 

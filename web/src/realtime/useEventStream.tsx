@@ -26,6 +26,7 @@ export type StreamTopic =
   | "review.finished"
   | "review.failed"
   | "action.performed"
+  | "config.updated"
   | "learning.changed"
   | "queue.updated"
   | "webhook.replayed";
@@ -47,6 +48,18 @@ export interface ActionPayload {
   role: string | null;
   result: string;
   detail?: string;
+}
+
+export interface ConfigUpdatePayload {
+  owner: string;
+  repo: string;
+  mode: "commit" | "pr";
+  actor: string | null;
+  role: string | null;
+  branch: string;
+  commitSha?: string;
+  prNumber?: number;
+  prUrl?: string;
 }
 
 export interface LearningChangePayload {
@@ -78,6 +91,7 @@ const TOPICS: StreamTopic[] = [
   "review.finished",
   "review.failed",
   "action.performed",
+  "config.updated",
   "learning.changed",
   "queue.updated",
   "webhook.replayed",

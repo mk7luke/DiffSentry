@@ -40,6 +40,23 @@ export interface ActionPayload {
   detail?: string;
 }
 
+/** A repo's .diffsentry.yaml was changed from the command center. */
+export interface ConfigUpdatePayload {
+  owner: string;
+  repo: string;
+  /** How the change landed: a direct commit on the default branch, or a PR. */
+  mode: "commit" | "pr";
+  actor: string | null;
+  role: string | null;
+  /** Branch the change targeted (default branch for "commit", the PR head for "pr"). */
+  branch: string;
+  /** Commit SHA for a direct commit. */
+  commitSha?: string;
+  /** PR number + URL when mode === "pr". */
+  prNumber?: number;
+  prUrl?: string;
+}
+
 /** A learning was created / edited / deleted / promoted — emitted from the API
  * so connected dashboards refresh the Learnings screen without a manual reload. */
 export interface LearningChangePayload {
@@ -106,6 +123,7 @@ export interface BusEventMap {
   "review.finished": ReviewLifecyclePayload;
   "review.failed": ReviewLifecyclePayload;
   "action.performed": ActionPayload;
+  "config.updated": ConfigUpdatePayload;
   "learning.changed": LearningChangePayload;
   "queue.updated": ReviewQueueEntry;
   "webhook.replayed": WebhookReplayPayload;
