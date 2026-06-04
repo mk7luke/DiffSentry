@@ -127,6 +127,7 @@ export async function dispatchToChannel(
 export async function sendTest(channelId: number, actorLogin?: string | null): Promise<{ ok: boolean; detail: string }> {
   const channel = getNotificationChannel(channelId);
   if (!channel) return { ok: false, detail: "channel not found" };
+  if (channel.enabled !== 1) return { ok: false, detail: "channel is disabled" };
   const msg: ChannelMessage = {
     title: "DiffSentry test notification",
     text: `This is a test from DiffSentry${actorLogin ? `, sent by @${actorLogin}` : ""}. If you can see this, the channel is wired up correctly.`,
@@ -304,21 +305,20 @@ class NotificationEngine {
       });
       if (result.ok) delivered = true;
     }
-    // Retry next tick ONLY when we actually tried to deliver and every attempt
-    // failed — that's the transient-outage case where the week shouldn't be
-    // burned. If no attempt was even possible (no enabled channel on any digest
-    // rule), there's nothing to retry, so mark the week sent like the no-rules
-    // case to avoid re-evaluating every hour in the window.
-    if (attempted && !delivered) {
-      logger.warn({ weekKey, rules: digestRules.length }, "Weekly digest: no channel accepted delivery — not marking the week sent");
+    // Only a successful delivery marks the week sent. Both "no enabled channel on
+    // any digest rule" (attempted === false) and "tried but every attempt failed"
+    // leave the week unmarked, so the case stays retryable on a later tick during
+    // the same digest window (e.g. an admin re-enables the channel, or a restart
+    // re-runs the immediate tick) instead of silently burning the week.
+    if (!delivered) {
+      const reason = attempted
+        ? "no channel accepted delivery"
+        : "digest rules have no enabled channel";
+      logger.warn({ weekKey, rules: digestRules.length }, `Weekly digest: ${reason} — not marking the week sent (retryable within the digest window)`);
       return;
     }
     upsertSettingOverride({ scope: "global", key: "digest.lastSentWeek", value: weekKey, updatedBy: "system" });
-    if (delivered) {
-      logger.info({ weekKey, rules: digestRules.length }, "Weekly digest sent");
-    } else {
-      logger.info({ weekKey, rules: digestRules.length }, "Weekly digest: no eligible channel — marked week sent without delivering");
-    }
+    logger.info({ weekKey, rules: digestRules.length }, "Weekly digest sent");
   }
 }
 

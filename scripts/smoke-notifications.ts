@@ -370,6 +370,18 @@ async function main() {
     const testNoCsrf = await req("POST", `/notifications/channels/${channelId}/test`, { session: admin, body: {} });
     ok("test-send(no CSRF) → 403", testNoCsrf.status === 403);
 
+    // ── test-send on a disabled channel does not dispatch ──────────────
+    await req("PUT", `/notifications/channels/${channelId}`, { session: admin, csrf: true, body: { enabled: false } });
+    received.length = 0;
+    const testDisabled = await req("POST", `/notifications/channels/${channelId}/test`, { session: admin, csrf: true, body: {} });
+    ok(
+      "test-send(disabled channel) → 200 ok:false 'channel is disabled'",
+      testDisabled.status === 200 && testDisabled.json.data.ok === false && testDisabled.json.data.detail === "channel is disabled",
+    );
+    await new Promise((r) => setTimeout(r, 150));
+    ok("test-send(disabled channel) → nothing delivered", received.length === 0);
+    await req("PUT", `/notifications/channels/${channelId}`, { session: admin, csrf: true, body: { enabled: true } });
+
     // ── Deliveries recorded ────────────────────────────────────────────
     const deliveries = getNotificationDeliveries(50);
     ok("notification_deliveries recorded ≥ 2 sends", deliveries.filter((d) => d.status === "ok").length >= 2);
