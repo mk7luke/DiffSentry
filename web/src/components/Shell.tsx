@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../auth/useAuth";
@@ -176,10 +176,13 @@ export function Shell() {
 
   // While the drawer is open it behaves as a modal, so inert the background
   // (top bar + main) — keeping tab focus and screen readers inside the drawer
-  // and off the content behind the backdrop.
+  // and off the content behind the backdrop. Toggle the attribute directly so
+  // we don't depend on HTMLElement.inert being present in the TS lib typings.
   useEffect(() => {
     for (const el of [topbarRef.current, mainRef.current]) {
-      if (el) el.inert = navOpen;
+      if (!el) continue;
+      if (navOpen) el.setAttribute("inert", "");
+      else el.removeAttribute("inert");
     }
   }, [navOpen]);
 
@@ -214,14 +217,20 @@ export function Shell() {
     };
   }, [navOpen]);
 
-  // Move focus into the drawer when it opens, and restore it to the menu button
-  // when it closes (when that's what opened it). Declared after the inert effect
-  // so the background is interactive again before we focus the trigger.
+  // Move focus into the drawer as it opens. A layout effect, so it runs before
+  // the (passive) inert effect marks the top bar inert — focus goes straight
+  // from the menu button into the drawer with no detour through <body>.
+  useLayoutEffect(() => {
+    if (!navOpen) return;
+    const drawer = drawerRef.current;
+    (drawer?.querySelector<HTMLElement>(".drawer-close") ?? getFocusable(drawer)[0])?.focus();
+  }, [navOpen]);
+
+  // Restore focus to the menu button after the drawer closes (when it opened
+  // it). A passive effect declared after the inert effect, so the top bar's
+  // inert is already cleared and the button can receive focus.
   useEffect(() => {
-    if (navOpen) {
-      const drawer = drawerRef.current;
-      (drawer?.querySelector<HTMLElement>(".drawer-close") ?? getFocusable(drawer)[0])?.focus();
-    } else if (restoreFocusRef.current) {
+    if (!navOpen && restoreFocusRef.current) {
       restoreFocusRef.current = false;
       menuButtonRef.current?.focus();
     }

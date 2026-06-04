@@ -1,5 +1,5 @@
 import { hydrate, type QueryClient } from "@tanstack/react-query";
-import { persistQueryClientSubscribe } from "@tanstack/react-query-persist-client";
+import { persistQueryClientSave, persistQueryClientSubscribe } from "@tanstack/react-query-persist-client";
 import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
 import type { PersistedClient } from "@tanstack/react-query-persist-client";
 
@@ -182,6 +182,10 @@ export async function applyPersistedDataForOwner(
   store.setItem(OWNER_KEY, login);
   if (persister) {
     unsubscribePersistence = persistQueryClientSubscribe({ queryClient, persister, ...persistOptions });
+    // Persist the queries already in the cache right now (the subscriber only
+    // fires on *future* changes), so this user's last-viewed data is available
+    // offline immediately rather than after the next cache change.
+    await persistQueryClientSave({ queryClient, persister, ...persistOptions });
   }
 }
 
