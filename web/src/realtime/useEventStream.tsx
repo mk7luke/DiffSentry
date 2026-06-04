@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { ReviewQueueEntry } from "../api/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // useEventStream — a single shared EventSource over /api/v1/stream.
@@ -25,7 +26,15 @@ export type StreamTopic =
   | "review.finished"
   | "review.failed"
   | "webhook.received"
-  | "action.performed";
+  | "action.performed"
+  | "budget.exceeded"
+  | "settings.changed"
+  | "token.changed"
+  | "rule.changed"
+  | "config.updated"
+  | "learning.changed"
+  | "queue.updated"
+  | "webhook.replayed";
 
 export interface ReviewLifecyclePayload {
   owner: string;
@@ -55,6 +64,75 @@ export interface ActionPayload {
   detail?: string;
 }
 
+export interface BudgetAlertPayload {
+  scope: string;
+  owner: string | null;
+  repo: string | null;
+  month: string;
+  spentUsd: number;
+  budgetUsd: number;
+}
+
+export interface SettingsChangedPayload {
+  scope: string;
+  key: string;
+  value: unknown;
+  actor: string | null;
+}
+
+export interface TokenChangePayload {
+  id: number;
+  name: string | null;
+  action: "create" | "revoke";
+  actor: string | null;
+  role: string | null;
+  result: string;
+}
+
+export interface RuleChangedPayload {
+  id: number | null;
+  name: string;
+  scope: string;
+  action: "create" | "update" | "delete";
+  actor: string | null;
+  role: string | null;
+}
+
+export interface ConfigUpdatePayload {
+  owner: string;
+  repo: string;
+  mode: "commit" | "pr";
+  actor: string | null;
+  role: string | null;
+  branch: string;
+  commitSha?: string;
+  prNumber?: number;
+  prUrl?: string;
+}
+
+export interface LearningChangePayload {
+  scope: "global" | "repo";
+  owner?: string;
+  repo?: string;
+  action: string;
+  id?: string;
+  count?: number;
+  actor: string | null;
+  role: string | null;
+}
+
+/** Payload of a `queue.updated` event — the canonical board entry shape, kept
+ * in one place to avoid drift. */
+export type QueueUpdatedPayload = ReviewQueueEntry;
+
+export interface WebhookReplayPayload {
+  id: number;
+  newDeliveryId: number | null;
+  event: string;
+  action: string | null;
+  actor: string | null;
+}
+
 /** Every topic the server emits — the SSE `event:` names we listen for. */
 const TOPICS: StreamTopic[] = [
   "review.started",
@@ -62,6 +140,14 @@ const TOPICS: StreamTopic[] = [
   "review.failed",
   "webhook.received",
   "action.performed",
+  "budget.exceeded",
+  "settings.changed",
+  "token.changed",
+  "rule.changed",
+  "config.updated",
+  "learning.changed",
+  "queue.updated",
+  "webhook.replayed",
 ];
 
 type Listener = (env: StreamEnvelope) => void;

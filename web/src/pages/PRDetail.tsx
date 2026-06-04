@@ -4,62 +4,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { usePRDetail } from "../api/hooks";
 import { Breadcrumbs } from "../components/Shell";
 import { Card, PageHeader } from "../components/primitives";
-import { ActionButton } from "../components/ActionButton";
-import { ApprovalBadge, RiskBadge, SeverityBadge } from "../components/badges";
+import { ActionBar } from "../components/ActionBar";
+import { ApprovalBadge, RiskBadge, SeverityBadge, TriageBadge } from "../components/badges";
+import { TriageMenu } from "../components/TriageControls";
 import { EmptyState, QueryBoundary } from "../components/states";
 import { Markdown } from "../components/Markdown";
-import { GithubIcon } from "../components/icons";
 import { useEventStream, type StreamEnvelope } from "../realtime/useEventStream";
 import { pluralize, relativeTime } from "../lib/format";
 import type { PRReviewRow } from "../api/types";
-
-/** The command bar on a PR — author+ controls, capability-gated. */
-function PRActions({ owner, repo, number }: { owner: string; repo: string; number: number }) {
-  const enc = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/prs/${number}`;
-  const prKey = ["pr", owner, repo, number];
-  return (
-    <div className="actions" style={{ display: "inline-flex", gap: 8, flexWrap: "wrap" }}>
-      <ActionButton
-        path={`${enc}/review`}
-        body={{ mode: "full" }}
-        capability="triggerReview"
-        variant="primary"
-        successTitle="Re-review queued"
-        pendingLabel="Queuing…"
-        invalidateKeys={[prKey]}
-      >
-        Re-review
-      </ActionButton>
-      <ActionButton path={`${enc}/resolve`} capability="triggerReview" successTitle="Threads resolved" invalidateKeys={[prKey]}>
-        Resolve threads
-      </ActionButton>
-      <ActionButton path={`${enc}/pause`} capability="triggerReview" successTitle="Reviews paused">
-        Pause
-      </ActionButton>
-      <ActionButton path={`${enc}/resume`} capability="triggerReview" successTitle="Reviews resumed">
-        Resume
-      </ActionButton>
-      <ActionButton
-        path={`${enc}/cancel`}
-        capability="triggerReview"
-        variant="danger"
-        successTitle="Review canceled"
-        confirm="Abort any in-flight review for this PR?"
-      >
-        Cancel
-      </ActionButton>
-      <a
-        href={`https://github.com/${owner}/${repo}/pull/${number}`}
-        className="btn btn-ghost"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        <GithubIcon />
-        Open in GitHub
-      </a>
-    </div>
-  );
-}
 
 function LatestReview({ latest }: { latest: PRReviewRow }) {
   const [showRaw, setShowRaw] = useState(false);
@@ -168,8 +120,9 @@ export function PRDetailPage() {
                     {a.pr?.state ? <span className={`chip ${a.pr.state === "open" ? "good" : "muted"} uppercase`}>{a.pr.state}</span> : null}
                   </>
                 }
-                right={<PRActions owner={owner} repo={repo} number={a.number} />}
               />
+
+              <ActionBar owner={owner} repo={repo} number={a.number} variant="pr" />
 
               <div className="grid stack">
                 {a.latest ? (
@@ -202,6 +155,7 @@ export function PRDetailPage() {
                           <th>Title</th>
                           <th>Review</th>
                           <th>Source</th>
+                          <th>Triage</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -243,6 +197,12 @@ export function PRDetailPage() {
                                 )}
                               </td>
                               <td className="muted">{f.source ?? "—"}</td>
+                              <td>
+                                <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                  <TriageBadge row={f} />
+                                  <TriageMenu target={{ kind: "single", id: f.id }} compact />
+                                </div>
+                              </td>
                             </tr>
                           );
                         })}

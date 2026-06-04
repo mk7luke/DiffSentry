@@ -54,6 +54,131 @@ export interface ActionPayload {
   detail?: string;
 }
 
+/** AI-spend budget exceeded — emitted from the cost instrumentation. */
+export interface BudgetAlertPayload {
+  /** 'global' or 'owner/repo'. */
+  scope: string;
+  owner: string | null;
+  repo: string | null;
+  /** YYYY-MM the alert is for. */
+  month: string;
+  /** Month-to-date spend that tripped the budget. */
+  spentUsd: number;
+  /** The configured monthly ceiling. */
+  budgetUsd: number;
+}
+
+/** An operator settings override changed — emitted from the settings API. */
+export interface SettingsChangedPayload {
+  /** 'global' or 'owner/repo'. */
+  scope: string;
+  /** The setting key that changed (e.g. "pauseAll", "profile"). */
+  key: string;
+  /** The new value, or null when the override was cleared. */
+  value: unknown;
+  actor: string | null;
+}
+
+/** An API token was created or revoked — emitted from the token admin API. */
+export interface TokenChangePayload {
+  id: number;
+  name: string | null;
+  /** "create" | "revoke". */
+  action: "create" | "revoke";
+  actor: string | null;
+  role: string | null;
+  /** "ok" | "noop" | "error". */
+  result: string;
+}
+
+/** A custom anti-pattern rule was created, updated, or deleted via the API. */
+export interface RuleChangedPayload {
+  /** The rule id (null only when a delete raced a missing row). */
+  id: number | null;
+  name: string;
+  scope: string;
+  action: "create" | "update" | "delete";
+  actor: string | null;
+  role: string | null;
+}
+
+/** A repo's .diffsentry.yaml was changed from the command center. */
+export interface ConfigUpdatePayload {
+  owner: string;
+  repo: string;
+  /** How the change landed: a direct commit on the default branch, or a PR. */
+  mode: "commit" | "pr";
+  actor: string | null;
+  role: string | null;
+  /** Branch the change targeted (default branch for "commit", the PR head for "pr"). */
+  branch: string;
+  /** Commit SHA for a direct commit. */
+  commitSha?: string;
+  /** PR number + URL when mode === "pr". */
+  prNumber?: number;
+  prUrl?: string;
+}
+
+/** A learning was created / edited / deleted / promoted — emitted from the API
+ * so connected dashboards refresh the Learnings screen without a manual reload. */
+export interface LearningChangePayload {
+  /** Which store changed. */
+  scope: "global" | "repo";
+  /** Present for repo-scoped changes (owner/name of the affected repo). */
+  owner?: string;
+  repo?: string;
+  /** Bare action name: "create" | "update" | "delete" | "promote" | "bulk_delete". */
+  action: string;
+  /** The affected learning id, when a single one changed. */
+  id?: string;
+  /** Number affected (bulk_delete). */
+  count?: number;
+  actor: string | null;
+  role: string | null;
+}
+
+/** The state machine behind the review-pipeline board. */
+export type ReviewQueueState = "queued" | "running" | "done" | "failed" | "canceled";
+
+/**
+ * A single review's lifecycle as tracked by the in-memory queue registry
+ * (src/realtime/queue.ts). Published verbatim as `queue.updated` and returned
+ * by GET /api/v1/queue. Fully JSON-serializable — the AbortController that
+ * actually drives cancellation is held out-of-band by the registry.
+ */
+export interface ReviewQueueEntry {
+  /** `${owner}/${repo}#${number}` — stable per PR across attempts. */
+  key: string;
+  owner: string;
+  repo: string;
+  number: number;
+  mode: "full" | "incremental";
+  state: ReviewQueueState;
+  /** Free-text phase shown on the running card (e.g. "reviewing"). */
+  phase: string | null;
+  /** ISO time the review entered the queue. */
+  enqueuedAt: string;
+  /** ISO time it transitioned to running (null while still queued). */
+  startedAt: string | null;
+  /** ISO time it reached a terminal state (null while active). */
+  finishedAt: string | null;
+  /** Error message for the failed lane (never a stack trace). */
+  error: string | null;
+  /** Monotonic per-PR attempt counter — bumped on each (re-)enqueue. */
+  attempt: number;
+}
+
+/** An admin replayed a stored webhook delivery — emitted from the API. */
+export interface WebhookReplayPayload {
+  /** rowid of the original delivery that was replayed. */
+  id: number;
+  /** rowid of the new delivery row recorded for the replay (null if DB off). */
+  newDeliveryId: number | null;
+  event: string;
+  action: string | null;
+  actor: string | null;
+}
+
 /** Topic → payload map. Add new topics here so publish/subscribe stay typed. */
 export interface BusEventMap {
   "review.started": ReviewLifecyclePayload;
@@ -61,6 +186,14 @@ export interface BusEventMap {
   "review.failed": ReviewLifecyclePayload;
   "webhook.received": WebhookPayload;
   "action.performed": ActionPayload;
+  "budget.exceeded": BudgetAlertPayload;
+  "settings.changed": SettingsChangedPayload;
+  "token.changed": TokenChangePayload;
+  "rule.changed": RuleChangedPayload;
+  "config.updated": ConfigUpdatePayload;
+  "learning.changed": LearningChangePayload;
+  "queue.updated": ReviewQueueEntry;
+  "webhook.replayed": WebhookReplayPayload;
 }
 
 export type BusTopic = keyof BusEventMap;
@@ -131,5 +264,9 @@ class EventBus {
   }
 }
 
-/** Process-wide singleton. Import this everywhere — do not construct your own. */
-export const bus = new EventBus();
+/** Process-wide singleton. Import this everywhere — do not construct your own.
+ * Pinned to globalThis so the instance survives any module-duplication a
+ * bundler/loader might introduce (a no-op in the normal single-graph runtime);
+ * this keeps publishers and the SSE subscriber on the same bus. */
+const busGlobal = globalThis as unknown as { __diffsentryBus?: EventBus };
+export const bus: EventBus = busGlobal.__diffsentryBus ?? (busGlobal.__diffsentryBus = new EventBus());

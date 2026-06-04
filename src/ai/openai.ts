@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { AIProvider, PRContext, ReviewResult, WalkthroughResult, RepoConfig, Learning, IssueContext } from "../types.js";
 import { buildReviewPrompt, buildWalkthroughPrompt, buildChatPrompt, buildIssueChatPrompt } from "./prompt.js";
 import { parseReviewResponse, parseWalkthroughResponse } from "./parse.js";
+import { recordAiUsage } from "./cost.js";
 import { logger } from "../logger.js";
 
 export class OpenAIProvider implements AIProvider {
@@ -31,6 +32,20 @@ export class OpenAIProvider implements AIProvider {
   constructor(apiKey: string, model: string, baseURL?: string) {
     this.client = new OpenAI({ apiKey, ...(baseURL && { baseURL }) });
     this.model = model;
+  }
+
+  /** Record token usage + cost for one call (best-effort, never throws). */
+  private track(
+    usage: { prompt_tokens?: number; completion_tokens?: number } | undefined | null,
+    kind: string,
+  ): void {
+    recordAiUsage({
+      provider: "openai",
+      model: this.model,
+      inputTokens: usage?.prompt_tokens,
+      outputTokens: usage?.completion_tokens,
+      fallbackKind: kind,
+    });
   }
 
   /** o-series and gpt-5+ are reasoning models — `max_completion_tokens` is
@@ -212,6 +227,7 @@ export class OpenAIProvider implements AIProvider {
       "OpenAI review response received"
     );
     this.logEmptyCompletion(log, response, "review");
+    this.track(response.usage, "review");
 
     return parseReviewResponse(text, context);
   }
@@ -244,6 +260,7 @@ export class OpenAIProvider implements AIProvider {
       "OpenAI walkthrough response received"
     );
     this.logEmptyCompletion(log, response, "walkthrough");
+    this.track(response.usage, "walkthrough");
 
     return parseWalkthroughResponse(text);
   }
@@ -274,6 +291,7 @@ export class OpenAIProvider implements AIProvider {
       "OpenAI chat response received"
     );
     this.logEmptyCompletion(log, response, "chat");
+    this.track(response.usage, "chat");
 
     return text;
   }
@@ -290,6 +308,7 @@ export class OpenAIProvider implements AIProvider {
       ...(opts?.json ? { response_format: { type: "json_object" as const } } : {}),
       ...extras,
     } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
+    this.track(response.usage, "complete");
     return response.choices[0]?.message?.content || "";
   }
 
@@ -319,6 +338,7 @@ export class OpenAIProvider implements AIProvider {
       "OpenAI issue chat response received"
     );
     this.logEmptyCompletion(log, response, "chatIssue");
+    this.track(response.usage, "issue_chat");
 
     return text;
   }

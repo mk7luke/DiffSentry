@@ -226,24 +226,31 @@ export function OpsConsolePage() {
     }
   }, [backfill.data]);
 
+  // Latest filter values for the live tail, read inside a *stable* onEvent.
+  // Keeping onEvent stable means the SSE subscription is set up once (not torn
+  // down on every filter change), and reading the ref guarantees a delivered
+  // event is always matched against the current scope — never a stale closure.
+  const filterRef = useRef({ repo, kind, severity });
+  useEffect(() => {
+    filterRef.current = { repo, kind, severity };
+  }, [repo, kind, severity]);
+
   // Live tail. Record the kind for the dropdown, then drop events outside the
   // active filter so the live buffer stays scoped (no cross-repo leakage).
-  const onEvent = useCallback(
-    (env: StreamEnvelope) => {
-      const item = envToItem(env);
-      if (!item) return;
-      setLiveKinds((prev) => (prev.has(item.kind) ? prev : new Set(prev).add(item.kind)));
-      // Guard nullable metadata before coercing — never compare "null/null".
-      if (repo && (!item.owner || !item.repo || `${item.owner}/${item.repo}` !== repo)) return;
-      if (kind && item.kind !== kind) return;
-      if (severity && (item.severity ?? "").toLowerCase() !== severity) return;
-      setLive((prev) => {
-        const next = prev.length >= MAX_ITEMS ? prev.slice(prev.length - MAX_ITEMS + 1) : prev;
-        return [...next, item];
-      });
-    },
-    [repo, kind, severity],
-  );
+  const onEvent = useCallback((env: StreamEnvelope) => {
+    const item = envToItem(env);
+    if (!item) return;
+    setLiveKinds((prev) => (prev.has(item.kind) ? prev : new Set(prev).add(item.kind)));
+    const { repo, kind, severity } = filterRef.current;
+    // Guard nullable metadata before coercing — never compare "null/null".
+    if (repo && (!item.owner || !item.repo || `${item.owner}/${item.repo}` !== repo)) return;
+    if (kind && item.kind !== kind) return;
+    if (severity && (item.severity ?? "").toLowerCase() !== severity) return;
+    setLive((prev) => {
+      const next = prev.length >= MAX_ITEMS ? prev.slice(prev.length - MAX_ITEMS + 1) : prev;
+      return [...next, item];
+    });
+  }, []);
   useEventStream(onEvent);
 
   // Per-minute clock for the sparkline + relative times.
@@ -492,6 +499,7 @@ function FeedRow({ item, onOpen, now }: { item: FeedItem; onOpen: (i: FeedItem) 
       onClick={clickable ? () => onOpen(item) : undefined}
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
+      aria-label={clickable ? `Open ${item.number != null ? "PR" : "repo"} ${ref}: ${item.kind} — ${describe(item)}` : undefined}
       onKeyDown={
         clickable
           ? (e) => {
