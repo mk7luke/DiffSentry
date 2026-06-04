@@ -59,7 +59,13 @@ function parseCondition(row: AlertRuleRow): RuleCondition {
     c.event === "review_failed" || c.event === "budget" || c.event === "digest" || c.event === "any"
       ? c.event
       : "finding";
-  return { event, minSeverity: c.minSeverity };
+  // Validate minSeverity defensively (a malformed/legacy row could carry junk);
+  // an unrecognized value is dropped so onEvent falls back to the "nit" floor.
+  const minSeverity =
+    c.minSeverity === "critical" || c.minSeverity === "major" || c.minSeverity === "minor" || c.minSeverity === "nit"
+      ? c.minSeverity
+      : undefined;
+  return { event, minSeverity };
 }
 
 function channelConfig(row: NotificationChannelRow): Record<string, unknown> {
@@ -167,6 +173,10 @@ class NotificationEngine {
     const tick = setInterval(() => void this.tick(), 60 * 60 * 1000);
     if (typeof tick.unref === "function") tick.unref();
     this.timers.push(tick);
+    // Run one tick immediately so a process that boots during the digest window
+    // doesn't wait up to an hour to evaluate it. Fire-and-forget; tick() catches
+    // its own errors so this never throws out of start().
+    void this.tick();
     logger.info("Notification engine started (bus subscriber + hourly digest tick)");
   }
 

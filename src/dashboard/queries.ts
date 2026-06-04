@@ -2078,7 +2078,8 @@ export interface NotificationDeliveryRow {
 }
 
 /** All notification channels (raw — config_json carries secrets; redact before
- *  returning over the API). Degrades to [] on a pre-v2 database. */
+ *  returning over the API). Degrades to [] on a database that predates the
+ *  notifications schema. */
 export function getNotificationChannels(): NotificationChannelRow[] {
   const db = openDatabase();
   if (!db) return [];
@@ -2110,7 +2111,8 @@ export function getNotificationChannel(id: number): NotificationChannelRow | nul
   }
 }
 
-/** All alert rules. Degrades to [] on a pre-v2 database. */
+/** All alert rules. Degrades to [] on a database that predates the
+ *  notifications schema. */
 export function getAlertRules(): AlertRuleRow[] {
   const db = openDatabase();
   if (!db) return [];
@@ -2142,7 +2144,8 @@ export function getAlertRule(id: number): AlertRuleRow | null {
   }
 }
 
-/** Recent notification deliveries, newest first. Degrades to [] on a pre-v4 DB. */
+/** Recent notification deliveries, newest first. Degrades to [] on a database
+ *  that predates the notifications schema. */
 export function getNotificationDeliveries(limit = 50): NotificationDeliveryRow[] {
   const db = openDatabase();
   if (!db) return [];
