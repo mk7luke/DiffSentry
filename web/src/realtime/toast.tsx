@@ -1,5 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useEventStream, type ActionPayload, type ReviewLifecyclePayload, type StreamEnvelope } from "./useEventStream";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  useEventStream,
+  type ActionPayload,
+  type ConfigUpdatePayload,
+  type LearningChangePayload,
+  type ReviewLifecyclePayload,
+  type StreamEnvelope,
+  type TokenChangePayload,
+  type WebhookReplayPayload,
+} from "./useEventStream";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Toast / live feed primitive.
@@ -129,8 +139,22 @@ export function useToast(): ToastContextValue {
 /** Bridges the SSE stream into toasts. Rendered once inside the provider. */
 function StreamToasts() {
   const { push } = useToast();
+  const qc = useQueryClient();
   const onEvent = useCallback(
     (env: StreamEnvelope) => {
+      if (env.topic === "token.changed") {
+        const p = env.payload as TokenChangePayload;
+        const who = p.actor ? `@${p.actor}` : "someone";
+        const verb = p.action === "create" ? "created" : "revoked";
+        push({
+          tone: p.result === "ok" ? "info" : "danger",
+          title: `${who} · token ${verb}`,
+          body: p.name ? p.name : `token #${p.id}`,
+        });
+        // Keep an open API Tokens screen in sync without a manual refresh.
+        void qc.invalidateQueries({ queryKey: ["tokens"] });
+        return;
+      }
       if (env.topic === "review.started" || env.topic === "review.finished" || env.topic === "review.failed") {
         const p = env.payload as ReviewLifecyclePayload;
         const ref = `${p.owner}/${p.repo}#${p.number}`;
@@ -152,9 +176,37 @@ function StreamToasts() {
           title: `${who} · ${p.action} · ${ref}`,
           body: p.detail,
         });
+        return;
+      }
+      if (env.topic === "config.updated") {
+        const p = env.payload as ConfigUpdatePayload;
+        const who = p.actor ? `@${p.actor}` : "someone";
+        push({
+          tone: "info",
+          title: `${who} updated config · ${p.owner}/${p.repo}`,
+          body: p.mode === "pr" ? `Opened PR #${p.prNumber}` : `Committed to ${p.branch}`,
+        });
+        return;
+      }
+      if (env.topic === "learning.changed") {
+        const p = env.payload as LearningChangePayload;
+        const who = p.actor ? `@${p.actor}` : "someone";
+        const where = p.scope === "global" ? "global" : `${p.owner}/${p.repo}`;
+        const what = p.action === "bulk_delete" ? `deleted ${p.count ?? 0} learnings` : `learning ${p.action}`;
+        push({ tone: "info", title: `${who} · ${what}`, body: where });
+        return;
+      }
+      if (env.topic === "webhook.replayed") {
+        const p = env.payload as WebhookReplayPayload;
+        const who = p.actor ? `@${p.actor}` : "someone";
+        push({
+          tone: "info",
+          title: `${who} replayed webhook · ${p.event}`,
+          body: p.newDeliveryId ? `New delivery #${p.newDeliveryId} (from #${p.id})` : `Replayed delivery #${p.id}`,
+        });
       }
     },
-    [push],
+    [push, qc],
   );
   useEventStream(onEvent);
   return null;

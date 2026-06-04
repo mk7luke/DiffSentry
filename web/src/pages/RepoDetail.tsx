@@ -4,6 +4,7 @@ import { useAuth } from "../auth/useAuth";
 import { Breadcrumbs } from "../components/Shell";
 import { Card, PageHeader } from "../components/primitives";
 import { RepoSettingsCard } from "../components/SettingsControls";
+import { ActionBar } from "../components/ActionBar";
 import { ApprovalBadge, RiskBadge } from "../components/badges";
 import { Donut, Hbar, RiskLine, StackedSeverityBar } from "../components/charts";
 import { EmptyState, QueryBoundary } from "../components/states";
@@ -153,6 +154,8 @@ export function RepoDetailPage() {
                 }
               />
 
+              {latestPR ? <ActionBar owner={owner} repo={repo} number={latestPR.number} variant="repo" /> : null}
+
               <div className="grid hero" style={{ marginBottom: 16 }}>
                 <Card
                   title="Findings · last 30 days"
@@ -282,6 +285,14 @@ export function RepoDetailPage() {
                 <Card
                   title=".diffsentry.yaml"
                   subtitle={a.config === null ? "Default branch · repo defaults" : "Default branch · enforced for all PRs"}
+                  right={
+                    <Link
+                      className="btn btn-ghost"
+                      to={`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/config`}
+                    >
+                      Edit
+                    </Link>
+                  }
                 >
                   {a.config === null ? (
                     <EmptyState title="Using defaults" hint="No .diffsentry.yaml on the default branch." />

@@ -169,6 +169,13 @@ cost surprises).
   all-time hit counts to spot noisy rules.
 - **Operator settings** at `/dashboard/settings` — runtime + storage health +
   a live warn/error log tail captured via an in-process pino ring buffer.
+- **Guided first-run diagnostics** at `/settings/diagnostics` in the
+  command-center SPA (served at `/` — see the deployment note below; the legacy
+  `/dashboard` pages above have no diagnostics screen) — pinpoints
+  missing/invalid config (GitHub App, AI provider, OAuth, DB) with fix hints,
+  shows App installation + connected-repo status and webhook delivery health,
+  and runs one-click test-AI / test-webhook self-tests. A setup wizard nudges
+  you until the instance is healthy.
 - **GitHub OAuth gating** — the dashboard is opt-in via `ENABLE_DASHBOARD=1`
   and requires a GitHub login matching one of `DASHBOARD_ALLOWED_LOGINS` or
   org membership in `DASHBOARD_ALLOWED_ORGS`.
@@ -538,6 +545,8 @@ GitHub webhook
 | `DASHBOARD_AUTHOR_LOGINS` | No | | Comma-separated logins granted the `author` role. |
 | `DASHBOARD_SESSION_SECRET` | No | `GITHUB_WEBHOOK_SECRET` | HMAC key for the dashboard session + CSRF cookies. |
 | `DASHBOARD_SSE_HEARTBEAT_MS` | No | `25000` | Heartbeat interval (ms, min 1000) for the `/api/v1/stream` SSE feed. |
+| `DASHBOARD_CONFIG_PR_BRANCH_PREFIX` | No | `diffsentry/config` | Branch-name prefix used when an admin edits `.diffsentry.yaml` from the dashboard and chooses "open a PR". |
+| `IMPACT_MINUTES_PER_FINDING` | No | `15` | Reviewer-minutes-saved-per-finding heuristic for the Impact report's time-saved estimate. The only estimated figure on that page; all other numbers are counted from the raw tables. |
 
 \* One of `GITHUB_PRIVATE_KEY_PATH` or `GITHUB_PRIVATE_KEY` is required.
 
@@ -689,6 +698,10 @@ untouched.
 
 - `/` — repos overview (PRs reviewed, 7d findings, 7d critical, last review),
   sortable, with a 14-day aggregate activity chart.
+- `/queue` — the live **review pipeline board**: Queued → Running → Done /
+  Failed lanes with per-card elapsed timers, a cancel button on in-flight
+  reviews, and a one-click retry on the failed lane. Hydrates from
+  `GET /api/v1/queue` then updates live from the `queue.updated` SSE stream.
 - `/repos/:owner/:repo` — 90-day risk line, hot paths, top firing pattern
   rules, recent PRs + issues, active `@bot learn` learnings, the live
   `.diffsentry.yaml` for the repo, and (admin) a per-repo **operator overrides**
@@ -698,23 +711,104 @@ untouched.
 - `/findings` — cross-repo filterable explorer (severity, source, repo,
   free-text, age) with a "recurring fingerprints" group.
 - `/patterns` — every pattern-rule hit with 30d + all-time counts.
+- `/rules` — **admin only** — author custom anti-pattern rules (name, severity,
+  scope, regex, optional path glob, message/advice). A live tester runs the
+  pattern against a pasted snippet and highlights matches without persisting,
+  and the active-rules table joins each rule to its pattern-hit counts.
+- `/leaderboard` — per-author review activity over a 7/30/90-day window
+  (PRs reviewed, avg risk, findings/PR by severity, acceptance rate, trend
+  sparkline), sortable, with a click-through author drill-down (severity mix,
+  hot paths, recent PRs). Framed as where review effort lands, not a scoreboard.
+- `/trends` — org-wide activity over time, risk-level distribution, and
+  hot-paths-over-time (top paths by critical+major with a per-path trend line).
+- `/learnings` — manage the `@bot learn` learnings the reviewer applies:
+  searchable list of global + per-repo learnings, inline edit, path-glob
+  badges, create, bulk delete, dedupe suggestions, "promote to global", and a
+  "test against a file path" preview. Reads are open to viewers; create/edit/
+  delete require `author`.
 - `/audit` — **admin only** — the audit trail (who did what, when) plus a
   per-login role-override editor.
+- `/tokens` — **admin only** — create / list / revoke platform API tokens
+  (the secret is shown once), with a link to the rendered API docs.
+- `/webhooks` — **admin only** — every raw webhook delivery GitHub sent
+  (event, repo, signature status, size), with an expandable syntax-highlighted
+  JSON viewer and a one-click **Replay** that re-runs the stored payload through
+  the engine. Filter by event type and repo.
 - `/settings` — (admin) **operator controls**: a prominent global **Pause-All**
   kill switch with live status, plus grouped review defaults (auto-review,
   default profile, log level, max files). Also runtime + storage health, the
   signed-in session with its resolved role + capabilities, and a recent
   warn/error log tail captured via an in-process pino ring buffer.
+- `/settings/diagnostics` — the **guided first-run / health screen**: per-area
+  configuration checks (GitHub App, AI provider, dashboard auth, persistence)
+  each with a concrete fix hint, an on-demand **GitHub App probe** (which
+  installations + repos are connected, recent webhook delivery outcomes, and
+  rate-limit headroom), and one-click **test AI call** + **test webhook secret**
+  self-tests. When any check fails, a dismissible **setup wizard** banner
+  appears app-wide pointing to exactly what's missing.
+
+**Command palette (⌘K / Ctrl-K)** — press `⌘K` anywhere (or click **Search…**
+in the sidebar) to open a keyboard-first palette that combines three things:
+
+- **Navigation** — jump to any screen (capability-filtered, so non-admins don't
+  see the Audit entry).
+- **Quick actions** — when you're on a PR page, the author+ commands
+  (re-review, resolve threads, pause/resume, cancel) are one keystroke away.
+  They run through the same `requireRole` + CSRF + audit + SSE command endpoints
+  as the on-page buttons, so they're hidden for viewers and audited for everyone
+  else.
+- **Search** — `GET /api/v1/search?q=` does a ranked `LIKE` sweep across repos,
+  PRs, findings, and on-disk learnings; each result deep-links to its screen.
+  `↑`/`↓` move, `↵` opens/acts, `esc` closes.
 
 **JSON API** (`/api/v1`)
 
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
-failure. Read endpoints: `GET /me`, `/health`, `/repos`, `/repos/:owner/:repo`,
-`/repos/:owner/:repo/prs/:number`, `/findings`, `/patterns`, and `/audit`
-(admin). Write endpoints: `POST /roles` (admin) sets/clears a role override.
-When OAuth is configured every endpoint requires a valid session (401 JSON
-otherwise); the queries reuse the same SQL as the legacy dashboard and no-op
-gracefully when persistence is disabled.
+failure. Read endpoints: `GET /me`, `/health`, `/queue`, `/repos`,
+`/repos/:owner/:repo`, `/repos/:owner/:repo/prs/:number`,
+`/repos/:owner/:repo/config`, `/findings`, `/patterns`, `/rules` (admin),
+`/search?q=`, the analytics trio `/analytics/authors`,
+`/analytics/authors/:author`, `/analytics/trends` (all accept `?days=`, default
+30, clamped 1–365), `/audit` (admin), `/tokens` (admin), `/webhooks` +
+`/webhooks/:id` (admin), `/diagnostics` (static config + DB checks), and
+`/diagnostics/github` (live App probe). The machine-readable
+**`GET /api/v1/openapi.json`** (OpenAPI 3) and the rendered docs page
+**`GET /api/v1/docs`** are public. `GET /queue` returns the live review-pipeline
+snapshot from an in-process registry (works regardless of persistence). Write
+endpoints: `POST /roles` (admin) sets/clears a role override; `GET`/`POST /tokens`
++ `DELETE /tokens/:id` (admin) manage platform API tokens; `POST/PUT/DELETE /rules`
+(admin) manage custom rules and `POST /rules/test` (admin) tests a candidate
+pattern against a snippet without persisting; `PUT /repos/:owner/:repo/config`
+(admin) edits `.diffsentry.yaml`; `POST /webhooks/:id/replay` (admin)
+re-dispatches a stored delivery; `POST /diagnostics/test-ai` and `POST
+/diagnostics/test-webhook` (both `author`+, CSRF + audited) run the provider
+reachability and webhook-secret self-tests. When OAuth is configured every other
+endpoint requires a valid session or bearer API token (401 JSON otherwise); the
+queries reuse the same SQL as the legacy dashboard and no-op gracefully when
+persistence is disabled.
+
+**Webhook capture & replay.** Every delivery to `POST /webhook` is persisted to
+`webhook_deliveries` (event, action, repo, PR/issue number, `X-GitHub-Delivery`
+id, whether the signature verified, and a truncated payload) right after
+signature verification — rejected deliveries are recorded too, so the inspection
+view shows everything. `POST /webhooks/:id/replay` (admin + CSRF) records a new
+delivery row flagged `replayed_from` and re-runs the stored payload through the
+exact same engine path the live handler uses, then writes a `webhook.replay`
+audit row and emits `webhook.replayed` over SSE. Replay never re-enters the
+`/webhook` capture path, so it can't loop.
+
+**First-run diagnostics & setup wizard.** `GET /diagnostics` reads the
+environment (GitHub App, AI provider, OAuth, DB) and reports each as
+`ok`/`warn`/`fail` with a fix hint — no network calls, so it's instant and
+drives the wizard (`incomplete` when any check fails). `GET /diagnostics/github`
+authenticates as the App (JWT) to enumerate installations + connected repos,
+read the configured webhook URL and the last few delivery outcomes, and report
+rate-limit headroom — so a misconfigured instance pinpoints whether the App is
+even installed and whether GitHub's webhooks are reaching you. `test-ai` fires a
+tiny completion at the configured provider (proving the key works), and
+`test-webhook` confirms `GITHUB_WEBHOOK_SECRET` produces a valid HMAC signature
+the verifier accepts. These reuse existing config and the review engine — **no
+new environment variables** are introduced.
 
 **Command actions** (`author`+) drive the review engine from the dashboard. Each
 is `requireRole('author')` + CSRF gated, writes an `audit_log` row, and emits an
@@ -726,6 +820,35 @@ SSE event:
 | `POST .../prs/:number/resolve` | Resolve all DiffSentry review threads on the PR. |
 | `POST .../prs/:number/pause` / `.../resume` | Pause / resume automatic + manual reviews. |
 | `POST .../prs/:number/cancel` | Abort any in-flight review (handlePRClose semantics). |
+| `POST .../prs/:number/command` `{ command }` | Run a chat command on the PR by synthesizing an `@bot <cmd>` through `handleComment` — returns `202`, runs in the background. `command` is allowlisted: `summary`, `tldr`, `ship`, `changelog`, `generate_tests`, `generate_docstrings`. |
+
+The PR-detail and repo-detail screens render an **action bar** wiring up these
+endpoints — re-review (full/incremental), resolve/pause/resume/cancel, and the
+chat commands as buttons. The repo screen's bar targets the most recent PR. The
+whole write surface is hidden for viewers; each button shows a spinner +
+optimistic toast and reports the audit-logged result.
+
+**Custom rules** (`admin`) extend the pattern engine from the UI. `POST /rules`,
+`PUT /rules/:id`, and `DELETE /rules/:id` manage admin-authored anti-patterns
+(stored in the `custom_rules` table, migration v3); each is `requireRole('admin')`
++ CSRF gated, writes an `audit_log` row, and publishes a `rule.changed` SSE event.
+Enabled rules — global, or scoped to one `owner/repo` — compile into the review
+engine alongside the built-ins and the `.diffsentry.yaml` `anti_patterns`, and
+their hits are recorded with `source='custom'` so they show up in pattern
+analytics. `POST /rules/test` compiles + runs a candidate pattern against a
+pasted snippet (no persistence) for the live tester.
+
+**Config editor** (`admin`) — edit a repo's `.diffsentry.yaml` from the dashboard
+(`/repos/:owner/:repo/config`). `GET .../config` returns the current YAML on the
+default branch, the parsed + merged-with-defaults effective config, and a JSON
+schema derived from `RepoConfig`. The editor offers a **schema-aware form** and a
+**raw YAML editor** (CodeMirror) kept in sync, with live validation and a
+side-by-side diff preview. `PUT .../config` (admin + CSRF) validates the YAML
+(syntax + schema — invalid configs are rejected with field-level errors before
+anything is written) and then either **commits directly** to the default branch
+or **opens a PR** (your choice). The change is audit-logged with a diff
+(`config.update`) and announced on the bus as `config.updated`; a direct commit
+also invalidates the 5-minute config read cache.
 
 **Operator settings** (`admin`) are runtime overrides stored in the
 `settings_overrides` table (not repo writes) — they layer on top of the
@@ -754,12 +877,40 @@ controls degrade cleanly without a database.
 
 **Realtime** (`GET /api/v1/stream`) is a Server-Sent Events feed on an in-process
 event bus. The review engine publishes `review.started` / `review.finished` /
-`review.failed`, every command action publishes `action.performed`, and a
-settings change publishes `settings.changed`. The SPA
-opens one `EventSource`, surfaces events as toasts, and live-refetches the
+`review.failed`, the in-memory review queue publishes `queue.updated` on every
+state transition (queued → running → done/failed/canceled, including phase
+changes), every command action publishes `action.performed`, a custom rule
+change publishes `rule.changed`, a config edit publishes `config.updated`, a
+settings change publishes `settings.changed`, and a webhook replay publishes
+`webhook.replayed`. The SPA opens one `EventSource`,
+surfaces events as toasts, drives the live queue board, and live-refetches the
 affected PR — so a re-review's findings appear without a refresh. The stream
 heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed
 events on reconnect via `Last-Event-ID`.
+
+**Platform API (bearer tokens)**
+
+Beyond the cookie-session dashboard, the API accepts **bearer tokens** for
+scripts and integrations. An admin mints tokens from the `/tokens` screen (or
+`POST /api/v1/tokens`); the plaintext (`dsk_…`) is shown **once** and only its
+SHA-256 hash is stored. Send it as `Authorization: Bearer dsk_…`:
+
+```bash
+curl -H "Authorization: Bearer dsk_xxx" https://your-host/api/v1/repos
+```
+
+Tokens carry **scopes**: `read` (every GET endpoint) and `review` (the safe
+action subset — trigger reviews, resolve, pause/resume/cancel; implies `read`).
+The gate enforces them per request — a `read`-only token gets `403` on any write,
+and an unknown or revoked token gets `401`. Tokens **never** reach admin
+endpoints (audit, role/token administration); those stay cookie-session +
+`admin` only. Each authenticated call bumps the token's `last_used_at`, and
+create/revoke land an `audit_log` row plus a `token.changed` SSE event. Bearer
+requests are exempt from CSRF (there's no ambient cookie to forge); cookie
+writes still require the `X-CSRF-Token` header.
+
+Explore the full surface at **`/api/v1/docs`** (a dependency-free viewer that
+renders **`/api/v1/openapi.json`**) — both are public.
 
 **Roles & access control (RBAC)**
 
@@ -783,9 +934,11 @@ double-submit token as an `X-CSRF-Token` header.
 | View dashboard & findings | ✅ | ✅ | ✅ |
 | Triage findings | — | ✅ | ✅ |
 | Trigger reviews | — | ✅ | ✅ |
+| Manage learnings | — | ✅ | ✅ |
 | Manage config | — | — | ✅ |
 | Manage role overrides | — | — | ✅ |
 | View audit log | — | — | ✅ |
+| Manage API tokens | — | — | ✅ |
 
 When OAuth is disabled (open/local mode) there is no session to gate on, so the
 local operator is treated as `admin`.

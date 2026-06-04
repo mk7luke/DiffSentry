@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useHealth } from "../api/hooks";
 import { useAuth } from "../auth/useAuth";
 import { Breadcrumbs } from "../components/Shell";
@@ -12,9 +13,11 @@ const CAPABILITY_LABELS: { key: keyof Capabilities; label: string }[] = [
   { key: "viewDashboard", label: "View dashboard" },
   { key: "triageFindings", label: "Triage findings" },
   { key: "triggerReview", label: "Trigger reviews" },
+  { key: "manageLearnings", label: "Manage learnings" },
   { key: "manageConfig", label: "Manage config" },
   { key: "manageRoles", label: "Manage roles" },
   { key: "viewAudit", label: "View audit log" },
+  { key: "manageTokens", label: "Manage API tokens" },
 ];
 
 export function SettingsPage() {
@@ -26,6 +29,11 @@ export function SettingsPage() {
       <PageHeader
         title="Settings & health"
         subtitle="Operator controls, persistence stats, recent warnings, and the signed-in session."
+        right={
+          <Link to="/settings/diagnostics" className="btn btn-ghost btn-sm">
+            Diagnostics & setup →
+          </Link>
+        }
       />
 
       {/* Operator controls — admin only. The server enforces requireRole('admin')

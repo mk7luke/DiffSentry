@@ -53,8 +53,26 @@ async function main() {
     JSON.stringify([{ id: "l1", repo: "mk7luke/diffsentry-sandbox", content: "Prefer async/await.", createdAt: hoursAgo(240) }]),
   );
 
+  // Webhook secret so the diagnostics webhook self-test can round-trip.
+  process.env.GITHUB_WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || "smoke-secret";
+
+  // Stub the diagnostics provider — the smoke harness has no real Reviewer, so
+  // we inject canned probe results (the route wiring + envelope is what we test).
+  const diagnosticsStub = {
+    aiTarget: () => ({ provider: "anthropic", model: "claude-test" }),
+    testAiProvider: async () => ({ ok: true, provider: "anthropic", model: "claude-test", latencyMs: 5, reply: "pong" }),
+    getGithubDiagnostics: async () => ({
+      app: { slug: "diffsentry", name: "DiffSentry", htmlUrl: "https://github.com/apps/diffsentry" },
+      installations: [
+        { id: 1, account: "mk7luke", accountType: "User", repositorySelection: "selected", repos: ["mk7luke/diffsentry-sandbox"], repoCount: 1, truncated: false },
+      ],
+      webhook: { configuredUrl: "https://example.com/webhook", deliveries: [{ id: 1, event: "pull_request", action: "opened", status: "OK", statusCode: 200, deliveredAt: now, redelivery: false }] },
+      rateLimit: { limit: 5000, remaining: 4999, reset: now },
+    }),
+  };
+
   const app = express();
-  app.use("/api/v1", createApiRouter({ learningsDir }));
+  app.use("/api/v1", createApiRouter({ learningsDir, diagnostics: diagnosticsStub }));
   const server = app.listen(0);
   const port = (server.address() as { port: number }).port;
 
@@ -77,6 +95,32 @@ async function main() {
           });
         })
         .on("error", reject);
+    });
+  }
+
+  async function post(pathname: string): Promise<{ status: number; json: any }> {
+    return await new Promise((resolve, reject) => {
+      const req = http.request(
+        `http://127.0.0.1:${port}${pathname}`,
+        { method: "POST", headers: { "Content-Type": "application/json" } },
+        (r) => {
+          const chunks: Buffer[] = [];
+          r.on("data", (c) => chunks.push(c));
+          r.on("end", () => {
+            const body = Buffer.concat(chunks).toString("utf8");
+            let json: any = null;
+            try {
+              json = body ? JSON.parse(body) : null;
+            } catch {
+              reject(new Error(`non-JSON body for POST ${pathname}: ${body.slice(0, 120)}`));
+              return;
+            }
+            resolve({ status: r.statusCode ?? 0, json });
+          });
+        },
+      );
+      req.on("error", reject);
+      req.end();
     });
   }
 
@@ -137,8 +181,148 @@ async function main() {
     const patterns = await get("/api/v1/patterns");
     ok("patterns → rules", patterns.status === 200 && patterns.json.data.rules.some((r: any) => r.rule_name === "no-console"));
 
+    // ── Search (Cmd-K palette) ──────────────────────────────────────
+    const searchRepo = await get("/api/v1/search?q=" + encodeURIComponent("diffsentry"));
+    ok(
+      "search → repo hit with deep link",
+      searchRepo.status === 200 &&
+        searchRepo.json.data.results.some(
+          (r: any) => r.type === "repo" && r.repo === "diffsentry-sandbox" && r.to === "/repos/mk7luke/diffsentry-sandbox",
+        ),
+    );
+
+    const searchPr = await get("/api/v1/search?q=" + encodeURIComponent("rate limiter"));
+    ok(
+      "search → PR hit with /pr/ deep link",
+      searchPr.status === 200 &&
+        searchPr.json.data.results.some(
+          (r: any) => r.type === "pr" && r.number === 42 && r.to === "/repos/mk7luke/diffsentry-sandbox/pr/42",
+        ),
+    );
+
+    const searchFinding = await get("/api/v1/search?q=" + encodeURIComponent("race condition"));
+    ok(
+      "search → finding hit (severity + PR deep link)",
+      searchFinding.status === 200 &&
+        searchFinding.json.data.results.some(
+          (r: any) => r.type === "finding" && r.severity === "critical" && r.to === "/repos/mk7luke/diffsentry-sandbox/pr/42",
+        ),
+    );
+
+    const searchLearning = await get("/api/v1/search?q=" + encodeURIComponent("async"));
+    ok(
+      "search → on-disk learning hit",
+      searchLearning.status === 200 &&
+        searchLearning.json.data.results.some((r: any) => r.type === "learning" && r.repo === "diffsentry-sandbox"),
+    );
+
+    const searchMixed = await get("/api/v1/search?q=" + encodeURIComponent("src"));
+    ok(
+      "search → mixed results, ranked (descending score)",
+      searchMixed.status === 200 &&
+        searchMixed.json.data.results.length > 0 &&
+        searchMixed.json.data.results.every(
+          (r: any, i: number, arr: any[]) => i === 0 || arr[i - 1].score >= r.score,
+        ),
+    );
+
+    const searchPercent = await get("/api/v1/search?q=" + encodeURIComponent("100%"));
+    ok("search → LIKE wildcard in query is escaped (no crash, empty)", searchPercent.status === 200 && Array.isArray(searchPercent.json.data.results));
+
+    const searchBlank = await get("/api/v1/search?q=" + encodeURIComponent("   "));
+    ok("search → blank query returns empty", searchBlank.status === 200 && searchBlank.json.data.results.length === 0);
+
     const health = await get("/api/v1/health");
     ok("health → counts + logs", health.status === 200 && health.json.data.counts.repos === 2 && Array.isArray(health.json.data.logs));
+
+    // ── Diagnostics (first-run experience) ─────────────────────────
+    const diag = await get("/api/v1/diagnostics");
+    ok(
+      "diagnostics → checks + summary + config + db",
+      diag.status === 200 &&
+        Array.isArray(diag.json.data.checks) &&
+        diag.json.data.checks.length > 0 &&
+        diag.json.data.checks.some((c: any) => c.id === "ai.provider") &&
+        typeof diag.json.data.summary.fail === "number" &&
+        diag.json.data.config.provider === "anthropic" &&
+        diag.json.data.db.enabled === true,
+    );
+
+    const ghd = await get("/api/v1/diagnostics/github");
+    ok(
+      "diagnostics/github → installations + reachable + counts",
+      ghd.status === 200 &&
+        ghd.json.data.reachable === true &&
+        ghd.json.data.installationCount === 1 &&
+        ghd.json.data.connectedRepos === 1 &&
+        ghd.json.data.installations[0].repos[0] === "mk7luke/diffsentry-sandbox",
+    );
+
+    const testAi = await post("/api/v1/diagnostics/test-ai");
+    ok(
+      "diagnostics test-ai → ok (open-mode admin passes author gate + noop CSRF)",
+      testAi.status === 200 && testAi.json.data.ok === true && testAi.json.data.reply === "pong",
+    );
+
+    const testWh = await post("/api/v1/diagnostics/test-webhook");
+    ok(
+      "diagnostics test-webhook → signature round-trip verified",
+      testWh.status === 200 && testWh.json.data.ok === true && testWh.json.data.secretConfigured === true,
+    );
+
+    // ── Analytics ──────────────────────────────────────────────────
+    const authors = await get("/api/v1/analytics/authors");
+    const aliceRow = authors.json.data.authors.find((a: any) => a.author === "alice");
+    const unknownRow = authors.json.data.authors.find((a: any) => a.author === "(unknown)");
+    const sumFindings = authors.json.data.authors.reduce((n: number, a: any) => n + a.findings, 0);
+    const sumPRs = authors.json.data.authors.reduce((n: number, a: any) => n + a.prs_reviewed, 0);
+    ok(
+      "analytics authors → per-author stats; sums match org totals",
+      authors.status === 200 &&
+        aliceRow &&
+        aliceRow.prs_reviewed === 1 &&
+        aliceRow.findings === 2 &&
+        aliceRow.critical === 1 &&
+        aliceRow.major === 1 &&
+        aliceRow.triaged === 0 && // nothing triaged in the seed → acceptance is null in the UI
+        unknownRow &&
+        unknownRow.critical === 1 && // other-repo review has no prs row → '(unknown)' bucket
+        sumFindings === 3 && // 2 (alice) + 1 (unknown) = every finding in the DB
+        sumPRs === 2 &&
+        Array.isArray(authors.json.data.series),
+    );
+
+    const aliceDetail = await get("/api/v1/analytics/authors/alice");
+    ok(
+      "analytics author detail → stat + hot paths + PRs",
+      aliceDetail.status === 200 &&
+        aliceDetail.json.data.stat.findings === 2 &&
+        aliceDetail.json.data.hotPaths.some((p: any) => p.path === "src/limiter.ts") &&
+        aliceDetail.json.data.prs.some((p: any) => p.number === 42),
+    );
+
+    // '(unknown)' bucket: other-repo#7 has a review + critical finding but no
+    // prs row, so it attributes to '(unknown)'. Its hot paths must still resolve
+    // (guards the COALESCE author filter in getAuthorHotPaths).
+    const unknownDetail = await get("/api/v1/analytics/authors/" + encodeURIComponent("(unknown)"));
+    ok(
+      "analytics '(unknown)' drill-down → hot paths for PR-less reviews",
+      unknownDetail.status === 200 &&
+        unknownDetail.json.data.hotPaths.some((p: any) => p.path === "src/auth.ts"),
+    );
+
+    const noAuthor = await get("/api/v1/analytics/authors/nobody");
+    ok("analytics unknown author → 404 JSON", noAuthor.status === 404 && noAuthor.json.error.code === "not_found");
+
+    const trends = await get("/api/v1/analytics/trends");
+    ok(
+      "analytics trends → activity + risk distribution + hot paths over time",
+      trends.status === 200 &&
+        Array.isArray(trends.json.data.activity) &&
+        trends.json.data.riskDistribution.some((b: any) => b.level === "critical") &&
+        trends.json.data.hotPaths.some((p: any) => p.path === "src/limiter.ts") &&
+        Array.isArray(trends.json.data.hotPathSeries),
+    );
 
     const missing = await get("/api/v1/repos/unknown/unknown");
     ok("unknown repo → 404 JSON", missing.status === 404 && missing.json.error.code === "not_found");
@@ -148,6 +332,54 @@ async function main() {
 
     const unknownEndpoint = await get("/api/v1/nope");
     ok("unknown endpoint → 404 JSON", unknownEndpoint.status === 404 && unknownEndpoint.json.error.code === "not_found");
+
+    // ── Diagnostics WITHOUT a provider wired ───────────────────────
+    // The static env+DB checks (and the webhook self-test) must still work so
+    // the setup wizard functions on a minimally-wired instance; provider-backed
+    // probes degrade explicitly instead of 404-ing the whole surface.
+    {
+      const noProvApp = express();
+      noProvApp.use("/api/v1", createApiRouter({ learningsDir })); // no diagnostics provider
+      const noProvServer = noProvApp.listen(0);
+      const noProvPort = (noProvServer.address() as { port: number }).port;
+      const req = (method: "GET" | "POST", pathname: string) =>
+        new Promise<{ status: number; json: any }>((resolve, reject) => {
+          const r = http.request({ hostname: "127.0.0.1", port: noProvPort, path: pathname, method }, (resp) => {
+            const chunks: Buffer[] = [];
+            resp.on("data", (c) => chunks.push(c));
+            resp.on("end", () => {
+              const body = Buffer.concat(chunks).toString("utf8");
+              resolve({ status: resp.statusCode ?? 0, json: body ? JSON.parse(body) : null });
+            });
+          });
+          r.on("error", reject);
+          r.end();
+        });
+      try {
+        const d = await req("GET", "/api/v1/diagnostics");
+        ok(
+          "no-provider: GET /diagnostics → 200 static checks + env-derived config",
+          d.status === 200 && Array.isArray(d.json.data.checks) && d.json.data.config.provider === "anthropic",
+        );
+        const ghd = await req("GET", "/api/v1/diagnostics/github");
+        ok(
+          "no-provider: GET /diagnostics/github → 200 reachable:false + error",
+          ghd.status === 200 && ghd.json.data.reachable === false && typeof ghd.json.data.error === "string",
+        );
+        const tAi = await req("POST", "/api/v1/diagnostics/test-ai");
+        ok(
+          "no-provider: POST test-ai → ok:false (provider unavailable)",
+          tAi.status === 200 && tAi.json.data.ok === false && typeof tAi.json.data.error === "string",
+        );
+        const tWh = await req("POST", "/api/v1/diagnostics/test-webhook");
+        ok(
+          "no-provider: POST test-webhook → still verifies (needs no provider)",
+          tWh.status === 200 && tWh.json.data.ok === true,
+        );
+      } finally {
+        noProvServer.close();
+      }
+    }
 
     // Auth gate — a second app with auth wired returns 401 JSON (not a redirect)
     // for an unauthenticated request.

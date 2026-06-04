@@ -3,7 +3,7 @@ import type { Role } from "../dashboard/roles.js";
 import { getActor } from "../dashboard/roles.js";
 import type { CsrfRuntime } from "../dashboard/auth.js";
 import { repoExists } from "../dashboard/queries.js";
-import { insertAuditLog, upsertSettingOverride, deleteSettingOverride } from "../storage/dao.js";
+import { commitSettingsChanges } from "../storage/dao.js";
 import { bus } from "../realtime/bus.js";
 import { logger } from "../logger.js";
 import {
@@ -89,43 +89,52 @@ function planChanges(
   return errors.length > 0 ? { ok: false, errors } : { ok: true, changes };
 }
 
-/** Apply the planned changes to one scope, auditing + emitting each. */
+/**
+ * Apply the planned changes to one scope. The override writes + their audit_log
+ * rows are committed together in a single transaction (all-or-none). Runtime
+ * side effects (e.g. log level) run outside the transaction as best-effort, so a
+ * side-effect failure can't leave a half-written batch. The `settings.changed`
+ * bus events are published only after a successful commit.
+ *
+ * Returns false when the transactional persist failed (a live DB that errored);
+ * the caller surfaces that as a 500 so it isn't reported as success.
+ */
 function applyChanges(
   scope: string,
   changes: PlannedChange[],
   actor: { login: string | null; role: string | null },
-): void {
+): boolean {
+  const persisted = commitSettingsChanges({
+    scope,
+    updatedBy: actor.login,
+    actorLogin: actor.login,
+    actorRole: actor.role,
+    changes: changes.map((c) => ({ key: c.key, clear: c.value === CLEAR, value: c.value === CLEAR ? null : c.value })),
+  });
+
+  // Runtime side effects, best-effort and outside the transaction. On clear,
+  // re-resolve the effective value now the override is gone (read from
+  // getGlobalSettings — the only keys with a side effect are global) so the
+  // runtime reverts to the default immediately rather than on restart.
+  for (const c of changes) {
+    if (!c.apply) continue;
+    const clearing = c.value === CLEAR;
+    try {
+      const effective = clearing ? (getGlobalSettings() as unknown as Record<string, unknown>)[c.key] : c.value;
+      c.apply(effective);
+    } catch (err) {
+      logger.debug({ err, key: c.key }, "settings: apply side effect failed");
+    }
+  }
+
+  // Only announce changes that actually committed (or were a graceful no-op when
+  // persistence is off — commitSettingsChanges returns true in that case).
+  if (!persisted) return false;
   for (const c of changes) {
     const clearing = c.value === CLEAR;
-    const value = clearing ? null : c.value;
-    if (clearing) {
-      deleteSettingOverride(scope, c.key);
-    } else {
-      upsertSettingOverride({ scope, key: c.key, value, updatedBy: actor.login });
-    }
-    // Runtime side effect (e.g. log level). On set, apply the new value; on
-    // clear, re-resolve the effective value now that the override is gone (read
-    // from getGlobalSettings — the only keys with a side effect are global) so
-    // the runtime reverts to the default immediately rather than on restart.
-    if (c.apply) {
-      try {
-        const effective = clearing ? (getGlobalSettings() as unknown as Record<string, unknown>)[c.key] : value;
-        c.apply(effective);
-      } catch (err) {
-        logger.debug({ err, key: c.key }, "settings: apply side effect failed");
-      }
-    }
-    insertAuditLog({
-      actorLogin: actor.login,
-      actorRole: actor.role,
-      action: clearing ? "settings.clear" : "settings.set",
-      targetType: "setting",
-      targetRef: `${scope}:${c.key}`,
-      payload: { value },
-      result: "ok",
-    });
-    bus.publish("settings.changed", { scope, key: c.key, value, actor: actor.login });
+    bus.publish("settings.changed", { scope, key: c.key, value: clearing ? null : c.value, actor: actor.login });
   }
+  return true;
 }
 
 export function registerSettingsRoutes(router: Router, deps: SettingsDeps): void {
@@ -155,10 +164,14 @@ export function registerSettingsRoutes(router: Router, deps: SettingsDeps): void
       return;
     }
     try {
-      applyChanges(GLOBAL_SCOPE, planned.changes, {
+      const ok = applyChanges(GLOBAL_SCOPE, planned.changes, {
         login: actor?.login ?? null,
         role: actor?.role ?? null,
       });
+      if (!ok) {
+        sendError(res, 500, "internal", "Failed to persist settings.");
+        return;
+      }
       sendData(res, { settings: getGlobalSettings() });
     } catch (err) {
       logger.error({ err }, "api PUT /settings failed");
@@ -205,10 +218,14 @@ export function registerSettingsRoutes(router: Router, deps: SettingsDeps): void
       return;
     }
     try {
-      applyChanges(repoScope(owner, repo), planned.changes, {
+      const ok = applyChanges(repoScope(owner, repo), planned.changes, {
         login: actor?.login ?? null,
         role: actor?.role ?? null,
       });
+      if (!ok) {
+        sendError(res, 500, "internal", "Failed to persist repo settings.");
+        return;
+      }
       sendData(res, { owner, repo, settings: getRepoSettings(owner, repo) });
     } catch (err) {
       logger.error({ err, owner, repo }, "api PUT repo settings failed");
