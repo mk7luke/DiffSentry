@@ -38,6 +38,11 @@ function buildStackedDays(daily: CostDailyModelRow[], opts: { days?: number; sta
     byDay.set(r.day, parts);
   }
   const todayKey = new Date().toISOString().slice(0, 10);
+  // End the axis at the later of today (browser clock) and the newest returned
+  // data day, so a row stamped slightly ahead of the client clock (server/client
+  // skew, or a UTC-vs-local edge) is never silently dropped off the chart.
+  // Keys are YYYY-MM-DD, so lexical max == chronological max.
+  const endKey = daily.reduce((m, r) => (r.day > m ? r.day : m), todayKey);
   let startKey: string;
   if (opts.startIso) {
     startKey = opts.startIso.slice(0, 10);
@@ -48,8 +53,8 @@ function buildStackedDays(daily: CostDailyModelRow[], opts: { days?: number; sta
   }
   const out: StackedDay[] = [];
   const cur = new Date(`${startKey}T00:00:00.000Z`);
-  const end = new Date(`${todayKey}T00:00:00.000Z`);
-  // Walk start→today inclusive. The cap guards against a malformed startIso.
+  const end = new Date(`${endKey}T00:00:00.000Z`);
+  // Walk start→end inclusive. The cap guards against a malformed startIso.
   while (cur <= end && out.length < 400) {
     const key = cur.toISOString().slice(0, 10);
     out.push({ day: key, parts: byDay.get(key) ?? {} });
@@ -73,8 +78,7 @@ export function CostPage() {
             {RANGES.map((r) => (
               <button
                 key={r.key}
-                className={`btn btn-ghost${r.key === range ? " active" : ""}`}
-                style={r.key === range ? { color: "var(--text)" } : { color: "var(--text-3)" }}
+                className={`seg-btn${r.key === range ? " active" : ""}`}
                 onClick={() => setRange(r.key)}
               >
                 {r.label}

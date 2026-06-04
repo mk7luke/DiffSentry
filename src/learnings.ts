@@ -5,6 +5,35 @@ import { minimatch } from "minimatch";
 import { AIProvider, Learning } from "./types.js";
 import { logger } from "./logger.js";
 
+/** Sentinel repo for cross-repo (global) learnings. Real GitHub owners can
+ * never be "*", so a global learning never collides with a per-repo one. */
+export const GLOBAL_REPO = "*";
+
+/** Filename (at the store root) holding the global learnings array. GitHub
+ * owner logins can't contain underscores, so this never shadows an owner dir. */
+const GLOBAL_FILE = "__global__.json";
+
+/** Apply an edit patch to a learning, returning the next value. Empty/blank
+ * content is ignored (keeps the current); path === null | "" clears the glob. */
+function applyPatch(
+  current: Learning,
+  patch: { content?: string; path?: string | null },
+): Learning {
+  const next: Learning = {
+    ...current,
+    content:
+      typeof patch.content === "string" && patch.content.trim().length > 0
+        ? patch.content.trim()
+        : current.content,
+  };
+  if (patch.path === null || patch.path === "") {
+    delete next.path;
+  } else if (typeof patch.path === "string") {
+    next.path = patch.path.trim();
+  }
+  return next;
+}
+
 export class LearningsStore {
   private baseDir: string;
 
@@ -16,6 +45,10 @@ export class LearningsStore {
     // repo is "owner/name" → store as {baseDir}/owner/name.json
     const [owner, name] = repo.split("/");
     return path.join(this.baseDir, owner, `${name}.json`);
+  }
+
+  private globalFilePath(): string {
+    return path.join(this.baseDir, GLOBAL_FILE);
   }
 
   async addLearning(
@@ -52,10 +85,17 @@ export class LearningsStore {
     repo: string,
     filenames: string[],
   ): Promise<Learning[]> {
-    const all = await this.getLearnings(repo);
+    // Cross-repo (global) learnings apply to every repo; merge them ahead of
+    // the per-repo set so they read first in the prompt. When no global file
+    // exists this is a no-op and behaviour is identical to a repo-only store.
+    const [repoLearnings, globalLearnings] = await Promise.all([
+      this.getLearnings(repo),
+      this.getGlobalLearnings(),
+    ]);
+    const all = [...globalLearnings, ...repoLearnings];
 
     return all.filter((learning) => {
-      // Global learnings (no path) are always relevant
+      // Path-less learnings (repo-wide or truly global) are always relevant
       if (!learning.path) return true;
 
       // Path-scoped learnings match if their glob matches any reviewed file
@@ -84,23 +124,108 @@ export class LearningsStore {
     const idx = learnings.findIndex((l) => l.id === id);
     if (idx < 0) return null;
 
-    const current = learnings[idx];
-    const next: Learning = {
-      ...current,
-      content:
-        typeof patch.content === "string" && patch.content.trim().length > 0
-          ? patch.content.trim()
-          : current.content,
-    };
-    if (patch.path === null || patch.path === "") {
-      delete next.path;
-    } else if (typeof patch.path === "string") {
-      next.path = patch.path.trim();
-    }
-
-    learnings[idx] = next;
+    learnings[idx] = applyPatch(learnings[idx], patch);
     await this.writeLearnings(repo, learnings);
-    return next;
+    return learnings[idx];
+  }
+
+  // ─── Global (cross-repo) learnings ────────────────────────────────
+  // Stored in a single flat file at the store root and consumed by every
+  // review via getRelevantLearnings. Mirror the per-repo API one-for-one.
+
+  async getGlobalLearnings(): Promise<Learning[]> {
+    try {
+      const data = await fs.readFile(this.globalFilePath(), "utf-8");
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? (parsed as Learning[]) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async addGlobalLearning(content: string, filePath?: string): Promise<Learning> {
+    const learning: Learning = {
+      id: crypto.randomUUID(),
+      repo: GLOBAL_REPO,
+      content,
+      createdAt: new Date().toISOString(),
+      path: filePath,
+    };
+    const learnings = await this.getGlobalLearnings();
+    learnings.push(learning);
+    await this.writeGlobalLearnings(learnings);
+    return learning;
+  }
+
+  async removeGlobalLearning(id: string): Promise<boolean> {
+    const learnings = await this.getGlobalLearnings();
+    const filtered = learnings.filter((l) => l.id !== id);
+    if (filtered.length === learnings.length) return false;
+    await this.writeGlobalLearnings(filtered);
+    return true;
+  }
+
+  async updateGlobalLearning(
+    id: string,
+    patch: { content?: string; path?: string | null },
+  ): Promise<Learning | null> {
+    const learnings = await this.getGlobalLearnings();
+    const idx = learnings.findIndex((l) => l.id === id);
+    if (idx < 0) return null;
+    learnings[idx] = applyPatch(learnings[idx], patch);
+    await this.writeGlobalLearnings(learnings);
+    return learnings[idx];
+  }
+
+  /**
+   * Move a per-repo learning into the global set. The repo entry is removed and
+   * a fresh global entry (new id + timestamp) is created with the same content
+   * and path. Returns the new global learning, or null if the source is gone.
+   */
+  async promoteToGlobal(repo: string, id: string): Promise<Learning | null> {
+    const learnings = await this.getLearnings(repo);
+    const idx = learnings.findIndex((l) => l.id === id);
+    if (idx < 0) return null;
+    const [src] = learnings.splice(idx, 1);
+    await this.writeLearnings(repo, learnings);
+    return this.addGlobalLearning(src.content, src.path);
+  }
+
+  /**
+   * Enumerate every per-repo learning file under the store root. Best-effort:
+   * a missing root or unreadable directory yields an empty list rather than
+   * throwing. The global file at the root is skipped (it isn't an owner dir).
+   */
+  async listAllRepos(): Promise<{ owner: string; repo: string; learnings: Learning[] }[]> {
+    let owners: import("fs").Dirent[];
+    try {
+      owners = await fs.readdir(this.baseDir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const out: { owner: string; repo: string; learnings: Learning[] }[] = [];
+    for (const owner of owners) {
+      if (!owner.isDirectory()) continue;
+      let files: string[];
+      try {
+        files = await fs.readdir(path.join(this.baseDir, owner.name));
+      } catch {
+        continue;
+      }
+      for (const file of files) {
+        if (!file.endsWith(".json")) continue;
+        const repo = file.slice(0, -".json".length);
+        const learnings = await this.getLearnings(`${owner.name}/${repo}`);
+        if (learnings.length > 0) out.push({ owner: owner.name, repo, learnings });
+      }
+    }
+    return out;
+  }
+
+  private async writeGlobalLearnings(learnings: Learning[]): Promise<void> {
+    const fp = this.globalFilePath();
+    await fs.mkdir(path.dirname(fp), { recursive: true });
+    await fs.writeFile(fp, JSON.stringify(learnings, null, 2), "utf-8");
   }
 
   formatForPrompt(learnings: Learning[]): string {

@@ -22,7 +22,7 @@ import { suggestReviewersFromBlame, renderSuggestedReviewers, combineReviewers, 
 import { loadCodeowners, ownersForFiles, renderCodeownersBlock } from "./codeowners.js";
 import { findPriorBotThreadsForPaths, renderPriorDiscussionsBlock, diffWithOtherPR, renderDiffPRReply } from "./cross-pr.js";
 import { renderStickyStatus, STICKY_MARKER } from "./sticky-status.js";
-import { recordRepo, recordPR, recordReview, recordFindings, recordPatternHits, recordIssue, recordIssueAction } from "./storage/dao.js";
+import { recordRepo, recordPR, recordReview, recordFindings, recordPatternHits, recordIssue, recordIssueAction, listCustomRulesForRepo } from "./storage/dao.js";
 import { runSafetyScanners } from "./safety-scanner.js";
 import { runPatternChecks } from "./pattern-checks.js";
 import { scanDependencyChanges, renderDepBlock } from "./dep-scanner.js";
@@ -31,6 +31,8 @@ import { createHash } from "node:crypto";
 import { logger } from "./logger.js";
 import { bus } from "./realtime/bus.js";
 import { runWithCostContext, getCostContext, setCostReviewId, flushCostEvents } from "./ai/cost.js";
+import { isPauseAll, resolveProfileOverride, resolveMaxFilesOverride } from "./settings/overrides.js";
+import { reviewQueue, type ReviewHandle } from "./realtime/queue.js";
 
 /** Map a PR chat command to the cost-attribution kind for its AI calls. */
 function costKindForCommand(type: string): string {
@@ -159,7 +161,9 @@ function resumeNotice(): string {
 // In-memory state per PR
 const pausedPRs = new Set<string>();
 const reviewCountByPR = new Map<string, number>();
-const activeReviews = new Map<string, AbortController>();
+// In-flight reviews + their lifecycle live in the shared reviewQueue registry
+// (src/realtime/queue.ts), which owns the AbortControllers that used to sit in
+// a bare `activeReviews` map here and additionally powers the /queue board.
 
 // In-memory state per issue. Separate keyspace from PRs because GitHub uses
 // the same number sequence for both — we don't want pausing PR #42 to also
@@ -210,6 +214,57 @@ export class Reviewer {
     return this.github.getInstallationOctokit(installationId);
   }
 
+  // ─── Diagnostics surface (first-run experience) ──────────────
+  /** The provider + model currently in effect (non-secret). */
+  aiTarget(): { provider: Config["aiProvider"]; model: string } {
+    const provider = this.config.aiProvider;
+    const model =
+      provider === "anthropic"
+        ? this.config.anthropicModel
+        : provider === "openai-compatible"
+          ? this.config.localAiModel
+          : this.config.openaiModel;
+    return { provider, model };
+  }
+
+  /**
+   * Fire a tiny, cheap completion at the configured AI provider to prove it is
+   * reachable and the credentials work. Returns timing + a short echo on
+   * success, or the error message on failure — never throws.
+   */
+  async testAiProvider(): Promise<{
+    ok: boolean;
+    provider: Config["aiProvider"];
+    model: string;
+    latencyMs: number;
+    reply?: string;
+    error?: string;
+  }> {
+    const { provider, model } = this.aiTarget();
+    const start = Date.now();
+    try {
+      const reply = await this.ai.complete(
+        "You are a connectivity probe for DiffSentry. Reply with the single word: pong",
+        "ping",
+        { maxTokens: 16 },
+      );
+      return { ok: true, provider, model, latencyMs: Date.now() - start, reply: reply.trim().slice(0, 200) };
+    } catch (err) {
+      return {
+        ok: false,
+        provider,
+        model,
+        latencyMs: Date.now() - start,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  /** Live GitHub-side diagnostics (installations, webhook health, rate limit). */
+  async getGithubDiagnostics() {
+    return this.github.getAppDiagnostics();
+  }
+
   // ─── Push-driven auto-resolve (runs even when reviews are paused) ─────
   async autoResolveOnPush(
     installationId: number,
@@ -234,12 +289,8 @@ export class Reviewer {
   // ─── Abort on PR Close ───────────────────────────────────────
   handlePRClose(owner: string, repo: string, pullNumber: number): void {
     const key = prKey(owner, repo, pullNumber);
-    const controller = activeReviews.get(key);
-    if (controller) {
-      logger.info({ owner, repo, pr: pullNumber }, "Aborting in-flight review (PR closed)");
-      controller.abort();
-      activeReviews.delete(key);
-    }
+    // Aborts the in-flight review (if any) and marks the queue card canceled.
+    reviewQueue.cancel(owner, repo, pullNumber);
     // Clean up state
     pausedPRs.delete(key);
     reviewCountByPR.delete(key);
@@ -288,6 +339,25 @@ export class Reviewer {
     return this.handlePullRequest(installationId, owner, repo, pullNumber, mode);
   }
 
+  /**
+   * Run a chat command from the dashboard by synthesizing an "@bot <cmd>"
+   * comment and routing it through the normal command handler — the same path
+   * the webhook and the finishing-touches checkboxes use. The reply lands as a
+   * top-level PR comment (the "issue" kind ignores commentId, so the synthetic
+   * `0` is harmless). `command` is the raw phrase, e.g. "summary" or
+   * "generate tests"; parseCommand maps it to the concrete action.
+   */
+  async runCommand(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    command: string,
+  ): Promise<void> {
+    const synthetic = `@${this.config.botName} ${command}`;
+    await this.handleComment(installationId, owner, repo, pullNumber, synthetic, 0, "issue");
+  }
+
   // ─── Main PR Review Handler ──────────────────────────────────
   // Public entrypoint: establishes the cost-attribution context (kind=review)
   // for every AI call this review makes, then runs the implementation. Usage is
@@ -322,9 +392,21 @@ export class Reviewer {
       return;
     }
 
-    // Set up abort controller
-    const abortController = new AbortController();
-    activeReviews.set(key, abortController);
+    // Global Pause-All kill switch (operator control, persisted in
+    // settings_overrides). Honored on every trigger path — webhook, chat
+    // `@bot review`, and the dashboard's trigger action all funnel here — so a
+    // single switch reliably halts new reviews. No-ops when persistence is off.
+    if (isPauseAll()) {
+      log.info("Pause-All is active; skipping review");
+      return;
+    }
+
+    // Register in the queue board as "queued" and take its abort handle. The
+    // handle owns the AbortController (cancellation) and drives the live board
+    // through queued → running → done | failed | canceled. It is pinned to this
+    // attempt, so a superseding review for the same PR can't finalize our card.
+    const review: ReviewHandle = reviewQueue.enqueue(owner, repo, pullNumber, mode);
+    const signal = review.signal;
 
     // Lifecycle on the bus (command-center realtime). Emitted once we commit to
     // running — after the pause/abort-state checks above — and balanced by a
@@ -335,10 +417,16 @@ export class Reviewer {
     let reviewError: string | undefined;
 
     try {
+      // Operator max-files override (repo > global > env default). Resolved
+      // before fetching context so the file cap is applied at fetch time.
+      const maxFilesOverride = resolveMaxFilesOverride(owner, repo);
+
       // Fetch PR context first so we have the repo's default branch on hand.
       log.info("Fetching PR context");
       const octokit = await this.github.getInstallationOctokit(installationId);
-      const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
+      const context = await this.github.getPRContext(
+        installationId, owner, repo, pullNumber, maxFilesOverride ?? undefined,
+      );
 
       // Load repo config from the default branch — NOT the PR head. This makes
       // the .diffsentry.yaml on the default branch authoritative for every PR,
@@ -347,6 +435,14 @@ export class Reviewer {
       log.info("Loading repo configuration");
       const rawConfig = await loadRepoConfig(octokit, owner, repo, context.defaultBranch || "HEAD");
       const repoConfig = mergeWithDefaults(rawConfig);
+
+      // Operator profile override (repo > global default) wins over the
+      // .diffsentry.yaml profile. Applied onto repoConfig so it flows through
+      // the AI prompt, the rendered review body, and the persisted review row.
+      const profileOverride = resolveProfileOverride(owner, repo);
+      if (profileOverride) {
+        repoConfig.reviews = { ...(repoConfig.reviews ?? {}), profile: profileOverride };
+      }
 
       // Check auto-review controls
       if (!shouldReviewPR(repoConfig, {
@@ -375,6 +471,10 @@ export class Reviewer {
         }
       }
 
+      // All skip-gates passed — we're committed to reviewing. Flip the board
+      // card from queued → running so its live elapsed timer starts ticking.
+      review.start("preparing");
+
       // Post initial "in review" status comment
       const statusBody = STATUS_MARKER + "\n" +
         `> :eyes: **DiffSentry** is reviewing this ${mode === "full" ? "pull request" : "update"}... hang tight.`;
@@ -396,7 +496,7 @@ export class Reviewer {
         ).catch((err) => log.warn({ err }, "Failed to set pending commit status"));
       }
 
-      if (abortController.signal.aborted) return;
+      if (signal.aborted) return;
 
       // Note: push-driven auto-resolve now runs from server.ts on synchronize
       // *before* this gated path, so paused/draft/ignored PRs still resolve
@@ -482,7 +582,8 @@ export class Reviewer {
         ? await fetchLinkedIssues(octokit, owner, repo, issueNumbers)
         : [];
 
-      if (abortController.signal.aborted) return;
+      if (signal.aborted) return;
+      review.phase("reviewing");
 
       // Build enhanced prompt context by injecting knowledge into the AI prompt
       // (Guidelines and issues are injected via the prompt builder's learnings param)
@@ -533,7 +634,7 @@ export class Reviewer {
           : Promise.resolve(null),
       ]);
 
-      if (abortController.signal.aborted) return;
+      if (signal.aborted) return;
 
       // Find related PRs for walkthrough
       let relatedPRsSection = "";
@@ -598,8 +699,10 @@ export class Reviewer {
         }
       }
 
-      // Run anti-pattern + built-in heuristic checks
-      const patternFindings = runPatternChecks(context.files, repoConfig);
+      // Run anti-pattern + built-in heuristic checks. Admin-authored custom
+      // rules (global + this repo's scope) compile in alongside the built-ins
+      // and the .diffsentry.yaml anti_patterns.
+      const patternFindings = runPatternChecks(context.files, repoConfig, listCustomRulesForRepo(owner, repo));
       if (patternFindings.length > 0) {
         log.info({ count: patternFindings.length }, "Pattern checks produced findings");
         reviewResult.comments = [...patternFindings, ...reviewResult.comments];
@@ -981,6 +1084,10 @@ export class Reviewer {
           // anti-pattern findings. Map heuristically — close enough for the
           // dashboard's source filter.
           if (c.fingerprint && c.body?.includes("DiffSentry's safety scanner")) return "safety";
+          // Pattern-engine findings carry an explicit origin tag; fall back to
+          // body-sniffing only for anything that predates it.
+          if (c.patternSource === "builtin") return "builtin";
+          if (c.patternSource === "custom") return "custom";
           if (c.body?.includes("DiffSentry built-in pattern check")) return "builtin";
           if (c.body?.includes("Project anti-pattern")) return "custom";
           return "ai";
@@ -993,8 +1100,9 @@ export class Reviewer {
             ...safetyFindings.map((f) => ({ ruleName: f.title ?? "safety", source: "safety" as const, fingerprint: f.fingerprint })),
             ...patternFindings.map((f) => ({
               ruleName: f.title ?? "pattern",
-              source: (f.body?.includes("Project anti-pattern") ? "custom" : "builtin") as "builtin" | "custom",
+              source: (f.patternSource ?? (f.body?.includes("Project anti-pattern") ? "custom" : "builtin")) as "builtin" | "custom",
               fingerprint: f.fingerprint,
+              customRuleId: f.customRuleId,
             })),
           ],
         });
@@ -1005,6 +1113,7 @@ export class Reviewer {
         { commentCount: reviewResult.comments.length, approval: reviewResult.approval },
         "Review complete, submitting to GitHub"
       );
+      review.phase("posting review");
       await this.github.submitReview(installationId, context, reviewResult);
 
       // Upsert the sticky pinned status comment (separate from the
@@ -1090,7 +1199,7 @@ export class Reviewer {
       reviewCountByPR.set(key, currentCount + 1);
 
     } catch (err) {
-      if (abortController.signal.aborted) {
+      if (signal.aborted) {
         log.info("Review aborted (PR closed)");
         return;
       }
@@ -1099,11 +1208,19 @@ export class Reviewer {
       log.error({ err }, "Review failed");
       throw err;
     } finally {
-      activeReviews.delete(key);
       // Flush any cost events still buffered — covers the early-return and error
       // paths where setCostReviewId was never reached (they persist with a null
       // review_id but stay attributable by owner/repo/number).
       flushCostEvents();
+      // Resolve the queue card. cancel() may already have finalized it as
+      // canceled out-of-band — these calls are no-ops once the card is terminal.
+      if (reviewOutcome === "failed") {
+        review.fail(reviewError ?? "Review failed");
+      } else if (signal.aborted) {
+        review.canceled();
+      } else {
+        review.complete();
+      }
       // Always emit a terminal event so subscribers can clear "in progress"
       // state, whether the run completed, was skipped early, was aborted, or
       // failed. An aborted run is reported as finished (it terminated cleanly).
