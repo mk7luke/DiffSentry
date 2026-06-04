@@ -44,8 +44,14 @@ async function main() {
   const { createApiRouter } = await import("../src/api/router.js");
   const { createAuth } = await import("../src/dashboard/auth.js");
   const { recordRepo } = await import("../src/storage/dao.js");
-  const { isPauseAll, isAutoReviewEnabled, resolveProfileOverride, resolveMaxFilesOverride, getGlobalSettings } =
-    await import("../src/settings/overrides.js");
+  const {
+    isPauseAll,
+    isAutoReviewEnabled,
+    resolveProfileOverride,
+    resolveMaxFilesOverride,
+    getGlobalSettings,
+    GLOBAL_SETTING_DEFAULTS,
+  } = await import("../src/settings/overrides.js");
 
   const db = openDatabase();
   if (!db) throw new Error("failed to open temp db");
@@ -133,14 +139,17 @@ async function main() {
     );
 
     // ── Defaults on a fresh DB ───────────────────────────────────────────
+    // Compare against the canonical defaults exported by the settings module
+    // (single source of truth) rather than re-stating the literals here.
     const fresh = await req("GET", "/settings", { session: adminSess });
+    const s = fresh.json.data.settings;
     ok(
       "GET /settings (admin) → documented defaults",
       fresh.status === 200 &&
-        fresh.json.data.settings.pauseAll === false &&
-        fresh.json.data.settings.autoReview === true &&
-        fresh.json.data.settings.defaultProfile === "chill" &&
-        fresh.json.data.settings.maxFiles === null,
+        s.pauseAll === GLOBAL_SETTING_DEFAULTS.pauseAll &&
+        s.autoReview === GLOBAL_SETTING_DEFAULTS.autoReview &&
+        s.defaultProfile === GLOBAL_SETTING_DEFAULTS.defaultProfile &&
+        s.maxFiles === GLOBAL_SETTING_DEFAULTS.maxFiles,
     );
 
     // ── Pause-All kill switch ────────────────────────────────────────────
@@ -236,6 +245,7 @@ async function main() {
         },
         (res) => {
           if (res.statusCode !== 200) {
+            clearTimeout(timeout);
             reject(new Error(`stream status ${res.statusCode}`));
             return;
           }
@@ -243,6 +253,7 @@ async function main() {
           res.on("data", (chunk: string) => {
             buf += chunk;
             if (buf.includes("event: settings.changed")) {
+              clearTimeout(timeout);
               r.destroy();
               resolve(buf);
             }
@@ -254,10 +265,16 @@ async function main() {
         },
       );
       r.on("error", (err) => {
-        if (!buf.includes("event: settings.changed")) reject(err);
+        if (!buf.includes("event: settings.changed")) {
+          clearTimeout(timeout);
+          reject(err);
+        }
       });
       r.end();
-      setTimeout(() => reject(new Error("SSE timeout")), 3000);
+      const timeout = setTimeout(() => {
+        r.destroy();
+        reject(new Error("SSE timeout"));
+      }, 3000);
     });
     ok("SSE stream delivered settings.changed live", sseSeen.includes("event: settings.changed"));
 

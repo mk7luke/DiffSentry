@@ -122,19 +122,38 @@ function activeLogLevel(): LogLevel {
   return (LOG_LEVELS as readonly string[]).includes(lvl) ? (lvl as LogLevel) : "info";
 }
 
+/**
+ * Canonical default global settings — the values resolved when no override is
+ * stored. The single source of truth: getGlobalSettings (and the effective
+ * helpers) read these, and tests assert against them. `logLevel` is excluded on
+ * purpose — its default is the running process level (see activeLogLevel), not
+ * a fixed constant.
+ */
+export const GLOBAL_SETTING_DEFAULTS: {
+  pauseAll: boolean;
+  autoReview: boolean;
+  defaultProfile: Profile;
+  maxFiles: number | null;
+} = {
+  pauseAll: false,
+  autoReview: true,
+  defaultProfile: "chill",
+  maxFiles: null,
+};
+
 /** Resolve the global settings, with file/env/process defaults filled in. */
 export function getGlobalSettings(): GlobalSettings {
   return {
-    pauseAll: readBool(GLOBAL_SCOPE, "pauseAll", false),
-    autoReview: readBool(GLOBAL_SCOPE, "autoReview", true),
-    defaultProfile: readProfile(GLOBAL_SCOPE, "defaultProfile", "chill"),
+    pauseAll: readBool(GLOBAL_SCOPE, "pauseAll", GLOBAL_SETTING_DEFAULTS.pauseAll),
+    autoReview: readBool(GLOBAL_SCOPE, "autoReview", GLOBAL_SETTING_DEFAULTS.autoReview),
+    defaultProfile: readProfile(GLOBAL_SCOPE, "defaultProfile", GLOBAL_SETTING_DEFAULTS.defaultProfile),
     logLevel: ((): LogLevel => {
       const v = getSettingOverride<string>(GLOBAL_SCOPE, "logLevel");
       return typeof v === "string" && (LOG_LEVELS as readonly string[]).includes(v)
         ? (v as LogLevel)
         : activeLogLevel();
     })(),
-    maxFiles: readNum(GLOBAL_SCOPE, "maxFiles"),
+    maxFiles: readNum(GLOBAL_SCOPE, "maxFiles") ?? GLOBAL_SETTING_DEFAULTS.maxFiles,
   };
 }
 
@@ -154,7 +173,7 @@ export function getRepoSettings(owner: string, repo: string): RepoSettings {
 
 /** The global Pause-All kill switch. Honored before queuing any review. */
 export function isPauseAll(): boolean {
-  return readBool(GLOBAL_SCOPE, "pauseAll", false);
+  return readBool(GLOBAL_SCOPE, "pauseAll", GLOBAL_SETTING_DEFAULTS.pauseAll);
 }
 
 /**
@@ -164,7 +183,7 @@ export function isPauseAll(): boolean {
 export function isAutoReviewEnabled(owner: string, repo: string): boolean {
   const r = getSettingOverride<boolean>(repoScope(owner, repo), "autoReview");
   if (typeof r === "boolean") return r;
-  return readBool(GLOBAL_SCOPE, "autoReview", true);
+  return readBool(GLOBAL_SCOPE, "autoReview", GLOBAL_SETTING_DEFAULTS.autoReview);
 }
 
 /**
