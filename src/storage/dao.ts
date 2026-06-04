@@ -530,6 +530,80 @@ export function deleteSettingOverride(scope: string, key: string): void {
   }
 }
 
+/** A single settings-override mutation: set a value, or clear the key. */
+export type SettingOverrideOp = { key: string; value: unknown } | { key: string; clear: true };
+
+/**
+ * Apply several settings-override mutations to one scope atomically: all ops run
+ * in a single SQLite transaction, so a mid-batch failure rolls the whole batch
+ * back rather than leaving a half-applied multi-field change (e.g. a branding
+ * update that sets the name but not the accent).
+ *
+ * Returns true when the batch is applied — or when persistence is disabled
+ * (nothing to do is not a failure). Returns false only when the scope/key is
+ * invalid, a value can't be serialized, or the transaction itself errors; in
+ * every false case nothing is written. Input is validated and values are
+ * pre-serialized before the transaction opens, so the tx body runs only trusted
+ * statements.
+ */
+export function applySettingOverrides(
+  scope: string,
+  ops: SettingOverrideOp[],
+  updatedBy: string | null,
+): boolean {
+  const db = openDatabase();
+  if (!db) return true; // persistence disabled — a no-op, not an error
+  if (!ensureCommandCenterSchema(db, ["settings_overrides"])) return false;
+  if (!isValidScope(scope)) {
+    logger.debug({ scope }, "dao.applySettingOverrides: invalid scope — skipping batch");
+    return false;
+  }
+  if (ops.length === 0) return true;
+
+  type Prepared = { kind: "upsert"; key: string; valueJson: string } | { kind: "delete"; key: string };
+  const prepared: Prepared[] = [];
+  for (const op of ops) {
+    if (!isValidKey(op.key)) {
+      logger.debug({ scope, key: op.key }, "dao.applySettingOverrides: invalid key — skipping batch");
+      return false;
+    }
+    if ("clear" in op) {
+      prepared.push({ kind: "delete", key: op.key });
+    } else {
+      const valueJson = safeJsonStringify(op.value);
+      if (valueJson == null) {
+        logger.debug({ scope, key: op.key }, "dao.applySettingOverrides: value not JSON-serializable — skipping batch");
+        return false;
+      }
+      prepared.push({ kind: "upsert", key: op.key, valueJson });
+    }
+  }
+
+  try {
+    const upsert = db.prepare(
+      `INSERT INTO settings_overrides (scope, key, value_json, updated_by, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(scope, key) DO UPDATE SET
+         value_json = excluded.value_json,
+         updated_by = excluded.updated_by,
+         updated_at = excluded.updated_at`,
+    );
+    const del = db.prepare(`DELETE FROM settings_overrides WHERE scope = ? AND key = ?`);
+    const now = new Date().toISOString();
+    const tx = db.transaction((items: Prepared[]) => {
+      for (const item of items) {
+        if (item.kind === "upsert") upsert.run(scope, item.key, item.valueJson, updatedBy ?? null, now);
+        else del.run(scope, item.key);
+      }
+    });
+    tx(prepared);
+    return true;
+  } catch (err) {
+    logger.debug({ err, scope }, "dao.applySettingOverrides failed");
+    return false;
+  }
+}
+
 /** One override mutation in a settings batch: set `value` for `key`, or clear it. */
 export interface SettingChange {
   key: string;

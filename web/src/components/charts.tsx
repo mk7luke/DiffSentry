@@ -125,9 +125,11 @@ export function RiskLine({ points }: { points: SparklinePoint[] }) {
       <div className="plot">
         <svg viewBox={`0 0 ${w} ${h}`} className="risk-chart" preserveAspectRatio="none">
           <defs>
+            {/* Gradient stops read the theme accent via inline style — CSS
+               custom properties don't resolve in bare SVG presentation attrs. */}
             <linearGradient id="riskGrad" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="#5a8dff" stopOpacity="0.35" />
-              <stop offset="100%" stopColor="#5a8dff" stopOpacity="0" />
+              <stop offset="0%" style={{ stopColor: "var(--accent)", stopOpacity: 0.35 }} />
+              <stop offset="100%" style={{ stopColor: "var(--accent)", stopOpacity: 0 }} />
             </linearGradient>
           </defs>
           <polygon points={areaPath} className="area" />
@@ -137,7 +139,15 @@ export function RiskLine({ points }: { points: SparklinePoint[] }) {
       <div className="dots">
         {coords.map((c, i) => {
           const color =
-            c.score >= 75 ? "#fb6d82" : c.score >= 55 ? "#fb923c" : c.score >= 35 ? "#fbbf24" : c.score >= 15 ? "#facc15" : "#4ade80";
+            c.score >= 75
+              ? "var(--sev-crit)"
+              : c.score >= 55
+                ? "var(--sev-major)"
+                : c.score >= 35
+                  ? "var(--sev-minor)"
+                  : c.score >= 15
+                    ? "var(--warn)"
+                    : "var(--good)";
           const leftPct = n === 1 ? 0 : (c.x / w) * 100;
           const topPct = (c.y / h) * 100;
           return (
@@ -394,7 +404,8 @@ export function Donut({ slices, size = 120 }: { slices: DonutSlice[]; size?: num
                 cx={size / 2}
                 cy={size / 2}
                 r={r}
-                stroke={s.color}
+                // style (not the bare `stroke` attr) so CSS var colors resolve.
+                style={{ stroke: s.color }}
                 strokeDasharray={`${dash.toFixed(1)} ${(c - dash).toFixed(1)}`}
                 strokeDashoffset={(-offset).toFixed(1)}
               />

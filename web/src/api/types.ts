@@ -340,6 +340,19 @@ export interface PatternsResponse {
   rules: PatternRuleRow[];
 }
 
+/** Resolved instance branding (admin override → env → built-in default). */
+export interface BrandingResponse {
+  instanceName: string;
+  accentColor: string;
+}
+
+/** Branding write payload. Omit a field to leave it unchanged; send null/"" to
+ * clear that override and revert to the env / built-in default. */
+export interface BrandingUpdate {
+  instanceName?: string | null;
+  accentColor?: string | null;
+}
+
 // ─── Cost / AI spend ─────────────────────────────────────────────────
 
 export interface CostTotals {

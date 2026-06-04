@@ -545,6 +545,8 @@ GitHub webhook
 | `DASHBOARD_AUTHOR_LOGINS` | No | | Comma-separated logins granted the `author` role. |
 | `DASHBOARD_SESSION_SECRET` | No | `GITHUB_WEBHOOK_SECRET` | HMAC key for the dashboard session + CSRF cookies. |
 | `DASHBOARD_SSE_HEARTBEAT_MS` | No | `25000` | Heartbeat interval (ms, min 1000) for the `/api/v1/stream` SSE feed. |
+| `DASHBOARD_INSTANCE_NAME` | No | `DiffSentry` | Default instance name (sidebar wordmark + tab title). An admin can override it live in Settings → Branding. |
+| `DASHBOARD_ACCENT_COLOR` | No | `#5a8dff` | Default brand accent (hex `#rgb`/`#rrggbb`) the whole UI derives its accent from. Overridable live by an admin. |
 | `DIFFSENTRY_SUPPRESS_DISMISSED` | No | | Set to `1` so new reviews drop findings whose fingerprint was dismissed or is currently snoozed via triage. Off by default — triage never changes review output unless enabled. |
 | `DASHBOARD_CONFIG_PR_BRANCH_PREFIX` | No | `diffsentry/config` | Branch-name prefix used when an admin edits `.diffsentry.yaml` from the dashboard and chooses "open a PR". |
 | `IMPACT_MINUTES_PER_FINDING` | No | `15` | Reviewer-minutes-saved-per-finding heuristic for the Impact report's time-saved estimate. The only estimated figure on that page; all other numbers are counted from the raw tables. |
@@ -978,6 +980,23 @@ double-submit token as an `X-CSRF-Token` header.
 
 When OAuth is disabled (open/local mode) there is no session to gate on, so the
 local operator is treated as `admin`.
+
+**Theming & branding**
+
+The UI is fully themed via CSS variables. Each user picks their own **theme**
+(dark — the default — light, or follow the OS) and **density** (comfortable /
+compact) in Settings → Appearance; the choice is stored in that browser's
+`localStorage` and applied by a tiny inline script before first paint, so
+reloads and theme switches never flash. A quick dark⇄light toggle also lives in
+the sidebar.
+
+Admins (the `Manage config` capability) can set an instance-wide **name** and
+**accent color** in Settings → Branding (`GET`/`POST /api/v1/settings/branding`).
+The accent recolors the whole app, and a change broadcasts a `settings.updated`
+SSE event so every open dashboard re-brands live. Branding resolves
+admin override (SQLite) → `DASHBOARD_INSTANCE_NAME` / `DASHBOARD_ACCENT_COLOR`
+env → built-in `DiffSentry` / `#5a8dff`, and persistence is optional (with the
+DB off, the env/built-in defaults apply and writes no-op).
 
 **Local development**
 

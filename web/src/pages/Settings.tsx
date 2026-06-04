@@ -5,6 +5,7 @@ import { Breadcrumbs } from "../components/Shell";
 import { Card, Metric, PageHeader } from "../components/primitives";
 import { GlobalSettingsControls } from "../components/SettingsControls";
 import { RoleBadge } from "../components/badges";
+import { BrandingForm, ThemeControls } from "../components/appearance";
 import { EmptyState, QueryBoundary } from "../components/states";
 import type { Capabilities } from "../api/types";
 import { formatBytes, relativeTime } from "../lib/format";
@@ -28,13 +29,23 @@ export function SettingsPage() {
       <Breadcrumbs crumbs={[{ label: "Settings" }]} />
       <PageHeader
         title="Settings & health"
-        subtitle="Operator controls, persistence stats, recent warnings, and the signed-in session."
+        subtitle="Appearance, operator controls, persistence stats, recent warnings, and the signed-in session."
         right={
           <Link to="/settings/diagnostics" className="btn btn-ghost btn-sm">
             Diagnostics & setup →
           </Link>
         }
       />
+      <div className="grid two" style={{ marginBottom: 16 }}>
+        <Card title="Appearance" subtitle="theme · density">
+          <ThemeControls />
+        </Card>
+        {auth.capabilities.manageConfig ? (
+          <Card title="Branding" subtitle="admin · instance-wide">
+            <BrandingForm />
+          </Card>
+        ) : null}
+      </div>
 
       {/* Operator controls — admin only. The server enforces requireRole('admin')
           on every settings endpoint; this gate just avoids fetching/showing them
