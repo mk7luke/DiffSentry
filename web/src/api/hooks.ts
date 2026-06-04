@@ -6,10 +6,13 @@ import type {
   AuditResponse,
   AuthorDetailResponse,
   AuthorsResponse,
+  ConfigUpdateResult,
   CustomRuleInput,
   CustomRuleRow,
   CustomRulesResponse,
+  DiagnosticsResponse,
   FindingsResponse,
+  GithubDiagnosticsResponse,
   HealthResponse,
   ImpactReport,
   Learning,
@@ -20,12 +23,15 @@ import type {
   PatternsResponse,
   PRDetailResponse,
   QueueResponse,
+  RepoConfigResponse,
   RepoDetailResponse,
   ReplayResponse,
   ReposResponse,
   Role,
   RuleTestResult,
   SearchResponse,
+  TestAiResult,
+  TestWebhookResult,
   TrendsResponse,
   WebhookDeliveryDetail,
   WebhooksResponse,
@@ -205,6 +211,73 @@ export function useCreateRule() {
     mutationFn: (vars: CustomRuleInput) => apiSend<{ rule: CustomRuleRow }>("/rules", { body: vars }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["rules"] });
+    },
+  });
+}
+
+// ─── Diagnostics / first-run experience ─────────────────────────────
+
+export function useDiagnostics() {
+  return useQuery({
+    queryKey: ["diagnostics"],
+    queryFn: () => apiGet<DiagnosticsResponse>("/diagnostics"),
+    staleTime: 30_000,
+  });
+}
+
+/** Live GitHub App probe. Lazy: only runs once `enabled` is true (a network
+ * call, so we don't fire it until the user opens the GitHub section). */
+export function useGithubDiagnostics(enabled: boolean) {
+  return useQuery({
+    queryKey: ["diagnostics", "github"],
+    queryFn: () => apiGet<GithubDiagnosticsResponse>("/diagnostics/github"),
+    enabled,
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+/** Author+: fire a tiny completion at the configured provider. */
+export function useTestAi() {
+  return useMutation({
+    mutationFn: () => apiSend<TestAiResult>("/diagnostics/test-ai"),
+  });
+}
+
+/** Author+: round-trip a signed payload through the webhook verifier. */
+export function useTestWebhook() {
+  return useMutation({
+    mutationFn: () => apiSend<TestWebhookResult>("/diagnostics/test-webhook"),
+  });
+}
+
+// ─── Repo config (read viewer+, write admin) ───────────────────────
+
+export function useRepoConfig(owner: string, repo: string) {
+  return useQuery({
+    queryKey: ["repo-config", owner, repo],
+    queryFn: () =>
+      apiGet<RepoConfigResponse>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/config`),
+    enabled: !!owner && !!repo,
+  });
+}
+
+/** Admin: validate + commit (or open a PR for) a new .diffsentry.yaml. */
+export function useUpdateRepoConfig(owner: string, repo: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { yaml: string; mode: "commit" | "pr"; message?: string }) =>
+      apiSend<ConfigUpdateResult>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/config`, {
+        method: "PUT",
+        body: vars,
+      }),
+    onSuccess: (result) => {
+      // A direct commit changes what the read path serves; a PR doesn't (yet).
+      if (result.mode === "commit") {
+        void qc.invalidateQueries({ queryKey: ["repo-config", owner, repo] });
+        void qc.invalidateQueries({ queryKey: ["repo", owner, repo] });
+      }
+      void qc.invalidateQueries({ queryKey: ["audit"] });
     },
   });
 }

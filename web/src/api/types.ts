@@ -356,6 +356,135 @@ export interface RuleTestResult {
   matches: RuleTestMatch[];
 }
 
+// ─── Diagnostics / first-run experience ─────────────────────────────
+
+export type CheckStatus = "ok" | "warn" | "fail";
+export type CheckCategory = "github" | "ai" | "auth" | "persistence";
+
+export interface DiagnosticCheck {
+  id: string;
+  category: CheckCategory;
+  label: string;
+  status: CheckStatus;
+  detail: string;
+  fixHint?: string;
+}
+
+export interface DiagnosticsResponse {
+  checks: DiagnosticCheck[];
+  summary: { ok: number; warn: number; fail: number };
+  /** True when at least one check failed — drives the setup wizard. */
+  incomplete: boolean;
+  config: {
+    provider: string;
+    model: string;
+    botName: string;
+    authEnabled: boolean;
+    oauthConfigured: boolean;
+    dashboardUrl: string | null;
+    persistence: boolean;
+  };
+  db: {
+    enabled: boolean;
+    sizeBytes: number | null;
+    lastReviewAt: string | null;
+    counts: HealthCounts;
+  };
+}
+
+export interface InstallationInfo {
+  id: number;
+  account: string | null;
+  accountType: string | null;
+  repositorySelection: string | null;
+  repos: string[];
+  repoCount: number;
+  truncated: boolean;
+}
+
+export interface WebhookDelivery {
+  id: number;
+  event: string;
+  action: string | null;
+  status: string;
+  statusCode: number;
+  deliveredAt: string;
+  redelivery: boolean;
+}
+
+export interface GithubDiagnosticsResponse {
+  app: { slug: string | null; name: string | null; htmlUrl: string | null } | null;
+  installations: InstallationInfo[];
+  webhook: { configuredUrl: string | null; deliveries: WebhookDelivery[]; error?: string };
+  rateLimit: { limit: number; remaining: number; reset: string } | null;
+  error?: string;
+  reachable: boolean;
+  connectedRepos: number;
+  installationCount: number;
+}
+
+export interface TestAiResult {
+  ok: boolean;
+  provider: string;
+  model: string;
+  latencyMs: number;
+  reply?: string;
+  error?: string;
+}
+
+export interface TestWebhookResult {
+  ok: boolean;
+  error?: string;
+  secretConfigured: boolean;
+}
+
+// ─── Repo config editor (mirrors src/config-schema.ts) ──────────────
+
+export interface JsonSchema {
+  type?: "object" | "array" | "string" | "boolean" | "number" | "integer";
+  enum?: (string | number)[];
+  properties?: Record<string, JsonSchema>;
+  required?: string[];
+  additionalProperties?: boolean;
+  items?: JsonSchema;
+  minimum?: number;
+  description?: string;
+  widget?: "glob" | "multiline" | "regex";
+}
+
+export interface ConfigValidationError {
+  path: string;
+  message: string;
+}
+
+export interface RepoConfigResponse {
+  owner: string;
+  repo: string;
+  defaultBranch: string | null;
+  /** Raw .diffsentry.yaml on the default branch, or null when absent. */
+  yaml: string | null;
+  exists: boolean;
+  /** Parsed config object (the as-authored values, not merged). */
+  parsed: Record<string, unknown>;
+  /** Non-null when the stored YAML failed to parse. */
+  parseError: string | null;
+  /** Parsed config merged with DiffSentry's defaults. */
+  effective: Record<string, unknown>;
+  schema: JsonSchema;
+  /** True when the server can commit (octokit + installation present). */
+  editable: boolean;
+}
+
+export interface ConfigUpdateResult {
+  owner: string;
+  repo: string;
+  mode: "commit" | "pr";
+  branch: string;
+  commitSha?: string;
+  prNumber?: number;
+  prUrl?: string;
+}
+
 // ─── Analytics: authors & trends ────────────────────────────────────
 
 export interface AuthorStatRow {

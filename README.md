@@ -169,6 +169,13 @@ cost surprises).
   all-time hit counts to spot noisy rules.
 - **Operator settings** at `/dashboard/settings` — runtime + storage health +
   a live warn/error log tail captured via an in-process pino ring buffer.
+- **Guided first-run diagnostics** at `/settings/diagnostics` in the
+  command-center SPA (served at `/` — see the deployment note below; the legacy
+  `/dashboard` pages above have no diagnostics screen) — pinpoints
+  missing/invalid config (GitHub App, AI provider, OAuth, DB) with fix hints,
+  shows App installation + connected-repo status and webhook delivery health,
+  and runs one-click test-AI / test-webhook self-tests. A setup wizard nudges
+  you until the instance is healthy.
 - **GitHub OAuth gating** — the dashboard is opt-in via `ENABLE_DASHBOARD=1`
   and requires a GitHub login matching one of `DASHBOARD_ALLOWED_LOGINS` or
   org membership in `DASHBOARD_ALLOWED_ORGS`.
@@ -538,6 +545,7 @@ GitHub webhook
 | `DASHBOARD_AUTHOR_LOGINS` | No | | Comma-separated logins granted the `author` role. |
 | `DASHBOARD_SESSION_SECRET` | No | `GITHUB_WEBHOOK_SECRET` | HMAC key for the dashboard session + CSRF cookies. |
 | `DASHBOARD_SSE_HEARTBEAT_MS` | No | `25000` | Heartbeat interval (ms, min 1000) for the `/api/v1/stream` SSE feed. |
+| `DASHBOARD_CONFIG_PR_BRANCH_PREFIX` | No | `diffsentry/config` | Branch-name prefix used when an admin edits `.diffsentry.yaml` from the dashboard and chooses "open a PR". |
 | `IMPACT_MINUTES_PER_FINDING` | No | `15` | Reviewer-minutes-saved-per-finding heuristic for the Impact report's time-saved estimate. The only estimated figure on that page; all other numbers are counted from the raw tables. |
 
 \* One of `GITHUB_PRIVATE_KEY_PATH` or `GITHUB_PRIVATE_KEY` is required.
@@ -726,6 +734,13 @@ untouched.
 - `/settings` — runtime + storage health, the signed-in session with its
   resolved role + capabilities, and a recent warn/error log tail captured via
   an in-process pino ring buffer.
+- `/settings/diagnostics` — the **guided first-run / health screen**: per-area
+  configuration checks (GitHub App, AI provider, dashboard auth, persistence)
+  each with a concrete fix hint, an on-demand **GitHub App probe** (which
+  installations + repos are connected, recent webhook delivery outcomes, and
+  rate-limit headroom), and one-click **test AI call** + **test webhook secret**
+  self-tests. When any check fails, a dismissible **setup wizard** banner
+  appears app-wide pointing to exactly what's missing.
 
 **Command palette (⌘K / Ctrl-K)** — press `⌘K` anywhere (or click **Search…**
 in the sidebar) to open a keyboard-first palette that combines three things:
@@ -745,18 +760,23 @@ in the sidebar) to open a keyboard-first palette that combines three things:
 
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/queue`, `/repos`,
-`/repos/:owner/:repo`, `/repos/:owner/:repo/prs/:number`, `/findings`,
-`/patterns`, `/rules` (admin), `/search?q=`, the analytics trio
-`/analytics/authors`, `/analytics/authors/:author`, `/analytics/trends` (all
-accept `?days=`, default 30, clamped 1–365), `/audit` (admin), and `/webhooks` +
-`/webhooks/:id` (admin). `GET /queue` returns the live review-pipeline snapshot
-from an in-process registry (works regardless of persistence). Write endpoints:
-`POST /roles` (admin) sets/clears a role override; `POST/PUT/DELETE /rules`
-(admin) manage custom rules and `POST /rules/test` (admin) tests a candidate
-pattern against a snippet without persisting; `POST /webhooks/:id/replay` (admin)
-re-dispatches a stored delivery. When OAuth is configured every endpoint requires
-a valid session (401 JSON otherwise); the queries reuse the same SQL as the
-legacy dashboard and no-op gracefully when persistence is disabled.
+`/repos/:owner/:repo`, `/repos/:owner/:repo/prs/:number`,
+`/repos/:owner/:repo/config`, `/findings`, `/patterns`, `/rules` (admin),
+`/search?q=`, the analytics trio `/analytics/authors`,
+`/analytics/authors/:author`, `/analytics/trends` (all accept `?days=`, default
+30, clamped 1–365), `/audit` (admin), `/webhooks` + `/webhooks/:id` (admin),
+`/diagnostics` (static config + DB checks), and `/diagnostics/github` (live App
+probe). `GET /queue` returns the live review-pipeline snapshot from an in-process
+registry (works regardless of persistence). Write endpoints: `POST /roles`
+(admin) sets/clears a role override; `POST/PUT/DELETE /rules` (admin) manage
+custom rules and `POST /rules/test` (admin) tests a candidate pattern against a
+snippet without persisting; `PUT /repos/:owner/:repo/config` (admin) edits
+`.diffsentry.yaml`; `POST /webhooks/:id/replay` (admin) re-dispatches a stored
+delivery; `POST /diagnostics/test-ai` and `POST /diagnostics/test-webhook` (both
+`author`+, CSRF + audited) run the provider reachability and webhook-secret
+self-tests. When OAuth is configured every endpoint requires a valid session
+(401 JSON otherwise); the queries reuse the same SQL as the legacy dashboard and
+no-op gracefully when persistence is disabled.
 
 **Webhook capture & replay.** Every delivery to `POST /webhook` is persisted to
 `webhook_deliveries` (event, action, repo, PR/issue number, `X-GitHub-Delivery`
@@ -767,6 +787,19 @@ delivery row flagged `replayed_from` and re-runs the stored payload through the
 exact same engine path the live handler uses, then writes a `webhook.replay`
 audit row and emits `webhook.replayed` over SSE. Replay never re-enters the
 `/webhook` capture path, so it can't loop.
+
+**First-run diagnostics & setup wizard.** `GET /diagnostics` reads the
+environment (GitHub App, AI provider, OAuth, DB) and reports each as
+`ok`/`warn`/`fail` with a fix hint — no network calls, so it's instant and
+drives the wizard (`incomplete` when any check fails). `GET /diagnostics/github`
+authenticates as the App (JWT) to enumerate installations + connected repos,
+read the configured webhook URL and the last few delivery outcomes, and report
+rate-limit headroom — so a misconfigured instance pinpoints whether the App is
+even installed and whether GitHub's webhooks are reaching you. `test-ai` fires a
+tiny completion at the configured provider (proving the key works), and
+`test-webhook` confirms `GITHUB_WEBHOOK_SECRET` produces a valid HMAC signature
+the verifier accepts. These reuse existing config and the review engine — **no
+new environment variables** are introduced.
 
 **Command actions** (`author`+) drive the review engine from the dashboard. Each
 is `requireRole('author')` + CSRF gated, writes an `audit_log` row, and emits an
@@ -796,15 +829,27 @@ their hits are recorded with `source='custom'` so they show up in pattern
 analytics. `POST /rules/test` compiles + runs a candidate pattern against a
 pasted snippet (no persistence) for the live tester.
 
+**Config editor** (`admin`) — edit a repo's `.diffsentry.yaml` from the dashboard
+(`/repos/:owner/:repo/config`). `GET .../config` returns the current YAML on the
+default branch, the parsed + merged-with-defaults effective config, and a JSON
+schema derived from `RepoConfig`. The editor offers a **schema-aware form** and a
+**raw YAML editor** (CodeMirror) kept in sync, with live validation and a
+side-by-side diff preview. `PUT .../config` (admin + CSRF) validates the YAML
+(syntax + schema — invalid configs are rejected with field-level errors before
+anything is written) and then either **commits directly** to the default branch
+or **opens a PR** (your choice). The change is audit-logged with a diff
+(`config.update`) and announced on the bus as `config.updated`; a direct commit
+also invalidates the 5-minute config read cache.
+
 **Realtime** (`GET /api/v1/stream`) is a Server-Sent Events feed on an in-process
 event bus. The review engine publishes `review.started` / `review.finished` /
 `review.failed`, the in-memory review queue publishes `queue.updated` on every
 state transition (queued → running → done/failed/canceled, including phase
 changes), every command action publishes `action.performed`, a custom rule
-change publishes `rule.changed`, and a webhook replay publishes
-`webhook.replayed`. The SPA opens one `EventSource`, surfaces events as toasts,
-drives the live queue board, and live-refetches the affected PR — so a
-re-review's findings appear without a refresh. The stream
+change publishes `rule.changed`, a config edit publishes `config.updated`, and a
+webhook replay publishes `webhook.replayed`. The SPA opens one `EventSource`,
+surfaces events as toasts, drives the live queue board, and live-refetches the
+affected PR — so a re-review's findings appear without a refresh. The stream
 heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed
 events on reconnect via `Last-Event-ID`.
 

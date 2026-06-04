@@ -4,6 +4,7 @@ import { useAuth } from "../auth/useAuth";
 import type { Capabilities } from "../api/types";
 import { AuditIcon, FindingsIcon, ImpactIcon, LeaderboardIcon, LearningsIcon, LogoIcon, OverviewIcon, PatternsIcon, QueueIcon, RulesIcon, SearchIcon, SettingsIcon, TrendsIcon, WebhooksIcon } from "./icons";
 import { CommandPalette, openCommandPalette } from "./CommandPalette";
+import { SetupWizard } from "./SetupWizard";
 
 // Page shell: sticky left sidebar (brand + primary nav + signed-in user) and
 // the main content column. Mirrors renderLayout() from src/dashboard/layout.ts.
@@ -83,6 +84,7 @@ export function Shell() {
     <div className="app">
       <Sidebar />
       <main className="main">
+        <SetupWizard />
         <Outlet />
       </main>
       <CommandPalette />

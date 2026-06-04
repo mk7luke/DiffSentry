@@ -27,6 +27,7 @@ export type StreamTopic =
   | "review.failed"
   | "action.performed"
   | "rule.changed"
+  | "config.updated"
   | "learning.changed"
   | "queue.updated"
   | "webhook.replayed";
@@ -59,6 +60,18 @@ export interface RuleChangedPayload {
   role: string | null;
 }
 
+export interface ConfigUpdatePayload {
+  owner: string;
+  repo: string;
+  mode: "commit" | "pr";
+  actor: string | null;
+  role: string | null;
+  branch: string;
+  commitSha?: string;
+  prNumber?: number;
+  prUrl?: string;
+}
+
 export interface LearningChangePayload {
   scope: "global" | "repo";
   owner?: string;
@@ -89,6 +102,7 @@ const TOPICS: StreamTopic[] = [
   "review.failed",
   "action.performed",
   "rule.changed",
+  "config.updated",
   "learning.changed",
   "queue.updated",
   "webhook.replayed",
