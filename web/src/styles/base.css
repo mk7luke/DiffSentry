@@ -3698,3 +3698,73 @@ input[type="checkbox"].learn-check {
   padding: 10px 14px;
   border-top: 1px solid var(--line-soft);
 }
+
+/* API token screen — scope picker + one-time secret reveal. */
+.scope-picker {
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 8px 12px 10px;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: center;
+}
+.scope-picker legend {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+  padding: 0 4px;
+}
+.scope-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.scope-opt input {
+  accent-color: var(--accent-bright);
+}
+.token-reveal {
+  margin-top: 16px;
+  border: 1px solid var(--good-line);
+  background: var(--good-soft);
+  border-radius: 9px;
+  padding: 14px 16px;
+}
+.token-reveal-head {
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.token-reveal-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.token-secret {
+  flex: 1 1 320px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: var(--accent-bright);
+  user-select: all;
+}
+.token-curl {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  overflow-x: auto;
+  white-space: pre;
+}

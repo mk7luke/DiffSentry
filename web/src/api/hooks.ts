@@ -3,7 +3,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiSend } from "./client";
 import type {
+  ApiScope,
   AuditResponse,
+  CreatedToken,
   AuthorDetailResponse,
   AuthorsResponse,
   ConfigUpdateResult,
@@ -28,6 +30,7 @@ import type {
   ReplayResponse,
   ReposResponse,
   Role,
+  TokensResponse,
   RuleTestResult,
   SearchResponse,
   TestAiResult,
@@ -193,6 +196,15 @@ export function useAudit(query: AuditQuery, enabled: boolean) {
   });
 }
 
+/** Admin: list API tokens (metadata only). */
+export function useTokens(enabled: boolean) {
+  return useQuery({
+    queryKey: ["tokens"],
+    queryFn: () => apiGet<TokensResponse>("/tokens"),
+    enabled,
+  });
+}
+
 // ─── Custom rules (admin) ───────────────────────────────────────────
 
 /** Admin: list custom anti-pattern rules with their hit-counts. */
@@ -204,6 +216,18 @@ export function useCustomRules(enabled: boolean) {
   });
 }
 
+/** Admin: create an API token. Resolves with the one-time plaintext secret. */
+export function useCreateToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { name: string; scopes: ApiScope[] }) =>
+      apiSend<CreatedToken>("/tokens", { body: vars }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["tokens"] });
+    },
+  });
+}
+
 /** Admin: create a custom rule. */
 export function useCreateRule() {
   const qc = useQueryClient();
@@ -211,6 +235,17 @@ export function useCreateRule() {
     mutationFn: (vars: CustomRuleInput) => apiSend<{ rule: CustomRuleRow }>("/rules", { body: vars }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["rules"] });
+    },
+  });
+}
+
+/** Admin: revoke an API token by id. */
+export function useRevokeToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend<{ id: number; revoked: boolean }>(`/tokens/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["tokens"] });
     },
   });
 }

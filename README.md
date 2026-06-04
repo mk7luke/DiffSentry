@@ -727,6 +727,8 @@ untouched.
   delete require `author`.
 - `/audit` — **admin only** — the audit trail (who did what, when) plus a
   per-login role-override editor.
+- `/tokens` — **admin only** — create / list / revoke platform API tokens
+  (the secret is shown once), with a link to the rendered API docs.
 - `/webhooks` — **admin only** — every raw webhook delivery GitHub sent
   (event, repo, signature status, size), with an expandable syntax-highlighted
   JSON viewer and a one-click **Replay** that re-runs the stored payload through
@@ -764,19 +766,23 @@ failure. Read endpoints: `GET /me`, `/health`, `/queue`, `/repos`,
 `/repos/:owner/:repo/config`, `/findings`, `/patterns`, `/rules` (admin),
 `/search?q=`, the analytics trio `/analytics/authors`,
 `/analytics/authors/:author`, `/analytics/trends` (all accept `?days=`, default
-30, clamped 1–365), `/audit` (admin), `/webhooks` + `/webhooks/:id` (admin),
-`/diagnostics` (static config + DB checks), and `/diagnostics/github` (live App
-probe). `GET /queue` returns the live review-pipeline snapshot from an in-process
-registry (works regardless of persistence). Write endpoints: `POST /roles`
-(admin) sets/clears a role override; `POST/PUT/DELETE /rules` (admin) manage
-custom rules and `POST /rules/test` (admin) tests a candidate pattern against a
-snippet without persisting; `PUT /repos/:owner/:repo/config` (admin) edits
-`.diffsentry.yaml`; `POST /webhooks/:id/replay` (admin) re-dispatches a stored
-delivery; `POST /diagnostics/test-ai` and `POST /diagnostics/test-webhook` (both
-`author`+, CSRF + audited) run the provider reachability and webhook-secret
-self-tests. When OAuth is configured every endpoint requires a valid session
-(401 JSON otherwise); the queries reuse the same SQL as the legacy dashboard and
-no-op gracefully when persistence is disabled.
+30, clamped 1–365), `/audit` (admin), `/tokens` (admin), `/webhooks` +
+`/webhooks/:id` (admin), `/diagnostics` (static config + DB checks), and
+`/diagnostics/github` (live App probe). The machine-readable
+**`GET /api/v1/openapi.json`** (OpenAPI 3) and the rendered docs page
+**`GET /api/v1/docs`** are public. `GET /queue` returns the live review-pipeline
+snapshot from an in-process registry (works regardless of persistence). Write
+endpoints: `POST /roles` (admin) sets/clears a role override; `GET`/`POST /tokens`
++ `DELETE /tokens/:id` (admin) manage platform API tokens; `POST/PUT/DELETE /rules`
+(admin) manage custom rules and `POST /rules/test` (admin) tests a candidate
+pattern against a snippet without persisting; `PUT /repos/:owner/:repo/config`
+(admin) edits `.diffsentry.yaml`; `POST /webhooks/:id/replay` (admin)
+re-dispatches a stored delivery; `POST /diagnostics/test-ai` and `POST
+/diagnostics/test-webhook` (both `author`+, CSRF + audited) run the provider
+reachability and webhook-secret self-tests. When OAuth is configured every other
+endpoint requires a valid session or bearer API token (401 JSON otherwise); the
+queries reuse the same SQL as the legacy dashboard and no-op gracefully when
+persistence is disabled.
 
 **Webhook capture & replay.** Every delivery to `POST /webhook` is persisted to
 `webhook_deliveries` (event, action, repo, PR/issue number, `X-GitHub-Delivery`
@@ -853,6 +859,30 @@ affected PR — so a re-review's findings appear without a refresh. The stream
 heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed
 events on reconnect via `Last-Event-ID`.
 
+**Platform API (bearer tokens)**
+
+Beyond the cookie-session dashboard, the API accepts **bearer tokens** for
+scripts and integrations. An admin mints tokens from the `/tokens` screen (or
+`POST /api/v1/tokens`); the plaintext (`dsk_…`) is shown **once** and only its
+SHA-256 hash is stored. Send it as `Authorization: Bearer dsk_…`:
+
+```bash
+curl -H "Authorization: Bearer dsk_xxx" https://your-host/api/v1/repos
+```
+
+Tokens carry **scopes**: `read` (every GET endpoint) and `review` (the safe
+action subset — trigger reviews, resolve, pause/resume/cancel; implies `read`).
+The gate enforces them per request — a `read`-only token gets `403` on any write,
+and an unknown or revoked token gets `401`. Tokens **never** reach admin
+endpoints (audit, role/token administration); those stay cookie-session +
+`admin` only. Each authenticated call bumps the token's `last_used_at`, and
+create/revoke land an `audit_log` row plus a `token.changed` SSE event. Bearer
+requests are exempt from CSRF (there's no ambient cookie to forge); cookie
+writes still require the `X-CSRF-Token` header.
+
+Explore the full surface at **`/api/v1/docs`** (a dependency-free viewer that
+renders **`/api/v1/openapi.json`**) — both are public.
+
 **Roles & access control (RBAC)**
 
 Every signed-in user has a role — `viewer` < `author` < `admin`. A login's role
@@ -879,6 +909,7 @@ double-submit token as an `X-CSRF-Token` header.
 | Manage config | — | — | ✅ |
 | Manage role overrides | — | — | ✅ |
 | View audit log | — | — | ✅ |
+| Manage API tokens | — | — | ✅ |
 
 When OAuth is disabled (open/local mode) there is no session to gate on, so the
 local operator is treated as `admin`.

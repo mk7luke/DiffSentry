@@ -217,6 +217,7 @@ export interface Capabilities {
   manageConfig: boolean;
   manageRoles: boolean;
   viewAudit: boolean;
+  manageTokens: boolean;
 }
 
 export interface MeResponse {
@@ -294,6 +295,34 @@ export interface FindingsResponse {
 
 export interface PatternsResponse {
   rules: PatternRuleRow[];
+}
+
+// ─── API tokens (platform) ──────────────────────────────────────────
+
+export type ApiScope = "read" | "review";
+
+/** Token metadata — never includes the secret. */
+export interface ApiTokenMeta {
+  id: number;
+  name: string | null;
+  scopes: ApiScope[];
+  created_by: string | null;
+  created_at: string | null;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface TokensResponse {
+  tokens: ApiTokenMeta[];
+  availableScopes: ApiScope[];
+}
+
+/** Returned once by POST /tokens — `token` is the plaintext secret. */
+export interface CreatedToken {
+  id: number;
+  name: string;
+  scopes: ApiScope[];
+  token: string;
 }
 
 // ─── Custom rules (admin-authored anti-patterns) ────────────────────

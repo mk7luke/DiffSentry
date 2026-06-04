@@ -15,6 +15,7 @@ const VIEWER_CAPS: Capabilities = {
   manageConfig: false,
   manageRoles: false,
   viewAudit: false,
+  manageTokens: false,
 };
 
 export interface AuthState {

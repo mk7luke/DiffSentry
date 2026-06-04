@@ -40,6 +40,18 @@ export interface ActionPayload {
   detail?: string;
 }
 
+/** An API token was created or revoked — emitted from the token admin API. */
+export interface TokenChangePayload {
+  id: number;
+  name: string | null;
+  /** "create" | "revoke". */
+  action: "create" | "revoke";
+  actor: string | null;
+  role: string | null;
+  /** "ok" | "noop" | "error". */
+  result: string;
+}
+
 /** A custom anti-pattern rule was created, updated, or deleted via the API. */
 export interface RuleChangedPayload {
   /** The rule id (null only when a delete raced a missing row). */
@@ -134,6 +146,7 @@ export interface BusEventMap {
   "review.finished": ReviewLifecyclePayload;
   "review.failed": ReviewLifecyclePayload;
   "action.performed": ActionPayload;
+  "token.changed": TokenChangePayload;
   "rule.changed": RuleChangedPayload;
   "config.updated": ConfigUpdatePayload;
   "learning.changed": LearningChangePayload;
