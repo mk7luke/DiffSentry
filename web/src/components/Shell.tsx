@@ -151,6 +151,7 @@ function Sidebar({ onNavigate }: { onNavigate: () => void }) {
 export function Shell() {
   const [navOpen, setNavOpen] = useState(false);
   const location = useLocation();
+  const { instanceName } = useInstanceBranding();
 
   // Close the drawer on any route change so a tapped nav link doesn't leave it
   // hanging open over the new page.
@@ -177,16 +178,16 @@ export function Shell() {
       <header className="topbar">
         <button
           className="topbar-menu"
-          aria-label="Open navigation"
+          aria-label={navOpen ? "Close navigation" : "Open navigation"}
           aria-expanded={navOpen}
           aria-controls="app-sidebar"
-          onClick={() => setNavOpen(true)}
+          onClick={() => setNavOpen((open) => !open)}
         >
           <MenuIcon />
         </button>
         <NavLink to="/" className="topbar-brand">
           <LogoIcon />
-          <span>DiffSentry</span>
+          <span>{instanceName}</span>
         </NavLink>
         <OfflinePill />
       </header>

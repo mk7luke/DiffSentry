@@ -77,6 +77,11 @@ const persistOptions = {
 // trust it. Consumed (cleared) the first time a concrete login reconciles it.
 let pendingRestore: PersistedClient | null = null;
 
+// The active persistence subscription's teardown, so a repeated
+// initPersistence() (StrictMode/HMR remount, future bootstrap refactor)
+// replaces rather than stacks subscribers.
+let unsubscribePersistence: (() => void) | null = null;
+
 function isFresh(client: PersistedClient | undefined): client is PersistedClient {
   return !!client && client.buster === CACHE_BUSTER && Date.now() - client.timestamp <= MAX_AGE;
 }
@@ -108,8 +113,10 @@ export async function initPersistence(queryClient: QueryClient): Promise<void> {
   } finally {
     // Always start persisting future writes, even if the restore above threw —
     // otherwise a single corrupt read would silently disable persistence for
-    // the whole session.
-    persistQueryClientSubscribe({ queryClient, persister, ...persistOptions });
+    // the whole session. Tear down any prior subscription first so repeated
+    // init calls replace rather than stack subscribers.
+    unsubscribePersistence?.();
+    unsubscribePersistence = persistQueryClientSubscribe({ queryClient, persister, ...persistOptions });
   }
 }
 

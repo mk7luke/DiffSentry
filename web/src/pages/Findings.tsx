@@ -201,7 +201,7 @@ export function FindingsPage() {
                         <td data-label="Severity">
                           <SeverityBadge severity={g.severity} />
                         </td>
-                        <td className="cell-primary">
+                        <td className="cell-primary" data-label="Title">
                           <button
                             className="btn btn-link"
                             style={{ padding: 0, color: "var(--accent-bright)" }}
@@ -307,7 +307,7 @@ export function FindingsPage() {
                               {f.path ?? ""}
                               {f.line ? <span className="line-num">:{f.line}</span> : null}
                             </td>
-                            <td className="strong cell-primary">{f.title ?? "—"}</td>
+                            <td className="strong cell-primary" data-label="Title">{f.title ?? "—"}</td>
                             <td className="muted" data-label="Source">{f.source ?? "—"}</td>
                             <td data-label="Triage">
                               <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
