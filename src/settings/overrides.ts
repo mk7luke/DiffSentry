@@ -113,7 +113,11 @@ function readProfile(scope: string, key: string, dflt: Profile): Profile {
 }
 function readNum(scope: string, key: string): number | null {
   const v = getSettingOverride<number>(scope, key);
-  return typeof v === "number" && Number.isFinite(v) ? v : null;
+  // Enforce the same invariant as the write-time validator (integer 1..500), so
+  // a corrupted or out-of-range persisted override (0, 9999, 2.5, …) is ignored
+  // rather than served by getGlobalSettings / getRepoSettings / resolveMaxFilesOverride.
+  const verdict = vMaxFiles(v);
+  return verdict.ok ? verdict.value : null;
 }
 
 /** The running logger's level, falling back to a known level. */

@@ -43,7 +43,7 @@ async function main() {
   const { openDatabase, closeDatabase } = await import("../src/storage/db.js");
   const { createApiRouter } = await import("../src/api/router.js");
   const { createAuth } = await import("../src/dashboard/auth.js");
-  const { recordRepo } = await import("../src/storage/dao.js");
+  const { recordRepo, upsertSettingOverride } = await import("../src/storage/dao.js");
   const {
     isPauseAll,
     isAutoReviewEnabled,
@@ -177,6 +177,14 @@ async function main() {
     );
     ok("resolveProfileOverride() → assertive (global)", resolveProfileOverride("nope", "nope") === "assertive");
     ok("resolveMaxFilesOverride() → 25 (global)", resolveMaxFilesOverride("nope", "nope") === 25);
+
+    // A corrupted / out-of-range maxFiles written directly (bypassing the API
+    // validator) must be ignored by the resolvers, not served back.
+    upsertSettingOverride({ scope: "global", key: "maxFiles", value: 9999, updatedBy: "corruption" });
+    ok("getGlobalSettings() ignores out-of-range maxFiles", getGlobalSettings().maxFiles === null);
+    ok("resolveMaxFilesOverride() ignores out-of-range maxFiles", resolveMaxFilesOverride("nope", "nope") === null);
+    // Restore a valid value so the rest of the run is unaffected.
+    upsertSettingOverride({ scope: "global", key: "maxFiles", value: 25, updatedBy: "adminuser" });
 
     // ── Invalid values rejected, nothing persisted ───────────────────────
     const badProfile = await req("PUT", "/settings", { session: adminSess, csrf: true, body: { defaultProfile: "spicy" } });
