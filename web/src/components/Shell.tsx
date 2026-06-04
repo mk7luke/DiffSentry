@@ -8,14 +8,27 @@ import type { Capabilities } from "../api/types";
 import {
   AuditIcon,
   CloseIcon,
+  CostIcon,
   FindingsIcon,
+  ImpactIcon,
+  KeyIcon,
+  LeaderboardIcon,
+  LearningsIcon,
   LogoIcon,
   MenuIcon,
   OfflineIcon,
   OverviewIcon,
   PatternsIcon,
+  QueueIcon,
+  RecurringIcon,
+  RulesIcon,
+  SearchIcon,
   SettingsIcon,
+  TrendsIcon,
+  WebhooksIcon,
 } from "./icons";
+import { CommandPalette, openCommandPalette } from "./CommandPalette";
+import { SetupWizard } from "./SetupWizard";
 
 // Page shell: a left sidebar (brand + primary nav + signed-in user) and the
 // main content column. On phones the sidebar collapses into an off-canvas
@@ -33,9 +46,19 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: "/", label: "Overview", Icon: OverviewIcon, end: true },
-  { to: "/findings", label: "Findings", Icon: FindingsIcon, end: false },
+  { to: "/impact", label: "Impact", Icon: ImpactIcon, end: false },
+  { to: "/queue", label: "Queue", Icon: QueueIcon, end: false },
+  { to: "/findings", label: "Findings", Icon: FindingsIcon, end: true },
+  { to: "/findings/recurring", label: "Recurring", Icon: RecurringIcon, end: false },
   { to: "/patterns", label: "Patterns", Icon: PatternsIcon, end: false },
+  { to: "/cost", label: "Cost", Icon: CostIcon, end: false },
+  { to: "/rules", label: "Custom rules", Icon: RulesIcon, end: false, cap: "manageConfig" },
+  { to: "/leaderboard", label: "Leaderboard", Icon: LeaderboardIcon, end: false },
+  { to: "/trends", label: "Trends", Icon: TrendsIcon, end: false },
+  { to: "/learnings", label: "Learnings", Icon: LearningsIcon, end: false },
   { to: "/audit", label: "Audit log", Icon: AuditIcon, end: false, cap: "viewAudit" },
+  { to: "/webhooks", label: "Webhooks", Icon: WebhooksIcon, end: false, cap: "viewAudit" },
+  { to: "/tokens", label: "API tokens", Icon: KeyIcon, end: false, cap: "manageTokens" },
   { to: "/settings", label: "Settings", Icon: SettingsIcon, end: false },
 ];
 
@@ -77,6 +100,11 @@ function Sidebar({ onNavigate }: { onNavigate: () => void }) {
           <div className="wordmark-sub">REVIEW OPS</div>
         </div>
       </NavLink>
+      <button type="button" className="cmdk-trigger" onClick={openCommandPalette}>
+        <SearchIcon />
+        <span>Search…</span>
+        <kbd className="cmdk-kbd">⌘K</kbd>
+      </button>
       <nav className="sidebar-nav" aria-label="Primary">
         {items.map(({ to, label, Icon, end }) => (
           <NavLink
@@ -172,8 +200,10 @@ export function Shell() {
       />
 
       <main className="main">
+        <SetupWizard />
         <Outlet />
       </main>
+      <CommandPalette />
     </div>
   );
 }

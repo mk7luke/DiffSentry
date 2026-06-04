@@ -98,7 +98,6 @@ export async function initPersistence(queryClient: QueryClient): Promise<void> {
     } else if (restored) {
       await persister.removeClient(); // stale / busted — drop it.
     }
-    persistQueryClientSubscribe({ queryClient, persister, ...persistOptions });
   } catch {
     // A corrupt or unreadable cache must never block boot — start fresh.
     try {
@@ -106,6 +105,11 @@ export async function initPersistence(queryClient: QueryClient): Promise<void> {
     } catch {
       /* ignore */
     }
+  } finally {
+    // Always start persisting future writes, even if the restore above threw —
+    // otherwise a single corrupt read would silently disable persistence for
+    // the whole session.
+    persistQueryClientSubscribe({ queryClient, persister, ...persistOptions });
   }
 }
 
@@ -113,8 +117,9 @@ export async function initPersistence(queryClient: QueryClient): Promise<void> {
  * Reconcile the persisted cache against the signed-in user. Call when /me
  * settles. With a concrete `login` we either hydrate the cached data (owner
  * matches) or wipe it (owner differs) — so a different user on this device
- * never sees the previous user's data. With no login (offline / signed out)
- * we leave any boot-time offline hydration in place and wait.
+ * never sees the previous user's data. With no login (offline / signed out /
+ * still loading) `pendingRestore` stays pending and no cached authenticated
+ * data is hydrated, so nothing renders until owner verification succeeds.
  */
 export function applyPersistedDataForOwner(login: string | null, queryClient: QueryClient): void {
   if (!store || !login) return;

@@ -166,6 +166,14 @@ export interface ReviewComment {
   fingerprint?: string;
   /** AI's self-rated confidence in this finding (default high). */
   confidence?: Confidence;
+  /** Set by the pattern engine so callers can record the hit source without
+   *  re-sniffing the rendered body. "builtin" = shipped heuristic; "custom" =
+   *  a `.diffsentry.yaml` anti-pattern or an admin-authored command-center rule. */
+  patternSource?: "builtin" | "custom";
+  /** The admin custom-rule id that produced this finding (only for command-center
+   *  rules; absent for built-ins and `.diffsentry.yaml` anti_patterns). The stable
+   *  key analytics use so a hit is never matched to a rule by name. */
+  customRuleId?: number;
 }
 
 // ─── Review Result ─────────────────────────────────────────────

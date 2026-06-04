@@ -3,15 +3,49 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiSend } from "./client";
 import type {
+  ApiScope,
   AuditResponse,
+  CostResponse,
+  CreatedToken,
+  AuthorDetailResponse,
+  AuthorsResponse,
+  ConfigUpdateResult,
+  CustomRuleInput,
+  CustomRuleRow,
+  CustomRulesResponse,
+  DiagnosticsResponse,
   FindingsResponse,
+  GlobalSettingsPatch,
+  GithubDiagnosticsResponse,
   HealthResponse,
+  ImpactReport,
+  Learning,
+  LearningScope,
+  LearningsResponse,
+  LearningTestResponse,
   MeResponse,
   PatternsResponse,
   PRDetailResponse,
+  RecurringResponse,
+  QueueResponse,
+  RepoConfigResponse,
   RepoDetailResponse,
+  RepoSettingsPatch,
+  RepoSettingsResponse,
+  ReplayResponse,
   ReposResponse,
   Role,
+  TriageResult,
+  TriageState,
+  RuleTestResult,
+  SearchResponse,
+  SettingsResponse,
+  TestAiResult,
+  TestWebhookResult,
+  TokensResponse,
+  TrendsResponse,
+  WebhookDeliveryDetail,
+  WebhooksResponse,
 } from "./types";
 
 export function useMe() {
@@ -55,6 +89,7 @@ export interface FindingsQuery {
   repo?: string;
   q?: string;
   fingerprint?: string;
+  triage?: string;
   age?: string;
   limit?: number;
   offset?: number;
@@ -70,6 +105,7 @@ export function useFindings(query: FindingsQuery) {
         repo: query.repo,
         q: query.q,
         fingerprint: query.fingerprint,
+        triage: query.triage,
         age: query.age,
         limit: query.limit,
         offset: query.offset,
@@ -78,10 +114,124 @@ export function useFindings(query: FindingsQuery) {
   });
 }
 
+export function useRecurring(query: FindingsQuery) {
+  return useQuery({
+    queryKey: ["recurring", query],
+    queryFn: () =>
+      apiGet<RecurringResponse>("/findings/recurring", {
+        severity: query.severity,
+        source: query.source,
+        repo: query.repo,
+        q: query.q,
+        fingerprint: query.fingerprint,
+        triage: query.triage,
+        age: query.age,
+        limit: query.limit,
+      }),
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useImpact(range: string, repo?: string) {
+  return useQuery({
+    queryKey: ["impact", range, repo ?? null],
+    queryFn: () => apiGet<ImpactReport>("/impact", { range, repo }),
+    placeholderData: (prev) => prev,
+  });
+}
+
+export interface TriageVars {
+  state: TriageState;
+  /** ISO-8601 deadline — required when state is "snoozed". */
+  until?: string;
+  note?: string;
+}
+
+/**
+ * Refetch every view a triage write can touch: the explorer, the recurring
+ * view, any open PR detail, and the audit log. Called from each triage success.
+ */
+function invalidateTriageViews(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: ["findings"] });
+  void qc.invalidateQueries({ queryKey: ["recurring"] });
+  void qc.invalidateQueries({ queryKey: ["pr"] });
+  void qc.invalidateQueries({ queryKey: ["audit"] });
+}
+
+/** Triage a single finding by id. */
+export function useTriageFinding() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number } & TriageVars) =>
+      apiSend<TriageResult>(`/findings/${vars.id}/triage`, {
+        body: { state: vars.state, until: vars.until, note: vars.note },
+      }),
+    onSuccess: () => invalidateTriageViews(qc),
+  });
+}
+
+/** Bulk-triage findings by explicit id list, or a whole fingerprint class. */
+export function useBulkTriage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: ({ ids: number[] } | { fingerprint: string }) & TriageVars) =>
+      apiSend<TriageResult>("/findings/triage", { body: vars }),
+    onSuccess: () => invalidateTriageViews(qc),
+  });
+}
+
 export function usePatterns() {
   return useQuery({
     queryKey: ["patterns"],
     queryFn: () => apiGet<PatternsResponse>("/patterns"),
+  });
+}
+
+export function useAuthorAnalytics(days: number) {
+  return useQuery({
+    queryKey: ["analytics", "authors", days],
+    queryFn: () => apiGet<AuthorsResponse>("/analytics/authors", { days }),
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useAuthorDetail(author: string | null, days: number) {
+  return useQuery({
+    queryKey: ["analytics", "author", author, days],
+    queryFn: () =>
+      apiGet<AuthorDetailResponse>(`/analytics/authors/${encodeURIComponent(author ?? "")}`, { days }),
+    enabled: !!author,
+  });
+}
+
+export function useTrends(days: number) {
+  return useQuery({
+    queryKey: ["analytics", "trends", days],
+    queryFn: () => apiGet<TrendsResponse>("/analytics/trends", { days }),
+    placeholderData: (prev) => prev,
+  });
+}
+
+/** The review-pipeline board snapshot. Live transitions arrive over SSE
+ * (`queue.updated`); this just hydrates the initial board on load. */
+export function useQueue() {
+  return useQuery({
+    queryKey: ["queue"],
+    queryFn: () => apiGet<QueueResponse>("/queue"),
+    staleTime: 5_000,
+  });
+}
+
+/** Cmd-K palette search. Disabled for blank queries; keeps the prior page of
+ * results visible while the next one loads so the list doesn't flicker. */
+export function useSearch(q: string, enabled = true) {
+  const trimmed = q.trim();
+  return useQuery({
+    queryKey: ["search", trimmed],
+    queryFn: () => apiGet<SearchResponse>("/search", { q: trimmed }),
+    enabled: enabled && trimmed.length > 0,
+    placeholderData: (prev) => prev,
+    staleTime: 15_000,
   });
 }
 
@@ -114,6 +264,283 @@ export function useAudit(query: AuditQuery, enabled: boolean) {
   });
 }
 
+/** AI spend rollups for the Cost page. `range` is e.g. "7d" | "30d" | "90d" | "mtd". */
+export function useCost(range: string) {
+  return useQuery({
+    queryKey: ["cost", range],
+    queryFn: () => apiGet<CostResponse>("/cost", { range }),
+    placeholderData: (prev) => prev,
+  });
+}
+
+/** Admin: set (or clear, with `monthlyUsd: null`) a monthly budget for a scope. */
+export function useSetBudget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { scope: string; monthlyUsd: number | null }) =>
+      apiSend<{ scope: string; monthlyUsd: number | null }>("/cost/budget", { body: vars }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["cost"] });
+    },
+  });
+}
+
+// ─── Settings (operator controls, admin) ────────────────────────────
+
+/** Admin: resolved global settings. Only fetched when `enabled` (i.e. admin). */
+export function useSettings(enabled: boolean) {
+  return useQuery({
+    queryKey: ["settings"],
+    queryFn: () => apiGet<SettingsResponse>("/settings"),
+    enabled,
+  });
+}
+
+/** Admin: list API tokens (metadata only). */
+export function useTokens(enabled: boolean) {
+  return useQuery({
+    queryKey: ["tokens"],
+    queryFn: () => apiGet<TokensResponse>("/tokens"),
+    enabled,
+  });
+}
+
+/** Admin: set/clear global settings. Returns the refreshed resolved settings. */
+export function useUpdateSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: GlobalSettingsPatch) => apiSend<SettingsResponse>("/settings", { method: "PUT", body: patch }),
+    onSuccess: (data) => {
+      qc.setQueryData(["settings"], data);
+      void qc.invalidateQueries({ queryKey: ["audit"] });
+    },
+  });
+}
+
+/** Admin: resolved per-repo overrides. */
+export function useRepoSettings(owner: string, repo: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["repoSettings", owner, repo],
+    queryFn: () =>
+      apiGet<RepoSettingsResponse>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/settings`),
+    enabled: enabled && !!owner && !!repo,
+  });
+}
+
+/** Admin: set/clear per-repo overrides. */
+export function useUpdateRepoSettings(owner: string, repo: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: RepoSettingsPatch) =>
+      apiSend<RepoSettingsResponse>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/settings`,
+        { method: "PUT", body: patch },
+      ),
+    onSuccess: (data) => {
+      qc.setQueryData(["repoSettings", owner, repo], data);
+      void qc.invalidateQueries({ queryKey: ["audit"] });
+    },
+  });
+}
+
+// ─── Custom rules (admin) ───────────────────────────────────────────
+
+/** Admin: list custom anti-pattern rules with their hit-counts. */
+export function useCustomRules(enabled: boolean) {
+  return useQuery({
+    queryKey: ["rules"],
+    queryFn: () => apiGet<CustomRulesResponse>("/rules"),
+    enabled,
+  });
+}
+
+/** Admin: create an API token. Resolves with the one-time plaintext secret. */
+export function useCreateToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { name: string; scopes: ApiScope[] }) =>
+      apiSend<CreatedToken>("/tokens", { body: vars }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["tokens"] });
+    },
+  });
+}
+
+/** Admin: create a custom rule. */
+export function useCreateRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: CustomRuleInput) => apiSend<{ rule: CustomRuleRow }>("/rules", { body: vars }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["rules"] });
+    },
+  });
+}
+
+/** Admin: revoke an API token by id. */
+export function useRevokeToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend<{ id: number; revoked: boolean }>(`/tokens/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["tokens"] });
+    },
+  });
+}
+
+// ─── Diagnostics / first-run experience ─────────────────────────────
+
+export function useDiagnostics() {
+  return useQuery({
+    queryKey: ["diagnostics"],
+    queryFn: () => apiGet<DiagnosticsResponse>("/diagnostics"),
+    staleTime: 30_000,
+  });
+}
+
+/** Live GitHub App probe. Lazy: only runs once `enabled` is true (a network
+ * call, so we don't fire it until the user opens the GitHub section). */
+export function useGithubDiagnostics(enabled: boolean) {
+  return useQuery({
+    queryKey: ["diagnostics", "github"],
+    queryFn: () => apiGet<GithubDiagnosticsResponse>("/diagnostics/github"),
+    enabled,
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+/** Author+: fire a tiny completion at the configured provider. */
+export function useTestAi() {
+  return useMutation({
+    mutationFn: () => apiSend<TestAiResult>("/diagnostics/test-ai"),
+  });
+}
+
+/** Author+: round-trip a signed payload through the webhook verifier. */
+export function useTestWebhook() {
+  return useMutation({
+    mutationFn: () => apiSend<TestWebhookResult>("/diagnostics/test-webhook"),
+  });
+}
+
+// ─── Repo config (read viewer+, write admin) ───────────────────────
+
+export function useRepoConfig(owner: string, repo: string) {
+  return useQuery({
+    queryKey: ["repo-config", owner, repo],
+    queryFn: () =>
+      apiGet<RepoConfigResponse>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/config`),
+    enabled: !!owner && !!repo,
+  });
+}
+
+/** Admin: validate + commit (or open a PR for) a new .diffsentry.yaml. */
+export function useUpdateRepoConfig(owner: string, repo: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { yaml: string; mode: "commit" | "pr"; message?: string }) =>
+      apiSend<ConfigUpdateResult>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/config`, {
+        method: "PUT",
+        body: vars,
+      }),
+    onSuccess: (result) => {
+      // A direct commit changes what the read path serves; a PR doesn't (yet).
+      if (result.mode === "commit") {
+        void qc.invalidateQueries({ queryKey: ["repo-config", owner, repo] });
+        void qc.invalidateQueries({ queryKey: ["repo", owner, repo] });
+      }
+      void qc.invalidateQueries({ queryKey: ["audit"] });
+    },
+  });
+}
+
+/** Admin: update an existing custom rule (partial fields). */
+export function useUpdateRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number } & Partial<CustomRuleInput>) => {
+      const { id, ...body } = vars;
+      return apiSend<{ rule: CustomRuleRow }>(`/rules/${id}`, { method: "PUT", body });
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["rules"] });
+    },
+  });
+}
+
+/** Admin: delete a custom rule. */
+export function useDeleteRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend<{ id: number }>(`/rules/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["rules"] });
+    },
+  });
+}
+
+export interface RuleTestVars {
+  pattern: string;
+  flags?: string;
+  pathGlob?: string;
+  filename?: string;
+  snippet: string;
+}
+
+/** Admin: test a candidate rule against a pasted snippet (no persistence). */
+export function useTestRule() {
+  return useMutation({
+    mutationFn: (vars: RuleTestVars) => apiSend<RuleTestResult>("/rules/test", { body: vars }),
+  });
+}
+
+// ─── Webhook deliveries (admin) ─────────────────────────────────────
+
+export interface WebhooksQuery {
+  event?: string;
+  repo?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/** Admin: paged raw webhook deliveries + filter options. */
+export function useWebhooks(query: WebhooksQuery, enabled: boolean) {
+  return useQuery({
+    queryKey: ["webhooks", query],
+    queryFn: () =>
+      apiGet<WebhooksResponse>("/webhooks", {
+        event: query.event,
+        repo: query.repo,
+        limit: query.limit,
+        offset: query.offset,
+      }),
+    enabled,
+    placeholderData: (prev) => prev,
+  });
+}
+
+/** Admin: one delivery with its full stored payload. Enabled lazily on expand. */
+export function useWebhookDelivery(id: number | null) {
+  return useQuery({
+    queryKey: ["webhook", id],
+    queryFn: () => apiGet<WebhookDeliveryDetail>(`/webhooks/${id}`),
+    enabled: id != null,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Admin: re-dispatch a stored delivery through the engine. Refetches the list. */
+export function useReplayWebhook() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend<ReplayResponse>(`/webhooks/${id}/replay`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["webhooks"] });
+    },
+  });
+}
+
 /** Admin: grant or clear a per-login role override. `role: null` clears it. */
 export function useSetRole() {
   const qc = useQueryClient();
@@ -124,5 +551,128 @@ export function useSetRole() {
       void qc.invalidateQueries({ queryKey: ["audit"] });
       void qc.invalidateQueries({ queryKey: ["me"] });
     },
+  });
+}
+
+// ─── Learnings ──────────────────────────────────────────────────────
+
+const enc = encodeURIComponent;
+const repoLearningsPath = (owner: string, repo: string) => `/repos/${enc(owner)}/${enc(repo)}/learnings`;
+
+export function useLearnings() {
+  return useQuery({
+    queryKey: ["learnings"],
+    queryFn: () => apiGet<LearningsResponse>("/learnings"),
+  });
+}
+
+/** Shared cache invalidation: any learning write refreshes the list (and the
+ * repo detail page, whose learnings card reads the same files). */
+function useInvalidateLearnings() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: ["learnings"] });
+    void qc.invalidateQueries({ queryKey: ["repo"] });
+  };
+}
+
+export interface LearningWrite {
+  content?: string;
+  path?: string | null;
+}
+
+export function useCreateLearning() {
+  const invalidate = useInvalidateLearnings();
+  return useMutation({
+    mutationFn: (vars: { owner: string; repo: string } & LearningWrite) =>
+      apiSend<Learning>(repoLearningsPath(vars.owner, vars.repo), {
+        body: { content: vars.content, path: vars.path },
+      }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateLearning() {
+  const invalidate = useInvalidateLearnings();
+  return useMutation({
+    mutationFn: (vars: { owner: string; repo: string; id: string } & LearningWrite) =>
+      apiSend<Learning>(`${repoLearningsPath(vars.owner, vars.repo)}/${enc(vars.id)}`, {
+        method: "PUT",
+        body: { content: vars.content, path: vars.path },
+      }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteLearning() {
+  const invalidate = useInvalidateLearnings();
+  return useMutation({
+    mutationFn: (vars: { owner: string; repo: string; id: string }) =>
+      apiSend<{ id: string; deleted: boolean }>(`${repoLearningsPath(vars.owner, vars.repo)}/${enc(vars.id)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: invalidate,
+  });
+}
+
+export function usePromoteLearning() {
+  const invalidate = useInvalidateLearnings();
+  return useMutation({
+    mutationFn: (vars: { owner: string; repo: string; id: string }) =>
+      apiSend<Learning>(`${repoLearningsPath(vars.owner, vars.repo)}/${enc(vars.id)}/promote`, { method: "POST" }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useCreateGlobalLearning() {
+  const invalidate = useInvalidateLearnings();
+  return useMutation({
+    mutationFn: (vars: LearningWrite) =>
+      apiSend<Learning>("/learnings/global", { body: { content: vars.content, path: vars.path } }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateGlobalLearning() {
+  const invalidate = useInvalidateLearnings();
+  return useMutation({
+    mutationFn: (vars: { id: string } & LearningWrite) =>
+      apiSend<Learning>(`/learnings/global/${enc(vars.id)}`, {
+        method: "PUT",
+        body: { content: vars.content, path: vars.path },
+      }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteGlobalLearning() {
+  const invalidate = useInvalidateLearnings();
+  return useMutation({
+    mutationFn: (vars: { id: string }) =>
+      apiSend<{ id: string; deleted: boolean }>(`/learnings/global/${enc(vars.id)}`, { method: "DELETE" }),
+    onSuccess: invalidate,
+  });
+}
+
+export interface BulkDeleteRef {
+  scope: LearningScope;
+  owner?: string;
+  repo?: string;
+  id: string;
+}
+
+export function useBulkDeleteLearnings() {
+  const invalidate = useInvalidateLearnings();
+  return useMutation({
+    mutationFn: (items: BulkDeleteRef[]) => apiSend<{ deleted: number }>("/learnings/bulk-delete", { body: { items } }),
+    onSuccess: invalidate,
+  });
+}
+
+/** Read-only: preview which learnings would apply to a given file path. */
+export function useTestLearning() {
+  return useMutation({
+    mutationFn: (vars: { owner?: string; repo?: string; path: string }) =>
+      apiSend<LearningTestResponse>("/learnings/test", { body: vars }),
   });
 }
