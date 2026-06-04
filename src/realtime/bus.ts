@@ -40,6 +40,24 @@ export interface ActionPayload {
   detail?: string;
 }
 
+/** A learning was created / edited / deleted / promoted — emitted from the API
+ * so connected dashboards refresh the Learnings screen without a manual reload. */
+export interface LearningChangePayload {
+  /** Which store changed. */
+  scope: "global" | "repo";
+  /** Present for repo-scoped changes (owner/name of the affected repo). */
+  owner?: string;
+  repo?: string;
+  /** Bare action name: "create" | "update" | "delete" | "promote" | "bulk_delete". */
+  action: string;
+  /** The affected learning id, when a single one changed. */
+  id?: string;
+  /** Number affected (bulk_delete). */
+  count?: number;
+  actor: string | null;
+  role: string | null;
+}
+
 /** The state machine behind the review-pipeline board. */
 export type ReviewQueueState = "queued" | "running" | "done" | "failed" | "canceled";
 
@@ -88,6 +106,7 @@ export interface BusEventMap {
   "review.finished": ReviewLifecyclePayload;
   "review.failed": ReviewLifecyclePayload;
   "action.performed": ActionPayload;
+  "learning.changed": LearningChangePayload;
   "queue.updated": ReviewQueueEntry;
   "webhook.replayed": WebhookReplayPayload;
 }

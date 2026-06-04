@@ -9,6 +9,7 @@ import { FindingsPage } from "./pages/Findings";
 import { PatternsPage } from "./pages/Patterns";
 import { LeaderboardPage } from "./pages/Leaderboard";
 import { TrendsPage } from "./pages/Trends";
+import { LearningsPage } from "./pages/Learnings";
 import { SettingsPage } from "./pages/Settings";
 import { AuditPage } from "./pages/Audit";
 import { WebhooksPage } from "./pages/Webhooks";
@@ -40,6 +41,7 @@ export const router = createBrowserRouter([
       { path: "/patterns", element: <PatternsPage /> },
       { path: "/leaderboard", element: <LeaderboardPage /> },
       { path: "/trends", element: <TrendsPage /> },
+      { path: "/learnings", element: <LearningsPage /> },
       { path: "/audit", element: <AuditPage /> },
       { path: "/webhooks", element: <WebhooksPage /> },
       { path: "/settings", element: <SettingsPage /> },

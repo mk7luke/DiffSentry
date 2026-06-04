@@ -708,6 +708,11 @@ untouched.
   hot paths, recent PRs). Framed as where review effort lands, not a scoreboard.
 - `/trends` — org-wide activity over time, risk-level distribution, and
   hot-paths-over-time (top paths by critical+major with a per-path trend line).
+- `/learnings` — manage the `@bot learn` learnings the reviewer applies:
+  searchable list of global + per-repo learnings, inline edit, path-glob
+  badges, create, bulk delete, dedupe suggestions, "promote to global", and a
+  "test against a file path" preview. Reads are open to viewers; create/edit/
+  delete require `author`.
 - `/audit` — **admin only** — the audit trail (who did what, when) plus a
   per-login role-override editor.
 - `/webhooks` — **admin only** — every raw webhook delivery GitHub sent
@@ -808,6 +813,7 @@ double-submit token as an `X-CSRF-Token` header.
 | View dashboard & findings | ✅ | ✅ | ✅ |
 | Triage findings | — | ✅ | ✅ |
 | Trigger reviews | — | ✅ | ✅ |
+| Manage learnings | — | ✅ | ✅ |
 | Manage config | — | — | ✅ |
 | Manage role overrides | — | — | ✅ |
 | View audit log | — | — | ✅ |

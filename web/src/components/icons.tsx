@@ -95,6 +95,16 @@ export function TrendsIcon(props: IconProps) {
   );
 }
 
+export function LearningsIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 3 2 8l10 5 10-5-10-5z" />
+      <path d="M6 10.5V16c0 1.1 2.7 3 6 3s6-1.9 6-3v-5.5" />
+      <path d="M22 8v6" />
+    </svg>
+  );
+}
+
 export function ImpactIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...props}>
