@@ -7,6 +7,10 @@ import type {
   FindingsResponse,
   HealthResponse,
   ImpactReport,
+  Learning,
+  LearningScope,
+  LearningsResponse,
+  LearningTestResponse,
   MeResponse,
   PatternsResponse,
   PRDetailResponse,
@@ -205,5 +209,128 @@ export function useSetRole() {
       void qc.invalidateQueries({ queryKey: ["audit"] });
       void qc.invalidateQueries({ queryKey: ["me"] });
     },
+  });
+}
+
+// ─── Learnings ──────────────────────────────────────────────────────
+
+const enc = encodeURIComponent;
+const repoLearningsPath = (owner: string, repo: string) => `/repos/${enc(owner)}/${enc(repo)}/learnings`;
+
+export function useLearnings() {
+  return useQuery({
+    queryKey: ["learnings"],
+    queryFn: () => apiGet<LearningsResponse>("/learnings"),
+  });
+}
+
+/** Shared cache invalidation: any learning write refreshes the list (and the
+ * repo detail page, whose learnings card reads the same files). */
+function useInvalidateLearnings() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: ["learnings"] });
+    void qc.invalidateQueries({ queryKey: ["repo"] });
+  };
+}
+
+export interface LearningWrite {
+  content?: string;
+  path?: string | null;
+}
+
+export function useCreateLearning() {
+  const invalidate = useInvalidateLearnings();
+  return useMutation({
+    mutationFn: (vars: { owner: string; repo: string } & LearningWrite) =>
+      apiSend<Learning>(repoLearningsPath(vars.owner, vars.repo), {
+        body: { content: vars.content, path: vars.path },
+      }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateLearning() {
+  const invalidate = useInvalidateLearnings();
+  return useMutation({
+    mutationFn: (vars: { owner: string; repo: string; id: string } & LearningWrite) =>
+      apiSend<Learning>(`${repoLearningsPath(vars.owner, vars.repo)}/${enc(vars.id)}`, {
+        method: "PUT",
+        body: { content: vars.content, path: vars.path },
+      }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteLearning() {
+  const invalidate = useInvalidateLearnings();
+  return useMutation({
+    mutationFn: (vars: { owner: string; repo: string; id: string }) =>
+      apiSend<{ id: string; deleted: boolean }>(`${repoLearningsPath(vars.owner, vars.repo)}/${enc(vars.id)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: invalidate,
+  });
+}
+
+export function usePromoteLearning() {
+  const invalidate = useInvalidateLearnings();
+  return useMutation({
+    mutationFn: (vars: { owner: string; repo: string; id: string }) =>
+      apiSend<Learning>(`${repoLearningsPath(vars.owner, vars.repo)}/${enc(vars.id)}/promote`, { method: "POST" }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useCreateGlobalLearning() {
+  const invalidate = useInvalidateLearnings();
+  return useMutation({
+    mutationFn: (vars: LearningWrite) =>
+      apiSend<Learning>("/learnings/global", { body: { content: vars.content, path: vars.path } }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateGlobalLearning() {
+  const invalidate = useInvalidateLearnings();
+  return useMutation({
+    mutationFn: (vars: { id: string } & LearningWrite) =>
+      apiSend<Learning>(`/learnings/global/${enc(vars.id)}`, {
+        method: "PUT",
+        body: { content: vars.content, path: vars.path },
+      }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteGlobalLearning() {
+  const invalidate = useInvalidateLearnings();
+  return useMutation({
+    mutationFn: (vars: { id: string }) =>
+      apiSend<{ id: string; deleted: boolean }>(`/learnings/global/${enc(vars.id)}`, { method: "DELETE" }),
+    onSuccess: invalidate,
+  });
+}
+
+export interface BulkDeleteRef {
+  scope: LearningScope;
+  owner?: string;
+  repo?: string;
+  id: string;
+}
+
+export function useBulkDeleteLearnings() {
+  const invalidate = useInvalidateLearnings();
+  return useMutation({
+    mutationFn: (items: BulkDeleteRef[]) => apiSend<{ deleted: number }>("/learnings/bulk-delete", { body: { items } }),
+    onSuccess: invalidate,
+  });
+}
+
+/** Read-only: preview which learnings would apply to a given file path. */
+export function useTestLearning() {
+  return useMutation({
+    mutationFn: (vars: { owner?: string; repo?: string; path: string }) =>
+      apiSend<LearningTestResponse>("/learnings/test", { body: vars }),
   });
 }
