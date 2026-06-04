@@ -1,6 +1,11 @@
 import fs from "fs";
 import { Config } from "./types.js";
 
+// Canonical default model names. These literals live here only — other modules
+// (e.g. the diagnostics config summary) import these rather than re-hardcoding.
+export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
+export const DEFAULT_OPENAI_MODEL = "gpt-4o";
+
 export function loadConfig(): Config {
   const privateKeyPath = process.env.GITHUB_PRIVATE_KEY_PATH;
   let privateKey = process.env.GITHUB_PRIVATE_KEY || "";
@@ -71,8 +76,8 @@ export function loadConfig(): Config {
     anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL,
     openaiApiKey: process.env.OPENAI_API_KEY,
     openaiBaseUrl: process.env.OPENAI_BASE_URL,
-    anthropicModel: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
-    openaiModel: process.env.OPENAI_MODEL || "gpt-4o",
+    anthropicModel: process.env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL,
+    openaiModel: process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
     localAiBaseUrl: process.env.LOCAL_AI_BASE_URL,
     localAiApiKey: process.env.LOCAL_AI_API_KEY,
     localAiModel: process.env.LOCAL_AI_MODEL || "",

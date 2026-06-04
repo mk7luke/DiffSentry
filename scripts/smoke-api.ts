@@ -36,9 +36,12 @@ async function main() {
     .run("mk7luke", "other-repo", 7, "ffff", "assertive", "comment", "Security-adjacent refactor.", 42, "elevated", 4, 0, 0, hoursAgo(79)).lastInsertRowid;
 
   const insertFinding = db.prepare(`INSERT INTO findings (review_id, path, line, type, severity, title, body, fingerprint, source, confidence) VALUES (?,?,?,?,?,?,?,?,?,?)`);
-  insertFinding.run(r1, "src/limiter.ts", 42, "issue", "critical", "Race condition", "Concurrent access to counter is unsynchronized.", "fp1", "ai", "high");
+  const f1Id = Number(insertFinding.run(r1, "src/limiter.ts", 42, "issue", "critical", "Race condition", "Concurrent access to counter is unsynchronized.", "fp1", "ai", "high").lastInsertRowid);
   insertFinding.run(r1, "src/limiter.ts", 88, "issue", "major", "Missing null check", "token may be null.", "fp2", "ai", "medium");
   insertFinding.run(r4owner, "src/auth.ts", 5, "security", "critical", "Secret in code", "Hardcoded token.", "fp4", "safety", "high");
+  // A second finding sharing fingerprint fp2 on a *different* repo/PR so the
+  // recurring view has a genuine 2-occurrence, 2-repo, 2-PR class to group.
+  insertFinding.run(r4owner, "src/limiter.ts", 88, "issue", "major", "Missing null check", "token may be null.", "fp2", "ai", "medium");
 
   const insertHit = db.prepare(`INSERT INTO pattern_hits (owner, repo, rule_name, source, fingerprint, review_id) VALUES (?,?,?,?,?,?)`);
   insertHit.run("mk7luke", "diffsentry-sandbox", "no-console", "builtin", "fp-x1", r1);
@@ -53,8 +56,26 @@ async function main() {
     JSON.stringify([{ id: "l1", repo: "mk7luke/diffsentry-sandbox", content: "Prefer async/await.", createdAt: hoursAgo(240) }]),
   );
 
+  // Webhook secret so the diagnostics webhook self-test can round-trip.
+  process.env.GITHUB_WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || "smoke-secret";
+
+  // Stub the diagnostics provider — the smoke harness has no real Reviewer, so
+  // we inject canned probe results (the route wiring + envelope is what we test).
+  const diagnosticsStub = {
+    aiTarget: () => ({ provider: "anthropic", model: "claude-test" }),
+    testAiProvider: async () => ({ ok: true, provider: "anthropic", model: "claude-test", latencyMs: 5, reply: "pong" }),
+    getGithubDiagnostics: async () => ({
+      app: { slug: "diffsentry", name: "DiffSentry", htmlUrl: "https://github.com/apps/diffsentry" },
+      installations: [
+        { id: 1, account: "mk7luke", accountType: "User", repositorySelection: "selected", repos: ["mk7luke/diffsentry-sandbox"], repoCount: 1, truncated: false },
+      ],
+      webhook: { configuredUrl: "https://example.com/webhook", deliveries: [{ id: 1, event: "pull_request", action: "opened", status: "OK", statusCode: 200, deliveredAt: now, redelivery: false }] },
+      rateLimit: { limit: 5000, remaining: 4999, reset: now },
+    }),
+  };
+
   const app = express();
-  app.use("/api/v1", createApiRouter({ learningsDir }));
+  app.use("/api/v1", createApiRouter({ learningsDir, diagnostics: diagnosticsStub }));
   const server = app.listen(0);
   const port = (server.address() as { port: number }).port;
 
@@ -77,6 +98,35 @@ async function main() {
           });
         })
         .on("error", reject);
+    });
+  }
+
+  async function post(pathname: string, body?: unknown): Promise<{ status: number; json: any }> {
+    return await new Promise((resolve, reject) => {
+      const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
+      const headers: Record<string, string | number> = { "Content-Type": "application/json" };
+      if (payload) headers["Content-Length"] = payload.length;
+      const req = http.request(
+        { hostname: "127.0.0.1", port, path: pathname, method: "POST", headers },
+        (r) => {
+          const chunks: Buffer[] = [];
+          r.on("data", (c) => chunks.push(c));
+          r.on("end", () => {
+            const text = Buffer.concat(chunks).toString("utf8");
+            let json: any = null;
+            try {
+              json = text ? JSON.parse(text) : null;
+            } catch {
+              reject(new Error(`non-JSON body for POST ${pathname}: ${text.slice(0, 120)}`));
+              return;
+            }
+            resolve({ status: r.statusCode ?? 0, json });
+          });
+        },
+      );
+      req.on("error", reject);
+      if (payload) req.write(payload);
+      req.end();
     });
   }
 
@@ -134,11 +184,238 @@ async function main() {
         filtered.json.data.rows.some((f: any) => f.title === "Secret in code"),
     );
 
+    // ── Triage: single finding ───────────────────────────────────────
+    const triage1 = await post(`/api/v1/findings/${f1Id}/triage`, { state: "dismissed", note: "false positive" });
+    ok("triage single → 200 changed", triage1.status === 200 && triage1.json.data.changed === 1 && triage1.json.data.state === "dismissed");
+
+    const afterDismiss = await get(`/api/v1/findings?triage=dismissed`);
+    ok(
+      "triage persisted → finding now dismissed",
+      afterDismiss.status === 200 &&
+        afterDismiss.json.data.rows.some((f: any) => f.id === f1Id && f.accepted === 0 && f.triage_note === "false positive"),
+    );
+
+    // Idempotent re-apply changes nothing (survives reload / repeat).
+    const triage1Again = await post(`/api/v1/findings/${f1Id}/triage`, { state: "dismissed", note: "false positive" });
+    ok("triage idempotent → 0 changed on repeat", triage1Again.status === 200 && triage1Again.json.data.changed === 0);
+
+    // Snooze requires a future date; a past one is rejected.
+    const badSnooze = await post(`/api/v1/findings/${f1Id}/triage`, { state: "snoozed", until: "2000-01-01" });
+    ok("snooze past date → 400", badSnooze.status === 400 && badSnooze.json.error.code === "bad_request");
+
+    const unknownTriage = await post(`/api/v1/findings/999999/triage`, { state: "accepted" });
+    ok("triage unknown id → 404", unknownTriage.status === 404 && unknownTriage.json.error.code === "not_found");
+
+    // ── Recurring view groups by fingerprint ──────────────────────────
+    const recurring = await get(`/api/v1/findings/recurring`);
+    const fp2group = recurring.json?.data?.rows?.find((g: any) => g.fingerprint === "fp2");
+    ok(
+      "recurring → fp2 grouped (2 occurrences, 2 repos, 2 PRs)",
+      recurring.status === 200 && !!fp2group && fp2group.occurrences === 2 && fp2group.repos === 2 && fp2group.prs === 2,
+    );
+
+    // Filtered recurring query — proves buildFindingsWhere params bind in the
+    // right placeholder order alongside the SELECT's `now` and HAVING/LIMIT.
+    const recurringMajor = await get(`/api/v1/findings/recurring?severity=major`);
+    ok(
+      "recurring?severity=major → fp2 only (major class)",
+      recurringMajor.status === 200 &&
+        recurringMajor.json.data.rows.some((g: any) => g.fingerprint === "fp2" && g.severity === "major") &&
+        recurringMajor.json.data.rows.every((g: any) => g.severity === "major"),
+    );
+    const recurringCritical = await get(`/api/v1/findings/recurring?severity=critical`);
+    ok(
+      "recurring?severity=critical → excludes the major fp2 class",
+      recurringCritical.status === 200 && !recurringCritical.json.data.rows.some((g: any) => g.fingerprint === "fp2"),
+    );
+
+    // ── Bulk triage a whole fingerprint class ─────────────────────────
+    const bulk = await post(`/api/v1/findings/triage`, { fingerprint: "fp2", state: "accepted", note: "known + acceptable" });
+    ok(
+      "bulk triage by fingerprint → 2 matched/changed",
+      bulk.status === 200 && bulk.json.data.changed === 2 && bulk.json.data.requested === 2 && bulk.json.data.matched === 2,
+    );
+
+    const recurringAfter = await get(`/api/v1/findings/recurring`);
+    const fp2after = recurringAfter.json.data.rows.find((g: any) => g.fingerprint === "fp2");
+    ok("recurring rollup → fp2 accepted_count = 2", !!fp2after && fp2after.accepted_count === 2);
+
+    const bulkEmpty = await post(`/api/v1/findings/triage`, { state: "accepted" });
+    ok("bulk triage with no targets → 400", bulkEmpty.status === 400 && bulkEmpty.json.error.code === "bad_request");
+
+    const bulkEmptyArr = await post(`/api/v1/findings/triage`, { ids: [], state: "accepted" });
+    ok("bulk triage empty ids array → 400 (distinct from no-target)", bulkEmptyArr.status === 400 && bulkEmptyArr.json.error.code === "bad_request");
+
+    const bulkMalformed = await post(`/api/v1/findings/triage`, { ids: [f1Id, "abc", -3], state: "accepted" });
+    ok("bulk triage malformed ids → 400 (not silently dropped)", bulkMalformed.status === 400 && bulkMalformed.json.error.code === "bad_request");
+
+    const bulkMissing = await post(`/api/v1/findings/triage`, { ids: [987654, 987655], state: "accepted" });
+    ok("bulk triage non-existent ids → 404", bulkMissing.status === 404 && bulkMissing.json.error.code === "not_found");
+
+    // Explicit ids are all-or-nothing: one real + one missing id must 404
+    // (no partial triage of the existing subset).
+    const bulkPartial = await post(`/api/v1/findings/triage`, { ids: [f1Id, 987654], state: "accepted" });
+    ok(
+      "bulk triage partial-match ids → 404 (all-or-nothing)",
+      bulkPartial.status === 404 && bulkPartial.json.error.code === "not_found" && /987654/.test(bulkPartial.json.error.message),
+    );
+
+    // De-dup: a repeated id is counted once (matched/requested both 1).
+    const bulkDedup = await post(`/api/v1/findings/triage`, { ids: [f1Id, f1Id], state: "dismissed" });
+    ok("bulk triage dedups repeated ids → matched 1", bulkDedup.status === 200 && bulkDedup.json.data.matched === 1 && bulkDedup.json.data.requested === 1);
+
+    // ── Triage shows in the audit log ─────────────────────────────────
+    const audit = await get(`/api/v1/audit`);
+    ok(
+      "audit log → finding.triage rows present",
+      audit.status === 200 && audit.json.data.rows.some((r: any) => r.action === "finding.triage"),
+    );
+
     const patterns = await get("/api/v1/patterns");
     ok("patterns → rules", patterns.status === 200 && patterns.json.data.rules.some((r: any) => r.rule_name === "no-console"));
 
+    // ── Search (Cmd-K palette) ──────────────────────────────────────
+    const searchRepo = await get("/api/v1/search?q=" + encodeURIComponent("diffsentry"));
+    ok(
+      "search → repo hit with deep link",
+      searchRepo.status === 200 &&
+        searchRepo.json.data.results.some(
+          (r: any) => r.type === "repo" && r.repo === "diffsentry-sandbox" && r.to === "/repos/mk7luke/diffsentry-sandbox",
+        ),
+    );
+
+    const searchPr = await get("/api/v1/search?q=" + encodeURIComponent("rate limiter"));
+    ok(
+      "search → PR hit with /pr/ deep link",
+      searchPr.status === 200 &&
+        searchPr.json.data.results.some(
+          (r: any) => r.type === "pr" && r.number === 42 && r.to === "/repos/mk7luke/diffsentry-sandbox/pr/42",
+        ),
+    );
+
+    const searchFinding = await get("/api/v1/search?q=" + encodeURIComponent("race condition"));
+    ok(
+      "search → finding hit (severity + PR deep link)",
+      searchFinding.status === 200 &&
+        searchFinding.json.data.results.some(
+          (r: any) => r.type === "finding" && r.severity === "critical" && r.to === "/repos/mk7luke/diffsentry-sandbox/pr/42",
+        ),
+    );
+
+    const searchLearning = await get("/api/v1/search?q=" + encodeURIComponent("async"));
+    ok(
+      "search → on-disk learning hit",
+      searchLearning.status === 200 &&
+        searchLearning.json.data.results.some((r: any) => r.type === "learning" && r.repo === "diffsentry-sandbox"),
+    );
+
+    const searchMixed = await get("/api/v1/search?q=" + encodeURIComponent("src"));
+    ok(
+      "search → mixed results, ranked (descending score)",
+      searchMixed.status === 200 &&
+        searchMixed.json.data.results.length > 0 &&
+        searchMixed.json.data.results.every(
+          (r: any, i: number, arr: any[]) => i === 0 || arr[i - 1].score >= r.score,
+        ),
+    );
+
+    const searchPercent = await get("/api/v1/search?q=" + encodeURIComponent("100%"));
+    ok("search → LIKE wildcard in query is escaped (no crash, empty)", searchPercent.status === 200 && Array.isArray(searchPercent.json.data.results));
+
+    const searchBlank = await get("/api/v1/search?q=" + encodeURIComponent("   "));
+    ok("search → blank query returns empty", searchBlank.status === 200 && searchBlank.json.data.results.length === 0);
+
     const health = await get("/api/v1/health");
     ok("health → counts + logs", health.status === 200 && health.json.data.counts.repos === 2 && Array.isArray(health.json.data.logs));
+
+    // ── Diagnostics (first-run experience) ─────────────────────────
+    const diag = await get("/api/v1/diagnostics");
+    ok(
+      "diagnostics → checks + summary + config + db",
+      diag.status === 200 &&
+        Array.isArray(diag.json.data.checks) &&
+        diag.json.data.checks.length > 0 &&
+        diag.json.data.checks.some((c: any) => c.id === "ai.provider") &&
+        typeof diag.json.data.summary.fail === "number" &&
+        diag.json.data.config.provider === "anthropic" &&
+        diag.json.data.db.enabled === true,
+    );
+
+    const ghd = await get("/api/v1/diagnostics/github");
+    ok(
+      "diagnostics/github → installations + reachable + counts",
+      ghd.status === 200 &&
+        ghd.json.data.reachable === true &&
+        ghd.json.data.installationCount === 1 &&
+        ghd.json.data.connectedRepos === 1 &&
+        ghd.json.data.installations[0].repos[0] === "mk7luke/diffsentry-sandbox",
+    );
+
+    const testAi = await post("/api/v1/diagnostics/test-ai");
+    ok(
+      "diagnostics test-ai → ok (open-mode admin passes author gate + noop CSRF)",
+      testAi.status === 200 && testAi.json.data.ok === true && testAi.json.data.reply === "pong",
+    );
+
+    const testWh = await post("/api/v1/diagnostics/test-webhook");
+    ok(
+      "diagnostics test-webhook → signature round-trip verified",
+      testWh.status === 200 && testWh.json.data.ok === true && testWh.json.data.secretConfigured === true,
+    );
+
+    // ── Analytics ──────────────────────────────────────────────────
+    const authors = await get("/api/v1/analytics/authors");
+    const aliceRow = authors.json.data.authors.find((a: any) => a.author === "alice");
+    const unknownRow = authors.json.data.authors.find((a: any) => a.author === "(unknown)");
+    const sumFindings = authors.json.data.authors.reduce((n: number, a: any) => n + a.findings, 0);
+    const sumPRs = authors.json.data.authors.reduce((n: number, a: any) => n + a.prs_reviewed, 0);
+    ok(
+      "analytics authors → per-author stats; sums match org totals",
+      authors.status === 200 &&
+        aliceRow &&
+        aliceRow.prs_reviewed === 1 &&
+        aliceRow.findings === 2 &&
+        aliceRow.critical === 1 &&
+        aliceRow.major === 1 &&
+        aliceRow.triaged === 2 && // the triage suite above dismissed fp1 + accepted the fp2 class — both of alice's findings now carry an accepted value
+        unknownRow &&
+        unknownRow.critical === 1 && // other-repo review has no prs row → '(unknown)' bucket
+        sumFindings === 4 && // 2 (alice) + 2 (unknown: fp4 + the recurring-fixture fp2) = every finding in the DB
+        sumPRs === 2 &&
+        Array.isArray(authors.json.data.series),
+    );
+
+    const aliceDetail = await get("/api/v1/analytics/authors/alice");
+    ok(
+      "analytics author detail → stat + hot paths + PRs",
+      aliceDetail.status === 200 &&
+        aliceDetail.json.data.stat.findings === 2 &&
+        aliceDetail.json.data.hotPaths.some((p: any) => p.path === "src/limiter.ts") &&
+        aliceDetail.json.data.prs.some((p: any) => p.number === 42),
+    );
+
+    // '(unknown)' bucket: other-repo#7 has a review + critical finding but no
+    // prs row, so it attributes to '(unknown)'. Its hot paths must still resolve
+    // (guards the COALESCE author filter in getAuthorHotPaths).
+    const unknownDetail = await get("/api/v1/analytics/authors/" + encodeURIComponent("(unknown)"));
+    ok(
+      "analytics '(unknown)' drill-down → hot paths for PR-less reviews",
+      unknownDetail.status === 200 &&
+        unknownDetail.json.data.hotPaths.some((p: any) => p.path === "src/auth.ts"),
+    );
+
+    const noAuthor = await get("/api/v1/analytics/authors/nobody");
+    ok("analytics unknown author → 404 JSON", noAuthor.status === 404 && noAuthor.json.error.code === "not_found");
+
+    const trends = await get("/api/v1/analytics/trends");
+    ok(
+      "analytics trends → activity + risk distribution + hot paths over time",
+      trends.status === 200 &&
+        Array.isArray(trends.json.data.activity) &&
+        trends.json.data.riskDistribution.some((b: any) => b.level === "critical") &&
+        trends.json.data.hotPaths.some((p: any) => p.path === "src/limiter.ts") &&
+        Array.isArray(trends.json.data.hotPathSeries),
+    );
 
     const missing = await get("/api/v1/repos/unknown/unknown");
     ok("unknown repo → 404 JSON", missing.status === 404 && missing.json.error.code === "not_found");
@@ -148,6 +425,54 @@ async function main() {
 
     const unknownEndpoint = await get("/api/v1/nope");
     ok("unknown endpoint → 404 JSON", unknownEndpoint.status === 404 && unknownEndpoint.json.error.code === "not_found");
+
+    // ── Diagnostics WITHOUT a provider wired ───────────────────────
+    // The static env+DB checks (and the webhook self-test) must still work so
+    // the setup wizard functions on a minimally-wired instance; provider-backed
+    // probes degrade explicitly instead of 404-ing the whole surface.
+    {
+      const noProvApp = express();
+      noProvApp.use("/api/v1", createApiRouter({ learningsDir })); // no diagnostics provider
+      const noProvServer = noProvApp.listen(0);
+      const noProvPort = (noProvServer.address() as { port: number }).port;
+      const req = (method: "GET" | "POST", pathname: string) =>
+        new Promise<{ status: number; json: any }>((resolve, reject) => {
+          const r = http.request({ hostname: "127.0.0.1", port: noProvPort, path: pathname, method }, (resp) => {
+            const chunks: Buffer[] = [];
+            resp.on("data", (c) => chunks.push(c));
+            resp.on("end", () => {
+              const body = Buffer.concat(chunks).toString("utf8");
+              resolve({ status: resp.statusCode ?? 0, json: body ? JSON.parse(body) : null });
+            });
+          });
+          r.on("error", reject);
+          r.end();
+        });
+      try {
+        const d = await req("GET", "/api/v1/diagnostics");
+        ok(
+          "no-provider: GET /diagnostics → 200 static checks + env-derived config",
+          d.status === 200 && Array.isArray(d.json.data.checks) && d.json.data.config.provider === "anthropic",
+        );
+        const ghd = await req("GET", "/api/v1/diagnostics/github");
+        ok(
+          "no-provider: GET /diagnostics/github → 200 reachable:false + error",
+          ghd.status === 200 && ghd.json.data.reachable === false && typeof ghd.json.data.error === "string",
+        );
+        const tAi = await req("POST", "/api/v1/diagnostics/test-ai");
+        ok(
+          "no-provider: POST test-ai → ok:false (provider unavailable)",
+          tAi.status === 200 && tAi.json.data.ok === false && typeof tAi.json.data.error === "string",
+        );
+        const tWh = await req("POST", "/api/v1/diagnostics/test-webhook");
+        ok(
+          "no-provider: POST test-webhook → still verifies (needs no provider)",
+          tWh.status === 200 && tWh.json.data.ok === true,
+        );
+      } finally {
+        noProvServer.close();
+      }
+    }
 
     // Auth gate — a second app with auth wired returns 401 JSON (not a redirect)
     // for an unauthenticated request.

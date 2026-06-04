@@ -3,6 +3,73 @@ import { Octokit } from "@octokit/rest";
 import { Config, FileChange, PRContext, ReviewResult, IssueContext, IssueComment } from "./types.js";
 import { logger } from "./logger.js";
 
+// ─── GitHub App diagnostics (first-run experience) ─────────────────
+// Shapes returned by getAppDiagnostics(), consumed by the API diagnostics
+// route and the SPA's setup wizard / Diagnostics screen. Every field is
+// best-effort: a sub-call that fails leaves its slice empty rather than
+// throwing, so a partial picture is still useful when (say) the App can list
+// installations but lacks webhook-read permission.
+
+export interface InstallationInfo {
+  id: number;
+  /** Owner login the App is installed on (org or user). */
+  account: string | null;
+  accountType: string | null;
+  /** "all" or "selected" — whether the App can see every repo or a subset. */
+  repositorySelection: string | null;
+  /** Up to the first 50 connected repos as "owner/name". */
+  repos: string[];
+  /** Total repos the App can access (may exceed repos.length). */
+  repoCount: number;
+  /** True when repoCount > repos.length (the list was capped). */
+  truncated: boolean;
+}
+
+export interface WebhookDelivery {
+  id: number;
+  event: string;
+  action: string | null;
+  /** GitHub's textual status, e.g. "OK" or "failed to connect". */
+  status: string;
+  /** HTTP status code our endpoint returned (0 when GitHub couldn't reach us). */
+  statusCode: number;
+  deliveredAt: string;
+  redelivery: boolean;
+}
+
+export interface GithubDiagnostics {
+  app: { slug: string | null; name: string | null; htmlUrl: string | null } | null;
+  installations: InstallationInfo[];
+  webhook: { configuredUrl: string | null; deliveries: WebhookDelivery[]; error?: string };
+  rateLimit: { limit: number; remaining: number; reset: string } | null;
+  /** Set when the App JWT itself couldn't authenticate (bad app id / key). */
+  error?: string;
+}
+
+// Narrow shapes for the raw @octokit/rest responses getAppDiagnostics() reads.
+// We assert to these (only the fields we use) instead of `any`: the App-level
+// list endpoints + paginate() don't infer cleanly down to this handful of
+// fields, but the runtime payloads carry them. @octokit/rest ^21.
+interface RawInstallation {
+  id: number;
+  account?: { login?: string; slug?: string; type?: string } | null;
+  repository_selection?: string | null;
+}
+interface RawWebhookDelivery {
+  id: number;
+  event: string;
+  action?: string | null;
+  status: string;
+  status_code: number;
+  delivered_at: string;
+  redelivery?: boolean;
+}
+interface RawRateBucket {
+  limit: number;
+  remaining: number;
+  reset: number;
+}
+
 function isOurBotThread(thread: any, botLogin: string): boolean {
   const first = thread.comments?.nodes?.[0];
   if (!first) return false;
@@ -33,11 +100,138 @@ export class GitHubClient {
     });
   }
 
+  /**
+   * App-level Octokit (authenticated as the App via JWT, not as an
+   * installation). Used by the diagnostics surface to enumerate installations,
+   * inspect the webhook config, and read recent deliveries — none of which a
+   * single installation token can see.
+   */
+  getAppOctokit(): Octokit {
+    return new Octokit({
+      authStrategy: createAppAuth,
+      auth: {
+        appId: this.config.githubAppId,
+        privateKey: this.config.githubPrivateKey,
+      },
+    });
+  }
+
+  /**
+   * Gather the live GitHub-side picture for the first-run experience: which
+   * installations exist and what repos they reach, the configured webhook URL
+   * + recent delivery outcomes, and current rate-limit headroom. Every section
+   * degrades to empty/null on permission or network errors so the dashboard
+   * can render a partial-but-useful diagnostic rather than failing outright.
+   */
+  async getAppDiagnostics(): Promise<GithubDiagnostics> {
+    // Constructing the client never performs I/O — App JWT authentication is
+    // lazy and first exercised by getAuthenticated() below, where a bad App
+    // ID / private key surfaces as the top-level `error`.
+    const app = this.getAppOctokit();
+
+    const result: GithubDiagnostics = {
+      app: null,
+      installations: [],
+      webhook: { configuredUrl: null, deliveries: [] },
+      rateLimit: null,
+    };
+
+    // App identity — also the canonical "is the App ID + private key valid?"
+    // check: a bad key fails here with a 401 we surface to the wizard.
+    try {
+      const { data } = await app.apps.getAuthenticated();
+      result.app = data
+        ? { slug: data.slug ?? null, name: data.name ?? null, htmlUrl: data.html_url ?? null }
+        : null;
+    } catch (err) {
+      // App JWT couldn't authenticate (bad App ID / private key). Return now —
+      // the remaining calls would fail with the same credentials and bury this
+      // root cause behind secondary 401s. A set top-level `error` is the
+      // documented signal that App authentication itself failed.
+      result.error = err instanceof Error ? err.message : String(err);
+      return result;
+    }
+
+    // Installations + the repos each can reach.
+    try {
+      const insts = (await app.paginate(app.apps.listInstallations, { per_page: 100 })) as RawInstallation[];
+      for (const inst of insts) {
+        const info: InstallationInfo = {
+          id: inst.id,
+          account: inst.account?.login ?? inst.account?.slug ?? null,
+          accountType: inst.account?.type ?? null,
+          repositorySelection: inst.repository_selection ?? null,
+          repos: [],
+          repoCount: 0,
+          truncated: false,
+        };
+        try {
+          const instOcto = await this.getInstallationOctokit(inst.id);
+          // One page is enough for the 50-name preview: per_page=100 ≥ the cap,
+          // and `total_count` is the authoritative full count (not page-limited),
+          // so repoCount + truncated stay accurate without paginating.
+          const { data } = await instOcto.apps.listReposAccessibleToInstallation({ per_page: 100 });
+          const repos = data.repositories ?? [];
+          info.repoCount = data.total_count ?? repos.length;
+          info.repos = repos.slice(0, 50).map((r) => r.full_name);
+          info.truncated = info.repoCount > info.repos.length;
+        } catch (err) {
+          logger.debug({ err, installationId: inst.id }, "diagnostics: list repos failed");
+        }
+        result.installations.push(info);
+      }
+    } catch (err) {
+      logger.debug({ err }, "diagnostics: list installations failed");
+    }
+
+    // Webhook config + last few deliveries (App-level, JWT-only endpoints).
+    try {
+      const { data } = await app.apps.getWebhookConfigForApp();
+      result.webhook.configuredUrl = (data as { url?: string }).url ?? null;
+    } catch (err) {
+      result.webhook.error = err instanceof Error ? err.message : String(err);
+    }
+    try {
+      const { data } = await app.apps.listWebhookDeliveries({ per_page: 10 });
+      result.webhook.deliveries = (data as RawWebhookDelivery[]).map((d) => ({
+        id: d.id,
+        event: d.event,
+        action: d.action ?? null,
+        status: d.status,
+        statusCode: d.status_code,
+        deliveredAt: d.delivered_at,
+        redelivery: !!d.redelivery,
+      }));
+    } catch (err) {
+      result.webhook.error = result.webhook.error ?? (err instanceof Error ? err.message : String(err));
+    }
+
+    // Rate limit (App JWT core bucket).
+    try {
+      const { data } = await app.rateLimit.get();
+      const limits = data as { resources?: { core?: RawRateBucket }; rate?: RawRateBucket };
+      const core = limits.resources?.core ?? limits.rate;
+      if (core) {
+        result.rateLimit = {
+          limit: core.limit,
+          remaining: core.remaining,
+          reset: new Date(core.reset * 1000).toISOString(),
+        };
+      }
+    } catch (err) {
+      logger.debug({ err }, "diagnostics: rate limit failed");
+    }
+
+    return result;
+  }
+
   async getPRContext(
     installationId: number,
     owner: string,
     repo: string,
-    pullNumber: number
+    pullNumber: number,
+    /** Per-review max-files override (operator setting); falls back to config. */
+    maxFiles?: number
   ): Promise<PRContext> {
     const octokit = await this.getInstallationOctokit(installationId);
 
@@ -46,9 +240,10 @@ export class GitHubClient {
       octokit.pulls.listFiles({ owner, repo, pull_number: pullNumber, per_page: 100 }),
     ]);
 
+    const fileCap = maxFiles != null && maxFiles > 0 ? maxFiles : this.config.maxFilesPerReview;
     const files: FileChange[] = filesResponse.data
       .filter((f) => !this.isIgnored(f.filename))
-      .slice(0, this.config.maxFilesPerReview)
+      .slice(0, fileCap)
       .map((f) => ({
         filename: f.filename,
         status: f.status as FileChange["status"],

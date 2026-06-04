@@ -1,7 +1,9 @@
+import { Link } from "react-router-dom";
 import { useHealth } from "../api/hooks";
 import { useAuth } from "../auth/useAuth";
 import { Breadcrumbs } from "../components/Shell";
 import { Card, Metric, PageHeader } from "../components/primitives";
+import { GlobalSettingsControls } from "../components/SettingsControls";
 import { RoleBadge } from "../components/badges";
 import { BrandingForm, ThemeControls } from "../components/appearance";
 import { EmptyState, QueryBoundary } from "../components/states";
@@ -12,9 +14,11 @@ const CAPABILITY_LABELS: { key: keyof Capabilities; label: string }[] = [
   { key: "viewDashboard", label: "View dashboard" },
   { key: "triageFindings", label: "Triage findings" },
   { key: "triggerReview", label: "Trigger reviews" },
+  { key: "manageLearnings", label: "Manage learnings" },
   { key: "manageConfig", label: "Manage config" },
   { key: "manageRoles", label: "Manage roles" },
   { key: "viewAudit", label: "View audit log" },
+  { key: "manageTokens", label: "Manage API tokens" },
 ];
 
 export function SettingsPage() {
@@ -23,7 +27,15 @@ export function SettingsPage() {
   return (
     <>
       <Breadcrumbs crumbs={[{ label: "Settings" }]} />
-      <PageHeader title="Settings & health" subtitle="Appearance, persistence stats, recent warnings, and the signed-in session." />
+      <PageHeader
+        title="Settings & health"
+        subtitle="Appearance, operator controls, persistence stats, recent warnings, and the signed-in session."
+        right={
+          <Link to="/settings/diagnostics" className="btn btn-ghost btn-sm">
+            Diagnostics & setup →
+          </Link>
+        }
+      />
       <div className="grid two" style={{ marginBottom: 16 }}>
         <Card title="Appearance" subtitle="theme · density">
           <ThemeControls />
@@ -34,6 +46,16 @@ export function SettingsPage() {
           </Card>
         ) : null}
       </div>
+
+      {/* Operator controls — admin only. The server enforces requireRole('admin')
+          on every settings endpoint; this gate just avoids fetching/showing them
+          to non-admins (who would otherwise get a 403). */}
+      {auth.capabilities.manageConfig ? (
+        <div style={{ marginBottom: 16 }}>
+          <GlobalSettingsControls />
+        </div>
+      ) : null}
+
       <QueryBoundary query={query} loadingLabel="Loading health…">
         {(data) => {
           const c = data.counts;

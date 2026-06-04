@@ -24,5 +24,5 @@ tests/e2e/.work/
 # Local-only deploy/test tooling (contains SSH targets)
 scripts/local/
 
-# Playwright MCP visual-QA artifacts
+# Playwright MCP visual-QA artifacts / transient snapshots
 .playwright-mcp/

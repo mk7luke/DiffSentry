@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { AIProvider, PRContext, ReviewResult, WalkthroughResult, RepoConfig, Learning, IssueContext } from "../types.js";
 import { buildReviewPrompt, buildWalkthroughPrompt, buildChatPrompt, buildIssueChatPrompt } from "./prompt.js";
 import { parseReviewResponse, parseWalkthroughResponse } from "./parse.js";
+import { recordAiUsage } from "./cost.js";
 import { logger } from "../logger.js";
 
 export class AnthropicProvider implements AIProvider {
@@ -11,6 +12,17 @@ export class AnthropicProvider implements AIProvider {
   constructor(apiKey: string, model: string, baseURL?: string) {
     this.client = new Anthropic({ apiKey, ...(baseURL && { baseURL }) });
     this.model = model;
+  }
+
+  /** Record token usage + cost for one call (best-effort, never throws). */
+  private track(usage: { input_tokens?: number; output_tokens?: number } | undefined, kind: string): void {
+    recordAiUsage({
+      provider: "anthropic",
+      model: this.model,
+      inputTokens: usage?.input_tokens,
+      outputTokens: usage?.output_tokens,
+      fallbackKind: kind,
+    });
   }
 
   async review(context: PRContext, repoConfig?: RepoConfig, learnings?: Learning[]): Promise<ReviewResult> {
@@ -36,6 +48,7 @@ export class AnthropicProvider implements AIProvider {
       },
       "Anthropic review response received"
     );
+    this.track(response.usage, "review");
 
     return parseReviewResponse(text, context);
   }
@@ -63,6 +76,7 @@ export class AnthropicProvider implements AIProvider {
       },
       "Anthropic walkthrough response received"
     );
+    this.track(response.usage, "walkthrough");
 
     return parseWalkthroughResponse(text);
   }
@@ -90,6 +104,7 @@ export class AnthropicProvider implements AIProvider {
       },
       "Anthropic chat response received"
     );
+    this.track(response.usage, "chat");
 
     return text;
   }
@@ -101,6 +116,7 @@ export class AnthropicProvider implements AIProvider {
       system,
       messages: [{ role: "user", content: user }],
     });
+    this.track(response.usage, "complete");
     return response.content[0]?.type === "text" ? response.content[0].text : "";
   }
 
@@ -127,6 +143,7 @@ export class AnthropicProvider implements AIProvider {
       },
       "Anthropic issue chat response received"
     );
+    this.track(response.usage, "issue_chat");
 
     return text;
   }
