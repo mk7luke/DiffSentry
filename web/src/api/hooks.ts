@@ -5,6 +5,8 @@ import { apiGet, apiSend } from "./client";
 import type {
   ApiScope,
   AuditResponse,
+  BrandingResponse,
+  BrandingUpdate,
   CostResponse,
   CreatedToken,
   AuthorDetailResponse,
@@ -48,6 +50,8 @@ import type {
   WebhookDeliveryDetail,
   WebhooksResponse,
 } from "./types";
+
+export const BRANDING_QUERY_KEY = ["branding"] as const;
 
 export function useMe() {
   return useQuery({
@@ -286,6 +290,28 @@ function useNotifMutation<TVars>(fn: (vars: TVars) => Promise<unknown>) {
     mutationFn: fn,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: NOTIF_KEY });
+    },
+  });
+}
+
+/** Instance branding (name + accent). Readable by any authenticated role; the
+ * SPA applies it as the theme accent + sidebar wordmark + document title. */
+export function useBranding() {
+  return useQuery({
+    queryKey: BRANDING_QUERY_KEY,
+    queryFn: () => apiGet<BrandingResponse>("/settings/branding"),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Admin: update instance branding. Returns the resolved branding. */
+export function useSetBranding() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: BrandingUpdate) => apiSend<BrandingResponse>("/settings/branding", { body: vars }),
+    onSuccess: (data) => {
+      qc.setQueryData(BRANDING_QUERY_KEY, data);
+      void qc.invalidateQueries({ queryKey: ["audit"] });
     },
   });
 }

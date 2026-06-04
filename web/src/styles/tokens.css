@@ -1,13 +1,33 @@
-/* Design tokens — ported verbatim from DESIGN_TOKENS in src/dashboard/layout.ts.
-   Keep these in sync with the legacy dashboard until the cleanup PR removes it. */
+/* Design tokens — a theme system layered on the palette ported from
+   DESIGN_TOKENS in src/dashboard/layout.ts.
+
+   Structure:
+     1. :root                     non-themed tokens (fonts, radius, layout) +
+                                  the DARK palette (the default theme).
+     2. :root[data-theme="light"] LIGHT palette overrides.
+     3. density tokens            comfortable (default) + compact overrides.
+
+   The whole app reads colors through these vars, so flipping data-theme on
+   <html> restyles everything with no per-component work. The no-flash inline
+   script in index.html sets data-theme / data-density before first paint, and
+   an admin-set accent color is applied as inline --accent* overrides on <html>
+   (which therefore win over the per-theme accent tuning below — intentional:
+   a self-hoster's brand color is honored verbatim in both themes). */
+
 :root {
-  /* Surface */
+  /* ── Surface (dark) ─────────────────────────────────────────────── */
   --bg: #0a0c13;
   --bg-deep: #070910;
   --bg-elev: #11141d;
   --bg-elev-2: #171b26;
   --bg-hover: #1c212e;
   --bg-chart: #0d1018;
+  /* Gradient end for card / repo-card surfaces (one notch below --bg-elev). */
+  --bg-card-2: #10131c;
+
+  /* Thin highlight overlays used on raised surfaces (top hairline, head sheen). */
+  --inset-hi: rgba(255, 255, 255, 0.06);
+  --inset-hi-soft: rgba(255, 255, 255, 0.015);
 
   /* Line */
   --line: #1d2230;
@@ -21,7 +41,7 @@
   --text-3: #6a7085;
   --text-4: #40465a;
 
-  /* Brand */
+  /* Brand. These six are also what an admin accent override replaces inline. */
   --accent: #5a8dff;
   --accent-bright: #7aa7ff;
   --accent-deep: #3d6ee8;
@@ -29,52 +49,184 @@
   --accent-soft: rgba(90, 141, 255, 0.1);
   --accent-line: rgba(90, 141, 255, 0.28);
   --accent-2: #9a6bff;
+  /* Text/icon color that sits on top of a filled accent (e.g. primary button). */
+  --accent-contrast: #0a0c13;
 
   /* Severity / semantic */
   --sev-crit: #fb6d82;
   --sev-crit-soft: rgba(251, 109, 130, 0.14);
   --sev-crit-line: rgba(251, 109, 130, 0.38);
+  --sev-crit-text: #ffbfc9;
   --sev-major: #fb923c;
   --sev-major-soft: rgba(251, 146, 60, 0.13);
   --sev-major-line: rgba(251, 146, 60, 0.38);
+  --sev-major-text: #ffcfa4;
   --sev-minor: #fbbf24;
   --sev-minor-soft: rgba(251, 191, 36, 0.12);
   --sev-minor-line: rgba(251, 191, 36, 0.36);
+  --sev-minor-text: #ffe1a0;
   --sev-nit: #64748b;
   --sev-nit-soft: rgba(100, 116, 139, 0.15);
   --sev-nit-line: rgba(100, 116, 139, 0.38);
+  --sev-nit-text: #c3cbd9;
 
   --good: #4ade80;
   --good-soft: rgba(74, 222, 128, 0.13);
   --good-line: rgba(74, 222, 128, 0.38);
+  --good-text: #bff5d1;
   --warn: #fbbf24;
   --warn-soft: rgba(251, 191, 36, 0.13);
   --warn-line: rgba(251, 191, 36, 0.38);
+  --warn-text: #ffe1a0;
   --danger: #ef4444;
   --danger-soft: rgba(239, 68, 68, 0.13);
   --danger-line: rgba(239, 68, 68, 0.4);
+  --danger-text: #ffc7c7;
 
-  /* Typography */
+  /* Approval-mix "commented" neutral swatch (was a hardcoded chart hex). */
+  --neutral-swatch: #9aa0b2;
+
+  /* Backdrop glow behind the header (accent at low alpha). */
+  --page-glow: rgba(90, 141, 255, 0.06);
+
+  /* ── Typography (shared across themes) ──────────────────────────── */
   --font-sans: "Inter", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   --font-display: "Inter Tight", "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* Radius */
+  /* ── Radius (shared) ────────────────────────────────────────────── */
   --r-xs: 3px;
   --r-sm: 5px;
   --r-md: 7px;
   --r-lg: 10px;
   --r-xl: 14px;
 
-  /* Shadow */
+  /* ── Shadow (dark) ──────────────────────────────────────────────── */
   --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.025) inset, 0 1px 2px rgba(0, 0, 0, 0.25);
   --shadow-hover: 0 1px 0 rgba(255, 255, 255, 0.045) inset, 0 8px 24px -12px rgba(0, 0, 0, 0.5);
   --shadow-accent: 0 0 0 1px var(--accent-line), 0 10px 30px -10px var(--accent-glow);
 
-  /* Layout */
+  /* ── Layout (shared) ────────────────────────────────────────────── */
   --sidebar-w: 228px;
   --page-max: 1440px;
   --page-gutter: 28px;
 
+  /* ── Density (comfortable — the default) ────────────────────────── */
+  --body-font: 14px;
+  --pad-card: 14px;
+  --pad-card-head-y: 11px;
+  --pad-card-head-x: 14px;
+  --pad-metric-y: 14px;
+  --pad-metric-x: 16px;
+  --pad-metric-hero-y: 18px;
+  --pad-metric-hero-x: 20px;
+  --pad-cell-y: 10px;
+  --pad-cell-x: 14px;
+  --pad-thead-y: 9px;
+  --pad-snav-y: 7px;
+  --pad-snav-x: 10px;
+  --pad-main-y: 26px;
+  --grid-gap: 14px;
+
   color-scheme: dark;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   LIGHT THEME — genuinely usable, same visual language as dark. Only the
+   palette changes; structure/typography/radius/density are shared.
+   ════════════════════════════════════════════════════════════════════ */
+:root[data-theme="light"] {
+  --bg: #f5f6fb;
+  --bg-deep: #e9ecf4;
+  --bg-elev: #ffffff;
+  --bg-elev-2: #eef1f7;
+  --bg-hover: #e7eaf3;
+  --bg-chart: #fbfcfe;
+  --bg-card-2: #fbfcff;
+
+  --inset-hi: rgba(15, 19, 32, 0.04);
+  --inset-hi-soft: rgba(15, 19, 32, 0.012);
+
+  --line: #dce0ea;
+  --line-strong: #c4cad8;
+  --line-soft: #e8eaf1;
+
+  --text: #11151f;
+  --text-1: #2b3142;
+  --text-2: #565d72;
+  --text-3: #78808f;
+  --text-4: #a7aebd;
+
+  /* Deepen the accent a touch so it carries on white surfaces. */
+  --accent: #3d6ee8;
+  --accent-bright: #5a8dff;
+  --accent-deep: #2f59cf;
+  --accent-glow: rgba(61, 110, 232, 0.28);
+  --accent-soft: rgba(61, 110, 232, 0.1);
+  --accent-line: rgba(61, 110, 232, 0.3);
+  --accent-2: #7c4dff;
+  --accent-contrast: #ffffff;
+
+  /* Severity hues deepened for contrast on light backgrounds; soft fills are
+     light tints and the *-text tones are dark so chip labels stay legible. */
+  --sev-crit: #e23950;
+  --sev-crit-soft: rgba(226, 57, 80, 0.1);
+  --sev-crit-line: rgba(226, 57, 80, 0.3);
+  --sev-crit-text: #b21f33;
+  --sev-major: #d9711d;
+  --sev-major-soft: rgba(217, 113, 29, 0.11);
+  --sev-major-line: rgba(217, 113, 29, 0.32);
+  --sev-major-text: #9a4e08;
+  --sev-minor: #c98a00;
+  --sev-minor-soft: rgba(201, 138, 0, 0.12);
+  --sev-minor-line: rgba(201, 138, 0, 0.32);
+  --sev-minor-text: #855c00;
+  --sev-nit: #5b6677;
+  --sev-nit-soft: rgba(91, 102, 119, 0.12);
+  --sev-nit-line: rgba(91, 102, 119, 0.32);
+  --sev-nit-text: #44505f;
+
+  --good: #1f9d57;
+  --good-soft: rgba(31, 157, 87, 0.12);
+  --good-line: rgba(31, 157, 87, 0.32);
+  --good-text: #137041;
+  --warn: #c98a00;
+  --warn-soft: rgba(201, 138, 0, 0.12);
+  --warn-line: rgba(201, 138, 0, 0.32);
+  --warn-text: #855c00;
+  --danger: #d92d2d;
+  --danger-soft: rgba(217, 45, 45, 0.1);
+  --danger-line: rgba(217, 45, 45, 0.32);
+  --danger-text: #a51f1f;
+
+  --neutral-swatch: #565d72;
+  --page-glow: rgba(61, 110, 232, 0.07);
+
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 1px 2px rgba(15, 23, 42, 0.08);
+  --shadow-hover: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 10px 28px -14px rgba(15, 23, 42, 0.22);
+  --shadow-accent: 0 0 0 1px var(--accent-line), 0 10px 30px -12px var(--accent-glow);
+
+  color-scheme: light;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   DENSITY — compact tightens spacing + nudges the base font down. Applies
+   in either theme via the [data-density] attribute on <html>.
+   ════════════════════════════════════════════════════════════════════ */
+:root[data-density="compact"] {
+  --body-font: 13px;
+  --pad-card: 10px;
+  --pad-card-head-y: 8px;
+  --pad-card-head-x: 11px;
+  --pad-metric-y: 10px;
+  --pad-metric-x: 12px;
+  --pad-metric-hero-y: 13px;
+  --pad-metric-hero-x: 15px;
+  --pad-cell-y: 6px;
+  --pad-cell-x: 11px;
+  --pad-thead-y: 6px;
+  --pad-snav-y: 5px;
+  --pad-snav-x: 9px;
+  --pad-main-y: 18px;
+  --grid-gap: 10px;
 }

@@ -18,6 +18,7 @@
     "smoke:rbac": "tsx scripts/smoke-rbac.ts",
     "smoke:actions": "tsx scripts/smoke-actions.ts",
     "smoke:notifications": "tsx scripts/smoke-notifications.ts",
+    "smoke:branding": "tsx scripts/smoke-branding.ts",
     "smoke:settings": "tsx scripts/smoke-settings.ts",
     "smoke:tokens": "tsx scripts/smoke-tokens.ts",
     "smoke:config": "tsx scripts/smoke-config.ts",

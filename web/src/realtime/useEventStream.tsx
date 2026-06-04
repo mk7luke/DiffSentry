@@ -26,6 +26,7 @@ export type StreamTopic =
   | "review.finished"
   | "review.failed"
   | "action.performed"
+  | "settings.updated"
   | "budget.exceeded"
   | "finding.surfaced"
   | "notification.delivered"
@@ -55,6 +56,12 @@ export interface ActionPayload {
   role: string | null;
   result: string;
   detail?: string;
+}
+
+export interface SettingsUpdatedPayload {
+  instanceName: string;
+  accentColor: string;
+  updatedBy: string | null;
 }
 
 export interface BudgetAlertPayload {
@@ -132,6 +139,7 @@ const TOPICS: StreamTopic[] = [
   "review.finished",
   "review.failed",
   "action.performed",
+  "settings.updated",
   "budget.exceeded",
   "finding.surfaced",
   "notification.delivered",

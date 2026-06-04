@@ -162,11 +162,12 @@ class NotificationEngine {
       if (!eventType) return;
       void this.onEvent(eventType, env);
     });
-    // Hourly tick drives the (time-gated) weekly digest + the budget checker.
+    // Hourly tick drives the (time-gated) weekly digest. The handle is stored in
+    // this.timers and cleared in stop().
     const tick = setInterval(() => void this.tick(), 60 * 60 * 1000);
     if (typeof tick.unref === "function") tick.unref();
     this.timers.push(tick);
-    logger.info("Notification engine started (bus subscriber + hourly digest/budget tick)");
+    logger.info("Notification engine started (bus subscriber + hourly digest tick)");
   }
 
   stop(): void {
@@ -262,16 +263,25 @@ class NotificationEngine {
     const digest = getWeeklyDigest(7);
     const msg = renderDigestMessage(digest, dashboardOrigin());
     const channels = new Map(getNotificationChannels().map((c) => [c.id, c]));
+    let delivered = false;
     for (const rule of digestRules) {
       if (rule.channel_id == null) continue;
       const channel = channels.get(rule.channel_id);
       if (!channel || channel.enabled !== 1) continue;
-      await dispatchToChannel(channel, msg, {
+      const result = await dispatchToChannel(channel, msg, {
         trigger: "digest",
         target: rule.scope ?? "global",
         ruleId: rule.id,
         ruleName: rule.name,
       });
+      if (result.ok) delivered = true;
+    }
+    // Only record the week as sent once at least one channel accepted the digest,
+    // so a transient delivery outage during the send window doesn't silently
+    // burn this week's digest — the next tick (or restart) can retry.
+    if (!delivered) {
+      logger.warn({ weekKey, rules: digestRules.length }, "Weekly digest: no channel accepted delivery — not marking the week sent");
+      return;
     }
     upsertSettingOverride({ scope: "global", key: "digest.lastSentWeek", value: weekKey, updatedBy: "system" });
     logger.info({ weekKey, rules: digestRules.length }, "Weekly digest sent");
