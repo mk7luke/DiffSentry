@@ -93,6 +93,8 @@ async function main() {
     // Drop any cached DB singleton a prior import may have opened, so openDatabase
     // binds to the temp DB_PATH set above instead of returning a stale handle.
     dbModule.closeDatabase();
+    // openDatabase() runs applyMigrations() on the fresh DB_PATH, so the full
+    // command-center schema exists before recordRepo / the API endpoints touch it.
     const db = dbModule.openDatabase();
     if (!db) throw new Error("failed to open temp db");
     recordRepo({ owner: "acme", repo: "web", installationId: 42 });
@@ -269,9 +271,17 @@ async function main() {
     // Capture bus events through the real SSE stream (proves the action → bus →
     // SSE path on the shared bus instance the handlers use).
     const busEvents: Array<{ topic: string; payload: any }> = [];
+    // Resolve once the SSE response arrives — by then the server has flushed
+    // headers and (synchronously, before that) subscribed to the bus, so no
+    // event triggered afterwards can be missed. Beats a fixed sleep.
+    let resolveSseReady: () => void = () => {};
+    const sseReadyPromise = new Promise<void>((resolve) => {
+      resolveSseReady = resolve;
+    });
     sse = http.request(
       { hostname: "127.0.0.1", port, path: "/api/v1/stream", method: "GET", headers: { Accept: "text/event-stream", Cookie: `ds_session=${adminSess}` } },
       (res) => {
+        resolveSseReady();
         res.setEncoding("utf8");
         let buf = "";
         res.on("data", (chunk: string) => {
@@ -293,10 +303,11 @@ async function main() {
         });
       },
     );
-    sse.on("error", () => {});
+    sse.on("error", () => resolveSseReady());
     sse.end();
-    // Let the SSE connection establish before triggering actions.
-    await new Promise((r) => setTimeout(r, 80));
+    // Wait for the SSE connection to be established (or fail) before triggering
+    // actions, rather than guessing with a fixed delay.
+    await sseReadyPromise;
 
     // Poll busEvents for a matching frame (SSE delivery is async).
     async function waitForEvent(match: (e: { topic: string; payload: any }) => boolean): Promise<boolean> {
