@@ -190,9 +190,14 @@ export function Shell() {
   const drawerModalOpen = navOpen && isMobileNav;
 
   // Leaving the mobile breakpoint closes the drawer, so it can't silently
-  // reopen (and re-engage the modal) when the viewport returns to mobile.
+  // reopen (and re-engage the modal) when the viewport returns to mobile. Clear
+  // the focus-restore flag first: this isn't a user-initiated close and the
+  // menu button is hidden on desktop, so there's nothing to restore focus to.
   useEffect(() => {
-    if (!isMobileNav) setNavOpen(false);
+    if (!isMobileNav) {
+      restoreFocusRef.current = false;
+      setNavOpen(false);
+    }
   }, [isMobileNav]);
 
   // Close the drawer on any route change so a tapped nav link doesn't leave it
