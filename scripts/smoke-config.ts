@@ -52,8 +52,12 @@ interface CreateOrUpdateArgs {
 }
 
 async function main() {
-  // Snapshot the env we mutate so a harness that imports this script gets its
-  // process.env back (restored in the finally block).
+  // Snapshot the env vars we mutate so the finally block can restore them. This
+  // restores process.env only — it does NOT undo module-level state imported
+  // modules derive from env (e.g. the db singleton). That's fine because this is
+  // a CLI entry point (run via `tsx scripts/smoke-config.ts`), not a reusable
+  // in-process harness; the snapshot is just so a one-off import leaves the
+  // ambient environment as it found it.
   const prevEnv = {
     DB_PATH: process.env.DB_PATH,
     DASHBOARD_ADMIN_LOGINS: process.env.DASHBOARD_ADMIN_LOGINS,
@@ -273,14 +277,22 @@ async function main() {
     const busEvents: Array<{ topic: string; payload: any }> = [];
     // Resolve once the SSE response arrives — by then the server has flushed
     // headers and (synchronously, before that) subscribed to the bus, so no
-    // event triggered afterwards can be missed. Beats a fixed sleep.
+    // event triggered afterwards can be missed. Beats a fixed sleep. A request
+    // error or non-success status rejects instead, so a broken stream fails the
+    // test loudly rather than as a confusing missed-event assertion later.
     let resolveSseReady: () => void = () => {};
-    const sseReadyPromise = new Promise<void>((resolve) => {
+    let rejectSseReady: (err: Error) => void = () => {};
+    const sseReadyPromise = new Promise<void>((resolve, reject) => {
       resolveSseReady = resolve;
+      rejectSseReady = reject;
     });
     sse = http.request(
       { hostname: "127.0.0.1", port, path: "/api/v1/stream", method: "GET", headers: { Accept: "text/event-stream", Cookie: `ds_session=${adminSess}` } },
       (res) => {
+        if (res.statusCode !== 200) {
+          rejectSseReady(new Error(`SSE stream returned status ${res.statusCode}`));
+          return;
+        }
         resolveSseReady();
         res.setEncoding("utf8");
         let buf = "";
@@ -303,7 +315,7 @@ async function main() {
         });
       },
     );
-    sse.on("error", () => resolveSseReady());
+    sse.on("error", (err) => rejectSseReady(err));
     sse.end();
     // Wait for the SSE connection to be established (or fail) before triggering
     // actions, rather than guessing with a fixed delay.
