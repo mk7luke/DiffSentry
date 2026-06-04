@@ -195,21 +195,34 @@ async function main() {
           payload = JSON.stringify(opts.body);
           headers["Content-Type"] = "application/json";
         }
+        // Settle exactly once, and destroy the socket on error so a failed
+        // request can't leave a dangling connection for the finally to wait on.
+        let settled = false;
+        const finish = (fn: () => void) => {
+          if (settled) return;
+          settled = true;
+          fn();
+        };
         const r = http.request({ hostname: "127.0.0.1", port, path: `/api/v1${pathname}`, method, headers }, (res) => {
           const chunks: Buffer[] = [];
           res.on("data", (c) => chunks.push(c));
           res.on("end", () => {
-            const text = Buffer.concat(chunks).toString("utf8");
-            let json: any = null;
-            try {
-              json = text ? JSON.parse(text) : null;
-            } catch {
-              json = { _raw: text };
-            }
-            resolve({ status: res.statusCode ?? 0, json });
+            finish(() => {
+              const text = Buffer.concat(chunks).toString("utf8");
+              let json: any = null;
+              try {
+                json = text ? JSON.parse(text) : null;
+              } catch {
+                json = { _raw: text };
+              }
+              resolve({ status: res.statusCode ?? 0, json });
+            });
           });
         });
-        r.on("error", reject);
+        r.on("error", (err) => {
+          r.destroy();
+          finish(() => reject(err));
+        });
         if (payload) r.write(payload);
         r.end();
       });
