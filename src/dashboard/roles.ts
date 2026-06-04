@@ -34,6 +34,8 @@ export interface Capabilities {
   triageFindings: boolean;
   /** Trigger reviews (full/incremental re-review of a PR). */
   triggerReview: boolean;
+  /** Create / edit / delete / promote @bot learnings. */
+  manageLearnings: boolean;
   /** Change per-repo / global review configuration. */
   manageConfig: boolean;
   /** Grant/revoke per-login role overrides. */
@@ -42,6 +44,8 @@ export interface Capabilities {
   viewAudit: boolean;
   /** Manage notification channels + alert rules (and send tests). */
   manageNotifications: boolean;
+  /** Create / list / revoke platform API tokens. */
+  manageTokens: boolean;
 }
 
 /** Capability matrix by role. Keep in sync with the table in the README. */
@@ -52,10 +56,12 @@ export function capabilitiesFor(role: Role): Capabilities {
     viewDashboard: true,
     triageFindings: isAuthor,
     triggerReview: isAuthor,
+    manageLearnings: isAuthor,
     manageConfig: isAdmin,
     manageRoles: isAdmin,
     viewAudit: isAdmin,
     manageNotifications: isAdmin,
+    manageTokens: isAdmin,
   };
 }
 
@@ -109,15 +115,63 @@ interface DsUser {
   id: number;
 }
 
+// ─── Principals ─────────────────────────────────────────────────────────────
+// A request is authenticated either by an OAuth cookie session or by a bearer
+// API token. The auth gate (src/api/router.ts) attaches the resolved principal
+// to `req.dsPrincipal`; resolveActor turns it into the Actor that RBAC gates on.
+
+/** A bearer-token principal — set by the token-auth gate. Its role is derived
+ *  from scopes (a token never outranks `author`; admin actions stay cookie-only). */
+export interface TokenPrincipal {
+  kind: "token";
+  tokenId: number;
+  name: string | null;
+  scopes: string[];
+}
+
+/** A cookie-session principal — set by the OAuth gate. */
+export interface SessionPrincipal {
+  kind: "session";
+  login: string;
+  id: number;
+}
+
+export type DsPrincipal = TokenPrincipal | SessionPrincipal;
+
+/** Read the principal the auth gate attached to the request, if any. */
+export function getPrincipal(req: Request): DsPrincipal | undefined {
+  return (req as Request & { dsPrincipal?: DsPrincipal }).dsPrincipal;
+}
+
+/**
+ * Map a token's scopes to a role. A token with the `review` scope acts as an
+ * `author` (it can trigger the safe action subset); any other token is a
+ * read-only `viewer`. Tokens never resolve to `admin` — token-admin and other
+ * admin endpoints require a cookie session and a real admin login.
+ */
+export function roleForTokenScopes(scopes: string[]): Role {
+  return scopes.includes("review") ? "author" : "viewer";
+}
+
 /**
  * Resolve the acting user for a request.
  *
- * When auth is disabled (local/dev — no OAuth configured) there is no session
- * to gate on, so the local operator is treated as `admin`, matching the
- * dashboard's documented "open mode". When auth is enabled the upstream auth
- * gate has already attached `dsUser` (or answered 401), so it is present here.
+ * Precedence:
+ *   1. A bearer-token principal → role derived from its scopes (≤ author).
+ *   2. Cookie session (auth enabled) → role from the roles table / env.
+ *   3. Open mode (no OAuth configured) → the local operator is `admin`,
+ *      matching the dashboard's documented "open mode".
+ *
+ * When auth is enabled the upstream auth gate has already attached a principal
+ * (or answered 401), so a session principal is present here for cookie requests.
  */
 export function resolveActor(req: Request, cfg: RoleConfig, authEnabled: boolean): Actor {
+  const principal = getPrincipal(req);
+  if (principal?.kind === "token") {
+    const role = roleForTokenScopes(principal.scopes);
+    const login = principal.name ? `token:${principal.name}` : `token#${principal.tokenId}`;
+    return { login, id: 0, role, capabilities: capabilitiesFor(role) };
+  }
   const u = (req as Request & { dsUser?: DsUser }).dsUser;
   if (!authEnabled || !u) {
     return { login: u?.login ?? "local", id: u?.id ?? 0, role: "admin", capabilities: capabilitiesFor("admin") };

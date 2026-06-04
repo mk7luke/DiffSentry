@@ -54,3 +54,16 @@ export const logger = pino(
 export function getRecentLogs(limit = 100): LogEntry[] {
   return ring.slice(-limit);
 }
+
+/**
+ * Set the active log level at runtime (used by the command-center settings).
+ * Pino accepts any of its level names; an unrecognized value is ignored so a
+ * bad override can never silence the logger entirely.
+ */
+export function setLogLevel(level: string): void {
+  if (!Object.values(LEVEL_NAMES).includes(level)) {
+    logger.warn({ level }, "setLogLevel: ignoring unrecognized level");
+    return;
+  }
+  logger.level = level;
+}

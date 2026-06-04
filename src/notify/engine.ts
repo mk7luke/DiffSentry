@@ -5,7 +5,6 @@ import {
   getNotificationChannel,
   getNotificationChannels,
   getWeeklyDigest,
-  getCostSince,
   type AlertRuleRow,
   type NotificationChannelRow,
 } from "../dashboard/queries.js";
@@ -21,9 +20,10 @@ import {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Alert engine — subscribes to the in-process bus and fans matching events out
-// to the configured channels, recording every delivery. Also runs two timers:
-//   - a weekly digest (rules with event "digest")
-//   - a budget checker (emits budget.exceeded when spend crosses NOTIFY_BUDGET_USD)
+// to the configured channels, recording every delivery. Also runs a weekly
+// digest timer (rules with event "digest"). Budget alerts are consumed from the
+// cost feature's `budget.exceeded` event (it owns the DB-configured budgets) —
+// the engine just delivers them to the matching channels.
 //
 // Everything is best-effort: the engine never throws into a bus handler, and it
 // degrades to a no-op when persistence is off (no rules/channels to read).
@@ -154,8 +154,6 @@ function isoWeekKey(d: Date): string {
 class NotificationEngine {
   private unsub: (() => void) | null = null;
   private timers: NodeJS.Timeout[] = [];
-  /** Month keys ("YYYY-MM") already budget-alerted this process, to avoid spam. */
-  private budgetAlerted = new Set<string>();
 
   start(): void {
     if (this.unsub) return; // already started
@@ -236,26 +234,10 @@ class NotificationEngine {
 
   private async tick(): Promise<void> {
     try {
-      this.checkBudget();
       await this.maybeSendDigest();
     } catch (err) {
       logger.debug({ err }, "notification engine: tick failed");
     }
-  }
-
-  /** Compare 30-day spend against the global budget; emit budget.exceeded once
-   *  per calendar month when it is crossed. The bus event drives dispatch. */
-  private checkBudget(): void {
-    const limitRaw = Number.parseFloat(process.env.NOTIFY_BUDGET_USD ?? "");
-    if (!Number.isFinite(limitRaw) || limitRaw <= 0) return;
-    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const spent = getCostSince(since);
-    if (spent <= limitRaw) return;
-    const now = new Date();
-    const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
-    if (this.budgetAlerted.has(monthKey)) return;
-    this.budgetAlerted.add(monthKey);
-    bus.publish("budget.exceeded", { scope: "global", window: "30d", spentUsd: spent, limitUsd: limitRaw });
   }
 
   /** Send the weekly digest if it's the configured weekday+hour (UTC) and this

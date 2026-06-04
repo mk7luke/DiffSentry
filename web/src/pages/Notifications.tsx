@@ -5,9 +5,9 @@ import {
   useUpdateChannel,
   useDeleteChannel,
   useTestChannel,
-  useCreateRule,
-  useUpdateRule,
-  useDeleteRule,
+  useCreateAlertRule,
+  useUpdateAlertRule,
+  useDeleteAlertRule,
 } from "../api/hooks";
 import { useAuth } from "../auth/useAuth";
 import { useToast } from "../realtime/toast";
@@ -238,9 +238,9 @@ function ChannelsCard({ channels }: { channels: NotificationChannel[] }) {
 // ─── Rules ──────────────────────────────────────────────────────────
 
 function RulesCard({ rules, channels }: { rules: AlertRule[]; channels: NotificationChannel[] }) {
-  const create = useCreateRule();
-  const update = useUpdateRule();
-  const del = useDeleteRule();
+  const create = useCreateAlertRule();
+  const update = useUpdateAlertRule();
+  const del = useDeleteAlertRule();
   const { push } = useToast();
 
   const [event, setEvent] = useState("finding");

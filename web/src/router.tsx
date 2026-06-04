@@ -1,14 +1,30 @@
+import { lazy, Suspense } from "react";
 import { createBrowserRouter } from "react-router-dom";
 import { Shell } from "./components/Shell";
 import { OverviewPage } from "./pages/Overview";
+import { ImpactPage } from "./pages/Impact";
+import { QueuePage } from "./pages/Queue";
 import { RepoDetailPage } from "./pages/RepoDetail";
 import { PRDetailPage } from "./pages/PRDetail";
 import { FindingsPage } from "./pages/Findings";
+import { RecurringPage } from "./pages/Recurring";
 import { PatternsPage } from "./pages/Patterns";
+import { CostPage } from "./pages/Cost";
+import { RulesPage } from "./pages/Rules";
+import { LeaderboardPage } from "./pages/Leaderboard";
+import { TrendsPage } from "./pages/Trends";
+import { LearningsPage } from "./pages/Learnings";
 import { SettingsPage } from "./pages/Settings";
+import { DiagnosticsPage } from "./pages/Diagnostics";
 import { AuditPage } from "./pages/Audit";
 import { NotificationsPage } from "./pages/Notifications";
-import { NotFoundState } from "./components/states";
+import { ApiTokensPage } from "./pages/ApiTokens";
+import { WebhooksPage } from "./pages/Webhooks";
+import { LoadingState, NotFoundState } from "./components/states";
+
+// Code editor (CodeMirror) only loads on the config screen, so split it out of
+// the main bundle.
+const RepoConfigPage = lazy(() => import("./pages/RepoConfig").then((m) => ({ default: m.RepoConfigPage })));
 
 function NotFoundPage() {
   return (
@@ -28,13 +44,32 @@ export const router = createBrowserRouter([
     element: <Shell />,
     children: [
       { path: "/", element: <OverviewPage /> },
+      { path: "/impact", element: <ImpactPage /> },
+      { path: "/queue", element: <QueuePage /> },
+      {
+        path: "/repos/:owner/:repo/config",
+        element: (
+          <Suspense fallback={<LoadingState label="Loading config editor…" />}>
+            <RepoConfigPage />
+          </Suspense>
+        ),
+      },
       { path: "/repos/:owner/:repo", element: <RepoDetailPage /> },
       { path: "/repos/:owner/:repo/pr/:number", element: <PRDetailPage /> },
       { path: "/findings", element: <FindingsPage /> },
+      { path: "/findings/recurring", element: <RecurringPage /> },
       { path: "/patterns", element: <PatternsPage /> },
+      { path: "/cost", element: <CostPage /> },
+      { path: "/rules", element: <RulesPage /> },
+      { path: "/leaderboard", element: <LeaderboardPage /> },
+      { path: "/trends", element: <TrendsPage /> },
+      { path: "/learnings", element: <LearningsPage /> },
       { path: "/audit", element: <AuditPage /> },
+      { path: "/webhooks", element: <WebhooksPage /> },
+      { path: "/tokens", element: <ApiTokensPage /> },
       { path: "/notifications", element: <NotificationsPage /> },
       { path: "/settings", element: <SettingsPage /> },
+      { path: "/settings/diagnostics", element: <DiagnosticsPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],
   },

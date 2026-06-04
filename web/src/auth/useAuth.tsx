@@ -11,10 +11,12 @@ const VIEWER_CAPS: Capabilities = {
   viewDashboard: true,
   triageFindings: false,
   triggerReview: false,
+  manageLearnings: false,
   manageConfig: false,
   manageRoles: false,
   viewAudit: false,
   manageNotifications: false,
+  manageTokens: false,
 };
 
 export interface AuthState {

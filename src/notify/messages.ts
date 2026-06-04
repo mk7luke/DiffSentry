@@ -1,5 +1,5 @@
 import type {
-  BudgetExceededPayload,
+  BudgetAlertPayload,
   FindingSurfacedPayload,
   ReviewLifecyclePayload,
 } from "../realtime/bus.js";
@@ -67,16 +67,16 @@ export function renderReviewFailedMessage(p: ReviewLifecyclePayload): ChannelMes
   };
 }
 
-export function renderBudgetMessage(p: BudgetExceededPayload): ChannelMessage {
+export function renderBudgetMessage(p: BudgetAlertPayload): ChannelMessage {
   return {
     title: `DiffSentry: AI budget exceeded (${p.scope})`,
-    text: `Spend over ${p.window} reached $${p.spentUsd.toFixed(2)} of the $${p.limitUsd.toFixed(2)} budget for ${p.scope}.`,
+    text: `Spend for ${p.month} reached $${p.spentUsd.toFixed(2)} of the $${p.budgetUsd.toFixed(2)} budget for ${p.scope}.`,
     severity: "major",
     fields: [
       { label: "Scope", value: p.scope },
-      { label: "Window", value: p.window },
+      { label: "Month", value: p.month },
       { label: "Spent", value: `$${p.spentUsd.toFixed(2)}` },
-      { label: "Budget", value: `$${p.limitUsd.toFixed(2)}` },
+      { label: "Budget", value: `$${p.budgetUsd.toFixed(2)}` },
     ],
   };
 }

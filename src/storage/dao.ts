@@ -1,6 +1,6 @@
 import type { Database as DB } from "better-sqlite3";
 import { openDatabase } from "./db.js";
-import type { IssueContext, PRContext, ReviewComment, ReviewResult } from "../types.js";
+import type { AntiPattern, CommentSeverity, CommentType, IssueContext, PRContext, ReviewComment, ReviewResult } from "../types.js";
 import type { RiskAssessment } from "../insights.js";
 import { logger } from "../logger.js";
 
@@ -530,6 +530,335 @@ export function deleteSettingOverride(scope: string, key: string): void {
   }
 }
 
+/** One override mutation in a settings batch: set `value` for `key`, or clear it. */
+export interface SettingChange {
+  key: string;
+  /** When true the override is deleted (revert to default); `value` is ignored. */
+  clear: boolean;
+  value: unknown;
+}
+
+/**
+ * Apply a batch of settings overrides for one scope atomically, writing an
+ * `audit_log` row for each in the SAME transaction — either every override +
+ * audit row persists, or none do. Unlike the per-call helpers above (which each
+ * open the db and swallow errors), this owns one transaction so a mid-batch
+ * failure rolls the whole thing back.
+ *
+ * Return values let the caller decide whether to emit bus events:
+ *   - true  → committed, OR persistence is gracefully off (no db / schema absent),
+ *             matching the documented no-op behavior — the caller may still notify.
+ *   - false → a real failure (invalid scope/key, unrepresentable value, or the
+ *             transaction threw): nothing persisted, so the caller must NOT
+ *             audit/publish success.
+ *
+ * The audit payload (`{ value }`) and actions (`settings.set` / `settings.clear`)
+ * mirror what insertAuditLog wrote per-call before, so existing audit readers
+ * are unaffected.
+ */
+export function commitSettingsChanges(opts: {
+  scope: string;
+  updatedBy?: string | null;
+  actorLogin?: string | null;
+  actorRole?: string | null;
+  changes: SettingChange[];
+}): boolean {
+  const db = openDatabase();
+  if (!db) return true; // persistence off — graceful no-op
+  if (!ensureCommandCenterSchema(db, ["settings_overrides", "audit_log"])) return true;
+  if (!isValidScope(opts.scope)) {
+    logger.debug({ scope: opts.scope }, "dao.commitSettingsChanges: invalid scope — skipping write");
+    return false;
+  }
+  if (opts.changes.length === 0) return true;
+
+  // Validate keys + serialize values BEFORE opening the transaction, so a bad
+  // entry aborts the whole batch without partially writing anything.
+  const prepared: Array<{ key: string; clear: boolean; valueJson: string | null; auditJson: string | null }> = [];
+  for (const c of opts.changes) {
+    if (!isValidKey(c.key)) {
+      logger.debug({ scope: opts.scope, key: c.key }, "dao.commitSettingsChanges: invalid key — aborting batch");
+      return false;
+    }
+    let valueJson: string | null = null;
+    if (!c.clear) {
+      valueJson = safeJsonStringify(c.value);
+      if (valueJson == null) {
+        logger.debug(
+          { scope: opts.scope, key: c.key },
+          "dao.commitSettingsChanges: value not JSON-serializable — aborting batch",
+        );
+        return false;
+      }
+    }
+    // Audit payload mirrors the prior per-call shape: { value } (null on clear).
+    const auditJson = safeJsonStringify({ value: c.clear ? null : c.value });
+    prepared.push({ key: c.key, clear: c.clear, valueJson, auditJson });
+  }
+
+  try {
+    const now = new Date().toISOString();
+    const upsert = db.prepare(
+      `INSERT INTO settings_overrides (scope, key, value_json, updated_by, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(scope, key) DO UPDATE SET
+         value_json = excluded.value_json,
+         updated_by = excluded.updated_by,
+         updated_at = excluded.updated_at`,
+    );
+    const del = db.prepare(`DELETE FROM settings_overrides WHERE scope = ? AND key = ?`);
+    const audit = db.prepare(
+      `INSERT INTO audit_log (ts, actor_login, actor_role, action, target_type, target_ref, payload_json, result)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const tx = db.transaction((rows: typeof prepared) => {
+      for (const p of rows) {
+        if (p.clear) {
+          del.run(opts.scope, p.key);
+        } else {
+          upsert.run(opts.scope, p.key, p.valueJson, opts.updatedBy ?? null, now);
+        }
+        audit.run(
+          now,
+          opts.actorLogin ?? null,
+          opts.actorRole ?? null,
+          p.clear ? "settings.clear" : "settings.set",
+          "setting",
+          `${opts.scope}:${p.key}`,
+          p.auditJson == null ? null : p.auditJson.slice(0, 100_000),
+          "ok",
+        );
+      }
+    });
+    tx(prepared);
+    return true;
+  } catch (err) {
+    logger.debug({ err, scope: opts.scope }, "dao.commitSettingsChanges failed — rolled back");
+    return false;
+  }
+}
+
+// ─── Custom anti-pattern rules (admin-authored, migration v3) ──────────────
+
+/** Canonical severities/types a custom rule may use — mirror types.ts. */
+export const CUSTOM_RULE_SEVERITIES = ["critical", "major", "minor", "trivial"] as const;
+export const CUSTOM_RULE_TYPES = ["issue", "suggestion", "nitpick", "documentation", "security"] as const;
+/** Rule kinds the engine can compile. AST is reserved for a future migration. */
+export const CUSTOM_RULE_KINDS = ["regex"] as const;
+
+/** A row from the custom_rules table, as stored. */
+export interface CustomRuleRow {
+  id: number;
+  scope: string;
+  kind: string;
+  name: string;
+  severity: string;
+  type: string;
+  pattern: string;
+  flags: string | null;
+  path_glob: string | null;
+  message: string | null;
+  advice: string | null;
+  enabled: number;
+  created_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+/** Writable fields for create/update. `enabled` defaults to true on create. */
+export interface CustomRuleInput {
+  scope?: string;
+  kind?: string;
+  name: string;
+  severity?: string;
+  type?: string;
+  pattern: string;
+  flags?: string | null;
+  pathGlob?: string | null;
+  message?: string | null;
+  advice?: string | null;
+  enabled?: boolean;
+}
+
+/** List every custom rule (newest first). Empty when persistence is off. */
+export function listCustomRules(opts: { scope?: string } = {}): CustomRuleRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  if (!ensureCommandCenterSchema(db, ["custom_rules"])) return [];
+  try {
+    if (opts.scope) {
+      return db
+        .prepare(`SELECT * FROM custom_rules WHERE scope = ? ORDER BY id DESC`)
+        .all(opts.scope) as CustomRuleRow[];
+    }
+    return db.prepare(`SELECT * FROM custom_rules ORDER BY id DESC`).all() as CustomRuleRow[];
+  } catch (err) {
+    logger.debug({ err }, "dao.listCustomRules failed");
+    return [];
+  }
+}
+
+/** Fetch a single custom rule by id, or null when missing / disabled. */
+export function getCustomRule(id: number): CustomRuleRow | null {
+  const db = openDatabase();
+  if (!db) return null;
+  if (!ensureCommandCenterSchema(db, ["custom_rules"])) return null;
+  try {
+    const row = db.prepare(`SELECT * FROM custom_rules WHERE id = ?`).get(id) as CustomRuleRow | undefined;
+    return row ?? null;
+  } catch (err) {
+    logger.debug({ err, id }, "dao.getCustomRule failed");
+    return null;
+  }
+}
+
+/**
+ * True when a custom rule with this exact name already exists (optionally
+ * excluding one id, for renames). Custom-rule names must be globally unique
+ * because pattern_hits is joined back to rules by name — two same-named rules
+ * would merge their hit-counts. Returns false when persistence is off; the
+ * UNIQUE index on custom_rules(name) is the hard backstop.
+ */
+export function customRuleNameExists(name: string, excludeId?: number): boolean {
+  const db = openDatabase();
+  if (!db) return false;
+  if (!ensureCommandCenterSchema(db, ["custom_rules"])) return false;
+  try {
+    const row =
+      excludeId != null
+        ? db.prepare(`SELECT 1 FROM custom_rules WHERE name = ? AND id <> ? LIMIT 1`).get(name, excludeId)
+        : db.prepare(`SELECT 1 FROM custom_rules WHERE name = ? LIMIT 1`).get(name);
+    return row != null;
+  } catch (err) {
+    logger.debug({ err }, "dao.customRuleNameExists failed");
+    return false;
+  }
+}
+
+/** Insert a new custom rule. Returns the new id, or null when disabled. */
+export function insertCustomRule(input: CustomRuleInput, createdBy?: string | null): number | null {
+  const db = openDatabase();
+  if (!db) return null;
+  if (!ensureCommandCenterSchema(db, ["custom_rules"])) return null;
+  try {
+    const now = new Date().toISOString();
+    const info = db
+      .prepare(
+        `INSERT INTO custom_rules
+           (scope, kind, name, severity, type, pattern, flags, path_glob, message, advice, enabled, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.scope ?? "global",
+        input.kind ?? "regex",
+        input.name,
+        input.severity ?? "minor",
+        input.type ?? "suggestion",
+        input.pattern,
+        input.flags ?? null,
+        input.pathGlob ?? null,
+        input.message ?? null,
+        input.advice ?? null,
+        input.enabled === false ? 0 : 1,
+        createdBy ?? null,
+        now,
+        now,
+      );
+    return Number(info.lastInsertRowid);
+  } catch (err) {
+    logger.debug({ err }, "dao.insertCustomRule failed");
+    return null;
+  }
+}
+
+/**
+ * Update an existing custom rule in place. Only the provided fields change.
+ * Returns true when a row was updated, false otherwise (missing / disabled DB).
+ */
+export function updateCustomRule(id: number, input: Partial<CustomRuleInput>): boolean {
+  const db = openDatabase();
+  if (!db) return false;
+  if (!ensureCommandCenterSchema(db, ["custom_rules"])) return false;
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  const push = (col: string, val: unknown) => {
+    sets.push(`${col} = ?`);
+    vals.push(val);
+  };
+  if (input.scope !== undefined) push("scope", input.scope);
+  if (input.kind !== undefined) push("kind", input.kind);
+  if (input.name !== undefined) push("name", input.name);
+  if (input.severity !== undefined) push("severity", input.severity);
+  if (input.type !== undefined) push("type", input.type);
+  if (input.pattern !== undefined) push("pattern", input.pattern);
+  if (input.flags !== undefined) push("flags", input.flags ?? null);
+  if (input.pathGlob !== undefined) push("path_glob", input.pathGlob ?? null);
+  if (input.message !== undefined) push("message", input.message ?? null);
+  if (input.advice !== undefined) push("advice", input.advice ?? null);
+  if (input.enabled !== undefined) push("enabled", input.enabled ? 1 : 0);
+  if (sets.length === 0) return false;
+  push("updated_at", new Date().toISOString());
+  try {
+    const info = db.prepare(`UPDATE custom_rules SET ${sets.join(", ")} WHERE id = ?`).run(...vals, id);
+    return info.changes > 0;
+  } catch (err) {
+    logger.debug({ err, id }, "dao.updateCustomRule failed");
+    return false;
+  }
+}
+
+/** Delete a custom rule. Returns true when a row was removed. */
+export function deleteCustomRule(id: number): boolean {
+  const db = openDatabase();
+  if (!db) return false;
+  if (!ensureCommandCenterSchema(db, ["custom_rules"])) return false;
+  try {
+    const info = db.prepare(`DELETE FROM custom_rules WHERE id = ?`).run(id);
+    return info.changes > 0;
+  } catch (err) {
+    logger.debug({ err, id }, "dao.deleteCustomRule failed");
+    return false;
+  }
+}
+
+/** An AntiPattern plus its DB id, so recorded hits can be tied back to the exact
+ * admin rule (the stable analytics key) rather than matched by name. */
+export type CustomRuleForEngine = AntiPattern & { id: number };
+
+/**
+ * Load the enabled custom rules that apply to a repo — global rules plus any
+ * scoped to exactly `owner/repo` — shaped as AntiPattern (+ id) for the pattern
+ * engine. Empty when persistence is off, so the engine simply runs without them.
+ */
+export function listCustomRulesForRepo(owner: string, repo: string): CustomRuleForEngine[] {
+  const db = openDatabase();
+  if (!db) return [];
+  if (!ensureCommandCenterSchema(db, ["custom_rules"])) return [];
+  try {
+    const rows = db
+      .prepare(
+        `SELECT * FROM custom_rules
+         WHERE enabled = 1 AND kind = 'regex' AND (scope = 'global' OR scope = ?)
+         ORDER BY id ASC`,
+      )
+      .all(`${owner}/${repo}`) as CustomRuleRow[];
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      pattern: r.pattern,
+      flags: r.flags ?? undefined,
+      severity: (r.severity as CommentSeverity) ?? "minor",
+      type: (r.type as CommentType) ?? "suggestion",
+      message: r.message ?? undefined,
+      advice: r.advice ?? undefined,
+      path: r.path_glob ?? undefined,
+    }));
+  } catch (err) {
+    logger.debug({ err, owner, repo }, "dao.listCustomRulesForRepo failed");
+    return [];
+  }
+}
+
 /** Record an AI cost/usage event. Returns the rowid, or null when disabled. */
 export function recordCostEvent(opts: {
   owner?: string | null;
@@ -678,6 +1007,142 @@ export function triageFinding(opts: {
   }
 }
 
+/** A finding's PR coordinates — used to attribute triage events on the bus. */
+export interface FindingCoords {
+  id: number;
+  owner: string;
+  repo: string;
+  number: number;
+  fingerprint: string | null;
+}
+
+/**
+ * Resolve the PR coordinates (owner/repo/number) for a set of finding ids.
+ * Used by the API to publish an `action.performed` bus event per affected PR
+ * after a triage write. Returns [] when persistence is disabled or no id
+ * matched. Ids are bound positionally — never interpolated into the SQL text.
+ */
+export function getFindingCoords(ids: number[]): FindingCoords[] {
+  const db = openDatabase();
+  if (!db || ids.length === 0) return [];
+  try {
+    const placeholders = ids.map(() => "?").join(", ");
+    return db
+      .prepare(
+        `SELECT fi.id, rv.owner, rv.repo, rv.number, fi.fingerprint
+         FROM findings fi
+         JOIN reviews rv ON rv.id = fi.review_id
+         WHERE fi.id IN (${placeholders})`,
+      )
+      .all(...ids) as FindingCoords[];
+  } catch (err) {
+    logger.debug({ err }, "dao.getFindingCoords failed");
+    return [];
+  }
+}
+
+/**
+ * Every finding id sharing a fingerprint — the "dismiss a whole class" path.
+ * Capped so a pathological fingerprint can't trigger an unbounded UPDATE.
+ */
+export function getFindingIdsByFingerprint(fingerprint: string, limit = 1000): number[] {
+  const db = openDatabase();
+  if (!db || !fingerprint) return [];
+  try {
+    const cap = Math.min(Math.max(limit, 1), 5000);
+    const rows = db
+      .prepare(`SELECT id FROM findings WHERE fingerprint = ? ORDER BY id DESC LIMIT ?`)
+      .all(fingerprint, cap) as Array<{ id: number }>;
+    return rows.map((r) => r.id);
+  } catch (err) {
+    logger.debug({ err }, "dao.getFindingIdsByFingerprint failed");
+    return [];
+  }
+}
+
+/**
+ * Apply the same triage state to many findings in one statement. Mirrors
+ * triageFinding's safe-fragment construction (no column name is interpolated)
+ * but binds an `IN (...)` list of ids. Returns the number of rows actually
+ * changed (rows already at the target state are left untouched by the null-safe
+ * `IS NOT` diff predicate, so re-applying is a no-op).
+ */
+export function bulkTriageFindings(opts: {
+  ids: number[];
+  accepted?: boolean | null;
+  snoozedUntil?: string | null;
+  triagedBy?: string | null;
+  triageNote?: string | null;
+}): number {
+  const db = openDatabase();
+  if (!db || opts.ids.length === 0) return 0;
+  if (!ensureCommandCenterSchema(db, [], REQUIRED_FINDINGS_COLUMNS)) return 0;
+  try {
+    const updates: Array<{ set: string; diff: string; value: unknown }> = [];
+    if (opts.accepted !== undefined) {
+      updates.push({
+        set: "accepted = ?",
+        diff: "accepted IS NOT ?",
+        value: opts.accepted == null ? null : opts.accepted ? 1 : 0,
+      });
+    }
+    if (opts.snoozedUntil !== undefined) {
+      updates.push({ set: "snoozed_until = ?", diff: "snoozed_until IS NOT ?", value: opts.snoozedUntil });
+    }
+    if (opts.triageNote !== undefined) {
+      updates.push({ set: "triage_note = ?", diff: "triage_note IS NOT ?", value: opts.triageNote });
+    }
+    if (opts.triagedBy !== undefined) {
+      updates.push({ set: "triaged_by = ?", diff: "triaged_by IS NOT ?", value: opts.triagedBy });
+    }
+    if (updates.length === 0) return 0;
+
+    const setClauses = updates.map((u) => u.set);
+    const setValues = updates.map((u) => u.value);
+    const diffPredicates = updates.map((u) => u.diff);
+    const diffValues = updates.map((u) => u.value);
+    setClauses.push("triaged_at = ?");
+    setValues.push(new Date().toISOString());
+
+    const placeholders = opts.ids.map(() => "?").join(", ");
+    // Placeholder order: every SET value, then the id list, then every
+    // diff-predicate value. The .run() args mirror that order exactly.
+    const sql = `UPDATE findings SET ${setClauses.join(", ")} WHERE id IN (${placeholders}) AND (${diffPredicates.join(" OR ")})`;
+    const info = db.prepare(sql).run(...setValues, ...opts.ids, ...diffValues);
+    return info.changes;
+  } catch (err) {
+    logger.debug({ err }, "dao.bulkTriageFindings failed");
+    return 0;
+  }
+}
+
+/**
+ * The set of fingerprints a review may suppress: findings explicitly dismissed
+ * (accepted = 0) or currently snoozed (snoozed_until in the future). This is the
+ * read the engine consults when DIFFSENTRY_SUPPRESS_DISMISSED is enabled — it
+ * is opt-in precisely because it changes review output. Returns an empty set
+ * (never throws) when persistence or the v2 schema is unavailable, so the
+ * engine degrades to its default behavior.
+ */
+export function getSuppressedFingerprints(nowIso = new Date().toISOString()): Set<string> {
+  const db = openDatabase();
+  if (!db) return new Set();
+  if (!ensureCommandCenterSchema(db, [], REQUIRED_FINDINGS_COLUMNS)) return new Set();
+  try {
+    const rows = db
+      .prepare(
+        `SELECT DISTINCT fingerprint FROM findings
+         WHERE fingerprint IS NOT NULL AND fingerprint <> ''
+           AND (accepted = 0 OR (snoozed_until IS NOT NULL AND snoozed_until > ?))`,
+      )
+      .all(nowIso) as Array<{ fingerprint: string }>;
+    return new Set(rows.map((r) => r.fingerprint));
+  } catch (err) {
+    logger.debug({ err }, "dao.getSuppressedFingerprints failed");
+    return new Set();
+  }
+}
+
 /** Canonical command-center roles the dashboard gates write access on. */
 export const VALID_ROLES = ["viewer", "author", "admin"] as const;
 export type Role = (typeof VALID_ROLES)[number];
@@ -752,9 +1217,126 @@ export function getRole(login: string | null | undefined): Role | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// API tokens — bearer credentials for the platform API. The plaintext token is
+// shown to its creator exactly once; only a SHA-256 hash is persisted. Auth
+// looks a token up by hash (the hash column is indexed), checks it is not
+// revoked, and bumps last_used_at. All best-effort no-ops when the DB is off.
+// Token minting/hashing lives in src/api/token-auth.ts; this layer only stores
+// and retrieves rows.
+// ---------------------------------------------------------------------------
+
+export interface ApiTokenRow {
+  id: number;
+  name: string | null;
+  created_by: string | null;
+  created_at: string | null;
+  last_used_at: string | null;
+  scopes_json: string | null;
+  revoked_at: string | null;
+}
+
+/** Insert an API token (its hash + scopes). Returns the new id, or null when
+ *  persistence is disabled. The caller passes the already-computed hash so the
+ *  plaintext never reaches storage. */
+export function createApiToken(opts: {
+  name?: string | null;
+  tokenHash: string;
+  scopes: string[];
+  createdBy?: string | null;
+}): number | null {
+  const db = openDatabase();
+  if (!db) return null;
+  if (!ensureCommandCenterSchema(db, ["api_tokens"])) return null;
+  try {
+    const info = db.prepare(
+      `INSERT INTO api_tokens (name, token_hash, created_by, created_at, scopes_json)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(
+      opts.name ?? null,
+      opts.tokenHash,
+      opts.createdBy ?? null,
+      new Date().toISOString(),
+      JSON.stringify(opts.scopes ?? []),
+    );
+    return Number(info.lastInsertRowid);
+  } catch (err) {
+    logger.debug({ err }, "dao.createApiToken failed");
+    return null;
+  }
+}
+
+/** List API tokens (metadata only — never the hash). Newest first. */
+export function listApiTokens(): ApiTokenRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  if (!ensureCommandCenterSchema(db, ["api_tokens"])) return [];
+  try {
+    return db.prepare(
+      `SELECT id, name, created_by, created_at, last_used_at, scopes_json, revoked_at
+       FROM api_tokens ORDER BY id DESC`,
+    ).all() as ApiTokenRow[];
+  } catch (err) {
+    logger.debug({ err }, "dao.listApiTokens failed");
+    return [];
+  }
+}
+
+/**
+ * Revoke a token by id. Idempotent: only stamps revoked_at when it is still
+ * NULL, so re-revoking is a harmless no-op. Returns true when a row actually
+ * transitioned from active to revoked.
+ */
+export function revokeApiToken(id: number): boolean {
+  const db = openDatabase();
+  if (!db) return false;
+  if (!ensureCommandCenterSchema(db, ["api_tokens"])) return false;
+  try {
+    const info = db.prepare(
+      `UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
+    ).run(new Date().toISOString(), id);
+    return info.changes > 0;
+  } catch (err) {
+    logger.debug({ err }, "dao.revokeApiToken failed");
+    return false;
+  }
+}
+
+/**
+ * Look up an ACTIVE (non-revoked) token by its hash — the auth hot path.
+ * Returns undefined when the token is unknown, revoked, or persistence is off.
+ */
+export function findActiveApiTokenByHash(tokenHash: string): ApiTokenRow | undefined {
+  const db = openDatabase();
+  if (!db) return undefined;
+  if (!ensureCommandCenterSchema(db, ["api_tokens"])) return undefined;
+  try {
+    const row = db.prepare(
+      `SELECT id, name, created_by, created_at, last_used_at, scopes_json, revoked_at
+       FROM api_tokens WHERE token_hash = ? AND revoked_at IS NULL`,
+    ).get(tokenHash) as ApiTokenRow | undefined;
+    return row ?? undefined;
+  } catch (err) {
+    logger.debug({ err }, "dao.findActiveApiTokenByHash failed");
+    return undefined;
+  }
+}
+
+/** Best-effort bump of a token's last_used_at on a successful authentication. */
+export function touchApiTokenLastUsed(id: number): void {
+  const db = openDatabase();
+  if (!db) return;
+  if (!ensureCommandCenterSchema(db, ["api_tokens"])) return;
+  try {
+    db.prepare(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`).run(new Date().toISOString(), id);
+  } catch (err) {
+    logger.debug({ err }, "dao.touchApiTokenLastUsed failed");
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Notifications — channel + alert-rule config and the delivery log. Channels
 // and rules live in the v2 schema (notification_channels / alert_rules);
-// deliveries in the v3 notification_deliveries table. All best-effort no-ops
+// deliveries in the v4 notification_deliveries table. All best-effort no-ops
 // when persistence is disabled or the table is missing, matching every other
 // helper here. Reads live in src/dashboard/queries.ts.
 // ---------------------------------------------------------------------------
@@ -978,17 +1560,24 @@ export function recordPatternHits(opts: {
   owner: string;
   repo: string;
   reviewId: number | null;
-  hits: Array<{ ruleName: string; source: "builtin" | "custom" | "safety"; fingerprint?: string }>;
+  hits: Array<{
+    ruleName: string;
+    source: "builtin" | "custom" | "safety";
+    fingerprint?: string;
+    /** Set only for admin-authored custom rules — the stable join key analytics
+     * use so they're never conflated with same-named YAML anti_patterns. */
+    customRuleId?: number | null;
+  }>;
 }): void {
   const db = openDatabase();
   if (!db || opts.hits.length === 0) return;
   try {
     const stmt = db.prepare(
-      `INSERT INTO pattern_hits (owner, repo, rule_name, source, fingerprint, review_id) VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO pattern_hits (owner, repo, rule_name, source, fingerprint, review_id, custom_rule_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
     const tx = db.transaction((rows: typeof opts.hits) => {
       for (const r of rows) {
-        stmt.run(opts.owner, opts.repo, r.ruleName, r.source, r.fingerprint ?? null, opts.reviewId);
+        stmt.run(opts.owner, opts.repo, r.ruleName, r.source, r.fingerprint ?? null, opts.reviewId, r.customRuleId ?? null);
       }
     });
     tx(opts.hits);
