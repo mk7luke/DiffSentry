@@ -97,7 +97,7 @@ function Sidebar({ onNavigate }: { onNavigate: () => void }) {
   };
 
   return (
-    <aside className="sidebar" aria-label="Sidebar">
+    <aside id="app-sidebar" className="sidebar" aria-label="Sidebar">
       <NavLink to="/" className="sidebar-head" onClick={onNavigate}>
         <LogoIcon />
         <div>
@@ -192,7 +192,7 @@ export function Shell() {
         <OfflinePill />
       </header>
 
-      <div id="app-sidebar" className="sidebar-wrap">
+      <div className="sidebar-wrap">
         <Sidebar onNavigate={() => setNavOpen(false)} />
         {/* Close button lives inside the drawer on mobile (hidden on desktop). */}
         <button className="drawer-close" aria-label="Close navigation" onClick={() => setNavOpen(false)}>

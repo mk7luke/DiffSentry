@@ -152,7 +152,16 @@ export function applyPersistedDataForOwner(login: string | null, queryClient: Qu
     return;
   }
 
-  // Same owner with nothing staged, or a genuine first run — just claim it.
+  // Already this user's verified cache, nothing staged — leave it as is.
+  if (owner === login) return;
+
+  // Genuine first run on this device (no owner marker yet). The persistence
+  // subscriber may already have written an *ownerless* blob this session, so
+  // drop any persisted client before claiming the cache — we never bind an
+  // unverified on-disk blob to this login. The live queryClient is untouched
+  // (no clear / refetch); the subscriber re-persists under the new owner on the
+  // next change.
+  if (persister) void persister.removeClient();
   store.setItem(OWNER_KEY, login);
 }
 
