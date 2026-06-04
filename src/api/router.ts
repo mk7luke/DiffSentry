@@ -18,6 +18,7 @@ import {
 import { insertAuditLog, setRole } from "../storage/dao.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
+import { registerDiagnosticsRoutes, type DiagnosticsProvider } from "./diagnostics.js";
 import { registerConfigRoutes, loadRepoConfigYaml } from "./config.js";
 import { registerLearningRoutes } from "./learnings.js";
 import { reviewQueue } from "../realtime/queue.js";
@@ -77,6 +78,12 @@ export interface ApiDeps {
    * the SSE stream are still mounted, but actions have nothing to drive — so
    * they are only registered when a reviewer is provided. */
   reviewer?: ReviewerActions;
+  /** First-run diagnostics surface (AI probe + GitHub App introspection).
+   * The /diagnostics routes are always mounted; when this is omitted only the
+   * provider-backed probes (test-ai, GitHub introspection) return an explicit
+   * "unavailable" result — the static env+DB checks and webhook self-test still
+   * work. */
+  diagnostics?: DiagnosticsProvider;
   /** Re-dispatches a stored webhook delivery (records a flagged replay row +
    * runs the same engine path). When omitted, GET /webhooks still works but
    * POST /webhooks/:id/replay answers 503. */
@@ -257,6 +264,13 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   if (deps.reviewer) {
     registerActionRoutes(router, { reviewer: deps.reviewer, requireRole, csrf });
   }
+
+  // ─── Guided first-run diagnostics (read viewer+, tests author+) ─────
+  // Always mounted: the static env+DB checks (and the webhook self-test) need
+  // no provider and drive the setup wizard, so they must work even on a
+  // minimally-wired instance. Provider-backed probes (AI test, GitHub
+  // introspection) answer "unavailable" explicitly when no provider is passed.
+  registerDiagnosticsRoutes(router, { diagnostics: deps.diagnostics, requireRole, csrf, authEnabled });
 
   // ─── Repo config (read viewer+, write admin) ───────────────────────
   // GET is always useful; PUT degrades to a 503 when no octokit is wired in.

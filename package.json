@@ -23,6 +23,7 @@
     "smoke:migrate": "tsx scripts/migrate-smoke.ts",
     "smoke:dao": "tsx scripts/smoke-dao.ts",
     "smoke:webhooks": "tsx scripts/smoke-webhooks.ts",
+    "smoke:signature": "tsx scripts/smoke-signature.ts",
     "serve:seeded": "tsx scripts/serve-seeded.ts"
   },
   "dependencies": {
