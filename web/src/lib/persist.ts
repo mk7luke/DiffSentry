@@ -177,6 +177,11 @@ export async function purgePersistedCache(
   nextOwner: string | null = null,
 ): Promise<void> {
   pendingRestore = null;
+  // Stop the active writer FIRST. Otherwise queryClient.clear() (or a throttled
+  // write already queued) could persist the emptied cache back to STORAGE_KEY
+  // after removeClient() below — leaving an ownerless blob behind.
+  unsubscribePersistence?.();
+  unsubscribePersistence = null;
   queryClient.clear();
   if (store) {
     if (nextOwner) store.setItem(OWNER_KEY, nextOwner);
@@ -188,5 +193,11 @@ export async function purgePersistedCache(
     } catch {
       /* ignore */
     }
+  }
+  // A same-device owner switch (nextOwner set) keeps the app running, so resume
+  // persisting under the now-verified owner. Sign-out (no nextOwner) navigates
+  // away and intentionally leaves no writer that could recreate the cache.
+  if (nextOwner && persister) {
+    unsubscribePersistence = persistQueryClientSubscribe({ queryClient, persister, ...persistOptions });
   }
 }

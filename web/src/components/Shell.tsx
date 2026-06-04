@@ -1,4 +1,4 @@
-import { useEffect, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../auth/useAuth";
@@ -152,12 +152,23 @@ export function Shell() {
   const [navOpen, setNavOpen] = useState(false);
   const location = useLocation();
   const { instanceName } = useInstanceBranding();
+  const topbarRef = useRef<HTMLElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
 
   // Close the drawer on any route change so a tapped nav link doesn't leave it
   // hanging open over the new page.
   useEffect(() => {
     setNavOpen(false);
   }, [location.pathname]);
+
+  // While the drawer is open it behaves as a modal, so inert the background
+  // (top bar + main) — keeping tab focus and screen readers inside the drawer
+  // and off the content behind the backdrop.
+  useEffect(() => {
+    for (const el of [topbarRef.current, mainRef.current]) {
+      if (el) el.inert = navOpen;
+    }
+  }, [navOpen]);
 
   // Escape closes the drawer; lock body scroll while it's open on mobile.
   useEffect(() => {
@@ -175,7 +186,7 @@ export function Shell() {
 
   return (
     <div className={`app${navOpen ? " nav-open" : ""}`}>
-      <header className="topbar">
+      <header ref={topbarRef} className="topbar">
         <button
           className="topbar-menu"
           aria-label={navOpen ? "Close navigation" : "Open navigation"}
@@ -192,7 +203,12 @@ export function Shell() {
         <OfflinePill />
       </header>
 
-      <div className="sidebar-wrap">
+      <div
+        className="sidebar-wrap"
+        role={navOpen ? "dialog" : undefined}
+        aria-modal={navOpen || undefined}
+        aria-label={navOpen ? "Navigation menu" : undefined}
+      >
         <Sidebar onNavigate={() => setNavOpen(false)} />
         {/* Close button lives inside the drawer on mobile (hidden on desktop). */}
         <button className="drawer-close" aria-label="Close navigation" onClick={() => setNavOpen(false)}>
@@ -207,7 +223,7 @@ export function Shell() {
         aria-hidden="true"
       />
 
-      <main className="main">
+      <main ref={mainRef} className="main">
         <SetupWizard />
         <Outlet />
       </main>
