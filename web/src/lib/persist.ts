@@ -57,8 +57,13 @@ const store = storage();
 
 // localStorage satisfies the AsyncStorage interface (get/set/removeItem), so
 // the async persister works against it synchronously under the hood.
+// throttleTime: 0 disables the persister's internal write throttle — otherwise
+// a write scheduled just before a purge could fire *after* removeClient() and
+// resurrect STORAGE_KEY. With no throttle there's never a queued write to
+// outlive the unsubscribe, so purge/owner-switch can't be raced. Writes here
+// are small and infrequent, so dropping the batch window costs nothing.
 const persister = store
-  ? createAsyncStoragePersister({ storage: store, key: STORAGE_KEY })
+  ? createAsyncStoragePersister({ storage: store, key: STORAGE_KEY, throttleTime: 0 })
   : null;
 
 const persistOptions = {
