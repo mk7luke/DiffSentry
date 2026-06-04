@@ -98,18 +98,25 @@ export async function dispatchToChannel(
   meta: DispatchMeta,
 ): Promise<{ ok: boolean; detail: string }> {
   const result = await deliverToChannel({ type: channel.type, config: channelConfig(channel) }, msg);
-  recordNotificationDelivery({
-    channelId: channel.id,
-    channelType: channel.type,
-    channelName: channel.name,
-    ruleId: meta.ruleId ?? null,
-    ruleName: meta.ruleName ?? null,
-    trigger: meta.trigger,
-    target: meta.target,
-    title: msg.title,
-    status: result.ok ? "ok" : "error",
-    detail: result.detail,
-  });
+  // Persisting the delivery is best-effort and must never affect the returned
+  // delivery result (recordNotificationDelivery already swallows its own errors;
+  // this isolates the call-site too, in case that ever changes).
+  try {
+    recordNotificationDelivery({
+      channelId: channel.id,
+      channelType: channel.type,
+      channelName: channel.name,
+      ruleId: meta.ruleId ?? null,
+      ruleName: meta.ruleName ?? null,
+      trigger: meta.trigger,
+      target: meta.target,
+      title: msg.title,
+      status: result.ok ? "ok" : "error",
+      detail: result.detail,
+    });
+  } catch (err) {
+    logger.debug({ err }, "dispatchToChannel: recordNotificationDelivery failed");
+  }
   bus.publish("notification.delivered", {
     channelId: channel.id,
     channelType: channel.type,

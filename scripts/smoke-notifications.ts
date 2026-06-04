@@ -26,7 +26,7 @@ import path from "node:path";
 import { openDatabase, closeDatabase } from "../src/storage/db.js";
 import { createApiRouter } from "../src/api/router.js";
 import { createAuth } from "../src/dashboard/auth.js";
-import { startNotifications } from "../src/notify/engine.js";
+import { startNotifications, notificationEngine } from "../src/notify/engine.js";
 import { bus } from "../src/realtime/bus.js";
 import { getNotificationDeliveries, getAuditLog } from "../src/dashboard/queries.js";
 
@@ -398,6 +398,8 @@ async function main() {
 
     console.log("\nall notification smoke checks passed ✓");
   } finally {
+    // Tear down the bus subscriber + digest timer that startNotifications() set up.
+    notificationEngine.stop();
     await new Promise<void>((r) => server.close(() => r()));
     await new Promise<void>((r) => receiver.close(() => r()));
     closeDatabase();
