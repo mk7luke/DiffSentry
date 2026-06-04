@@ -2053,11 +2053,16 @@ label.field {
     letter-spacing: 0.07em;
     text-transform: uppercase;
   }
-  /* No column label → full-width block (used for a row's primary content). */
+  /* Primary identifier cell — intentionally the full-width card heading on
+     phones (no column label). `.cell-primary` marks this intent explicitly in
+     the markup; cells that simply lack a data-label fall back to the same
+     treatment. */
+  .tbl td.cell-primary,
   .tbl td:not([data-label]) {
     display: block;
     text-align: left;
   }
+  .tbl td.cell-primary::before,
   .tbl td:not([data-label])::before {
     content: none;
   }

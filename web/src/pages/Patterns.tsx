@@ -42,7 +42,7 @@ export function PatternsPage() {
                     <tbody>
                       {rules.map((r, i) => (
                         <tr key={i}>
-                          <td className="mono strong">{r.rule_name}</td>
+                          <td className="mono strong cell-primary">{r.rule_name}</td>
                           <td className="muted" data-label="Source">{r.source}</td>
                           <td className="mono" data-label="Repo">
                             <Link className="link" to={`/repos/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.repo)}`}>
