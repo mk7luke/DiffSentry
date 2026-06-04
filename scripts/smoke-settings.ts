@@ -297,6 +297,11 @@ async function main() {
     } catch {
       // best effort
     }
+    try {
+      fs.rmSync(learningsDir, { recursive: true, force: true });
+    } catch {
+      // best effort
+    }
   }
 }
 
