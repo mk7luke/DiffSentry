@@ -7,12 +7,17 @@ import { recordWebhookDelivery } from "./storage/dao.js";
 import { createDashboardRouter } from "./dashboard/routes.js";
 import { createApiRouter } from "./api/router.js";
 import { createAuth, loadAuthConfigFromEnv } from "./dashboard/auth.js";
+import { applyPersistedSettings } from "./settings/overrides.js";
 import { dispatchWebhookEvent, extractWebhookMeta } from "./webhook/dispatch.js";
 import { verifyWebhookSignature } from "./webhook/signature.js";
 
 export function createServer(config: Config) {
   const app = express();
   const reviewer = new Reviewer(config);
+
+  // Apply any persisted runtime settings (e.g. log level) on boot so a value
+  // set via the dashboard survives restarts. No-ops when persistence is off.
+  applyPersistedSettings();
 
   // Parse raw body for webhook signature verification
   app.use("/webhook", express.raw({ type: "application/json" }));

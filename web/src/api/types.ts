@@ -297,6 +297,53 @@ export interface PatternsResponse {
   rules: PatternRuleRow[];
 }
 
+// ─── Settings (operator controls) ───────────────────────────────────
+
+export type Profile = "chill" | "assertive";
+export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal";
+
+export interface GlobalSettings {
+  pauseAll: boolean;
+  autoReview: boolean;
+  defaultProfile: Profile;
+  logLevel: LogLevel;
+  /** null = use the MAX_FILES_PER_REVIEW env default. */
+  maxFiles: number | null;
+}
+
+export interface SettingsResponse {
+  settings: GlobalSettings;
+}
+
+/** Per-repo overrides; null on a field means "inherit the global value". */
+export interface RepoSettings {
+  autoReview: boolean | null;
+  profile: Profile | null;
+  maxFiles: number | null;
+}
+
+export interface RepoSettingsResponse {
+  owner: string;
+  repo: string;
+  settings: RepoSettings;
+}
+
+/** Body for PUT /settings — any subset of keys; null clears a clearable one. */
+export interface GlobalSettingsPatch {
+  pauseAll?: boolean;
+  autoReview?: boolean;
+  defaultProfile?: Profile;
+  logLevel?: LogLevel;
+  maxFiles?: number | null;
+}
+
+/** Body for PUT /repos/:owner/:repo/settings. null clears (inherit global). */
+export interface RepoSettingsPatch {
+  autoReview?: boolean | null;
+  profile?: Profile | null;
+  maxFiles?: number | null;
+}
+
 // ─── API tokens (platform) ──────────────────────────────────────────
 
 export type ApiScope = "read" | "review";

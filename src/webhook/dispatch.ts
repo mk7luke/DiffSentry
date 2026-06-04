@@ -1,5 +1,18 @@
 import { logger } from "../logger.js";
 import { recordEvent } from "../storage/dao.js";
+import { isPauseAll, isAutoReviewEnabled } from "../settings/overrides.js";
+
+/**
+ * Whether an automatic (webhook-triggered) review should be queued for a repo,
+ * or a reason it's blocked. The global Pause-All kill switch wins, then the
+ * per-repo auto-review toggle. Both are operator settings persisted in
+ * settings_overrides and no-op (return null = allowed) when persistence is off.
+ */
+function reviewQueueBlockedReason(owner: string, repo: string): "paused" | "auto_review_disabled" | null {
+  if (isPauseAll()) return "paused";
+  if (!isAutoReviewEnabled(owner, repo)) return "auto_review_disabled";
+  return null;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Webhook event dispatch.
@@ -124,6 +137,11 @@ export async function dispatchWebhookEvent(
     }
 
     if (action === "opened") {
+      const blocked = reviewQueueBlockedReason(owner, repo);
+      if (blocked) {
+        logger.info({ owner, repo, pr: number, action, blocked }, "Not queuing full review (operator control)");
+        return { status: 200, body: { status: blocked } };
+      }
       logger.info({ owner, repo, pr: number, action }, "PR opened, queuing full review");
       reviewer.handlePullRequest(installationId, owner, repo, number, "full").catch((err) => {
         logger.error({ err, owner, repo, pr: number }, "Background review failed");
@@ -132,13 +150,23 @@ export async function dispatchWebhookEvent(
     }
 
     if (action === "synchronize") {
-      logger.info({ owner, repo, pr: number, action }, "PR updated, queuing incremental review");
+      logger.info({ owner, repo, pr: number, action }, "PR updated");
 
       // Run push-driven auto-resolve unconditionally (not gated by pause/draft/auto-review),
       // so threads close even on PRs the bot won't re-review.
       reviewer.autoResolveOnPush(installationId, owner, repo, number).catch((err) => {
         logger.error({ err, owner, repo, pr: number }, "Push auto-resolve failed");
       });
+
+      // Gate only the re-review queue behind the operator controls — the
+      // auto-resolve above still runs so addressed threads close.
+      const blocked = reviewQueueBlockedReason(owner, repo);
+      if (blocked) {
+        logger.info({ owner, repo, pr: number, action, blocked }, "Not queuing incremental review (operator control)");
+        // 202 because the push auto-resolve above was accepted, but surface the
+        // blocked reason (paused | auto_review_disabled) so it's observable.
+        return { status: 202, body: { status: blocked } };
+      }
 
       reviewer.handlePullRequest(installationId, owner, repo, number, "incremental").catch((err) => {
         logger.error({ err, owner, repo, pr: number }, "Background review failed");
@@ -155,6 +183,11 @@ export async function dispatchWebhookEvent(
 
     // ready_for_review — draft PR became ready
     if (action === "ready_for_review") {
+      const blocked = reviewQueueBlockedReason(owner, repo);
+      if (blocked) {
+        logger.info({ owner, repo, pr: number, action, blocked }, "Not queuing review (operator control)");
+        return { status: 200, body: { status: blocked } };
+      }
       logger.info({ owner, repo, pr: number, action }, "PR ready for review, queuing full review");
       reviewer.handlePullRequest(installationId, owner, repo, number, "full").catch((err) => {
         logger.error({ err, owner, repo, pr: number }, "Background review failed");

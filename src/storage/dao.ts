@@ -530,6 +530,114 @@ export function deleteSettingOverride(scope: string, key: string): void {
   }
 }
 
+/** One override mutation in a settings batch: set `value` for `key`, or clear it. */
+export interface SettingChange {
+  key: string;
+  /** When true the override is deleted (revert to default); `value` is ignored. */
+  clear: boolean;
+  value: unknown;
+}
+
+/**
+ * Apply a batch of settings overrides for one scope atomically, writing an
+ * `audit_log` row for each in the SAME transaction — either every override +
+ * audit row persists, or none do. Unlike the per-call helpers above (which each
+ * open the db and swallow errors), this owns one transaction so a mid-batch
+ * failure rolls the whole thing back.
+ *
+ * Return values let the caller decide whether to emit bus events:
+ *   - true  → committed, OR persistence is gracefully off (no db / schema absent),
+ *             matching the documented no-op behavior — the caller may still notify.
+ *   - false → a real failure (invalid scope/key, unrepresentable value, or the
+ *             transaction threw): nothing persisted, so the caller must NOT
+ *             audit/publish success.
+ *
+ * The audit payload (`{ value }`) and actions (`settings.set` / `settings.clear`)
+ * mirror what insertAuditLog wrote per-call before, so existing audit readers
+ * are unaffected.
+ */
+export function commitSettingsChanges(opts: {
+  scope: string;
+  updatedBy?: string | null;
+  actorLogin?: string | null;
+  actorRole?: string | null;
+  changes: SettingChange[];
+}): boolean {
+  const db = openDatabase();
+  if (!db) return true; // persistence off — graceful no-op
+  if (!ensureCommandCenterSchema(db, ["settings_overrides", "audit_log"])) return true;
+  if (!isValidScope(opts.scope)) {
+    logger.debug({ scope: opts.scope }, "dao.commitSettingsChanges: invalid scope — skipping write");
+    return false;
+  }
+  if (opts.changes.length === 0) return true;
+
+  // Validate keys + serialize values BEFORE opening the transaction, so a bad
+  // entry aborts the whole batch without partially writing anything.
+  const prepared: Array<{ key: string; clear: boolean; valueJson: string | null; auditJson: string | null }> = [];
+  for (const c of opts.changes) {
+    if (!isValidKey(c.key)) {
+      logger.debug({ scope: opts.scope, key: c.key }, "dao.commitSettingsChanges: invalid key — aborting batch");
+      return false;
+    }
+    let valueJson: string | null = null;
+    if (!c.clear) {
+      valueJson = safeJsonStringify(c.value);
+      if (valueJson == null) {
+        logger.debug(
+          { scope: opts.scope, key: c.key },
+          "dao.commitSettingsChanges: value not JSON-serializable — aborting batch",
+        );
+        return false;
+      }
+    }
+    // Audit payload mirrors the prior per-call shape: { value } (null on clear).
+    const auditJson = safeJsonStringify({ value: c.clear ? null : c.value });
+    prepared.push({ key: c.key, clear: c.clear, valueJson, auditJson });
+  }
+
+  try {
+    const now = new Date().toISOString();
+    const upsert = db.prepare(
+      `INSERT INTO settings_overrides (scope, key, value_json, updated_by, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(scope, key) DO UPDATE SET
+         value_json = excluded.value_json,
+         updated_by = excluded.updated_by,
+         updated_at = excluded.updated_at`,
+    );
+    const del = db.prepare(`DELETE FROM settings_overrides WHERE scope = ? AND key = ?`);
+    const audit = db.prepare(
+      `INSERT INTO audit_log (ts, actor_login, actor_role, action, target_type, target_ref, payload_json, result)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const tx = db.transaction((rows: typeof prepared) => {
+      for (const p of rows) {
+        if (p.clear) {
+          del.run(opts.scope, p.key);
+        } else {
+          upsert.run(opts.scope, p.key, p.valueJson, opts.updatedBy ?? null, now);
+        }
+        audit.run(
+          now,
+          opts.actorLogin ?? null,
+          opts.actorRole ?? null,
+          p.clear ? "settings.clear" : "settings.set",
+          "setting",
+          `${opts.scope}:${p.key}`,
+          p.auditJson == null ? null : p.auditJson.slice(0, 100_000),
+          "ok",
+        );
+      }
+    });
+    tx(prepared);
+    return true;
+  } catch (err) {
+    logger.debug({ err, scope: opts.scope }, "dao.commitSettingsChanges failed — rolled back");
+    return false;
+  }
+}
+
 // ─── Custom anti-pattern rules (admin-authored, migration v3) ──────────────
 
 /** Canonical severities/types a custom rule may use — mirror types.ts. */

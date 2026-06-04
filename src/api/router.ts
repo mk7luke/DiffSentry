@@ -18,6 +18,7 @@ import {
 import { insertAuditLog, setRole } from "../storage/dao.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
+import { registerSettingsRoutes } from "./settings.js";
 import { registerTokenRoutes } from "./tokens.js";
 import { authenticateBearer, extractBearer, requiredScopeForMethod } from "./token-auth.js";
 import { buildOpenApiSpec } from "./openapi.js";
@@ -341,6 +342,12 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   if (deps.reviewer) {
     registerActionRoutes(router, { reviewer: deps.reviewer, requireRole, csrf: writeCsrf });
   }
+
+  // ─── Settings (operator controls, admin) ───────────────────────────
+  // Global + per-repo overrides (pause-all, auto-review, profile, log level,
+  // max files). Same write contract as the actions above. Always mounted —
+  // unlike actions, settings don't need a reviewer to be useful.
+  registerSettingsRoutes(router, { requireRole, csrf });
 
   // ─── API token administration (admin, cookie-only) ─────────────────
   // create/list/revoke. requireRole('admin') keeps tokens out (a token

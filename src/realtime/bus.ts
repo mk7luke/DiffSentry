@@ -40,6 +40,17 @@ export interface ActionPayload {
   detail?: string;
 }
 
+/** An operator settings override changed — emitted from the settings API. */
+export interface SettingsChangedPayload {
+  /** 'global' or 'owner/repo'. */
+  scope: string;
+  /** The setting key that changed (e.g. "pauseAll", "profile"). */
+  key: string;
+  /** The new value, or null when the override was cleared. */
+  value: unknown;
+  actor: string | null;
+}
+
 /** An API token was created or revoked — emitted from the token admin API. */
 export interface TokenChangePayload {
   id: number;
@@ -146,6 +157,7 @@ export interface BusEventMap {
   "review.finished": ReviewLifecyclePayload;
   "review.failed": ReviewLifecyclePayload;
   "action.performed": ActionPayload;
+  "settings.changed": SettingsChangedPayload;
   "token.changed": TokenChangePayload;
   "rule.changed": RuleChangedPayload;
   "config.updated": ConfigUpdatePayload;

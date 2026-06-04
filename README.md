@@ -529,8 +529,8 @@ GitHub webhook
 | `LOCAL_AI_API_KEY` | No | `not-needed` | API key. Most local servers ignore it; set it only when your backend enforces one (e.g. a hosted vLLM gateway). |
 | `LOCAL_AI_JSON_MODE` | No | `true` | Send `response_format: json_object`. Set to `false` if your backend rejects the field (some older llama.cpp / vLLM builds). |
 | `PORT` | No | `3005` | Server port |
-| `LOG_LEVEL` | No | `info` | Logging level |
-| `MAX_FILES_PER_REVIEW` | No | `50` | Max files per review |
+| `LOG_LEVEL` | No | `info` | Logging level (runtime-overridable from the admin Settings page) |
+| `MAX_FILES_PER_REVIEW` | No | `50` | Max files per review (runtime-overridable per-global/-repo from Settings) |
 | `IGNORED_PATTERNS` | No | | Comma-separated globs to skip |
 | `BOT_NAME` | No | `diffsentry` | Bot mention name for chat commands |
 | `LEARNINGS_DIR` | No | `./data/learnings` | Per-repo learnings storage |
@@ -703,8 +703,9 @@ untouched.
   reviews, and a one-click retry on the failed lane. Hydrates from
   `GET /api/v1/queue` then updates live from the `queue.updated` SSE stream.
 - `/repos/:owner/:repo` — 90-day risk line, hot paths, top firing pattern
-  rules, recent PRs + issues, active `@bot learn` learnings, and the live
-  `.diffsentry.yaml` for the repo.
+  rules, recent PRs + issues, active `@bot learn` learnings, the live
+  `.diffsentry.yaml` for the repo, and (admin) a per-repo **operator overrides**
+  card (auto-review / profile / max files).
 - `/repos/:owner/:repo/pr/:number` — latest review snapshot, full findings
   table, all-reviews list, events timeline, link back to GitHub.
 - `/findings` — cross-repo filterable explorer (severity, source, repo,
@@ -733,9 +734,11 @@ untouched.
   (event, repo, signature status, size), with an expandable syntax-highlighted
   JSON viewer and a one-click **Replay** that re-runs the stored payload through
   the engine. Filter by event type and repo.
-- `/settings` — runtime + storage health, the signed-in session with its
-  resolved role + capabilities, and a recent warn/error log tail captured via
-  an in-process pino ring buffer.
+- `/settings` — (admin) **operator controls**: a prominent global **Pause-All**
+  kill switch with live status, plus grouped review defaults (auto-review,
+  default profile, log level, max files). Also runtime + storage health, the
+  signed-in session with its resolved role + capabilities, and a recent
+  warn/error log tail captured via an in-process pino ring buffer.
 - `/settings/diagnostics` — the **guided first-run / health screen**: per-area
   configuration checks (GitHub App, AI provider, dashboard auth, persistence)
   each with a concrete fix hint, an on-demand **GitHub App probe** (which
@@ -847,13 +850,39 @@ or **opens a PR** (your choice). The change is audit-logged with a diff
 (`config.update`) and announced on the bus as `config.updated`; a direct commit
 also invalidates the 5-minute config read cache.
 
+**Operator settings** (`admin`) are runtime overrides stored in the
+`settings_overrides` table (not repo writes) — they layer on top of the
+`.diffsentry.yaml` and the env defaults. Each write is `requireRole('admin')` +
+CSRF gated, writes an `audit_log` row, and emits a `settings.changed` SSE event.
+
+| Endpoint | Effect |
+|---|---|
+| `GET /api/v1/settings` | Resolved global settings (with defaults filled in). |
+| `PUT /api/v1/settings` | Set/clear global overrides — any subset of keys; `null` clears a clearable one. |
+| `GET /api/v1/repos/:owner/:repo/settings` | Per-repo overrides (`null` field = inherit global). |
+| `PUT /api/v1/repos/:owner/:repo/settings` | Set/clear per-repo overrides. |
+
+Keys and resolution (per-repo override **>** global default **>** file/env default):
+
+| Key | Scope | Effect |
+|---|---|---|
+| `pauseAll` | global | **Kill switch.** When on, the webhook queues **no** new reviews (PR opened/synchronize/ready-for-review) and the engine skips any trigger — chat `@bot review` and dashboard triggers included. Push auto-resolve still runs. |
+| `autoReview` | global + repo | Enable/disable **automatic** (webhook) reviews. A per-repo value wins over the global default (default `true`). |
+| `defaultProfile` / `profile` | global / repo | Review profile (`chill` \| `assertive`); overrides the `.diffsentry.yaml` `reviews.profile`. |
+| `logLevel` | global | Process log level — applied to the running logger immediately **and** re-applied on restart (overrides `LOG_LEVEL`). |
+| `maxFiles` | global + repo | Cap on changed files sent to the model; overrides `MAX_FILES_PER_REVIEW`. Clear to revert to the env default. |
+
+All reads no-op to the documented defaults when persistence is disabled, so the
+controls degrade cleanly without a database.
+
 **Realtime** (`GET /api/v1/stream`) is a Server-Sent Events feed on an in-process
 event bus. The review engine publishes `review.started` / `review.finished` /
 `review.failed`, the in-memory review queue publishes `queue.updated` on every
 state transition (queued → running → done/failed/canceled, including phase
 changes), every command action publishes `action.performed`, a custom rule
-change publishes `rule.changed`, a config edit publishes `config.updated`, and a
-webhook replay publishes `webhook.replayed`. The SPA opens one `EventSource`,
+change publishes `rule.changed`, a config edit publishes `config.updated`, a
+settings change publishes `settings.changed`, and a webhook replay publishes
+`webhook.replayed`. The SPA opens one `EventSource`,
 surfaces events as toasts, drives the live queue board, and live-refetches the
 affected PR — so a re-review's findings appear without a refresh. The stream
 heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed

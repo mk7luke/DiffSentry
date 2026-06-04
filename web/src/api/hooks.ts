@@ -14,6 +14,7 @@ import type {
   CustomRulesResponse,
   DiagnosticsResponse,
   FindingsResponse,
+  GlobalSettingsPatch,
   GithubDiagnosticsResponse,
   HealthResponse,
   ImpactReport,
@@ -27,14 +28,17 @@ import type {
   QueueResponse,
   RepoConfigResponse,
   RepoDetailResponse,
+  RepoSettingsPatch,
+  RepoSettingsResponse,
   ReplayResponse,
   ReposResponse,
   Role,
-  TokensResponse,
   RuleTestResult,
   SearchResponse,
+  SettingsResponse,
   TestAiResult,
   TestWebhookResult,
+  TokensResponse,
   TrendsResponse,
   WebhookDeliveryDetail,
   WebhooksResponse,
@@ -196,12 +200,61 @@ export function useAudit(query: AuditQuery, enabled: boolean) {
   });
 }
 
+// ─── Settings (operator controls, admin) ────────────────────────────
+
+/** Admin: resolved global settings. Only fetched when `enabled` (i.e. admin). */
+export function useSettings(enabled: boolean) {
+  return useQuery({
+    queryKey: ["settings"],
+    queryFn: () => apiGet<SettingsResponse>("/settings"),
+    enabled,
+  });
+}
+
 /** Admin: list API tokens (metadata only). */
 export function useTokens(enabled: boolean) {
   return useQuery({
     queryKey: ["tokens"],
     queryFn: () => apiGet<TokensResponse>("/tokens"),
     enabled,
+  });
+}
+
+/** Admin: set/clear global settings. Returns the refreshed resolved settings. */
+export function useUpdateSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: GlobalSettingsPatch) => apiSend<SettingsResponse>("/settings", { method: "PUT", body: patch }),
+    onSuccess: (data) => {
+      qc.setQueryData(["settings"], data);
+      void qc.invalidateQueries({ queryKey: ["audit"] });
+    },
+  });
+}
+
+/** Admin: resolved per-repo overrides. */
+export function useRepoSettings(owner: string, repo: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["repoSettings", owner, repo],
+    queryFn: () =>
+      apiGet<RepoSettingsResponse>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/settings`),
+    enabled: enabled && !!owner && !!repo,
+  });
+}
+
+/** Admin: set/clear per-repo overrides. */
+export function useUpdateRepoSettings(owner: string, repo: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: RepoSettingsPatch) =>
+      apiSend<RepoSettingsResponse>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/settings`,
+        { method: "PUT", body: patch },
+      ),
+    onSuccess: (data) => {
+      qc.setQueryData(["repoSettings", owner, repo], data);
+      void qc.invalidateQueries({ queryKey: ["audit"] });
+    },
   });
 }
 
