@@ -328,6 +328,22 @@ async function main() {
     const delAfter = calls.filter((c) => c.method === "git.deleteRef").length;
     ok("pr failure after createRef → 500 + branch deleted", prFail.status === 500 && delAfter - delBefore === 1);
 
+    // ── PR-mode reads the existing config at the SAME branch it writes to ──
+    // (currentFileSha must resolve the generated, slash-containing PR branch;
+    // the read ref and the write branch must match so the sha is supplied.)
+    const refBase = calls.length;
+    const prRef = await req("PUT", CFG, { session: adminSess, csrf: true, body: { yaml: "issues:\n  auto_summary:\n    enabled: false\n", mode: "pr" } });
+    const refCalls = calls.slice(refBase);
+    const writeCall = refCalls.find((c) => c.method === "repos.createOrUpdateFileContents");
+    const writeBranch = (writeCall?.args[0] as { branch?: string } | undefined)?.branch;
+    const readAtWriteBranch = refCalls.some(
+      (c) => c.method === "repos.getContent" && (c.args[0] as { ref?: string } | undefined)?.ref === writeBranch,
+    );
+    ok(
+      "pr-mode reads existing config at the write branch (slash-safe ref)",
+      prRef.status === 200 && typeof writeBranch === "string" && writeBranch.includes("/") && readAtWriteBranch,
+    );
+
     // ── Transient GitHub errors are NOT cached as "no config" ──────────
     // First GET hits a one-shot 500 → null (uncached); the next GET recovers.
     transientFail = true;
