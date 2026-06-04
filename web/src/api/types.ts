@@ -333,8 +333,8 @@ export interface CustomRuleInput {
   pattern: string;
   scope?: string;
   kind?: string;
-  severity?: string;
-  type?: string;
+  severity?: RuleSeverity;
+  type?: RuleType;
   flags?: string | null;
   pathGlob?: string | null;
   message?: string | null;
