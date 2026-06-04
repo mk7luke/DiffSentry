@@ -85,16 +85,16 @@ export function extractBearer(header: string | undefined): string | null {
 }
 
 /**
- * Authenticate a bearer token. On success returns a TokenPrincipal and bumps
- * the row's last_used_at; returns null when the token is malformed, unknown,
- * revoked, or persistence is disabled.
+ * Authenticate an already-extracted bearer token (the caller pulls it from the
+ * Authorization header with extractBearer). On success returns a TokenPrincipal
+ * and bumps the row's last_used_at; returns null when the token is empty,
+ * unknown, revoked, or persistence is disabled.
  *
  * The lookup is a single indexed hash match. The token itself is 240 bits of
  * entropy, so there is no useful timing oracle against the hash comparison —
  * an attacker cannot incrementally guess a SHA-256 preimage.
  */
-export function authenticateBearer(authorizationHeader: string | undefined): TokenPrincipal | null {
-  const token = extractBearer(authorizationHeader);
+export function authenticateBearer(token: string): TokenPrincipal | null {
   if (!token) return null;
   const row = findActiveApiTokenByHash(hashApiToken(token));
   if (!row) return null;

@@ -265,7 +265,7 @@ export function createApiRouter(deps: ApiDeps): express.Router {
     //    scopes are enforced regardless of whether OAuth is configured.
     const bearer = extractBearer(req.headers.authorization);
     if (bearer) {
-      const principal = authenticateBearer(req.headers.authorization);
+      const principal = authenticateBearer(bearer);
       if (!principal) {
         sendError(res, 401, "unauthorized", "Invalid or revoked API token.");
         return;
