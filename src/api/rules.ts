@@ -12,6 +12,7 @@ import {
   getCustomRule,
   insertAuditLog,
   insertCustomRule,
+  renameCustomRuleHits,
   updateCustomRule,
 } from "../storage/dao.js";
 import { listCustomRulesWithHits } from "../dashboard/queries.js";
@@ -285,6 +286,11 @@ export function registerRuleRoutes(router: Router, deps: RuleDeps): void {
       if (!ok) {
         sendError(res, 500, "internal", "Failed to update custom rule.");
         return;
+      }
+      // On rename, carry the rule's historical pattern_hits to the new name so
+      // analytics aren't orphaned (hits join custom_rules by name).
+      if (input.name != null && input.name !== existing.name) {
+        renameCustomRuleHits(existing.name, input.name);
       }
       const updated = getCustomRule(id);
       recordRuleChange(req, "update", id, updated?.name ?? existing.name, updated?.scope ?? existing.scope);

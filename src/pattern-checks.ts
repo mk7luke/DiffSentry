@@ -271,6 +271,11 @@ export function runPatternChecks(
 
       if (isAdded) {
         for (const p of applicable) {
+          // A compiled regex is reused across every line, so a `g`/`y`-flagged
+          // rule (allowed on custom rules) carries lastIndex forward and would
+          // intermittently skip matching lines. Reset before each test — same as
+          // the live tester (testPattern) does.
+          p.regex.lastIndex = 0;
           if (p.regex.test(content)) {
             const title = p.rule.name;
             const bodyParts: string[] = [];

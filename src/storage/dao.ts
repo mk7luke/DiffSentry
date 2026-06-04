@@ -699,6 +699,23 @@ export function updateCustomRule(id: number, input: Partial<CustomRuleInput>): b
   }
 }
 
+/**
+ * Re-point historical pattern_hits from a rule's old name to its new one, so a
+ * rename doesn't orphan analytics (listCustomRulesWithHits joins hits by name).
+ * Custom-rule names are globally unique, so matching on the exact old name +
+ * source='custom' is unambiguous. Best-effort; never throws.
+ */
+export function renameCustomRuleHits(oldName: string, newName: string): void {
+  if (oldName === newName) return;
+  const db = openDatabase();
+  if (!db) return;
+  try {
+    db.prepare(`UPDATE pattern_hits SET rule_name = ? WHERE rule_name = ? AND source = 'custom'`).run(newName, oldName);
+  } catch (err) {
+    logger.debug({ err, oldName, newName }, "dao.renameCustomRuleHits failed");
+  }
+}
+
 /** Delete a custom rule. Returns true when a row was removed. */
 export function deleteCustomRule(id: number): boolean {
   const db = openDatabase();
