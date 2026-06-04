@@ -174,9 +174,9 @@ export function RepoDetailPage() {
                     ) : (
                       <Donut
                         slices={[
-                          { label: "Changes requested", value: changesN, color: "#fb6d82" },
-                          { label: "Commented", value: commentN, color: "#9aa0b2" },
-                          { label: "Approved", value: approveN, color: "#4ade80" },
+                          { label: "Changes requested", value: changesN, color: "var(--sev-crit)" },
+                          { label: "Commented", value: commentN, color: "var(--neutral-swatch)" },
+                          { label: "Approved", value: approveN, color: "var(--good)" },
                         ]}
                       />
                     )}
@@ -210,10 +210,10 @@ export function RepoDetailPage() {
                       <tbody>
                         {a.topRules.map((r, i) => (
                           <tr key={i}>
-                            <td className="mono">{r.rule_name}</td>
-                            <td className="muted">{r.source}</td>
-                            <td className="num strong">{r.hits}</td>
-                            <td className="right">
+                            <td className="mono cell-primary" data-label="Rule">{r.rule_name}</td>
+                            <td className="muted" data-label="Source">{r.source}</td>
+                            <td className="num strong" data-label="Hits">{r.hits}</td>
+                            <td className="right" data-label="Example">
                               {r.example_pr ? (
                                 <Link
                                   className="link mono"

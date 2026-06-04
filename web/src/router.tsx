@@ -19,6 +19,7 @@ import { LearningsPage } from "./pages/Learnings";
 import { SettingsPage } from "./pages/Settings";
 import { DiagnosticsPage } from "./pages/Diagnostics";
 import { AuditPage } from "./pages/Audit";
+import { NotificationsPage } from "./pages/Notifications";
 import { ApiTokensPage } from "./pages/ApiTokens";
 import { WebhooksPage } from "./pages/Webhooks";
 import { LoadingState, NotFoundState } from "./components/states";
@@ -79,6 +80,7 @@ export const router = createBrowserRouter([
       { path: "/audit", element: <AuditPage /> },
       { path: "/webhooks", element: <WebhooksPage /> },
       { path: "/tokens", element: <ApiTokensPage /> },
+      { path: "/notifications", element: <NotificationsPage /> },
       { path: "/settings", element: <SettingsPage /> },
       { path: "/settings/diagnostics", element: <DiagnosticsPage /> },
       { path: "*", element: <NotFoundPage /> },

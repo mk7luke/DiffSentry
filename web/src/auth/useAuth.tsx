@@ -1,5 +1,7 @@
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useMe } from "../api/hooks";
+import { applyPersistedDataForOwner, purgePersistedCache } from "../lib/persist";
 import type { Capabilities, Role } from "../api/types";
 
 // Auth context — fetches /me exactly once (TanStack Query dedupes the
@@ -15,6 +17,7 @@ const VIEWER_CAPS: Capabilities = {
   manageConfig: false,
   manageRoles: false,
   viewAudit: false,
+  manageNotifications: false,
   manageTokens: false,
 };
 
@@ -32,6 +35,33 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const me = useMe();
   const user = me.data?.user;
+  const queryClient = useQueryClient();
+  const login = user?.login ?? null;
+  const authEnabled = me.data?.authEnabled ?? false;
+
+  // Reconcile the persisted offline cache against the verified identity. Only
+  // once /me resolves to a concrete login do we hydrate the cached data — and
+  // only if this device's cache was written under the same login; a mismatch
+  // wipes it. This is the gate that keeps user A's data out of user B's UI.
+  // See lib/persist.ts.
+  useEffect(() => {
+    if (login) void applyPersistedDataForOwner(login, queryClient);
+  }, [login, queryClient]);
+
+  // Auth-loss purge: if we *had* an authenticated session and the login goes
+  // away (session expired, or signed out in another tab), drop the persisted
+  // cache here too — don't rely on the in-tab "Sign out" click being what ends
+  // the session. We track the *previous* authEnabled because /me erroring to
+  // 401 also clears authEnabled in the same tick.
+  const prevAuth = useRef<{ login: string | null; enabled: boolean }>({ login: null, enabled: false });
+  useEffect(() => {
+    const prev = prevAuth.current;
+    prevAuth.current = { login, enabled: authEnabled };
+    if (prev.enabled && prev.login && !login) {
+      void purgePersistedCache(queryClient);
+    }
+  }, [login, authEnabled, queryClient]);
+
   const value: AuthState = {
     login: user?.login ?? null,
     role: user?.role ?? null,

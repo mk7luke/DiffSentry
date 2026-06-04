@@ -17,15 +17,18 @@ html {
 body {
   margin: 0;
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: var(--body-font);
   line-height: 1.45;
   font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: radial-gradient(ellipse 1400px 600px at 50% -10%, rgba(90, 141, 255, 0.06), transparent 60%),
+  background: radial-gradient(ellipse 1400px 600px at 50% -10%, var(--page-glow), transparent 60%),
     var(--bg);
   color: var(--text-1);
   min-height: 100vh;
+  /* Theme/density flips restyle instantly; ease color so the swap reads as a
+     deliberate transition rather than a flash. */
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
 h1,
 h2,
@@ -82,10 +85,21 @@ code {
 }
 
 /* ── Layout shell ──────────────────────────────────────────────── */
+/* Desktop: a two-column grid (sidebar | main). The mobile-only top bar,
+   drawer close button and backdrop are display:none here, so they drop out of
+   grid flow and the sidebar-wrap + main fill the two columns. */
 .app {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
   min-height: 100vh;
+}
+.topbar,
+.drawer-close,
+.nav-backdrop {
+  display: none;
+}
+.sidebar-wrap {
+  min-width: 0;
 }
 .sidebar {
   position: sticky;
@@ -137,7 +151,7 @@ code {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 7px 10px;
+  padding: var(--pad-snav-y) var(--pad-snav-x);
   border-radius: var(--r-sm);
   font-size: 13px;
   color: var(--text-2);
@@ -227,54 +241,153 @@ code {
   background: var(--bg-elev);
 }
 
-/* Narrow screens: stack sidebar on top as a strip */
+/* Offline pill — shown in the sidebar foot (desktop) and top bar (mobile). */
+.offline-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--sev-minor);
+  background: var(--sev-minor-soft);
+  border: 1px solid var(--sev-minor-line);
+  white-space: nowrap;
+}
+.offline-pill svg {
+  width: 12px;
+  height: 12px;
+}
+.sidebar-foot.offline-only {
+  justify-content: center;
+}
+
+/* Narrow screens: a sticky top bar reveals the sidebar as an off-canvas drawer. */
 @media (max-width: 820px) {
   .app {
-    grid-template-columns: 1fr;
+    display: block;
+    min-height: 100vh;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 45;
+    padding: 10px 16px;
+    padding-top: max(10px, env(safe-area-inset-top));
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--bg-deep) 88%, transparent);
+    backdrop-filter: blur(8px);
+  }
+  .topbar-menu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    margin-left: -6px;
+    border-radius: var(--r-sm);
+    color: var(--text-1);
+  }
+  .topbar-menu:hover {
+    background: var(--bg-elev);
+    color: var(--text);
+  }
+  .topbar-menu svg {
+    width: 20px;
+    height: 20px;
+  }
+  .topbar-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--text);
+    letter-spacing: -0.015em;
+  }
+  .topbar-brand .logo {
+    width: 18px;
+    height: 18px;
+    color: var(--accent-bright);
+    filter: drop-shadow(0 0 8px var(--accent-glow));
+  }
+  .topbar .offline-pill {
+    margin-left: auto;
+  }
+
+  /* The drawer: fixed, off-canvas, slides in when .nav-open is set. */
+  .sidebar-wrap {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(82vw, 300px);
+    z-index: 60;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    will-change: transform;
+  }
+  .app.nav-open .sidebar-wrap {
+    transform: translateX(0);
   }
   .sidebar {
-    position: static;
-    height: auto;
-    flex-direction: row;
+    height: 100%;
+    box-shadow: 24px 0 60px -20px rgba(0, 0, 0, 0.7);
+    padding-top: max(18px, env(safe-area-inset-top));
+  }
+
+  .drawer-close {
+    display: inline-flex;
     align-items: center;
-    padding: 10px 16px;
-    gap: 10px;
-    overflow-x: auto;
+    justify-content: center;
+    position: absolute;
+    top: max(14px, env(safe-area-inset-top));
+    right: 12px;
+    width: 30px;
+    height: 30px;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    z-index: 1;
   }
-  .sidebar-head {
-    padding: 0 8px 0 0;
-    border: 0;
-    margin: 0;
+  .drawer-close:hover {
+    background: var(--bg-elev);
+    color: var(--text);
   }
-  .sidebar-head .wordmark-sub {
-    display: none;
+  .drawer-close svg {
+    width: 18px;
+    height: 18px;
   }
-  .sidebar-nav {
-    flex-direction: row;
-    flex: 1;
-    gap: 2px;
+
+  .nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(0, 0, 0, 0.55);
+    animation: backdrop-in 0.18s ease-out;
   }
-  .snav {
-    padding: 6px 10px;
+}
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
   }
-  .snav.active::before {
-    left: 4px;
-    top: auto;
-    bottom: 2px;
-    right: 4px;
-    width: auto;
-    height: 2px;
-  }
-  .sidebar-section,
-  .sidebar-foot {
-    display: none;
-  }
+}
+/* Lock background scroll while the drawer is open. */
+body.nav-locked {
+  overflow: hidden;
 }
 
 /* ── Main + page chrome ────────────────────────────────────────── */
 .main {
   min-width: 0;
-  padding: 26px var(--page-gutter) 60px;
+  padding: var(--pad-main-y) var(--page-gutter) 60px;
   max-width: var(--page-max);
   width: 100%;
 }
@@ -334,7 +447,7 @@ code {
 
 /* ── Card ──────────────────────────────────────────────────────── */
 .card {
-  background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-elev) 50%, #10131c 100%);
+  background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-elev) 50%, var(--bg-card-2) 100%);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
@@ -357,9 +470,9 @@ code {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 11px 14px;
+  padding: var(--pad-card-head-y) var(--pad-card-head-x);
   border-bottom: 1px solid var(--line-soft);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent);
+  background: linear-gradient(180deg, var(--inset-hi-soft), transparent);
   flex-shrink: 0;
 }
 .card-head h2,
@@ -376,7 +489,7 @@ code {
   letter-spacing: 0.01em;
 }
 .card-body {
-  padding: 14px;
+  padding: var(--pad-card);
   flex: 1;
   min-height: 0;
 }
@@ -384,7 +497,7 @@ code {
   padding: 0;
 }
 .card-body.tight {
-  padding: 10px 14px;
+  padding: var(--pad-cell-y) var(--pad-card);
 }
 .card-body.chart {
   padding: 16px 14px 8px;
@@ -398,7 +511,7 @@ code {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 14px 16px;
+  padding: var(--pad-metric-y) var(--pad-metric-x);
   background: var(--bg-elev);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
@@ -412,10 +525,10 @@ code {
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
+  background: linear-gradient(90deg, transparent, var(--inset-hi), transparent);
 }
 .metric.hero {
-  padding: 18px 20px;
+  padding: var(--pad-metric-hero-y) var(--pad-metric-hero-x);
   background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-elev-2) 100%);
 }
 .metric-label {
@@ -490,37 +603,37 @@ code {
 }
 .chip.sev-crit {
   background: var(--sev-crit-soft);
-  color: #ffbfc9;
+  color: var(--sev-crit-text);
   border-color: var(--sev-crit-line);
 }
 .chip.sev-major {
   background: var(--sev-major-soft);
-  color: #ffcfa4;
+  color: var(--sev-major-text);
   border-color: var(--sev-major-line);
 }
 .chip.sev-minor {
   background: var(--sev-minor-soft);
-  color: #ffe1a0;
+  color: var(--sev-minor-text);
   border-color: var(--sev-minor-line);
 }
 .chip.sev-nit {
   background: var(--sev-nit-soft);
-  color: #c3cbd9;
+  color: var(--sev-nit-text);
   border-color: var(--sev-nit-line);
 }
 .chip.good {
   background: var(--good-soft);
-  color: #bff5d1;
+  color: var(--good-text);
   border-color: var(--good-line);
 }
 .chip.warn {
   background: var(--warn-soft);
-  color: #ffe1a0;
+  color: var(--warn-text);
   border-color: var(--warn-line);
 }
 .chip.danger {
   background: var(--danger-soft);
-  color: #ffc7c7;
+  color: var(--danger-text);
   border-color: var(--danger-line);
 }
 .chip.accent {
@@ -563,7 +676,7 @@ code {
 }
 .btn-primary {
   background: linear-gradient(180deg, var(--accent-bright) 0%, var(--accent) 100%);
-  color: #0a0c13;
+  color: var(--accent-contrast);
   font-weight: 600;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.2) inset, 0 4px 14px -4px var(--accent-glow);
 }
@@ -601,7 +714,7 @@ code {
 }
 .tbl thead th {
   text-align: left;
-  padding: 9px 14px;
+  padding: var(--pad-thead-y) var(--pad-cell-x);
   font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -618,7 +731,7 @@ code {
   text-align: right;
 }
 .tbl tbody td {
-  padding: 10px 14px;
+  padding: var(--pad-cell-y) var(--pad-cell-x);
   color: var(--text-1);
   border-bottom: 1px solid var(--line-soft);
   vertical-align: middle;
@@ -694,7 +807,7 @@ code {
   background: var(--sev-nit);
 }
 .tbl.rail tbody td {
-  border-bottom-color: rgba(30, 34, 48, 0.6);
+  border-bottom-color: var(--line-soft);
 }
 
 /* ── Forms ─────────────────────────────────────────────────────── */
@@ -741,7 +854,7 @@ label.field {
   grid-template-columns: 1fr auto;
   gap: 10px 16px;
   padding: 14px 16px;
-  background: linear-gradient(180deg, var(--bg-elev) 0%, #10131c 100%);
+  background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-card-2) 100%);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   transition: border-color 0.15s, background 0.15s, transform 0.15s;
@@ -1362,12 +1475,12 @@ label.field {
 .logrow .lvl.error,
 .logrow .lvl.fatal {
   background: var(--danger-soft);
-  color: #ffc7c7;
+  color: var(--danger-text);
   border: 1px solid var(--danger-line);
 }
 .logrow .lvl.warn {
   background: var(--warn-soft);
-  color: #ffe1a0;
+  color: var(--warn-text);
   border: 1px solid var(--warn-line);
 }
 .logrow .msg {
@@ -1378,7 +1491,7 @@ label.field {
 /* ── Grids ─────────────────────────────────────────────────────── */
 .grid {
   display: grid;
-  gap: 14px;
+  gap: var(--grid-gap);
 }
 .grid.stack {
   grid-template-columns: 1fr;
@@ -1394,7 +1507,7 @@ label.field {
 }
 .grid.hero {
   grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr);
-  gap: 14px;
+  gap: var(--grid-gap);
 }
 @media (max-width: 1000px) {
   .grid.hero {
@@ -2002,7 +2115,7 @@ label.field {
 }
 .rolechip.role-author {
   background: var(--good-soft);
-  color: #bff5d1;
+  color: var(--good-text);
   border-color: var(--good-line);
 }
 .rolechip.role-viewer,
@@ -2054,6 +2167,326 @@ label.field {
 }
 .role-form .field {
   margin-bottom: 0;
+}
+
+/* ─── PWA prompts (update available / offline ready) ───────────────── */
+.pwa-prompt-viewport {
+  position: fixed;
+  bottom: 18px;
+  left: 18px;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  z-index: 1000;
+  width: min(360px, calc(100vw - 36px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.pwa-prompt {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--r-md);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--accent-line);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+  animation: toast-in 0.16s ease-out;
+}
+.pwa-prompt-text {
+  flex: 1;
+  min-width: 0;
+}
+.pwa-prompt-title {
+  color: var(--text);
+  font-weight: 560;
+  font-size: 12.5px;
+  line-height: 1.3;
+}
+.pwa-prompt-body {
+  color: var(--text-3);
+  font-size: 11.5px;
+  margin-top: 2px;
+}
+.pwa-prompt-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* ─── Responsive: phones / small screens ───────────────────────────── */
+@media (max-width: 820px) {
+  .main {
+    padding: 18px 16px 56px;
+    padding-bottom: max(56px, env(safe-area-inset-bottom));
+  }
+  .page-head h1 {
+    font-size: 21px;
+  }
+  .toast-viewport {
+    bottom: max(18px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Tables collapse into stacked cards. Each row becomes a card; each cell shows
+   its column name (from data-label) beside the value. Cells without a
+   data-label (e.g. a row's primary title) span the full width. */
+@media (max-width: 640px) {
+  .tbl,
+  .tbl tbody,
+  .tbl tr,
+  .tbl td {
+    display: block;
+    width: 100%;
+  }
+  .tbl thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .tbl tr {
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--bg-elev);
+    margin: 0 10px 10px;
+    padding: 2px 0;
+  }
+  .tbl tr:last-child {
+    margin-bottom: 10px;
+  }
+  .tbl tbody tr:hover {
+    background: var(--bg-elev);
+  }
+  .tbl td,
+  .tbl tbody td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 14px;
+    text-align: right;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .tbl tr td:last-child {
+    border-bottom: 0;
+  }
+  .tbl td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    text-align: left;
+    color: var(--text-3);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+  /* Primary identifier cell — intentionally the full-width card heading on
+     phones (no column label). `.cell-primary` marks this intent explicitly in
+     the markup; cells that simply lack a data-label fall back to the same
+     treatment. */
+  .tbl td.cell-primary,
+  .tbl td:not([data-label]) {
+    display: block;
+    text-align: left;
+  }
+  .tbl td.cell-primary::before,
+  .tbl td:not([data-label])::before {
+    content: none;
+  }
+  /* The left severity rail doesn't translate to cards — colour the whole row
+     edge instead and reclaim the first cell's ::before for its label. */
+  .tbl.rail tbody tr td:first-child::before {
+    position: static;
+    width: auto;
+    background: none;
+    box-shadow: none;
+  }
+  .tbl.rail tbody tr {
+    border-left-width: 3px;
+  }
+  .tbl.rail tbody tr[data-sev="critical"] {
+    border-left-color: var(--sev-crit);
+  }
+  .tbl.rail tbody tr[data-sev="major"] {
+    border-left-color: var(--sev-major);
+  }
+  .tbl.rail tbody tr[data-sev="minor"] {
+    border-left-color: var(--sev-minor);
+  }
+  .tbl.rail tbody tr[data-sev="nit"] {
+    border-left-color: var(--sev-nit);
+  }
+
+  /* Stat grids that hard-code multiple columns relax to a single column. */
+  .grid.three,
+  .grid.four {
+    grid-template-columns: 1fr 1fr;
+  }
+  .filterbar .wide {
+    grid-column: auto;
+  }
+}
+/* ─── Theme / density controls (W1 theming) ────────────────────────── */
+/* Segmented control — a row of options where exactly one is active. Used for
+   the theme picker (dark/light/system) and density (comfortable/compact). */
+.segmented {
+  display: inline-flex;
+  background: var(--bg-deep);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  padding: 2px;
+  gap: 2px;
+}
+.segmented .seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+.segmented .seg-btn svg {
+  width: 14px;
+  height: 14px;
+}
+.segmented .seg-btn:hover {
+  color: var(--text);
+}
+.segmented .seg-btn.active {
+  background: var(--accent-soft);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+/* Field rows in the Appearance card. */
+.appearance-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line-soft);
+  flex-wrap: wrap;
+}
+.appearance-row:last-child {
+  border-bottom: 0;
+}
+.appearance-row .label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.appearance-row .label .name {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+}
+.appearance-row .label .hint {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+/* Compact icon button to toggle theme from the sidebar foot. */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+  border: 1px solid transparent;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+  flex-shrink: 0;
+}
+.theme-toggle svg {
+  width: 15px;
+  height: 15px;
+}
+.theme-toggle:hover {
+  color: var(--text);
+  background: var(--bg-elev);
+  border-color: var(--line-strong);
+}
+
+/* ─── Branding form (admin) ─────────────────────────────────────────── */
+.branding-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.branding-form .row {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+.branding-form .grow {
+  flex: 1;
+  min-width: 180px;
+}
+/* Native color input styled as a tidy swatch sitting next to a hex text field. */
+.color-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.color-field input[type="color"] {
+  width: 38px;
+  height: 34px;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-deep);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.color-field input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.color-field input[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: 3px;
+}
+.color-field input[type="text"] {
+  width: 120px;
+  font-family: var(--font-mono);
+  text-transform: lowercase;
+}
+.branding-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.branding-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent-bright);
+  font-weight: 600;
+  font-size: 12px;
+}
+.branding-preview .swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
 }
 
 /* ── Custom rule builder (Rules screen) ────────────────────────── */

@@ -127,19 +127,19 @@ function AuditContent() {
                       <tbody>
                         {data.rows.map((r) => (
                           <tr key={r.id}>
-                            <td className="muted" title={r.ts}>
+                            <td className="muted" title={r.ts} data-label="When">
                               {relativeTime(r.ts)}
                             </td>
-                            <td>
+                            <td data-label="Actor">
                               <span className="mono">{r.actor_login ?? "—"}</span>{" "}
                               {r.actor_role ? <RoleBadge role={r.actor_role} /> : null}
                             </td>
-                            <td className="mono strong">{r.action}</td>
-                            <td className="mono muted">
+                            <td className="mono strong" data-label="Action">{r.action}</td>
+                            <td className="mono muted" data-label="Target">
                               {r.target_ref ?? "—"}
                               {r.target_type ? <span className="muted"> ({r.target_type})</span> : null}
                             </td>
-                            <td className="muted">{r.result ?? "—"}</td>
+                            <td className="muted" data-label="Result">{r.result ?? "—"}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -247,13 +247,13 @@ function RolesCard({ roles }: { roles: { login: string; role: string; granted_by
           <tbody>
             {roles.map((r) => (
               <tr key={r.login}>
-                <td className="mono">{r.login}</td>
-                <td>
+                <td className="mono" data-label="Login">{r.login}</td>
+                <td data-label="Role">
                   <RoleBadge role={r.role} />
                 </td>
-                <td className="mono muted">{r.granted_by ?? "—"}</td>
-                <td className="muted">{r.granted_at ? relativeTime(r.granted_at) : "—"}</td>
-                <td className="right">
+                <td className="mono muted" data-label="Granted by">{r.granted_by ?? "—"}</td>
+                <td className="muted" data-label="When">{r.granted_at ? relativeTime(r.granted_at) : "—"}</td>
+                <td className="right" data-label="Actions">
                   <button className="btn btn-link" onClick={() => clear(r.login)} disabled={setRole.isPending}>
                     Clear
                   </button>

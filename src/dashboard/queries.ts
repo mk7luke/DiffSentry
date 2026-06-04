@@ -1041,6 +1041,10 @@ export function getActivity(filters: ActivityFilters = {}): ActivityResult {
     params.push(filters.kind);
   }
   if (filters.severity) {
+    // Severity is finding-severity, attached only to `review` rows below (event
+    // rows are NULL). So a severity filter is implicitly reviews-only — and the
+    // live Ops Console matches this: its lifecycle/action events carry no
+    // severity, so `?severity=major` never silently disagrees with the stream.
     where.push("act.severity = ?");
     params.push(filters.severity);
   }
@@ -1120,20 +1124,38 @@ export function getActivity(filters: ActivityFilters = {}): ActivityResult {
   return { rows: page, nextBefore, hasMore };
 }
 
-/** Distinct activity kinds present (for the Ops Console filter dropdown). */
+// Kinds the Ops Console can show that never appear in the `events` table: the
+// synthetic "review" row kind plus the SSE-only lifecycle/action topics the
+// frontend derives from the bus (review.* and action.<verb>, where the verbs
+// are the command actions in src/api/actions.ts). Listed so the filter dropdown
+// is complete from first paint and still works with persistence disabled.
+const LIVE_ONLY_ACTIVITY_KINDS = [
+  "review",
+  "review.started",
+  "review.finished",
+  "review.failed",
+  "action.review",
+  "action.resolve",
+  "action.pause",
+  "action.resume",
+  "action.cancel",
+];
+
+/** Distinct activity kinds (persisted events ∪ synthetic + SSE-only kinds),
+ * deduped and sorted, for the Ops Console filter dropdown. */
 export function getActivityKinds(): string[] {
   const db = openDatabase();
-  if (!db) return [];
+  // Persistence off → still offer the live-only kinds the SSE stream emits.
+  if (!db) return [...LIVE_ONLY_ACTIVITY_KINDS].sort();
   try {
     const rows = db
       .prepare(`SELECT DISTINCT kind FROM events ORDER BY kind`)
       .all() as Array<{ kind: string }>;
-    const kinds = rows.map((r) => r.kind);
-    // Reviews are always surfaced under the synthetic "review" kind.
-    const hasReview = (db.prepare(`SELECT 1 FROM reviews LIMIT 1`).get()) != null;
-    return hasReview ? ["review", ...kinds] : kinds;
+    const set = new Set<string>(rows.map((r) => r.kind));
+    for (const k of LIVE_ONLY_ACTIVITY_KINDS) set.add(k);
+    return Array.from(set).sort();
   } catch {
-    return [];
+    return [...LIVE_ONLY_ACTIVITY_KINDS].sort();
   }
 }
 
@@ -2202,5 +2224,245 @@ export function getBudgets(): BudgetRow[] {
     return out;
   } catch {
     return [];
+  }
+}
+
+// ─── Notifications (channels / rules / deliveries) ──────────────────
+
+export interface NotificationChannelRow {
+  id: number;
+  type: string;
+  name: string | null;
+  config_json: string | null;
+  enabled: number;
+  created_by: string | null;
+  created_at: string | null;
+}
+
+export interface AlertRuleRow {
+  id: number;
+  name: string | null;
+  scope: string | null;
+  condition_json: string | null;
+  channel_id: number | null;
+  enabled: number;
+  created_by: string | null;
+  created_at: string | null;
+}
+
+export interface NotificationDeliveryRow {
+  id: number;
+  ts: string;
+  channel_id: number | null;
+  channel_type: string | null;
+  channel_name: string | null;
+  rule_id: number | null;
+  rule_name: string | null;
+  trigger: string | null;
+  target: string | null;
+  title: string | null;
+  status: string;
+  detail: string | null;
+}
+
+/** All notification channels (raw — config_json carries secrets; redact before
+ *  returning over the API). Degrades to [] on a database that predates the
+ *  notifications schema. */
+export function getNotificationChannels(): NotificationChannelRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  try {
+    return db
+      .prepare(
+        `SELECT id, type, name, config_json, enabled, created_by, created_at
+         FROM notification_channels ORDER BY id`,
+      )
+      .all() as NotificationChannelRow[];
+  } catch {
+    return [];
+  }
+}
+
+export function getNotificationChannel(id: number): NotificationChannelRow | null {
+  const db = openDatabase();
+  if (!db) return null;
+  try {
+    const row = db
+      .prepare(
+        `SELECT id, type, name, config_json, enabled, created_by, created_at
+         FROM notification_channels WHERE id = ?`,
+      )
+      .get(id) as NotificationChannelRow | undefined;
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** All alert rules. Degrades to [] on a database that predates the
+ *  notifications schema. */
+export function getAlertRules(): AlertRuleRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  try {
+    return db
+      .prepare(
+        `SELECT id, name, scope, condition_json, channel_id, enabled, created_by, created_at
+         FROM alert_rules ORDER BY id`,
+      )
+      .all() as AlertRuleRow[];
+  } catch {
+    return [];
+  }
+}
+
+export function getAlertRule(id: number): AlertRuleRow | null {
+  const db = openDatabase();
+  if (!db) return null;
+  try {
+    const row = db
+      .prepare(
+        `SELECT id, name, scope, condition_json, channel_id, enabled, created_by, created_at
+         FROM alert_rules WHERE id = ?`,
+      )
+      .get(id) as AlertRuleRow | undefined;
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Recent notification deliveries, newest first. Degrades to [] on a database
+ *  that predates the notifications schema. */
+export function getNotificationDeliveries(limit = 50): NotificationDeliveryRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  const lim = Math.min(Math.max(limit, 1), 500);
+  try {
+    return db
+      .prepare(
+        `SELECT id, ts, channel_id, channel_type, channel_name, rule_id, rule_name,
+                trigger, target, title, status, detail
+         FROM notification_deliveries ORDER BY ts DESC, id DESC LIMIT ?`,
+      )
+      .all(lim) as NotificationDeliveryRow[];
+  } catch {
+    return [];
+  }
+}
+
+// ─── Weekly digest (ROI / impact rollup) ────────────────────────────
+
+export interface DigestRepoRow {
+  owner: string;
+  repo: string;
+  reviews: number;
+  findings: number;
+  critical: number;
+  major: number;
+}
+
+export interface DigestTotals {
+  reviews: number;
+  findings: number;
+  critical: number;
+  major: number;
+  minor: number;
+  nit: number;
+  prs: number;
+  repos: number;
+}
+
+export interface WeeklyDigest {
+  since: string;
+  totals: DigestTotals;
+  perRepo: DigestRepoRow[];
+}
+
+/**
+ * Roll up the last `days` (default 7) of review activity for the weekly digest:
+ * totals + a per-repo breakdown ordered by impact (critical, then major). Reuses
+ * the same reviews⋈findings shape the dashboard's activity queries use.
+ */
+export function getWeeklyDigest(days = 7, scope?: { owner: string; repo: string }): WeeklyDigest {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const db = openDatabase();
+  const empty: WeeklyDigest = {
+    since,
+    totals: { reviews: 0, findings: 0, critical: 0, major: 0, minor: 0, nit: 0, prs: 0, repos: 0 },
+    perRepo: [],
+  };
+  if (!db) return empty;
+  // Optional owner/repo scope — parameterized; appended to each WHERE clause.
+  const scopeClause = scope ? " AND rv.owner = ? AND rv.repo = ?" : "";
+  const scopeParams: string[] = scope ? [scope.owner, scope.repo] : [];
+  try {
+    const totals = db
+      .prepare(
+        `SELECT
+           COUNT(DISTINCT rv.id) AS reviews,
+           COUNT(DISTINCT rv.owner || '/' || rv.repo) AS repos,
+           COUNT(DISTINCT rv.owner || '/' || rv.repo || '#' || rv.number) AS prs,
+           COUNT(f.id) AS findings,
+           SUM(CASE WHEN f.severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+           SUM(CASE WHEN f.severity = 'major' THEN 1 ELSE 0 END) AS major,
+           SUM(CASE WHEN f.severity = 'minor' THEN 1 ELSE 0 END) AS minor,
+           SUM(CASE WHEN f.severity = 'nit' THEN 1 ELSE 0 END) AS nit
+         FROM reviews rv
+         LEFT JOIN findings f ON f.review_id = rv.id
+         WHERE rv.created_at >= ?${scopeClause}`,
+      )
+      .get(since, ...scopeParams) as Record<string, number | null>;
+    const perRepo = db
+      .prepare(
+        `SELECT rv.owner AS owner, rv.repo AS repo,
+                COUNT(DISTINCT rv.id) AS reviews,
+                COUNT(f.id) AS findings,
+                SUM(CASE WHEN f.severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+                SUM(CASE WHEN f.severity = 'major' THEN 1 ELSE 0 END) AS major
+         FROM reviews rv
+         LEFT JOIN findings f ON f.review_id = rv.id
+         WHERE rv.created_at >= ?${scopeClause}
+         GROUP BY rv.owner, rv.repo
+         ORDER BY critical DESC, major DESC, findings DESC
+         LIMIT 50`,
+      )
+      .all(since, ...scopeParams) as DigestRepoRow[];
+    return {
+      since,
+      totals: {
+        reviews: totals.reviews ?? 0,
+        findings: totals.findings ?? 0,
+        critical: totals.critical ?? 0,
+        major: totals.major ?? 0,
+        minor: totals.minor ?? 0,
+        nit: totals.nit ?? 0,
+        prs: totals.prs ?? 0,
+        repos: totals.repos ?? 0,
+      },
+      perRepo,
+    };
+  } catch {
+    return empty;
+  }
+}
+
+/** Sum AI cost over the last `days` (for the budget checker). 0 when disabled. */
+export function getCostSince(sinceIso: string, scope?: { owner: string; repo: string }): number {
+  const db = openDatabase();
+  if (!db) return 0;
+  try {
+    if (scope) {
+      const row = db
+        .prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS total FROM cost_events WHERE ts >= ? AND owner = ? AND repo = ?`)
+        .get(sinceIso, scope.owner, scope.repo) as { total: number };
+      return row.total ?? 0;
+    }
+    const row = db
+      .prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS total FROM cost_events WHERE ts >= ?`)
+      .get(sinceIso) as { total: number };
+    return row.total ?? 0;
+  } catch {
+    return 0;
   }
 }

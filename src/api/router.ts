@@ -24,9 +24,18 @@ import {
   getFindingIdsByFingerprint,
   type FindingCoords,
 } from "../storage/dao.js";
+import {
+  applyBrandingOverrides,
+  isValidAccent,
+  normalizeAccent,
+  resolveBranding,
+  sanitizeInstanceName,
+  type BrandingChanges,
+} from "../dashboard/branding.js";
 import { bus } from "../realtime/bus.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
+import { registerNotificationRoutes } from "./notifications.js";
 import { registerCostRoutes } from "./cost.js";
 import { registerSettingsRoutes } from "./settings.js";
 import { registerTokenRoutes } from "./tokens.js";
@@ -439,6 +448,11 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   if (deps.reviewer) {
     registerActionRoutes(router, { reviewer: deps.reviewer, requireRole, csrf: writeCsrf });
   }
+
+  // ─── Notification settings (admin write) ───────────────────────────
+  // Channels, alert rules, test-send, and the delivery log. No reviewer
+  // dependency — always mounted. Admin-gated inside registerNotificationRoutes.
+  registerNotificationRoutes(router, { requireRole, csrf });
 
   // ─── Cost (read for all; budget writes are admin) ──────────────────
   registerCostRoutes(router, { requireRole, csrf });
@@ -1047,6 +1061,90 @@ export function createApiRouter(deps: ApiDeps): express.Router {
     } catch (err) {
       logger.error({ err, login }, "api POST /roles failed");
       sendError(res, 500, "internal", "Failed to update role.");
+    }
+  });
+
+  // ─── /settings/branding ─────────────────────────────────────────────
+  // Read the resolved instance branding (name + accent). Any authenticated
+  // role may read it — the SPA applies it as the theme accent + wordmark.
+  router.get("/settings/branding", (_req, res) => {
+    try {
+      sendData(res, resolveBranding());
+    } catch (err) {
+      logger.error({ err }, "api /settings/branding failed");
+      sendError(res, 500, "internal", "Failed to load branding.");
+    }
+  });
+
+  // ─── /settings/branding (admin write) ────────────────────────────────
+  // Set or clear the instance name / accent color. Same write contract as
+  // /roles: requireRole('admin') + CSRF + audit_log, plus a 'settings.updated'
+  // bus event so connected dashboards re-brand live. Validation runs for both
+  // fields before any write, so a bad accent can't leave a half-applied change.
+  router.post("/settings/branding", requireRole("admin"), csrf.verify, (req, res) => {
+    const actor = getActor(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const hasName = Object.prototype.hasOwnProperty.call(body, "instanceName");
+    const hasAccent = Object.prototype.hasOwnProperty.call(body, "accentColor");
+    if (!hasName && !hasAccent) {
+      sendError(res, 400, "bad_request", "Provide 'instanceName' and/or 'accentColor'.");
+      return;
+    }
+
+    // Phase 1 — validate everything before any mutation. A bad value rejects
+    // here, so we never partially apply a two-field change.
+    const changes: BrandingChanges = {};
+    if (hasName) {
+      const raw = body.instanceName;
+      if (raw == null || raw === "") {
+        changes.instanceName = null;
+      } else {
+        const name = sanitizeInstanceName(raw);
+        if (!name) {
+          sendError(res, 400, "bad_request", "'instanceName' must be a non-empty string.");
+          return;
+        }
+        changes.instanceName = name;
+      }
+    }
+    if (hasAccent) {
+      const raw = body.accentColor;
+      if (raw == null || raw === "") {
+        changes.accentColor = null;
+      } else if (!isValidAccent(raw)) {
+        sendError(res, 400, "bad_request", "'accentColor' must be a hex color like #5a8dff.");
+        return;
+      } else {
+        changes.accentColor = normalizeAccent(raw);
+      }
+    }
+
+    // Phase 2 — apply atomically (both fields in one transaction), then audit +
+    // broadcast only once the write succeeds.
+    try {
+      if (!applyBrandingOverrides(changes, actor?.login ?? null)) {
+        sendError(res, 500, "internal", "Failed to update branding.");
+        return;
+      }
+      const resolved = resolveBranding();
+      insertAuditLog({
+        actorLogin: actor?.login ?? null,
+        actorRole: actor?.role ?? null,
+        action: "settings.branding",
+        targetType: "settings",
+        targetRef: "global",
+        payload: changes,
+        result: "ok",
+      });
+      bus.publish("settings.updated", {
+        instanceName: resolved.instanceName,
+        accentColor: resolved.accentColor,
+        updatedBy: actor?.login ?? null,
+      });
+      sendData(res, resolved);
+    } catch (err) {
+      logger.error({ err }, "api POST /settings/branding failed");
+      sendError(res, 500, "internal", "Failed to update branding.");
     }
   });
 

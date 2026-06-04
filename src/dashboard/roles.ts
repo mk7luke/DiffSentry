@@ -42,6 +42,8 @@ export interface Capabilities {
   manageRoles: boolean;
   /** Read the audit log. */
   viewAudit: boolean;
+  /** Manage notification channels + alert rules (and send tests). */
+  manageNotifications: boolean;
   /** Create / list / revoke platform API tokens. */
   manageTokens: boolean;
 }
@@ -58,6 +60,7 @@ export function capabilitiesFor(role: Role): Capabilities {
     manageConfig: isAdmin,
     manageRoles: isAdmin,
     viewAudit: isAdmin,
+    manageNotifications: isAdmin,
     manageTokens: isAdmin,
   };
 }

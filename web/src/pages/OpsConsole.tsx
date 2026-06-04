@@ -71,6 +71,12 @@ function rowToItem(r: ActivityRow): FeedItem {
 }
 
 function envToItem(env: StreamEnvelope): FeedItem | null {
+  // `severity` is finding-severity only (critical/major/minor/nit), set on
+  // historical review rows by the backend. Live lifecycle/action events carry
+  // no finding severity, so they leave it null — keeping the severity filter's
+  // meaning identical on the live stream and the /api/v1/activity backfill
+  // (which only attaches severity to review rows). Colour-coding for these live
+  // events keys on kind/result in classify(), not on severity.
   const base = {
     key: `live:${env.id}`,
     source: "live" as const,
@@ -85,7 +91,7 @@ function envToItem(env: StreamEnvelope): FeedItem | null {
       repo: p.repo,
       number: p.number,
       kind: env.topic,
-      severity: env.topic === "review.failed" ? "critical" : null,
+      severity: null,
       detail: env.topic === "review.failed" ? p.error : p.mode ? `${p.mode} review` : null,
     };
   }
@@ -108,7 +114,7 @@ function envToItem(env: StreamEnvelope): FeedItem | null {
       repo: p.repo,
       number: p.number,
       kind: `action.${p.action}`,
-      severity: p.result === "ok" || p.result === "accepted" ? null : "major",
+      severity: null,
       detail: p.detail,
       actor: p.actor,
       result: p.result,
@@ -253,7 +259,9 @@ export function OpsConsolePage() {
   }, []);
   useEventStream(onEvent);
 
-  // Per-minute clock for the sparkline + relative times.
+  // Ticking clock: bumping `now` every 5s re-renders the page, which both
+  // recomputes the events/min sparkline and re-runs each FeedRow's
+  // relativeTime() so "3m ago" labels stay current without per-row timers.
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 5_000);
     if (typeof t === "object" && "unref" in t) (t as { unref?: () => void }).unref?.();
@@ -478,7 +486,7 @@ export function OpsConsolePage() {
                 hint={hasFilters ? "Clear the filters or load older history." : "Trigger a review or open a PR to see it stream in live."}
               />
             ) : (
-              visible.map((it) => <FeedRow key={it.key} item={it} onOpen={open} now={now} />)
+              visible.map((it) => <FeedRow key={it.key} item={it} onOpen={open} />)
             )}
           </div>
         </div>
@@ -487,11 +495,9 @@ export function OpsConsolePage() {
   );
 }
 
-function FeedRow({ item, onOpen, now }: { item: FeedItem; onOpen: (i: FeedItem) => void; now: number }) {
+function FeedRow({ item, onOpen }: { item: FeedItem; onOpen: (i: FeedItem) => void }) {
   const { color, tag } = classify(item);
   const ref = item.owner && item.repo ? `${item.owner}/${item.repo}${item.number != null ? `#${item.number}` : ""}` : "";
-  // now is referenced so the relative timestamp refreshes on each tick.
-  void now;
   const clickable = !!(item.owner && item.repo);
   return (
     <div
