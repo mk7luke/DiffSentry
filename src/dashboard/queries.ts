@@ -2193,7 +2193,7 @@ export interface WeeklyDigest {
  * totals + a per-repo breakdown ordered by impact (critical, then major). Reuses
  * the same reviews⋈findings shape the dashboard's activity queries use.
  */
-export function getWeeklyDigest(days = 7): WeeklyDigest {
+export function getWeeklyDigest(days = 7, scope?: { owner: string; repo: string }): WeeklyDigest {
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
   const db = openDatabase();
   const empty: WeeklyDigest = {
@@ -2202,6 +2202,9 @@ export function getWeeklyDigest(days = 7): WeeklyDigest {
     perRepo: [],
   };
   if (!db) return empty;
+  // Optional owner/repo scope — parameterized; appended to each WHERE clause.
+  const scopeClause = scope ? " AND rv.owner = ? AND rv.repo = ?" : "";
+  const scopeParams: string[] = scope ? [scope.owner, scope.repo] : [];
   try {
     const totals = db
       .prepare(
@@ -2216,9 +2219,9 @@ export function getWeeklyDigest(days = 7): WeeklyDigest {
            SUM(CASE WHEN f.severity = 'nit' THEN 1 ELSE 0 END) AS nit
          FROM reviews rv
          LEFT JOIN findings f ON f.review_id = rv.id
-         WHERE rv.created_at >= ?`,
+         WHERE rv.created_at >= ?${scopeClause}`,
       )
-      .get(since) as Record<string, number | null>;
+      .get(since, ...scopeParams) as Record<string, number | null>;
     const perRepo = db
       .prepare(
         `SELECT rv.owner AS owner, rv.repo AS repo,
@@ -2228,12 +2231,12 @@ export function getWeeklyDigest(days = 7): WeeklyDigest {
                 SUM(CASE WHEN f.severity = 'major' THEN 1 ELSE 0 END) AS major
          FROM reviews rv
          LEFT JOIN findings f ON f.review_id = rv.id
-         WHERE rv.created_at >= ?
+         WHERE rv.created_at >= ?${scopeClause}
          GROUP BY rv.owner, rv.repo
          ORDER BY critical DESC, major DESC, findings DESC
          LIMIT 50`,
       )
-      .all(since) as DigestRepoRow[];
+      .all(since, ...scopeParams) as DigestRepoRow[];
     return {
       since,
       totals: {

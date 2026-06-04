@@ -245,7 +245,9 @@ class NotificationEngine {
    *  ISO week hasn't been sent yet (persisted so restarts don't double-send). */
   private async maybeSendDigest(): Promise<void> {
     if (process.env.NOTIFY_DIGEST_DISABLED === "1") return;
-    const day = clampInt(process.env.NOTIFY_DIGEST_DAY, 1, 0, 6); // 0=Sun..6=Sat, default Mon
+    // Date#getUTCDay() is numbered 0=Sun … 6=Sat, so the valid range is 0–6.
+    const defaultDigestDay = 1; // Monday
+    const day = clampInt(process.env.NOTIFY_DIGEST_DAY, defaultDigestDay, 0, 6);
     const hour = clampInt(process.env.NOTIFY_DIGEST_HOUR, 9, 0, 23);
     const now = new Date();
     if (now.getUTCDay() !== day || now.getUTCHours() !== hour) return;
@@ -260,9 +262,22 @@ class NotificationEngine {
       upsertSettingOverride({ scope: "global", key: "digest.lastSentWeek", value: weekKey, updatedBy: "system" });
       return;
     }
-    const digest = getWeeklyDigest(7);
-    const msg = renderDigestMessage(digest, dashboardOrigin());
     const channels = new Map(getNotificationChannels().map((c) => [c.id, c]));
+    // Each rule's digest reflects its own scope: a "global" rule gets the org-wide
+    // rollup, an "owner/repo" rule gets that repo's rollup — never global data
+    // mislabeled as a repo's. Cache by scope so repeated scopes compute once.
+    const origin = dashboardOrigin();
+    const msgByScope = new Map<string, ChannelMessage>();
+    const messageFor = (scopeStr: string): ChannelMessage => {
+      let m = msgByScope.get(scopeStr);
+      if (!m) {
+        const parts = scopeStr.split("/");
+        const repoScope = parts.length === 2 && parts[0] && parts[1] ? { owner: parts[0], repo: parts[1] } : undefined;
+        m = renderDigestMessage(getWeeklyDigest(7, repoScope), origin);
+        msgByScope.set(scopeStr, m);
+      }
+      return m;
+    };
     let attempted = false; // an enabled channel was found and dispatch was called
     let delivered = false; // at least one dispatch returned ok
     for (const rule of digestRules) {
@@ -270,9 +285,10 @@ class NotificationEngine {
       const channel = channels.get(rule.channel_id);
       if (!channel || channel.enabled !== 1) continue;
       attempted = true;
-      const result = await dispatchToChannel(channel, msg, {
+      const scopeStr = (rule.scope ?? "").trim() || "global";
+      const result = await dispatchToChannel(channel, messageFor(scopeStr), {
         trigger: "digest",
-        target: rule.scope ?? "global",
+        target: scopeStr,
         ruleId: rule.id,
         ruleName: rule.name,
       });
