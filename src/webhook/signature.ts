@@ -28,13 +28,16 @@ export function verifyWebhookSignature(
   signature: string | undefined | null,
 ): boolean {
   if (!secret || typeof signature !== "string" || !signature.startsWith("sha256=")) return false;
-  const expected = signWebhookPayload(secret, payload);
-  const provided = Buffer.from(signature);
-  const want = Buffer.from(expected);
-  // Length check first: timingSafeEqual throws on unequal-length buffers.
-  if (provided.length !== want.length) return false;
+  const providedHex = signature.slice("sha256=".length);
+  // Validate the digest shape before Buffer.from(..., "hex"), which otherwise
+  // silently drops odd/invalid nibbles and would compare a short buffer.
+  if (!/^[0-9a-f]{64}$/i.test(providedHex)) return false;
+  // Compare the raw 32-byte digests (case-insensitive, unlike an ASCII compare).
+  const provided = Buffer.from(providedHex, "hex");
+  const expected = crypto.createHmac("sha256", secret).update(payload, "utf8").digest();
+  if (provided.length !== expected.length) return false;
   try {
-    return crypto.timingSafeEqual(provided, want);
+    return crypto.timingSafeEqual(provided, expected);
   } catch {
     return false;
   }

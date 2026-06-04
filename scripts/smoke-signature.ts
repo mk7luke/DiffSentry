@@ -26,6 +26,12 @@ async function main() {
   // A signature produced for the payload verifies.
   ok("valid signature verifies", verifyWebhookSignature(secret, payload, expected) === true);
 
+  // Hex is compared as bytes, so an upper-cased digest still verifies.
+  ok(
+    "uppercase hex digest verifies (case-insensitive)",
+    verifyWebhookSignature(secret, payload, "sha256=" + expected.slice("sha256=".length).toUpperCase()) === true,
+  );
+
   // Tampered payload → reject.
   ok(
     "tampered payload rejected",

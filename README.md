@@ -169,7 +169,9 @@ cost surprises).
   all-time hit counts to spot noisy rules.
 - **Operator settings** at `/dashboard/settings` — runtime + storage health +
   a live warn/error log tail captured via an in-process pino ring buffer.
-- **Guided first-run diagnostics** at `/settings/diagnostics` — pinpoints
+- **Guided first-run diagnostics** at `/settings/diagnostics` in the
+  command-center SPA (served at `/` — see the deployment note below; the legacy
+  `/dashboard` pages above have no diagnostics screen) — pinpoints
   missing/invalid config (GitHub App, AI provider, OAuth, DB) with fix hints,
   shows App installation + connected-repo status and webhook delivery health,
   and runs one-click test-AI / test-webhook self-tests. A setup wizard nudges
