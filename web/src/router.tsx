@@ -1,6 +1,8 @@
 import { lazy, Suspense } from "react";
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 import { Shell } from "./components/Shell";
+import { useAuth } from "./auth/useAuth";
+import { OpsConsolePage } from "./pages/OpsConsole";
 import { OverviewPage } from "./pages/Overview";
 import { ImpactPage } from "./pages/Impact";
 import { QueuePage } from "./pages/Queue";
@@ -31,7 +33,7 @@ function NotFoundPage() {
     <div style={{ marginTop: 14 }}>
       <NotFoundState message="That page doesn't exist." />
       <div style={{ marginTop: 14 }}>
-        <a href="/" className="btn btn-ghost">
+        <a href="/overview" className="btn btn-ghost">
           ← Back to overview
         </a>
       </div>
@@ -39,11 +41,22 @@ function NotFoundPage() {
   );
 }
 
+// The "/" landing tab is role-aware: admins drop straight into the live Ops
+// Console; everyone else lands on the repo Overview. We wait for /me so the
+// first paint doesn't flash the wrong tab and then bounce.
+function RootLanding() {
+  const { role, isLoading } = useAuth();
+  if (isLoading) return <LoadingState label="Loading…" />;
+  return <Navigate to={role === "admin" ? "/ops" : "/overview"} replace />;
+}
+
 export const router = createBrowserRouter([
   {
     element: <Shell />,
     children: [
-      { path: "/", element: <OverviewPage /> },
+      { path: "/", element: <RootLanding /> },
+      { path: "/ops", element: <OpsConsolePage /> },
+      { path: "/overview", element: <OverviewPage /> },
       { path: "/impact", element: <ImpactPage /> },
       { path: "/queue", element: <QueuePage /> },
       {

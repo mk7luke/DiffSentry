@@ -328,6 +328,83 @@ async function main() {
     const health = await get("/api/v1/health");
     ok("health → counts + logs", health.status === 200 && health.json.data.counts.repos === 2 && Array.isArray(health.json.data.logs));
 
+    const activity = await get("/api/v1/activity");
+    ok(
+      "activity → events + reviews unified",
+      activity.status === 200 &&
+        Array.isArray(activity.json.data.rows) &&
+        activity.json.data.rows.some((r: any) => r.source === "review" && r.kind === "review") &&
+        activity.json.data.rows.some((r: any) => r.source === "event" && r.kind === "pull_request.opened") &&
+        activity.json.data.kinds.includes("review") &&
+        activity.json.data.kinds.includes("pull_request.opened"),
+    );
+
+    const reviewRow = activity.json.data.rows.find((r: any) => r.source === "review");
+    ok(
+      "activity → review row carries worst severity + finding count",
+      reviewRow && reviewRow.severity === "critical" && reviewRow.finding_count >= 1 && reviewRow.number === 42,
+    );
+
+    const activityKind = await get("/api/v1/activity?kind=review");
+    ok(
+      "activity?kind=review → only reviews",
+      activityKind.status === 200 &&
+        activityKind.json.data.rows.length >= 1 &&
+        activityKind.json.data.rows.every((r: any) => r.kind === "review"),
+    );
+
+    const activitySev = await get("/api/v1/activity?severity=critical");
+    ok(
+      "activity?severity=critical → only critical-bearing reviews",
+      activitySev.status === 200 &&
+        activitySev.json.data.rows.length >= 1 &&
+        activitySev.json.data.rows.every((r: any) => r.severity === "critical"),
+    );
+
+    const activityRepo = await get("/api/v1/activity?repo=mk7luke/other-repo");
+    ok(
+      "activity?repo=… → scoped to one repo",
+      activityRepo.status === 200 &&
+        activityRepo.json.data.rows.length >= 1 &&
+        activityRepo.json.data.rows.every((r: any) => r.repo === "other-repo"),
+    );
+
+    const activityPaged = await get("/api/v1/activity?limit=1");
+    ok(
+      "activity?limit=1 → paginates with an opaque cursor",
+      activityPaged.status === 200 &&
+        activityPaged.json.data.rows.length === 1 &&
+        activityPaged.json.data.hasMore === true &&
+        typeof activityPaged.json.data.nextBefore === "string",
+    );
+
+    // Page with the returned cursor (opaque string) — the next page must be a
+    // strictly different row, never an overlap or a skip at the ts boundary.
+    const cursorKey = (r: any) => `${r.source}:${r.id}`;
+    const page1Key = cursorKey(activityPaged.json.data.rows[0]);
+    const activityPage2 = await get(`/api/v1/activity?limit=1&before=${encodeURIComponent(activityPaged.json.data.nextBefore)}`);
+    ok(
+      "activity cursor → next page is a distinct row",
+      activityPage2.status === 200 &&
+        activityPage2.json.data.rows.length === 1 &&
+        cursorKey(activityPage2.json.data.rows[0]) !== page1Key,
+    );
+
+    // Legacy bare-ISO cursor still works (back-compat).
+    const activityLegacy = await get(`/api/v1/activity?before=${encodeURIComponent(now)}`);
+    ok(
+      "activity?before=<iso> → legacy cursor still accepted",
+      activityLegacy.status === 200 && Array.isArray(activityLegacy.json.data.rows),
+    );
+
+    // Partially-numeric junk is rejected — falls back to the default limit
+    // rather than silently parsing to 10 (so all 3 seeded rows come back).
+    const activityBadLimit = await get("/api/v1/activity?limit=10abc");
+    ok(
+      "activity?limit=10abc → rejects junk, uses default",
+      activityBadLimit.status === 200 && activityBadLimit.json.data.rows.length === 3,
+    );
+
     // ── Diagnostics (first-run experience) ─────────────────────────
     const diag = await get("/api/v1/diagnostics");
     ok(

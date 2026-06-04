@@ -49,6 +49,8 @@ import { registerLearningRoutes } from "./learnings.js";
 import { reviewQueue } from "../realtime/queue.js";
 import { registerWebhookRoutes, type ReplayWebhook } from "./webhooks.js";
 import {
+  getActivity,
+  getActivityKinds,
   getApprovalMix,
   getAuditActions,
   getAuditLog,
@@ -647,6 +649,40 @@ export function createApiRouter(deps: ApiDeps): express.Router {
     } catch (err) {
       logger.error({ err }, "api /findings failed");
       sendError(res, 500, "internal", "Failed to load findings.");
+    }
+  });
+
+  // ─── /activity ─────────────────────────────────────────────────────
+  // The Ops Console backfill: a unified, newest-first feed of events + reviews.
+  // Page older by passing ?before=<nextBefore> — an opaque cursor returned by
+  // the previous response (a bare ISO timestamp is also accepted, legacy). Any
+  // authenticated role may read it — the live tail is the SSE /stream above.
+  router.get("/activity", (req, res) => {
+    try {
+      const q = req.query as Record<string, unknown>;
+      const str = (k: string) => {
+        const v = q[k];
+        return typeof v === "string" && v.length > 0 ? v : undefined;
+      };
+      const num = (k: string) => {
+        const v = q[k];
+        // Digit-only: reject partially-numeric junk like "10abc" so it falls
+        // back to the default rather than silently parsing to 10.
+        if (typeof v !== "string" || !/^\d+$/.test(v)) return undefined;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : undefined;
+      };
+      const result = getActivity({
+        repo: str("repo"),
+        kind: str("kind"),
+        severity: str("severity"),
+        before: str("before"),
+        limit: num("limit") ?? 100,
+      });
+      sendData(res, { ...result, kinds: getActivityKinds() });
+    } catch (err) {
+      logger.error({ err }, "api /activity failed");
+      sendError(res, 500, "internal", "Failed to load activity.");
     }
   });
 

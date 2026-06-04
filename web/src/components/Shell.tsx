@@ -20,6 +20,7 @@ import {
   LogoIcon,
   MenuIcon,
   OfflineIcon,
+  OpsIcon,
   OverviewIcon,
   PatternsIcon,
   QueueIcon,
@@ -48,7 +49,8 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { to: "/", label: "Overview", Icon: OverviewIcon, end: true },
+  { to: "/ops", label: "Ops Console", Icon: OpsIcon, end: false },
+  { to: "/overview", label: "Overview", Icon: OverviewIcon, end: false },
   { to: "/impact", label: "Impact", Icon: ImpactIcon, end: false },
   { to: "/queue", label: "Queue", Icon: QueueIcon, end: false },
   { to: "/findings", label: "Findings", Icon: FindingsIcon, end: true },

@@ -25,6 +25,20 @@ export interface ReviewLifecyclePayload {
   error?: string;
 }
 
+/** A GitHub webhook arrived — emitted from server.ts after persisting it. */
+export interface WebhookPayload {
+  owner: string;
+  repo: string;
+  /** PR or issue number when the event carries one; null otherwise. */
+  number: number | null;
+  /** The X-GitHub-Event header value, e.g. "pull_request", "issue_comment". */
+  event: string;
+  /** The payload.action when present (e.g. "opened", "synchronize"). */
+  action?: string;
+  /** The normalized `event.action` kind also written to the events table. */
+  kind: string;
+}
+
 /** A role-gated write action completed (or failed) — emitted from the API. */
 export interface ActionPayload {
   owner: string;
@@ -224,6 +238,7 @@ export interface BusEventMap {
   "review.started": ReviewLifecyclePayload;
   "review.finished": ReviewLifecyclePayload;
   "review.failed": ReviewLifecyclePayload;
+  "webhook.received": WebhookPayload;
   "action.performed": ActionPayload;
   "finding.surfaced": FindingSurfacedPayload;
   "notification.delivered": NotificationDeliveredPayload;

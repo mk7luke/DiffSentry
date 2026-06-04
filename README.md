@@ -710,8 +710,17 @@ untouched.
 
 **SPA pages** (all read-only)
 
-- `/` — repos overview (PRs reviewed, 7d findings, 7d critical, last review),
-  sortable, with a 14-day aggregate activity chart.
+- `/` — role-aware landing: **admins** drop into the live Ops Console, everyone
+  else lands on the repos overview.
+- `/ops` — **Ops Console**: a live, filterable tail of everything the bot is
+  doing. Backfills from `GET /api/v1/activity` (events + reviews unified,
+  cursor-paginated) then live-tails the SSE bus (`review.*`, `webhook.*`,
+  `action.performed`). Auto-scrolls to the tail (pauses on hover), filters by
+  repo / kind / severity, colour-codes each row by event type, shows an
+  events-per-minute sparkline + SSE connection indicator, and deep-links each
+  row to its PR.
+- `/overview` — repos overview (PRs reviewed, 7d findings, 7d critical, last
+  review), sortable, with a 14-day aggregate activity chart.
 - `/queue` — the live **review pipeline board**: Queued → Running → Done /
   Failed lanes with per-card elapsed timers, a cancel button on in-flight
   reviews, and a one-click retry on the failed lane. Hydrates from
@@ -783,10 +792,10 @@ in the sidebar) to open a keyboard-first palette that combines three things:
 
 **JSON API** (`/api/v1`)
 
-Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/queue`, `/repos`,
 `/repos/:owner/:repo`, `/repos/:owner/:repo/prs/:number`,
-`/repos/:owner/:repo/config`, `/findings`, `/findings/recurring`, `/patterns`, `/cost`
+`/repos/:owner/:repo/config`, `/findings`, `/findings/recurring`, `/patterns`,
+`/activity` (unified events+reviews feed; `?repo=&kind=&severity=&before=&limit=`), `/cost`
 (`?range=7d|30d|90d|mtd&group=repo|model|day|kind`), `/rules` (admin),
 `/search?q=`, the analytics trio `/analytics/authors`,
 `/analytics/authors/:author`, `/analytics/trends` (all accept `?days=`, default
@@ -907,17 +916,18 @@ controls degrade cleanly without a database.
 
 **Realtime** (`GET /api/v1/stream`) is a Server-Sent Events feed on an in-process
 event bus. The review engine publishes `review.started` / `review.finished` /
-`review.failed`, the in-memory review queue publishes `queue.updated` on every
-state transition (queued → running → done/failed/canceled, including phase
-changes), every command action publishes `action.performed`, a custom rule
-change publishes `rule.changed`, a config edit publishes `config.updated`, a
-settings change publishes `settings.changed`, a webhook replay publishes
-`webhook.replayed`, and the cost instrumentation publishes `budget.exceeded`
-when month-to-date spend crosses a configured ceiling. The SPA opens one
-`EventSource`, surfaces events as toasts, drives the live queue board, and
-live-refetches the affected PR — so a re-review's findings appear without a
-refresh. The stream heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s)
-and replays missed events on reconnect via `Last-Event-ID`.
+`review.failed`, every inbound GitHub webhook publishes `webhook.received`, the
+in-memory review queue publishes `queue.updated` on every state transition
+(queued → running → done/failed/canceled, including phase changes), every command
+action publishes `action.performed`, a custom rule change publishes `rule.changed`,
+a config edit publishes `config.updated`, a settings change publishes
+`settings.changed`, a webhook replay publishes `webhook.replayed`, and the cost
+instrumentation publishes `budget.exceeded` when month-to-date spend crosses a
+configured ceiling. The SPA opens one `EventSource`, surfaces events as toasts,
+streams them into the Ops Console, drives the live queue board, and live-refetches
+the affected PR — so a re-review's findings appear without a refresh. The stream
+heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed
+events on reconnect via `Last-Event-ID`.
 
 **AI cost tracking**
 

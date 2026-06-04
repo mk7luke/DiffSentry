@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiSend } from "./client";
 import type {
+  ActivityResponse,
   ApiScope,
   AuditResponse,
   BrandingResponse,
@@ -116,6 +117,42 @@ export function useFindings(query: FindingsQuery) {
         offset: query.offset,
       }),
     placeholderData: (prev) => prev,
+  });
+}
+
+export interface ActivityQuery {
+  repo?: string;
+  kind?: string;
+  severity?: string;
+  before?: string;
+  limit?: number;
+}
+
+/** Low-level fetch — used for "load older" paging where we hold the cursor. */
+export function fetchActivity(query: ActivityQuery): Promise<ActivityResponse> {
+  return apiGet<ActivityResponse>("/activity", {
+    repo: query.repo,
+    kind: query.kind,
+    severity: query.severity,
+    before: query.before,
+    limit: query.limit,
+  });
+}
+
+/**
+ * The Ops Console backfill: the most-recent page for the active filter scope
+ * (repo / kind / severity), so older matches aren't hidden behind an unfiltered
+ * page. The component then live-tails the SSE bus on top of this seed.
+ */
+export function useActivity(query: ActivityQuery) {
+  const limit = query.limit ?? 120;
+  return useQuery({
+    queryKey: ["activity", query.repo ?? "", query.kind ?? "", query.severity ?? "", limit],
+    queryFn: () =>
+      fetchActivity({ repo: query.repo, kind: query.kind, severity: query.severity, limit }),
+    // The bus is the realtime source of truth; don't poll the backfill.
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 }
 

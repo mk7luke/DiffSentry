@@ -21,6 +21,7 @@ import {
   CheckIcon,
   FindingsIcon,
   LearningIcon,
+  OpsIcon,
   OverviewIcon,
   PatternsIcon,
   PauseIcon,
@@ -72,7 +73,8 @@ interface Item {
 }
 
 const NAV: Array<{ to: string; label: string; Icon: Icon; cap?: keyof Capabilities }> = [
-  { to: "/", label: "Overview", Icon: OverviewIcon },
+  { to: "/ops", label: "Ops Console", Icon: OpsIcon },
+  { to: "/overview", label: "Overview", Icon: OverviewIcon },
   { to: "/findings", label: "Findings", Icon: FindingsIcon },
   { to: "/patterns", label: "Patterns", Icon: PatternsIcon },
   { to: "/audit", label: "Audit log", Icon: AuditIcon, cap: "viewAudit" },

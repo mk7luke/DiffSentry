@@ -971,6 +971,194 @@ export function getRoleOverrides(): RoleOverrideRow[] {
   }
 }
 
+// ─── Activity stream (Ops Console) ──────────────────────────────────
+//
+// A unified, newest-first feed of "everything the bot is doing": every row
+// from `events` (webhook traffic + bot actions) UNION'd with every `reviews`
+// row (each completed review, decorated with its worst finding severity, risk,
+// approval, and PR title). The SPA backfills from here, then live-tails the bus
+// (review.* + webhook.*) for anything newer. Cursor paginated on `ts` so
+// "load older" stays stable as new rows stream in at the head.
+
+export interface ActivityRow {
+  /** "review" | "event" — which table this row came from. */
+  source: string;
+  /** Per-source row id (events.id or reviews.id); pair with source for a key. */
+  id: number;
+  ts: string;
+  owner: string;
+  repo: string;
+  number: number | null;
+  /** Normalized kind: "review" for reviews, events.kind for events. */
+  kind: string;
+  /** Worst finding severity for a review; null for events. */
+  severity: string | null;
+  approval: string | null;
+  risk_level: string | null;
+  risk_score: number | null;
+  finding_count: number | null;
+  title: string | null;
+  author: string | null;
+}
+
+export interface ActivityFilters {
+  /** "owner/repo" — scope to one repo. */
+  repo?: string;
+  /** Exact kind match (e.g. "review", "pull_request.opened"). */
+  kind?: string;
+  /** Exact worst-severity match (reviews only). */
+  severity?: string;
+  /**
+   * Pagination cursor — pass the previous result's `nextBefore` to get the
+   * next (older) page. Opaque "ts|source|id" tuple; a bare ISO timestamp is
+   * accepted as a legacy cursor (`act.ts < ts`).
+   */
+  before?: string;
+  limit?: number;
+}
+
+export interface ActivityResult {
+  rows: ActivityRow[];
+  /** `ts` to pass as the next `before` cursor, or null when exhausted. */
+  nextBefore: string | null;
+  hasMore: boolean;
+}
+
+export function getActivity(filters: ActivityFilters = {}): ActivityResult {
+  const db = openDatabase();
+  if (!db) return { rows: [], nextBefore: null, hasMore: false };
+  const limit = Math.min(Math.max(filters.limit ?? 100, 1), 500);
+
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (filters.repo && filters.repo.includes("/")) {
+    const [o, r] = filters.repo.split("/", 2);
+    where.push("act.owner = ? AND act.repo = ?");
+    params.push(o, r);
+  }
+  if (filters.kind) {
+    where.push("act.kind = ?");
+    params.push(filters.kind);
+  }
+  if (filters.severity) {
+    // Severity is finding-severity, attached only to `review` rows below (event
+    // rows are NULL). So a severity filter is implicitly reviews-only — and the
+    // live Ops Console matches this: its lifecycle/action events carry no
+    // severity, so `?severity=major` never silently disagrees with the stream.
+    where.push("act.severity = ?");
+    params.push(filters.severity);
+  }
+  if (filters.before) {
+    // The cursor is an opaque "ts|source|id" tuple matching the ORDER BY below,
+    // so rows that share a millisecond `ts` are never skipped or repeated across
+    // a page boundary. A bare ISO timestamp is still accepted as a legacy cursor.
+    const parts = filters.before.split("|");
+    if (parts.length === 3 && /^\d+$/.test(parts[2])) {
+      const [cts, csource, cid] = parts;
+      where.push(
+        "(act.ts < ? OR (act.ts = ? AND act.source < ?) OR (act.ts = ? AND act.source = ? AND act.id < ?))",
+      );
+      params.push(cts, cts, csource, cts, csource, Number.parseInt(cid, 10));
+    } else {
+      where.push("act.ts < ?");
+      params.push(filters.before);
+    }
+  }
+  const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+
+  // One extra row tells us whether another page exists without a COUNT pass.
+  const rows = db
+    .prepare(
+      `SELECT * FROM (
+         SELECT
+           'review' AS source,
+           rv.id AS id,
+           rv.created_at AS ts,
+           rv.owner AS owner,
+           rv.repo AS repo,
+           rv.number AS number,
+           'review' AS kind,
+           (SELECT CASE
+              WHEN SUM(CASE WHEN f.severity = 'critical' THEN 1 ELSE 0 END) > 0 THEN 'critical'
+              WHEN SUM(CASE WHEN f.severity = 'major'    THEN 1 ELSE 0 END) > 0 THEN 'major'
+              WHEN SUM(CASE WHEN f.severity = 'minor'    THEN 1 ELSE 0 END) > 0 THEN 'minor'
+              WHEN SUM(CASE WHEN f.severity = 'nit'      THEN 1 ELSE 0 END) > 0 THEN 'nit'
+              ELSE NULL END
+            FROM findings f WHERE f.review_id = rv.id) AS severity,
+           rv.approval AS approval,
+           rv.risk_level AS risk_level,
+           rv.risk_score AS risk_score,
+           (SELECT COUNT(*) FROM findings f WHERE f.review_id = rv.id) AS finding_count,
+           p.title AS title,
+           p.author AS author
+         FROM reviews rv
+         LEFT JOIN prs p ON p.owner = rv.owner AND p.repo = rv.repo AND p.number = rv.number
+         UNION ALL
+         SELECT
+           'event' AS source,
+           e.id AS id,
+           e.ts AS ts,
+           e.owner AS owner,
+           e.repo AS repo,
+           e.number AS number,
+           e.kind AS kind,
+           NULL AS severity,
+           NULL AS approval,
+           NULL AS risk_level,
+           NULL AS risk_score,
+           NULL AS finding_count,
+           NULL AS title,
+           NULL AS author
+         FROM events e
+       ) AS act
+       ${whereSql}
+       ORDER BY act.ts DESC, act.source DESC, act.id DESC
+       LIMIT ?`,
+    )
+    .all(...params, limit + 1) as ActivityRow[];
+
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const last = page[page.length - 1];
+  const nextBefore = hasMore && last ? `${last.ts}|${last.source}|${last.id}` : null;
+  return { rows: page, nextBefore, hasMore };
+}
+
+// Kinds the Ops Console can show that never appear in the `events` table: the
+// synthetic "review" row kind plus the SSE-only lifecycle/action topics the
+// frontend derives from the bus (review.* and action.<verb>, where the verbs
+// are the command actions in src/api/actions.ts). Listed so the filter dropdown
+// is complete from first paint and still works with persistence disabled.
+const LIVE_ONLY_ACTIVITY_KINDS = [
+  "review",
+  "review.started",
+  "review.finished",
+  "review.failed",
+  "action.review",
+  "action.resolve",
+  "action.pause",
+  "action.resume",
+  "action.cancel",
+];
+
+/** Distinct activity kinds (persisted events ∪ synthetic + SSE-only kinds),
+ * deduped and sorted, for the Ops Console filter dropdown. */
+export function getActivityKinds(): string[] {
+  const db = openDatabase();
+  // Persistence off → still offer the live-only kinds the SSE stream emits.
+  if (!db) return [...LIVE_ONLY_ACTIVITY_KINDS].sort();
+  try {
+    const rows = db
+      .prepare(`SELECT DISTINCT kind FROM events ORDER BY kind`)
+      .all() as Array<{ kind: string }>;
+    const set = new Set<string>(rows.map((r) => r.kind));
+    for (const k of LIVE_ONLY_ACTIVITY_KINDS) set.add(k);
+    return Array.from(set).sort();
+  } catch {
+    return [...LIVE_ONLY_ACTIVITY_KINDS].sort();
+  }
+}
+
 // ─── Analytics: authors & org-wide trends ──────────────────────────
 //
 // "Author" here is the PR author (prs.author). Every review is attributed to

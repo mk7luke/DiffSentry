@@ -1866,6 +1866,235 @@ label.field {
   color: var(--text);
 }
 
+/* ─── Ops Console (live activity stream) ───────────────────────────── */
+.ops {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 86px);
+  min-height: 520px;
+}
+/* The feed card eats the remaining height; everything above it is fixed. */
+#ops-feed-card {
+  flex: 1;
+  min-height: 0;
+  margin-top: 14px;
+}
+#ops-feed-card .card-body.flush {
+  display: flex;
+  flex-direction: column;
+}
+.ops-feed-wrap {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.ops-older {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 6px;
+  border-bottom: 1px solid var(--line-soft);
+  flex-shrink: 0;
+}
+.ops-older-err {
+  font-size: 11.5px;
+  color: var(--sev-crit);
+}
+.ops-feed {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+
+/* Header meta cluster: sparkline + rate + connection chip. */
+.ops-headmeta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.ops-rate {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.05;
+}
+.ops-rate .n {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 620;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.ops-rate .u {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+.ops-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 30px;
+  width: 132px;
+}
+.ops-spark .bar {
+  flex: 1;
+  min-height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  transition: height 0.3s ease;
+}
+
+.ops-conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-elev);
+  color: var(--text-3);
+}
+.ops-conn .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-4);
+}
+.ops-conn.live {
+  color: #bff5d1;
+  border-color: var(--good-line);
+  background: var(--good-soft);
+}
+.ops-conn.live .dot {
+  background: var(--good);
+  box-shadow: 0 0 0 3px var(--good-soft);
+  animation: ops-pulse 1.6s ease-in-out infinite;
+}
+.ops-conn.reconnecting {
+  color: #ffe1a0;
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+}
+.ops-conn.reconnecting .dot {
+  background: var(--warn);
+  animation: ops-pulse 0.7s ease-in-out infinite;
+}
+@keyframes ops-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Filter bar. */
+.ops-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(140px, 1fr)) auto;
+  gap: 10px 12px;
+  align-items: end;
+}
+.ops-filter-actions {
+  display: flex;
+  align-items: end;
+}
+.ops-tailstate {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+}
+.ops-tailstate.paused {
+  color: var(--sev-minor);
+}
+
+/* Feed rows. */
+.ops-row {
+  display: grid;
+  grid-template-columns: 64px 9px 52px minmax(120px, 0.9fr) minmax(0, 1.6fr) auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12.5px;
+}
+.ops-row:last-child {
+  border-bottom: 0;
+}
+.ops-row.clickable {
+  cursor: pointer;
+}
+.ops-row.clickable:hover {
+  background: rgba(90, 141, 255, 0.06);
+}
+.ops-row .when {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  text-align: right;
+  white-space: nowrap;
+}
+.ops-row .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  align-self: center;
+  flex-shrink: 0;
+}
+.ops-row .tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  font-family: var(--font-mono);
+  align-self: center;
+}
+.ops-row .kindlabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ops-row .msg {
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ops-row .ref {
+  font-size: 11px;
+  color: var(--accent-bright);
+  text-align: right;
+  white-space: nowrap;
+}
+.ops-row.clickable:hover .ref {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+@media (max-width: 820px) {
+  .ops {
+    height: auto;
+    min-height: 0;
+  }
+  .ops-feed {
+    max-height: 70vh;
+  }
+  .ops-row {
+    grid-template-columns: 56px 9px 1fr auto;
+  }
+  .ops-row .tag,
+  .ops-row .kindlabel {
+    display: none;
+  }
+}
+
 /* ─── Roles & capabilities (RBAC) ──────────────────────────────────── */
 .rolechip {
   display: inline-flex;

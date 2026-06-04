@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ReviewQueueEntry } from "../api/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -25,6 +25,7 @@ export type StreamTopic =
   | "review.started"
   | "review.finished"
   | "review.failed"
+  | "webhook.received"
   | "action.performed"
   | "settings.updated"
   | "budget.exceeded"
@@ -45,6 +46,15 @@ export interface ReviewLifecyclePayload {
   number: number;
   mode?: "full" | "incremental";
   error?: string;
+}
+
+export interface WebhookPayload {
+  owner: string;
+  repo: string;
+  number: number | null;
+  event: string;
+  action?: string;
+  kind: string;
 }
 
 export interface ActionPayload {
@@ -138,6 +148,7 @@ const TOPICS: StreamTopic[] = [
   "review.started",
   "review.finished",
   "review.failed",
+  "webhook.received",
   "action.performed",
   "settings.updated",
   "budget.exceeded",
@@ -155,25 +166,43 @@ const TOPICS: StreamTopic[] = [
 
 type Listener = (env: StreamEnvelope) => void;
 
+/** Live SSE connection health, surfaced to the Ops Console indicator. */
+export type StreamStatus = "connecting" | "live" | "reconnecting";
+
 interface StreamContextValue {
   subscribe: (listener: Listener) => () => void;
 }
 
 const StreamContext = createContext<StreamContextValue | null>(null);
+// Status lives in its own context so a status change never re-renders the
+// (stable) subscribe value and tears down every useEventStream subscription.
+const StreamStatusContext = createContext<StreamStatus>("connecting");
 
 export function EventStreamProvider({ children }: { children: ReactNode }) {
   // A stable Set of listeners. The EventSource pushes into it; subscribers
   // add/remove themselves. Using a ref keeps the connection effect from
   // re-running when the listener set changes.
   const listeners = useRef<Set<Listener>>(new Set());
+  const [status, setStatus] = useState<StreamStatus>("connecting");
 
   useEffect(() => {
     // same-origin; cookies (ds_session) flow automatically.
     const es = new EventSource("/api/v1/stream");
     const handlers: Array<[StreamTopic, (e: MessageEvent) => void]> = [];
 
+    // EventSource reconnects on its own; mirror its state into our indicator.
+    es.onopen = () => setStatus("live");
+    es.onerror = () => {
+      // CLOSED (2) won't auto-recover; CONNECTING (0) means a retry is pending.
+      // Either way the stream isn't live right now.
+      setStatus("reconnecting");
+    };
+
     for (const topic of TOPICS) {
       const onMessage = (e: MessageEvent) => {
+        // Any delivered frame proves the socket is open — recover the indicator
+        // even if onopen was missed across a reconnect.
+        setStatus("live");
         let env: StreamEnvelope;
         try {
           env = JSON.parse(e.data) as StreamEnvelope;
@@ -204,8 +233,19 @@ export function EventStreamProvider({ children }: { children: ReactNode }) {
       listeners.current.delete(listener);
     };
   }, []);
+  // Memoized so its identity is stable across status-driven re-renders.
+  const streamValue = useMemo<StreamContextValue>(() => ({ subscribe }), [subscribe]);
 
-  return <StreamContext.Provider value={{ subscribe }}>{children}</StreamContext.Provider>;
+  return (
+    <StreamContext.Provider value={streamValue}>
+      <StreamStatusContext.Provider value={status}>{children}</StreamStatusContext.Provider>
+    </StreamContext.Provider>
+  );
+}
+
+/** Current SSE connection health. Safe outside the provider (returns "connecting"). */
+export function useStreamStatus(): StreamStatus {
+  return useContext(StreamStatusContext);
 }
 
 /**

@@ -1,5 +1,6 @@
 import { logger } from "../logger.js";
 import { recordEvent } from "../storage/dao.js";
+import { bus } from "../realtime/bus.js";
 import { isPauseAll, isAutoReviewEnabled } from "../settings/overrides.js";
 
 /**
@@ -117,7 +118,18 @@ export async function dispatchWebhookEvent(
     const repo = payload.repository?.name;
     const number = payload.pull_request?.number ?? payload.issue?.number ?? null;
     if (owner && repo) {
-      recordEvent({ owner, repo, number, kind: `${event}.${payload.action ?? ""}`.replace(/\.$/, "") });
+      const kind = `${event}.${payload.action ?? ""}`.replace(/\.$/, "");
+      recordEvent({ owner, repo, number, kind });
+      // Live-tail the same event onto the bus so the Ops Console streams
+      // webhook traffic the instant it lands (not just review lifecycle).
+      bus.publish("webhook.received", {
+        owner,
+        repo,
+        number: typeof number === "number" ? number : null,
+        event,
+        action: typeof payload.action === "string" ? payload.action : undefined,
+        kind,
+      });
     }
   } catch {
     // best effort
