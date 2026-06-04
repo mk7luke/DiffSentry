@@ -258,18 +258,24 @@ async function main() {
             return;
           }
           res.setEncoding("utf8");
+          let triggered = false;
           res.on("data", (chunk: string) => {
             buf += chunk;
+            // The first chunk (the stream's `retry:` preamble) only reaches us
+            // after the server's synchronous handler has run writeHead → write →
+            // bus.subscribe — so the subscription is guaranteed live now and a
+            // mutation can't be missed. Trigger it exactly once on that signal
+            // rather than guessing with a fixed delay after the 200 response.
+            if (!triggered) {
+              triggered = true;
+              void req("PUT", "/settings", { session: adminSess, csrf: true, body: { pauseAll: false } });
+            }
             if (buf.includes("event: settings.changed")) {
               clearTimeout(timeout);
               r.destroy();
               resolve(buf);
             }
           });
-          // Once connected, change a setting to push through the stream.
-          setTimeout(() => {
-            void req("PUT", "/settings", { session: adminSess, csrf: true, body: { pauseAll: false } });
-          }, 30);
         },
       );
       r.on("error", (err) => {
