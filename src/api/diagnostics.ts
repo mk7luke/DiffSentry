@@ -1,11 +1,11 @@
 import fs from "node:fs";
-import crypto from "node:crypto";
 import type { Request, Response, Router } from "express";
 import type { Role } from "../dashboard/roles.js";
 import { getActor } from "../dashboard/roles.js";
 import type { CsrfRuntime } from "../dashboard/auth.js";
 import { loadAuthConfigFromEnv } from "../dashboard/auth.js";
 import { DEFAULT_ANTHROPIC_MODEL, DEFAULT_OPENAI_MODEL } from "../config.js";
+import { signWebhookPayload, verifyWebhookSignature } from "../webhook/signature.js";
 import { insertAuditLog } from "../storage/dao.js";
 import { openDatabase } from "../storage/db.js";
 import { getHealthCounts } from "../dashboard/queries.js";
@@ -81,14 +81,6 @@ function sendError(res: Response, status: number, code: string, message: string)
   res.status(status).json({ error: { code, message } });
 }
 
-/** Constant-time string compare (lengths must match to be equal). */
-function timingSafeEqualStr(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ab.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ab, bb);
-}
-
 function envSet(name: string): boolean {
   const v = process.env[name];
   return typeof v === "string" && v.trim().length > 0;
@@ -111,7 +103,7 @@ function privateKeyState(): { ok: boolean; detail: string } {
 const VALID_PROVIDERS = ["anthropic", "openai", "openai-compatible"];
 
 /** Build the static (no-network) check list from the environment + DB. */
-function buildChecks(authEnabled: boolean): DiagnosticCheck[] {
+function buildChecks(authEnabled: boolean, persistenceEnabled: boolean): DiagnosticCheck[] {
   const checks: DiagnosticCheck[] = [];
 
   // ── GitHub App ──────────────────────────────────────────────────
@@ -222,16 +214,15 @@ function buildChecks(authEnabled: boolean): DiagnosticCheck[] {
   });
 
   // ── Persistence ─────────────────────────────────────────────────
-  const dbOn = !!openDatabase();
   checks.push({
     id: "persistence.db",
     category: "persistence",
     label: "SQLite persistence",
-    status: dbOn ? "ok" : "warn",
-    detail: dbOn
+    status: persistenceEnabled ? "ok" : "warn",
+    detail: persistenceEnabled
       ? "Database is open — reviews, findings, and audit history are recorded."
       : "Persistence is disabled; the dashboard has no history and the audit log is a no-op.",
-    fixHint: dbOn
+    fixHint: persistenceEnabled
       ? undefined
       : "Set DB_PATH to a writable file (default ./data/diffsentry.db) to enable persistence.",
   });
@@ -272,7 +263,8 @@ export function registerDiagnosticsRoutes(router: Router, deps: DiagnosticsRoute
   // ── GET /diagnostics — static, fast, no network ──────────────────
   router.get("/diagnostics", viewer, (_req, res) => {
     try {
-      const checks = buildChecks(authEnabled);
+      const persistenceEnabled = !!openDatabase();
+      const checks = buildChecks(authEnabled, persistenceEnabled);
       const summary = summarize(checks);
       const counts = getHealthCounts();
       // Static surface — works with or without a provider; fall back to env.
@@ -291,10 +283,10 @@ export function registerDiagnosticsRoutes(router: Router, deps: DiagnosticsRoute
           authEnabled,
           oauthConfigured: !!oauthCfg,
           dashboardUrl: oauthCfg?.baseUrl ?? null,
-          persistence: !!openDatabase(),
+          persistence: persistenceEnabled,
         },
         db: {
-          enabled: !!openDatabase(),
+          enabled: persistenceEnabled,
           sizeBytes: counts.db_bytes,
           lastReviewAt: counts.newest_review,
           counts,
@@ -388,13 +380,12 @@ export function registerDiagnosticsRoutes(router: Router, deps: DiagnosticsRoute
       error = "GITHUB_WEBHOOK_SECRET is not set, so webhook signatures cannot be verified.";
     } else {
       try {
+        // Exercise the exact verifier the live /webhook route uses: produce a
+        // GitHub-format `sha256=` signature for a raw payload, confirm it
+        // verifies, and confirm a wrong-secret signature is rejected.
         const payload = JSON.stringify({ zen: "DiffSentry self-test", hook_id: 0 });
-        const sign = (key: string) =>
-          "sha256=" + crypto.createHmac("sha256", key).update(payload).digest("hex");
-        const good = sign(secret);
-        const tampered = sign(secret + "-wrong");
-        const accepts = timingSafeEqualStr(good, sign(secret));
-        const rejects = !timingSafeEqualStr(good, tampered);
+        const accepts = verifyWebhookSignature(secret, payload, signWebhookPayload(secret, payload));
+        const rejects = !verifyWebhookSignature(secret, payload, signWebhookPayload(secret + "-wrong", payload));
         ok = accepts && rejects;
         if (!ok) error = "Signature pipeline did not behave as expected.";
       } catch (err) {

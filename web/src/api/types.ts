@@ -378,6 +378,53 @@ export interface TestWebhookResult {
   secretConfigured: boolean;
 }
 
+// ─── Repo config editor (mirrors src/config-schema.ts) ──────────────
+
+export interface JsonSchema {
+  type?: "object" | "array" | "string" | "boolean" | "number" | "integer";
+  enum?: (string | number)[];
+  properties?: Record<string, JsonSchema>;
+  required?: string[];
+  additionalProperties?: boolean;
+  items?: JsonSchema;
+  minimum?: number;
+  description?: string;
+  widget?: "glob" | "multiline" | "regex";
+}
+
+export interface ConfigValidationError {
+  path: string;
+  message: string;
+}
+
+export interface RepoConfigResponse {
+  owner: string;
+  repo: string;
+  defaultBranch: string | null;
+  /** Raw .diffsentry.yaml on the default branch, or null when absent. */
+  yaml: string | null;
+  exists: boolean;
+  /** Parsed config object (the as-authored values, not merged). */
+  parsed: Record<string, unknown>;
+  /** Non-null when the stored YAML failed to parse. */
+  parseError: string | null;
+  /** Parsed config merged with DiffSentry's defaults. */
+  effective: Record<string, unknown>;
+  schema: JsonSchema;
+  /** True when the server can commit (octokit + installation present). */
+  editable: boolean;
+}
+
+export interface ConfigUpdateResult {
+  owner: string;
+  repo: string;
+  mode: "commit" | "pr";
+  branch: string;
+  commitSha?: string;
+  prNumber?: number;
+  prUrl?: string;
+}
+
 // ─── Analytics: authors & trends ────────────────────────────────────
 
 export interface AuthorStatRow {

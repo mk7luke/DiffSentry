@@ -1,6 +1,5 @@
 import express from "express";
 import path from "node:path";
-import { Webhooks } from "@octokit/webhooks";
 import { Config } from "./types.js";
 import { Reviewer } from "./reviewer.js";
 import { logger } from "./logger.js";
@@ -9,10 +8,10 @@ import { createDashboardRouter } from "./dashboard/routes.js";
 import { createApiRouter } from "./api/router.js";
 import { createAuth, loadAuthConfigFromEnv } from "./dashboard/auth.js";
 import { dispatchWebhookEvent, extractWebhookMeta } from "./webhook/dispatch.js";
+import { verifyWebhookSignature } from "./webhook/signature.js";
 
 export function createServer(config: Config) {
   const app = express();
-  const webhooks = new Webhooks({ secret: config.githubWebhookSecret });
   const reviewer = new Reviewer(config);
 
   // Parse raw body for webhook signature verification
@@ -128,13 +127,7 @@ export function createServer(config: Config) {
       return;
     }
 
-    let signatureOk = false;
-    try {
-      await webhooks.verify(body.toString(), signature);
-      signatureOk = true;
-    } catch {
-      signatureOk = false;
-    }
+    const signatureOk = verifyWebhookSignature(config.githubWebhookSecret, body.toString(), signature);
 
     // Parse defensively: a rejected (bad-signature) delivery may still be JSON,
     // and we record it anyway so the deliveries view surfaces rejected hits too.

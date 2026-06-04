@@ -19,6 +19,7 @@ import { insertAuditLog, setRole } from "../storage/dao.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
 import { registerDiagnosticsRoutes, type DiagnosticsProvider } from "./diagnostics.js";
+import { registerConfigRoutes, loadRepoConfigYaml } from "./config.js";
 import { registerLearningRoutes } from "./learnings.js";
 import { reviewQueue } from "../realtime/queue.js";
 import { registerWebhookRoutes, type ReplayWebhook } from "./webhooks.js";
@@ -37,7 +38,6 @@ import {
   getHotPaths,
   getHotPathTrends,
   getImpact,
-  getInstallationId,
   getPR,
   getPRReviews,
   getPatternRules,
@@ -103,34 +103,6 @@ function sendData(res: Response, data: unknown, status = 200): void {
 
 function sendError(res: Response, status: number, code: ErrorCode, message: string): void {
   res.status(status).json({ error: { code, message } });
-}
-
-const configCache = new Map<string, { yaml: string | null; ts: number }>();
-const CONFIG_TTL_MS = 5 * 60 * 1000;
-
-async function loadRepoConfigSafe(deps: ApiDeps, owner: string, repo: string): Promise<string | null> {
-  const key = `${owner}/${repo}`;
-  const now = Date.now();
-  const cached = configCache.get(key);
-  if (cached && now - cached.ts < CONFIG_TTL_MS) return cached.yaml;
-  if (!deps.getInstallationOctokit) return null;
-  const id = getInstallationId(owner, repo);
-  if (id == null) return null;
-  try {
-    const octokit = await deps.getInstallationOctokit(id);
-    const { data } = await octokit.repos.getContent({ owner, repo, path: ".diffsentry.yaml" });
-    if (Array.isArray(data) || data.type !== "file" || !data.content) {
-      configCache.set(key, { yaml: null, ts: now });
-      return null;
-    }
-    const content = Buffer.from(data.content, "base64").toString("utf-8");
-    configCache.set(key, { yaml: content, ts: now });
-    return content;
-  } catch (err) {
-    logger.debug({ err, owner, repo }, "api: failed to fetch .diffsentry.yaml");
-    configCache.set(key, { yaml: null, ts: now });
-    return null;
-  }
 }
 
 async function loadLearningsSafe(baseDir: string, owner: string, repo: string): Promise<Learning[]> {
@@ -300,6 +272,14 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   // introspection) answer "unavailable" explicitly when no provider is passed.
   registerDiagnosticsRoutes(router, { diagnostics: deps.diagnostics, requireRole, csrf, authEnabled });
 
+  // ─── Repo config (read viewer+, write admin) ───────────────────────
+  // GET is always useful; PUT degrades to a 503 when no octokit is wired in.
+  registerConfigRoutes(router, {
+    getInstallationOctokit: deps.getInstallationOctokit,
+    requireRole,
+    csrf,
+  });
+
   // ─── Learnings management (read: any role; write: author+ with CSRF) ─
   // Independent of the reviewer — operates directly on the JSON store the
   // engine reads at review time, so edits here are reflected in future reviews.
@@ -398,7 +378,7 @@ export function createApiRouter(deps: ApiDeps): express.Router {
       }
       const [learnings, config] = await Promise.all([
         loadLearningsSafe(deps.learningsDir, owner, repo),
-        loadRepoConfigSafe(deps, owner, repo),
+        loadRepoConfigYaml(deps.getInstallationOctokit, owner, repo),
       ]);
       sendData(res, {
         owner,

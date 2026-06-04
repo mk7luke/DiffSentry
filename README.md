@@ -543,6 +543,7 @@ GitHub webhook
 | `DASHBOARD_AUTHOR_LOGINS` | No | | Comma-separated logins granted the `author` role. |
 | `DASHBOARD_SESSION_SECRET` | No | `GITHUB_WEBHOOK_SECRET` | HMAC key for the dashboard session + CSRF cookies. |
 | `DASHBOARD_SSE_HEARTBEAT_MS` | No | `25000` | Heartbeat interval (ms, min 1000) for the `/api/v1/stream` SSE feed. |
+| `DASHBOARD_CONFIG_PR_BRANCH_PREFIX` | No | `diffsentry/config` | Branch-name prefix used when an admin edits `.diffsentry.yaml` from the dashboard and chooses "open a PR". |
 | `IMPACT_MINUTES_PER_FINDING` | No | `15` | Reviewer-minutes-saved-per-finding heuristic for the Impact report's time-saved estimate. The only estimated figure on that page; all other numbers are counted from the raw tables. |
 
 \* One of `GITHUB_PRIVATE_KEY_PATH` or `GITHUB_PRIVATE_KEY` is required.
@@ -753,20 +754,21 @@ in the sidebar) to open a keyboard-first palette that combines three things:
 
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/queue`, `/repos`,
-`/repos/:owner/:repo`, `/repos/:owner/:repo/prs/:number`, `/findings`,
-`/patterns`, `/search?q=`, the analytics trio `/analytics/authors`,
-`/analytics/authors/:author`, `/analytics/trends` (all accept `?days=`, default
-30, clamped 1–365), `/audit` (admin), `/webhooks` + `/webhooks/:id` (admin),
-`/diagnostics` (static config + DB checks), and `/diagnostics/github` (live App
-probe). `GET /queue` returns the live review-pipeline snapshot from an
-in-process registry (works regardless of persistence). Write endpoints:
-`POST /roles` (admin) sets/clears a role override; `POST /webhooks/:id/replay`
-(admin) re-dispatches a stored delivery; `POST /diagnostics/test-ai` and
-`POST /diagnostics/test-webhook` (both `author`+, CSRF + audited) run the
-provider reachability and webhook-secret self-tests. When OAuth is configured
-every endpoint requires a valid session (401 JSON otherwise); the queries reuse
-the same SQL as the legacy dashboard and no-op gracefully when persistence is
-disabled.
+`/repos/:owner/:repo`, `/repos/:owner/:repo/prs/:number`,
+`/repos/:owner/:repo/config`, `/findings`, `/patterns`, `/search?q=`, the
+analytics trio `/analytics/authors`, `/analytics/authors/:author`,
+`/analytics/trends` (all accept `?days=`, default 30, clamped 1–365),
+`/audit` (admin), `/webhooks` + `/webhooks/:id` (admin), `/diagnostics` (static
+config + DB checks), and `/diagnostics/github` (live App probe). `GET /queue`
+returns the live review-pipeline snapshot from an in-process registry (works
+regardless of persistence). Write endpoints: `POST /roles` (admin) sets/clears a
+role override; `PUT /repos/:owner/:repo/config` (admin) edits `.diffsentry.yaml`;
+`POST /webhooks/:id/replay` (admin) re-dispatches a stored delivery;
+`POST /diagnostics/test-ai` and `POST /diagnostics/test-webhook` (both `author`+,
+CSRF + audited) run the provider reachability and webhook-secret self-tests. When
+OAuth is configured every endpoint requires a valid session (401 JSON otherwise);
+the queries reuse the same SQL as the legacy dashboard and no-op gracefully when
+persistence is disabled.
 
 **Webhook capture & replay.** Every delivery to `POST /webhook` is persisted to
 `webhook_deliveries` (event, action, repo, PR/issue number, `X-GitHub-Delivery`
@@ -809,14 +811,27 @@ chat commands as buttons. The repo screen's bar targets the most recent PR. The
 whole write surface is hidden for viewers; each button shows a spinner +
 optimistic toast and reports the audit-logged result.
 
+**Config editor** (`admin`) — edit a repo's `.diffsentry.yaml` from the dashboard
+(`/repos/:owner/:repo/config`). `GET .../config` returns the current YAML on the
+default branch, the parsed + merged-with-defaults effective config, and a JSON
+schema derived from `RepoConfig`. The editor offers a **schema-aware form** and a
+**raw YAML editor** (CodeMirror) kept in sync, with live validation and a
+side-by-side diff preview. `PUT .../config` (admin + CSRF) validates the YAML
+(syntax + schema — invalid configs are rejected with field-level errors before
+anything is written) and then either **commits directly** to the default branch
+or **opens a PR** (your choice). The change is audit-logged with a diff
+(`config.update`) and announced on the bus as `config.updated`; a direct commit
+also invalidates the 5-minute config read cache.
+
 **Realtime** (`GET /api/v1/stream`) is a Server-Sent Events feed on an in-process
 event bus. The review engine publishes `review.started` / `review.finished` /
 `review.failed`, the in-memory review queue publishes `queue.updated` on every
 state transition (queued → running → done/failed/canceled, including phase
-changes), every command action publishes `action.performed`, and a webhook
-replay publishes `webhook.replayed`. The SPA opens one `EventSource`, surfaces
-events as toasts, drives the live queue board, and live-refetches the affected
-PR — so a re-review's findings appear without a refresh. The stream
+changes), every command action publishes `action.performed`, a config edit
+publishes `config.updated`, and a webhook replay publishes `webhook.replayed`.
+The SPA opens one `EventSource`, surfaces events as toasts, drives the live queue
+board, and live-refetches the affected PR — so a re-review's findings appear
+without a refresh. The stream
 heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed
 events on reconnect via `Last-Event-ID`.
 
