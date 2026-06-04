@@ -163,7 +163,9 @@ export async function dispatchWebhookEvent(
       const blocked = reviewQueueBlockedReason(owner, repo);
       if (blocked) {
         logger.info({ owner, repo, pr: number, action, blocked }, "Not queuing incremental review (operator control)");
-        return { status: 202, body: { status: "accepted" } };
+        // 202 because the push auto-resolve above was accepted, but surface the
+        // blocked reason (paused | auto_review_disabled) so it's observable.
+        return { status: 202, body: { status: blocked } };
       }
 
       reviewer.handlePullRequest(installationId, owner, repo, number, "incremental").catch((err) => {

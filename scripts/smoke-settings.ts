@@ -181,6 +181,12 @@ async function main() {
     const noCsrf = await req("PUT", "/settings", { session: adminSess, body: { pauseAll: false } });
     ok("PUT /settings (no CSRF) → 403", noCsrf.status === 403);
 
+    // ── Empty body → 400 (at least one key required), no write ───────────
+    const emptyGlobal = await req("PUT", "/settings", { session: adminSess, csrf: true, body: {} });
+    ok("PUT /settings (empty body) → 400", emptyGlobal.status === 400);
+    const emptyRepo = await req("PUT", "/repos/acme/web/settings", { session: adminSess, csrf: true, body: {} });
+    ok("PUT repo settings (empty body) → 400", emptyRepo.status === 400);
+
     // ── Per-repo overrides ───────────────────────────────────────────────
     const repoSet = await req("PUT", "/repos/acme/web/settings", {
       session: adminSess,

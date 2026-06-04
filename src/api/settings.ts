@@ -112,6 +112,11 @@ function applyChanges(
     changes: changes.map((c) => ({ key: c.key, clear: c.value === CLEAR, value: c.value === CLEAR ? null : c.value })),
   });
 
+  // Bail before touching the running process or announcing anything if the
+  // persist failed (a live DB that errored). commitSettingsChanges returns true
+  // for a graceful no-op when persistence is off, so that path still proceeds.
+  if (!persisted) return false;
+
   // Runtime side effects, best-effort and outside the transaction. On clear,
   // re-resolve the effective value now the override is gone (read from
   // getGlobalSettings — the only keys with a side effect are global) so the
@@ -127,9 +132,7 @@ function applyChanges(
     }
   }
 
-  // Only announce changes that actually committed (or were a graceful no-op when
-  // persistence is off — commitSettingsChanges returns true in that case).
-  if (!persisted) return false;
+  // Announce the committed changes.
   for (const c of changes) {
     const clearing = c.value === CLEAR;
     bus.publish("settings.changed", { scope, key: c.key, value: clearing ? null : c.value, actor: actor.login });
@@ -161,6 +164,10 @@ export function registerSettingsRoutes(router: Router, deps: SettingsDeps): void
     const planned = planChanges(body, GLOBAL_SETTING_DEFS);
     if (!planned.ok) {
       sendError(res, 400, "bad_request", planned.errors.join("; "));
+      return;
+    }
+    if (planned.changes.length === 0) {
+      sendError(res, 400, "bad_request", "At least one setting key is required.");
       return;
     }
     try {
@@ -215,6 +222,10 @@ export function registerSettingsRoutes(router: Router, deps: SettingsDeps): void
     const planned = planChanges(body, REPO_SETTING_DEFS);
     if (!planned.ok) {
       sendError(res, 400, "bad_request", planned.errors.join("; "));
+      return;
+    }
+    if (planned.changes.length === 0) {
+      sendError(res, 400, "bad_request", "At least one setting key is required.");
       return;
     }
     try {
