@@ -300,7 +300,14 @@ export function Shell() {
       >
         <Sidebar onNavigate={() => setNavOpen(false)} />
         {/* Close button lives inside the drawer on mobile (hidden on desktop). */}
-        <button className="drawer-close" aria-label="Close navigation" onClick={() => setNavOpen(false)}>
+        <button
+          className="drawer-close"
+          aria-label="Close navigation"
+          onClick={() => {
+            restoreFocusRef.current = true;
+            setNavOpen(false);
+          }}
+        >
           <CloseIcon />
         </button>
       </div>
