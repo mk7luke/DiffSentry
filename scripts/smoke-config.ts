@@ -72,6 +72,9 @@ async function main() {
     const { getAuditLog } = await import("../src/dashboard/queries.js");
     closeDatabase = dbModule.closeDatabase;
 
+    // Drop any cached DB singleton a prior import may have opened, so openDatabase
+    // binds to the temp DB_PATH set above instead of returning a stale handle.
+    dbModule.closeDatabase();
     const db = dbModule.openDatabase();
     if (!db) throw new Error("failed to open temp db");
     recordRepo({ owner: "acme", repo: "web", installationId: 42 });
