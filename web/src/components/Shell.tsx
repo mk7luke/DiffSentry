@@ -2,7 +2,7 @@ import type { ComponentType, ReactNode, SVGProps } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
 import type { Capabilities } from "../api/types";
-import { AuditIcon, FindingsIcon, ImpactIcon, LogoIcon, OverviewIcon, PatternsIcon, QueueIcon, SearchIcon, SettingsIcon, WebhooksIcon } from "./icons";
+import { AuditIcon, FindingsIcon, ImpactIcon, LeaderboardIcon, LearningsIcon, LogoIcon, OverviewIcon, PatternsIcon, QueueIcon, SearchIcon, SettingsIcon, TrendsIcon, WebhooksIcon } from "./icons";
 import { CommandPalette, openCommandPalette } from "./CommandPalette";
 import { SetupWizard } from "./SetupWizard";
 
@@ -24,6 +24,9 @@ const NAV: NavItem[] = [
   { to: "/queue", label: "Queue", Icon: QueueIcon, end: false },
   { to: "/findings", label: "Findings", Icon: FindingsIcon, end: false },
   { to: "/patterns", label: "Patterns", Icon: PatternsIcon, end: false },
+  { to: "/leaderboard", label: "Leaderboard", Icon: LeaderboardIcon, end: false },
+  { to: "/trends", label: "Trends", Icon: TrendsIcon, end: false },
+  { to: "/learnings", label: "Learnings", Icon: LearningsIcon, end: false },
   { to: "/audit", label: "Audit log", Icon: AuditIcon, end: false, cap: "viewAudit" },
   { to: "/webhooks", label: "Webhooks", Icon: WebhooksIcon, end: false, cap: "viewAudit" },
   { to: "/settings", label: "Settings", Icon: SettingsIcon, end: false },

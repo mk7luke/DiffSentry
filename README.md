@@ -707,6 +707,17 @@ untouched.
 - `/findings` — cross-repo filterable explorer (severity, source, repo,
   free-text, age) with a "recurring fingerprints" group.
 - `/patterns` — every pattern-rule hit with 30d + all-time counts.
+- `/leaderboard` — per-author review activity over a 7/30/90-day window
+  (PRs reviewed, avg risk, findings/PR by severity, acceptance rate, trend
+  sparkline), sortable, with a click-through author drill-down (severity mix,
+  hot paths, recent PRs). Framed as where review effort lands, not a scoreboard.
+- `/trends` — org-wide activity over time, risk-level distribution, and
+  hot-paths-over-time (top paths by critical+major with a per-path trend line).
+- `/learnings` — manage the `@bot learn` learnings the reviewer applies:
+  searchable list of global + per-repo learnings, inline edit, path-glob
+  badges, create, bulk delete, dedupe suggestions, "promote to global", and a
+  "test against a file path" preview. Reads are open to viewers; create/edit/
+  delete require `author`.
 - `/audit` — **admin only** — the audit trail (who did what, when) plus a
   per-login role-override editor.
 - `/webhooks` — **admin only** — every raw webhook delivery GitHub sent
@@ -743,9 +754,11 @@ in the sidebar) to open a keyboard-first palette that combines three things:
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/queue`, `/repos`,
 `/repos/:owner/:repo`, `/repos/:owner/:repo/prs/:number`, `/findings`,
-`/patterns`, `/search?q=`, `/audit` (admin), `/webhooks` + `/webhooks/:id`
-(admin), `/diagnostics` (static config + DB checks), and `/diagnostics/github`
-(live App probe). `GET /queue` returns the live review-pipeline snapshot from an
+`/patterns`, `/search?q=`, the analytics trio `/analytics/authors`,
+`/analytics/authors/:author`, `/analytics/trends` (all accept `?days=`, default
+30, clamped 1–365), `/audit` (admin), `/webhooks` + `/webhooks/:id` (admin),
+`/diagnostics` (static config + DB checks), and `/diagnostics/github` (live App
+probe). `GET /queue` returns the live review-pipeline snapshot from an
 in-process registry (works regardless of persistence). Write endpoints:
 `POST /roles` (admin) sets/clears a role override; `POST /webhooks/:id/replay`
 (admin) re-dispatches a stored delivery; `POST /diagnostics/test-ai` and
@@ -829,6 +842,7 @@ double-submit token as an `X-CSRF-Token` header.
 | View dashboard & findings | ✅ | ✅ | ✅ |
 | Triage findings | — | ✅ | ✅ |
 | Trigger reviews | — | ✅ | ✅ |
+| Manage learnings | — | ✅ | ✅ |
 | Manage config | — | — | ✅ |
 | Manage role overrides | — | — | ✅ |
 | View audit log | — | — | ✅ |

@@ -177,6 +177,58 @@ export function Hbar({ label, critical, major, total, max, href }: { label: stri
   );
 }
 
+/**
+ * Compact SVG line sparkline for a single numeric series — used for per-author
+ * activity trends and hot-path-over-time rows. Renders a flat baseline when the
+ * series is empty/all-zero so sparse histories don't collapse to nothing.
+ */
+export function LineSpark({
+  values,
+  color = "var(--accent)",
+  width = 120,
+  height = 28,
+  title,
+}: {
+  values: number[];
+  color?: string;
+  width?: number;
+  height?: number;
+  title?: string;
+}) {
+  const n = values.length;
+  const max = Math.max(1, ...values);
+  const pad = 2;
+  const innerH = height - pad * 2;
+  const baselineY = pad + innerH;
+  const yFor = (v: number) => pad + innerH - (v / max) * innerH;
+  const pts = values.map((v, i) => {
+    const x = n <= 1 ? width / 2 : (i * width) / (n - 1);
+    return `${x.toFixed(1)},${yFor(v).toFixed(1)}`;
+  });
+  // 0 points → flat baseline; 1 point → horizontal line at its scaled height
+  // (a lone non-zero reading shouldn't look identical to all-zero); else polyline.
+  const line =
+    n === 0
+      ? `0,${baselineY.toFixed(1)} ${width},${baselineY.toFixed(1)}`
+      : n === 1
+        ? `0,${yFor(values[0]).toFixed(1)} ${width},${yFor(values[0]).toFixed(1)}`
+        : pts.join(" ");
+  // With a title the sparkline is a labelled image for assistive tech; without
+  // one it's decorative and hidden so screen readers don't announce empty SVG.
+  return (
+    <svg
+      className="line-spark"
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      role={title ? "img" : undefined}
+      aria-hidden={title ? undefined : true}
+    >
+      {title ? <title>{title}</title> : null}
+      <polyline points={line} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export interface DonutSlice {
   label: string;
   value: number;

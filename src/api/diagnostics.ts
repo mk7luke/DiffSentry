@@ -5,6 +5,7 @@ import type { Role } from "../dashboard/roles.js";
 import { getActor } from "../dashboard/roles.js";
 import type { CsrfRuntime } from "../dashboard/auth.js";
 import { loadAuthConfigFromEnv } from "../dashboard/auth.js";
+import { DEFAULT_ANTHROPIC_MODEL, DEFAULT_OPENAI_MODEL } from "../config.js";
 import { insertAuditLog } from "../storage/dao.js";
 import { openDatabase } from "../storage/db.js";
 import { getHealthCounts } from "../dashboard/queries.js";
@@ -253,10 +254,10 @@ function envAiTarget(): { provider: string; model: string } {
   const provider = (process.env.AI_PROVIDER || "anthropic").trim();
   const model =
     provider === "openai"
-      ? process.env.OPENAI_MODEL || "gpt-4o"
+      ? process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL
       : provider === "openai-compatible"
         ? process.env.LOCAL_AI_MODEL || ""
-        : process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
+        : process.env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL;
   return { provider, model };
 }
 
@@ -338,14 +339,19 @@ export function registerDiagnosticsRoutes(router: Router, deps: DiagnosticsRoute
   // ── POST /diagnostics/test-ai — author+, audited ─────────────────
   router.post("/diagnostics/test-ai", author, csrf.verify, async (req: Request, res: Response) => {
     const actor = getActor(req);
-    const result = diagnostics
-      ? await diagnostics.testAiProvider()
-      : {
-          ok: false as const,
-          ...envAiTarget(),
-          latencyMs: 0,
-          error: "AI provider is not available on this instance.",
-        };
+    let result: { ok: boolean; provider: string; model: string; latencyMs: number; reply?: string; error?: string };
+    if (!diagnostics) {
+      result = { ok: false, ...envAiTarget(), latencyMs: 0, error: "AI provider is not available on this instance." };
+    } else {
+      try {
+        result = await diagnostics.testAiProvider();
+      } catch (err) {
+        // The probe should report failure, not 500 the route — fall back to the
+        // provider's declared target so the audit/bus/response still carry it.
+        const { provider, model } = diagnostics.aiTarget();
+        result = { ok: false, provider, model, latencyMs: 0, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
     insertAuditLog({
       actorLogin: actor?.login ?? null,
       actorRole: actor?.role ?? null,

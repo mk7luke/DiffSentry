@@ -1881,6 +1881,97 @@ label.field {
   flex-direction: column;
   gap: 8px;
 }
+/* ── Learnings screen ──────────────────────────────────────────── */
+.learn-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+.learn-form .field {
+  margin-bottom: 0;
+}
+.learn-form textarea {
+  resize: vertical;
+  min-height: 38px;
+}
+.learn-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.learn-err {
+  color: var(--sev-crit);
+  font-size: 12.5px;
+  margin: 8px 0 0;
+}
+.learn-group + .learn-group {
+  border-top: 1px solid var(--line);
+}
+.learn-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 16px;
+  background: var(--bg-deep);
+  border-bottom: 1px solid var(--line-soft);
+}
+.learn-group-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.learn-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 12px;
+  align-items: start;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.learn-row:last-child {
+  border-bottom: none;
+}
+.learn-check {
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+}
+input[type="checkbox"].learn-check {
+  width: 14px;
+  accent-color: var(--accent);
+}
+.learn-main {
+  min-width: 0;
+}
+.learn-content {
+  color: var(--text-1);
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+.learn-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.learn-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.btn-link.danger {
+  color: var(--sev-crit);
+}
+.learn-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .diag-check {
   display: flex;
   gap: 10px;
@@ -2118,6 +2209,48 @@ label.field {
   display: flex;
   gap: 9px;
   margin-top: 15px;
+}
+.learn-edit textarea {
+  resize: vertical;
+}
+.learn-edit-actions {
+  display: flex;
+  gap: 8px;
+}
+.learn-dup {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.learn-dup:last-child {
+  border-bottom: none;
+}
+.learn-dup-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 12.5px;
+}
+.learn-dup-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-1);
+  word-break: break-word;
+}
+.learn-test-results {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.learn-test-results li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--text-1);
 }
 
 /* ─── Impact report (the marketing / leadership surface) ───────────── */
@@ -3081,4 +3214,128 @@ label.field {
 .qcard-actions .btn {
   padding: 4px 10px;
   font-size: 11px;
+}
+
+/* ── Analytics: sortable + clickable tables, sparkline, drill-down ── */
+.tbl thead th.sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.tbl thead th.sortable:hover {
+  color: var(--text-1);
+}
+.tbl thead th.sortable.sorted {
+  color: var(--accent-bright);
+}
+.tbl thead th.sortable .sort-caret {
+  color: var(--accent);
+  font-size: 10px;
+}
+.tbl tbody tr.clickable {
+  cursor: pointer;
+}
+.tbl tbody tr.clickable.selected {
+  background: var(--accent-soft);
+}
+.tbl tbody tr.clickable.selected td:first-child {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Compact SVG line sparkline */
+.line-spark {
+  display: block;
+  width: 100%;
+  height: 26px;
+}
+
+/* ── Author drill-down ──────────────────────────────────────────── */
+.drill-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr);
+  gap: 18px;
+}
+.drill-spark {
+  grid-column: 1;
+}
+.drill-donut {
+  grid-column: 2;
+}
+.drill-paths {
+  grid-column: 1 / -1;
+}
+.drill-prs {
+  grid-column: 1 / -1;
+}
+@media (max-width: 900px) {
+  .drill-grid {
+    grid-template-columns: 1fr;
+  }
+  .drill-spark,
+  .drill-donut,
+  .drill-paths,
+  .drill-prs {
+    grid-column: 1;
+  }
+}
+.drill-stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.drill-trends {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+.drill-trend-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+  margin-bottom: 6px;
+}
+
+/* Full-width activity chart needs a definite height so the bar columns
+   (height:100%) resolve — Overview gets this from its hero grid layout. */
+.activity-chart-frame {
+  display: flex;
+  flex-direction: column;
+  height: 200px;
+}
+
+/* ── Hot paths over time ────────────────────────────────────────── */
+.hotpath-trends {
+  display: flex;
+  flex-direction: column;
+}
+.hotpath-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px 40px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.hotpath-row:last-of-type {
+  border-bottom: 0;
+}
+.hotpath-row .path {
+  font-size: 11.5px;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hotpath-row .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-1);
+}
+.hotpath-foot {
+  padding: 10px 14px;
+  border-top: 1px solid var(--line-soft);
 }
