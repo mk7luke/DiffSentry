@@ -209,6 +209,13 @@ async function main() {
         testMatch.json.data.matched.some((l: any) => l.id === repoId) &&
         testMatch.json.data.matched.some((l: any) => l.id === globalId),
     );
+    ok(
+      "test matches are scope-tagged with the learning's own owner/repo",
+      testMatch.json.data.matched.find((l: any) => l.id === repoId)?.scope === "repo" &&
+        testMatch.json.data.matched.find((l: any) => l.id === repoId)?.owner === "acme" &&
+        testMatch.json.data.matched.find((l: any) => l.id === repoId)?.repo === "widget" &&
+        testMatch.json.data.matched.find((l: any) => l.id === globalId)?.scope === "global",
+    );
     const testNoMatch = await req("POST", "/learnings/test", {
       session: viewerSess,
       body: { owner: "acme", repo: "widget", path: "docs/readme.md" },

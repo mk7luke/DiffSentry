@@ -171,16 +171,20 @@ function computeDuplicates(flat: FlatLearning[]): DuplicateGroup[] {
   const groups: DuplicateGroup[] = [];
   for (let i = 0; i < flat.length; i += 1) {
     if (used[i]) continue;
-    const members: FlatLearning[] = [flat[i]];
+    // Single-linkage clustering: a candidate joins the group if it's similar to
+    // ANY current member, not just the seed `i`, so a chain of near-duplicates
+    // (A~B, B~C but A≁C) still clusters together. Track member indexes to avoid
+    // repeated indexOf lookups; i and j ascend, keeping group/member order stable.
+    const memberIdx: number[] = [i];
     used[i] = true;
     for (let j = i + 1; j < flat.length; j += 1) {
       if (used[j]) continue;
-      if (jaccard(tokens[i], tokens[j]) >= DUP_THRESHOLD) {
-        members.push(flat[j]);
+      if (memberIdx.some((m) => jaccard(tokens[m], tokens[j]) >= DUP_THRESHOLD)) {
+        memberIdx.push(j);
         used[j] = true;
       }
     }
-    if (members.length > 1) groups.push({ members });
+    if (memberIdx.length > 1) groups.push({ members: memberIdx.map((m) => flat[m]) });
   }
   return groups;
 }
@@ -247,11 +251,25 @@ export function registerLearningRoutes(router: Router, deps: LearningDeps): void
               (l) => !l.path || minimatch(filePath, l.path, { matchBase: true }),
             );
       // Scope-tag each match so the client can render a global vs repo badge.
-      const matched: FlatLearning[] = selected.map((l) =>
-        l.repo === GLOBAL_REPO
-          ? { scope: "global", id: l.id, content: l.content, path: l.path }
-          : { scope: "repo", owner, repo, id: l.id, content: l.content, path: l.path },
-      );
+      // Derive owner/repo from the learning's own `repo` field (the source of
+      // truth) and fall back to the request params only when it's absent or not
+      // in owner/repo form.
+      const matched: FlatLearning[] = selected.map((l) => {
+        if (l.repo === GLOBAL_REPO) {
+          return { scope: "global", id: l.id, content: l.content, path: l.path };
+        }
+        const slash = typeof l.repo === "string" ? l.repo.indexOf("/") : -1;
+        const lOwner = slash > 0 ? l.repo.slice(0, slash) : "";
+        const lRepo = slash > 0 ? l.repo.slice(slash + 1) : "";
+        return {
+          scope: "repo",
+          owner: lOwner || owner,
+          repo: lRepo || repo,
+          id: l.id,
+          content: l.content,
+          path: l.path,
+        };
+      });
       sendData(res, { path: filePath, matched });
     } catch (err) {
       logger.error({ err }, "api POST /learnings/test failed");

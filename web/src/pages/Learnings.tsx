@@ -124,6 +124,9 @@ function LearningsContent({
       .filter((it) => selected.has(keyOf(it)))
       .map((it) => ({ scope: it.scope, owner: it.owner, repo: it.repo, id: it.learning.id }));
     if (refs.length === 0) return;
+    if (!window.confirm(`Delete ${refs.length} selected ${pluralize(refs.length, "learning")}? This cannot be undone.`)) {
+      return;
+    }
     bulkDelete.mutate(refs, { onSuccess: () => setSelected(new Set()) });
   };
 
@@ -514,6 +517,7 @@ function DuplicatesCard({ groups, canWrite }: { groups: DuplicateGroup[]; canWri
 function TestSnippetCard({ repoLabels }: { repoLabels: string[] }) {
   const [file, setFile] = useState("");
   const [target, setTarget] = useState("");
+  const [targetErr, setTargetErr] = useState<string | null>(null);
   const test = useTestLearning();
 
   const run = (e: React.FormEvent) => {
@@ -521,13 +525,23 @@ function TestSnippetCard({ repoLabels }: { repoLabels: string[] }) {
     const f = file.trim();
     if (!f) return;
     const t = target.trim();
-    const slash = t.indexOf("/");
-    const owner = slash > 0 ? t.slice(0, slash) : undefined;
-    const repo = slash > 0 ? t.slice(slash + 1) : undefined;
+    let owner: string | undefined;
+    let repo: string | undefined;
+    // Empty target = global-only preview. A non-empty target must be owner/repo.
+    if (t) {
+      const slash = t.indexOf("/");
+      if (slash <= 0 || slash === t.length - 1) {
+        setTargetErr("Repo must be in owner/repo form, or leave it blank to test global learnings only.");
+        return;
+      }
+      owner = t.slice(0, slash);
+      repo = t.slice(slash + 1);
+    }
+    setTargetErr(null);
     test.mutate({ path: f, owner, repo });
   };
 
-  const err = errText(test.error);
+  const err = targetErr ?? errText(test.error);
 
   return (
     <Card
