@@ -312,19 +312,20 @@ class NotificationEngine {
       });
       if (result.ok) delivered = true;
     }
-    // Only a successful delivery marks the week sent. Both "no enabled channel on
-    // any digest rule" (attempted === false) and "tried but every attempt failed"
-    // leave the week unmarked, so the case stays retryable on a later tick during
-    // the same digest window (e.g. an admin re-enables the channel, or a restart
-    // re-runs the immediate tick) instead of silently burning the week.
+    // Mark the week evaluated exactly once, after the rules ran — whether or not
+    // any channel accepted. This gives predictable "evaluate once per scheduled
+    // window" semantics (no implicit re-attempts driven by an unset key, which is
+    // ambiguous and risks double-sends). Delivery failures are surfaced via the
+    // warning log below; if a real resend/backoff policy is ever needed, add an
+    // explicit retry setting rather than leaving digest.lastSentWeek unset.
+    upsertSettingOverride({ scope: "global", key: "digest.lastSentWeek", value: weekKey, updatedBy: "system" });
     if (!delivered) {
       const reason = attempted
         ? "no channel accepted delivery"
         : "digest rules have no enabled channel";
-      logger.warn({ weekKey, rules: digestRules.length }, `Weekly digest: ${reason} — not marking the week sent (retryable within the digest window)`);
+      logger.warn({ weekKey, rules: digestRules.length }, `Weekly digest: ${reason} — week marked evaluated, nothing delivered`);
       return;
     }
-    upsertSettingOverride({ scope: "global", key: "digest.lastSentWeek", value: weekKey, updatedBy: "system" });
     logger.info({ weekKey, rules: digestRules.length }, "Weekly digest sent");
   }
 }
