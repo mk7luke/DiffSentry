@@ -70,6 +70,10 @@ async function main() {
     pauseReviews: (...args: unknown[]) => void calls.push({ method: "pauseReviews", args }),
     resumeReviews: (...args: unknown[]) => void calls.push({ method: "resumeReviews", args }),
     cancelReview: (...args: unknown[]) => void calls.push({ method: "cancelReview", args }),
+    runCommand: (...args: unknown[]) => {
+      calls.push({ method: "runCommand", args });
+      return Promise.resolve();
+    },
   };
 
   const auth = createAuth({
@@ -145,6 +149,8 @@ async function main() {
       const r = await req("POST", `${PR}/${action}`, { session: viewerSess, csrf: true, body: {} });
       ok(`${action}(viewer) → 403`, r.status === 403 && r.json.error.code === "forbidden");
     }
+    const cmdViewer = await req("POST", `${PR}/command`, { session: viewerSess, csrf: true, body: { command: "summary" } });
+    ok("command(viewer) → 403", cmdViewer.status === 403 && cmdViewer.json.error.code === "forbidden");
 
     // ── Author triggers a full re-review → 202 + reviewer called ────────
     const review = await req("POST", `${PR}/review`, { session: authorSess, csrf: true, body: { mode: "full" } });
@@ -176,9 +182,35 @@ async function main() {
     const cancel = await req("POST", `${PR}/cancel`, { session: authorSess, csrf: true, body: {} });
     ok("cancel(author) → 200 + call", cancel.status === 200 && calls.some((c) => c.method === "cancelReview"));
 
+    // ── Author chat command → 202 + reviewer.runCommand(phrase) ─────────
+    const callsBeforeCommand = calls.length;
+    const command = await req("POST", `${PR}/command`, { session: authorSess, csrf: true, body: { command: "generate_tests" } });
+    ok(
+      "command(author) → 202 accepted",
+      command.status === 202 && command.json.data.result === "accepted" && command.json.data.command === "generate_tests",
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    const ranCommand = calls.slice(callsBeforeCommand).find((c) => c.method === "runCommand");
+    ok(
+      "command → reviewer.runCommand(42, acme, web, 7, 'generate tests')",
+      !!ranCommand &&
+        ranCommand.args[0] === 42 &&
+        ranCommand.args[1] === "acme" &&
+        ranCommand.args[2] === "web" &&
+        ranCommand.args[3] === 7 &&
+        ranCommand.args[4] === "generate tests",
+    );
+
+    // ── Unknown command token → 400 (allowlist is the trust boundary) ───
+    const badCommand = await req("POST", `${PR}/command`, { session: authorSess, csrf: true, body: { command: "rm -rf" } });
+    ok("command(unknown token) → 400", badCommand.status === 400 && badCommand.json.error.code === "bad_request");
+
     // ── CSRF is enforced (author, no token) ────────────────────────────
     const noCsrf = await req("POST", `${PR}/pause`, { session: authorSess, body: {} });
     ok("pause(author, no CSRF) → 403", noCsrf.status === 403);
+
+    const commandNoCsrf = await req("POST", `${PR}/command`, { session: authorSess, body: { command: "summary" } });
+    ok("command(author, no CSRF) → 403", commandNoCsrf.status === 403);
 
     // ── Missing installation → 404 for review/resolve ──────────────────
     const noInstall = await req("POST", "/repos/ghost/repo/prs/1/review", { session: authorSess, csrf: true, body: { mode: "full" } });
@@ -189,8 +221,8 @@ async function main() {
     const audit = getAuditLog({ limit: 100, offset: 0 });
     const actions = new Set(audit.rows.map((r: any) => r.action));
     ok(
-      "audit_log has pr.review / pr.pause / pr.resume / pr.resolve / pr.cancel",
-      ["pr.review", "pr.pause", "pr.resume", "pr.resolve", "pr.cancel"].every((a) => actions.has(a)),
+      "audit_log has pr.review / pr.pause / pr.resume / pr.resolve / pr.cancel / pr.command",
+      ["pr.review", "pr.pause", "pr.resume", "pr.resolve", "pr.cancel", "pr.command"].every((a) => actions.has(a)),
     );
     ok(
       "audit rows attribute the actor + target",

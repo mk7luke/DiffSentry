@@ -137,6 +137,57 @@ async function main() {
     const patterns = await get("/api/v1/patterns");
     ok("patterns → rules", patterns.status === 200 && patterns.json.data.rules.some((r: any) => r.rule_name === "no-console"));
 
+    // ── Search (Cmd-K palette) ──────────────────────────────────────
+    const searchRepo = await get("/api/v1/search?q=" + encodeURIComponent("diffsentry"));
+    ok(
+      "search → repo hit with deep link",
+      searchRepo.status === 200 &&
+        searchRepo.json.data.results.some(
+          (r: any) => r.type === "repo" && r.repo === "diffsentry-sandbox" && r.to === "/repos/mk7luke/diffsentry-sandbox",
+        ),
+    );
+
+    const searchPr = await get("/api/v1/search?q=" + encodeURIComponent("rate limiter"));
+    ok(
+      "search → PR hit with /pr/ deep link",
+      searchPr.status === 200 &&
+        searchPr.json.data.results.some(
+          (r: any) => r.type === "pr" && r.number === 42 && r.to === "/repos/mk7luke/diffsentry-sandbox/pr/42",
+        ),
+    );
+
+    const searchFinding = await get("/api/v1/search?q=" + encodeURIComponent("race condition"));
+    ok(
+      "search → finding hit (severity + PR deep link)",
+      searchFinding.status === 200 &&
+        searchFinding.json.data.results.some(
+          (r: any) => r.type === "finding" && r.severity === "critical" && r.to === "/repos/mk7luke/diffsentry-sandbox/pr/42",
+        ),
+    );
+
+    const searchLearning = await get("/api/v1/search?q=" + encodeURIComponent("async"));
+    ok(
+      "search → on-disk learning hit",
+      searchLearning.status === 200 &&
+        searchLearning.json.data.results.some((r: any) => r.type === "learning" && r.repo === "diffsentry-sandbox"),
+    );
+
+    const searchMixed = await get("/api/v1/search?q=" + encodeURIComponent("src"));
+    ok(
+      "search → mixed results, ranked (descending score)",
+      searchMixed.status === 200 &&
+        searchMixed.json.data.results.length > 0 &&
+        searchMixed.json.data.results.every(
+          (r: any, i: number, arr: any[]) => i === 0 || arr[i - 1].score >= r.score,
+        ),
+    );
+
+    const searchPercent = await get("/api/v1/search?q=" + encodeURIComponent("100%"));
+    ok("search → LIKE wildcard in query is escaped (no crash, empty)", searchPercent.status === 200 && Array.isArray(searchPercent.json.data.results));
+
+    const searchBlank = await get("/api/v1/search?q=" + encodeURIComponent("   "));
+    ok("search → blank query returns empty", searchBlank.status === 200 && searchBlank.json.data.results.length === 0);
+
     const health = await get("/api/v1/health");
     ok("health → counts + logs", health.status === 200 && health.json.data.counts.repos === 2 && Array.isArray(health.json.data.logs));
 

@@ -25,7 +25,7 @@ export function DaysPicker({
         <button
           key={d}
           type="button"
-          className={`seg${d === days ? " active" : ""}`}
+          className={`seg-btn${d === days ? " active" : ""}`}
           aria-pressed={d === days}
           onClick={() => onChange(d)}
         >
