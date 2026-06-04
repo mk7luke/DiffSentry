@@ -40,6 +40,17 @@ interface Call {
   args: unknown[];
 }
 
+/** Shape of the args the config handler passes to repos.createOrUpdateFileContents. */
+interface CreateOrUpdateArgs {
+  owner: string;
+  repo: string;
+  path: string;
+  message: string;
+  content: string;
+  branch: string;
+  sha?: string;
+}
+
 async function main() {
   // Snapshot the env we mutate so a harness that imports this script gets its
   // process.env back (restored in the finally block).
@@ -47,6 +58,7 @@ async function main() {
     DB_PATH: process.env.DB_PATH,
     DASHBOARD_ADMIN_LOGINS: process.env.DASHBOARD_ADMIN_LOGINS,
     DASHBOARD_AUTHOR_LOGINS: process.env.DASHBOARD_AUTHOR_LOGINS,
+    DASHBOARD_CONFIG_PR_BRANCH_PREFIX: process.env.DASHBOARD_CONFIG_PR_BRANCH_PREFIX,
   };
 
   // Resources are declared out here and created inside the try, so the finally
@@ -67,6 +79,9 @@ async function main() {
     process.env.DB_PATH = tmpDb;
     process.env.DASHBOARD_ADMIN_LOGINS = "adminuser";
     process.env.DASHBOARD_AUTHOR_LOGINS = "authoruser";
+    // Clear so branchName() falls back to the default "diffsentry/config" prefix;
+    // an ambient value without a slash would break the slash-safe-ref assertion.
+    delete process.env.DASHBOARD_CONFIG_PR_BRANCH_PREFIX;
 
     const dbModule = await import("../src/storage/db.js");
     const { createApiRouter } = await import("../src/api/router.js");
@@ -116,7 +131,7 @@ async function main() {
             },
           });
         },
-        createOrUpdateFileContents: (args: any) => {
+        createOrUpdateFileContents: (args: CreateOrUpdateArgs) => {
           calls.push({ method: "repos.createOrUpdateFileContents", args: [args] });
           // A commit to the default branch mutates what reads return next.
           if (args.branch === "main") {
