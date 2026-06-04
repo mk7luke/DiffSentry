@@ -343,6 +343,81 @@ export interface ConfigUpdateResult {
   prUrl?: string;
 }
 
+// ─── Analytics: authors & trends ────────────────────────────────────
+
+export interface AuthorStatRow {
+  author: string;
+  prs_reviewed: number;
+  reviews: number;
+  avg_risk: number | null;
+  findings: number;
+  critical: number;
+  major: number;
+  minor: number;
+  nit: number;
+  triaged: number;
+  accepted: number;
+}
+
+export interface AuthorDayRow {
+  author: string;
+  day: string; // YYYY-MM-DD
+  reviews: number;
+  critical: number;
+  major: number;
+  minor: number;
+  nit: number;
+}
+
+export interface AuthorPRRow {
+  owner: string;
+  repo: string;
+  number: number;
+  title: string | null;
+  latest_at: string;
+  review_count: number;
+  latest_approval: string | null;
+  latest_risk_score: number | null;
+  latest_risk_level: string | null;
+  total_findings: number;
+}
+
+export interface RiskBucketRow {
+  level: string; // low | moderate | elevated | high | critical | unscored
+  count: number;
+}
+
+export interface HotPathTrendPoint {
+  path: string;
+  day: string; // YYYY-MM-DD
+  critical: number;
+  major: number;
+  total: number;
+}
+
+export interface AuthorsResponse {
+  days: number;
+  authors: AuthorStatRow[];
+  series: AuthorDayRow[];
+}
+
+export interface AuthorDetailResponse {
+  author: string;
+  days: number;
+  stat: AuthorStatRow | null;
+  series: AuthorDayRow[];
+  hotPaths: HotPathRow[];
+  prs: AuthorPRRow[];
+}
+
+export interface TrendsResponse {
+  days: number;
+  activity: DailyActivityRow[];
+  riskDistribution: RiskBucketRow[];
+  hotPaths: HotPathRow[];
+  hotPathSeries: HotPathTrendPoint[];
+}
+
 // ─── Learnings management ────────────────────────────────────────────
 
 export type LearningScope = "global" | "repo";

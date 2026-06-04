@@ -26,11 +26,16 @@ import {
   getApprovalMix,
   getAuditActions,
   getAuditLog,
+  getAuthorDailyActivity,
+  getAuthorHotPaths,
+  getAuthorLeaderboard,
+  getAuthorPRs,
   getDailyActivity,
   getEvents,
   getFindingsForPR,
   getHealthCounts,
   getHotPaths,
+  getHotPathTrends,
   getImpact,
   getPR,
   getPRReviews,
@@ -38,6 +43,7 @@ import {
   getRecentIssues,
   getRecentPRsWithReviews,
   getRepoOverview,
+  getRiskDistribution,
   getRoleOverrides,
   getSparkline,
   getTopRules,
@@ -46,6 +52,7 @@ import {
   queryFingerprintGroups,
   repoExists,
   searchEntities,
+  type AuthorStatRow,
   type FindingFilters,
 } from "../dashboard/queries.js";
 
@@ -429,6 +436,76 @@ export function createApiRouter(deps: ApiDeps): express.Router {
     } catch (err) {
       logger.error({ err }, "api /patterns failed");
       sendError(res, 500, "internal", "Failed to load patterns.");
+    }
+  });
+
+  // ─── /analytics/* ───────────────────────────────────────────────────
+  // Read-only org analytics, behind the auth gate above (any role). `days`
+  // defaults to 30 and is clamped to 1..365 here so the value echoed in the
+  // response matches the window the query layer actually applies.
+  const parseDays = (req: Request, dflt = 30): number => {
+    const raw = (req.query as Record<string, unknown>).days;
+    const n = typeof raw === "string" ? Number.parseInt(raw, 10) : NaN;
+    const days = Number.isFinite(n) ? n : dflt;
+    return Math.min(Math.max(days, 1), 365);
+  };
+
+  // Per-author leaderboard + daily sparkline series.
+  router.get("/analytics/authors", (req, res) => {
+    try {
+      const days = parseDays(req);
+      sendData(res, {
+        days,
+        authors: getAuthorLeaderboard(days),
+        series: getAuthorDailyActivity(days),
+      });
+    } catch (err) {
+      logger.error({ err }, "api /analytics/authors failed");
+      sendError(res, 500, "internal", "Failed to load author analytics.");
+    }
+  });
+
+  // Single-author drill-down: their leaderboard row, daily series, hot paths,
+  // and recent PRs across repos.
+  router.get("/analytics/authors/:author", (req, res) => {
+    const author = req.params.author;
+    try {
+      const days = parseDays(req);
+      const stat = getAuthorLeaderboard(days).find((a: AuthorStatRow) => a.author === author) ?? null;
+      const series = getAuthorDailyActivity(days).filter((r) => r.author === author);
+      if (!stat && series.length === 0) {
+        sendError(res, 404, "not_found", `No review activity for '${author}' in the last ${days} days.`);
+        return;
+      }
+      sendData(res, {
+        author,
+        days,
+        stat,
+        series,
+        hotPaths: getAuthorHotPaths(author, days),
+        prs: getAuthorPRs(author, days, 50),
+      });
+    } catch (err) {
+      logger.error({ err, author }, "api /analytics/authors/:author failed");
+      sendError(res, 500, "internal", "Failed to load author detail.");
+    }
+  });
+
+  // Org-wide trends: activity time series, risk distribution, hot paths over time.
+  router.get("/analytics/trends", (req, res) => {
+    try {
+      const days = parseDays(req);
+      const hotPaths = getHotPathTrends(days, 8);
+      sendData(res, {
+        days,
+        activity: getDailyActivity(null, null, days),
+        riskDistribution: getRiskDistribution(days),
+        hotPaths: hotPaths.paths,
+        hotPathSeries: hotPaths.series,
+      });
+    } catch (err) {
+      logger.error({ err }, "api /analytics/trends failed");
+      sendError(res, 500, "internal", "Failed to load trends.");
     }
   });
 
