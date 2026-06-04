@@ -153,7 +153,12 @@ function getFocusable(el: HTMLElement | null): HTMLElement[] {
   if (!el) return [];
   const sel =
     'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-  return Array.from(el.querySelectorAll<HTMLElement>(sel)).filter((n) => n.offsetParent !== null);
+  // getClientRects() is a reliable "is rendered" test even inside fixed /
+  // transformed / off-canvas containers (where offsetParent can be null); also
+  // skip anything hidden from the accessibility tree.
+  return Array.from(el.querySelectorAll<HTMLElement>(sel)).filter(
+    (n) => n.getClientRects().length > 0 && !n.closest('[aria-hidden="true"]'),
+  );
 }
 
 export function Shell() {
@@ -168,6 +173,22 @@ export function Shell() {
   // focus there when it closes.
   const restoreFocusRef = useRef(false);
 
+  // The sidebar is only a modal drawer at the mobile breakpoint (matches the
+  // CSS); on desktop it's a static complementary region. Tracking the
+  // breakpoint means a resize from a mobile (open) layout to desktop can't
+  // leave the page inert / scroll-locked / focus-trapped.
+  const [isMobileNav, setIsMobileNav] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 820px)").matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 820px)");
+    const onChange = () => setIsMobileNav(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  // Modal semantics apply only when the drawer is open AND we're on mobile.
+  const drawerModalOpen = navOpen && isMobileNav;
+
   // Close the drawer on any route change so a tapped nav link doesn't leave it
   // hanging open over the new page.
   useEffect(() => {
@@ -181,15 +202,15 @@ export function Shell() {
   useEffect(() => {
     for (const el of [topbarRef.current, mainRef.current]) {
       if (!el) continue;
-      if (navOpen) el.setAttribute("inert", "");
+      if (drawerModalOpen) el.setAttribute("inert", "");
       else el.removeAttribute("inert");
     }
-  }, [navOpen]);
+  }, [drawerModalOpen]);
 
   // While open: lock body scroll, close on Escape, and trap Tab within the
   // drawer so focus can't reach the (inert) background behind the backdrop.
   useEffect(() => {
-    if (!navOpen) return;
+    if (!drawerModalOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setNavOpen(false);
@@ -215,26 +236,26 @@ export function Shell() {
       window.removeEventListener("keydown", onKey);
       document.body.classList.remove("nav-locked");
     };
-  }, [navOpen]);
+  }, [drawerModalOpen]);
 
   // Move focus into the drawer as it opens. A layout effect, so it runs before
   // the (passive) inert effect marks the top bar inert — focus goes straight
   // from the menu button into the drawer with no detour through <body>.
   useLayoutEffect(() => {
-    if (!navOpen) return;
+    if (!drawerModalOpen) return;
     const drawer = drawerRef.current;
     (drawer?.querySelector<HTMLElement>(".drawer-close") ?? getFocusable(drawer)[0])?.focus();
-  }, [navOpen]);
+  }, [drawerModalOpen]);
 
   // Restore focus to the menu button after the drawer closes (when it opened
   // it). A passive effect declared after the inert effect, so the top bar's
   // inert is already cleared and the button can receive focus.
   useEffect(() => {
-    if (!navOpen && restoreFocusRef.current) {
+    if (!drawerModalOpen && restoreFocusRef.current) {
       restoreFocusRef.current = false;
       menuButtonRef.current?.focus();
     }
-  }, [navOpen]);
+  }, [drawerModalOpen]);
 
   return (
     <div className={`app${navOpen ? " nav-open" : ""}`}>
@@ -262,9 +283,9 @@ export function Shell() {
       <div
         ref={drawerRef}
         className="sidebar-wrap"
-        role={navOpen ? "dialog" : undefined}
-        aria-modal={navOpen || undefined}
-        aria-label={navOpen ? "Navigation menu" : undefined}
+        role={drawerModalOpen ? "dialog" : undefined}
+        aria-modal={drawerModalOpen || undefined}
+        aria-label={drawerModalOpen ? "Navigation menu" : undefined}
       >
         <Sidebar onNavigate={() => setNavOpen(false)} />
         {/* Close button lives inside the drawer on mobile (hidden on desktop). */}
