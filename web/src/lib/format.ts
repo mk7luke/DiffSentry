@@ -28,11 +28,15 @@ export function relativeTime(iso: string | null | undefined): string {
   return new Date(ts).toISOString().slice(0, 10);
 }
 
-/** Build an empty N-day series ending today, then merge real bins into it. */
-export function buildDaySeries(bins: DayBin[], days: number): DayBin[] {
+/**
+ * Build an empty N-day series ending on `endDate` (default: today), then merge
+ * the real bins into it. Pass a server-supplied end date to keep the series
+ * tied to the backend's time axis rather than the browser clock.
+ */
+export function buildDaySeries(bins: DayBin[], days: number, endDate?: Date): DayBin[] {
   const byDay = new Map(bins.map((b) => [b.day, b]));
   const out: DayBin[] = [];
-  const now = new Date();
+  const now = endDate ?? new Date();
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setUTCDate(d.getUTCDate() - i);
@@ -92,3 +96,38 @@ export function formatBytes(bytes: number | null): string {
 }
 
 export const SEVERITY_ORDER: Severity[] = ["critical", "major", "minor", "nit"];
+
+/** Compact integer formatting: 1234 → "1,234", 12000 → "12k", 1_300_000 → "1.3M". */
+export function formatCompact(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (abs >= 10_000) return `${Math.round(n / 1000)}k`;
+  return n.toLocaleString("en-US");
+}
+
+/**
+ * Reviewer-time saved, from minutes into a human headline.
+ * < 60m → "45 min"; < 1 workday → "6.5 hrs"; else "3.2 days" (8h workdays).
+ */
+export function formatMinutesSaved(minutes: number): { value: string; unit: string } {
+  // Clamp malformed/negative input (e.g. a bad env value) to zero so the hero
+  // never renders "NaN minutes" or "-5 minutes" — mirrors formatCompact's guard.
+  const safe = Number.isFinite(minutes) ? Math.max(0, minutes) : 0;
+  if (safe < 60) return { value: String(Math.round(safe)), unit: safe === 1 ? "minute" : "minutes" };
+  const hours = safe / 60;
+  if (hours < 8) {
+    const v = hours >= 10 ? Math.round(hours) : Math.round(hours * 10) / 10;
+    return { value: String(v), unit: v === 1 ? "hour" : "hours" };
+  }
+  const days = hours / 8; // 8-hour working days
+  const v = days >= 10 ? Math.round(days) : Math.round(days * 10) / 10;
+  return { value: String(v), unit: v === 1 ? "work-day" : "work-days" };
+}
+
+/** Percent-change of `current` vs `prev`; null when there's no comparable prior. */
+export function percentDelta(current: number, prev: number | null | undefined): number | null {
+  if (prev == null) return null;
+  if (prev === 0) return current === 0 ? 0 : null; // null = "new", no baseline
+  return ((current - prev) / prev) * 100;
+}

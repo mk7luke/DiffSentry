@@ -5,6 +5,7 @@ import {
   type LearningChangePayload,
   type ReviewLifecyclePayload,
   type StreamEnvelope,
+  type WebhookReplayPayload,
 } from "./useEventStream";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -166,6 +167,16 @@ function StreamToasts() {
         const where = p.scope === "global" ? "global" : `${p.owner}/${p.repo}`;
         const what = p.action === "bulk_delete" ? `deleted ${p.count ?? 0} learnings` : `learning ${p.action}`;
         push({ tone: "info", title: `${who} · ${what}`, body: where });
+        return;
+      }
+      if (env.topic === "webhook.replayed") {
+        const p = env.payload as WebhookReplayPayload;
+        const who = p.actor ? `@${p.actor}` : "someone";
+        push({
+          tone: "info",
+          title: `${who} replayed webhook · ${p.event}`,
+          body: p.newDeliveryId ? `New delivery #${p.newDeliveryId} (from #${p.id})` : `Replayed delivery #${p.id}`,
+        });
       }
     },
     [push],

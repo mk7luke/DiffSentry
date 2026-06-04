@@ -3,7 +3,7 @@ import { minimatch } from "minimatch";
 import type { Role } from "../dashboard/roles.js";
 import { getActor, type Actor } from "../dashboard/roles.js";
 import type { CsrfRuntime } from "../dashboard/auth.js";
-import type { LearningsStore } from "../learnings.js";
+import { GLOBAL_REPO, type LearningsStore } from "../learnings.js";
 import type { Learning } from "../types.js";
 import { insertAuditLog } from "../storage/dao.js";
 import { bus } from "../realtime/bus.js";
@@ -238,12 +238,19 @@ export function registerLearningRoutes(router: Router, deps: LearningDeps): void
       return;
     }
     try {
-      const [global, repoLearnings] = await Promise.all([
-        learnings.getGlobalLearnings(),
-        owner && repo ? learnings.getLearnings(`${owner}/${repo}`) : Promise.resolve([]),
-      ]);
-      const matched = [...global, ...repoLearnings].filter(
-        (l) => !l.path || minimatch(filePath, l.path, { matchBase: true }),
+      // Reuse the engine's exact selection (global + path-matched repo) when a
+      // repo is given; otherwise just the global set under the same predicate.
+      const selected: Learning[] =
+        owner && repo
+          ? await learnings.getRelevantLearnings(`${owner}/${repo}`, [filePath])
+          : (await learnings.getGlobalLearnings()).filter(
+              (l) => !l.path || minimatch(filePath, l.path, { matchBase: true }),
+            );
+      // Scope-tag each match so the client can render a global vs repo badge.
+      const matched: FlatLearning[] = selected.map((l) =>
+        l.repo === GLOBAL_REPO
+          ? { scope: "global", id: l.id, content: l.content, path: l.path }
+          : { scope: "repo", owner, repo, id: l.id, content: l.content, path: l.path },
       );
       sendData(res, { path: filePath, matched });
     } catch (err) {

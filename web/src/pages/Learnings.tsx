@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useBulkDeleteLearnings,
@@ -272,6 +272,16 @@ function LearningRow({
   const [editing, setEditing] = useState(false);
   const [content, setContent] = useState(item.learning.content);
   const [path, setPath] = useState(item.learning.path ?? "");
+
+  // This row is reused (stable key) across refetches, so useState won't
+  // re-seed when the underlying learning changes (e.g. another session edits
+  // it, or our own save lands). Sync the draft from item.learning — but only
+  // while not editing, so an in-progress edit is never clobbered.
+  useEffect(() => {
+    if (editing) return;
+    setContent(item.learning.content);
+    setPath(item.learning.path ?? "");
+  }, [item.learning.content, item.learning.path, editing]);
 
   const updateRepo = useUpdateLearning();
   const updateGlobal = useUpdateGlobalLearning();
@@ -558,7 +568,10 @@ function TestSnippetCard({ repoLabels }: { repoLabels: string[] }) {
         ) : (
           <ul className="learn-test-results">
             {test.data.matched.map((l) => (
-              <li key={l.id}>
+              <li key={`${l.scope}:${l.owner ?? ""}/${l.repo ?? ""}:${l.id}`}>
+                <Chip tone={l.scope === "global" ? "accent" : "neutral"} uppercase>
+                  {l.scope === "global" ? "global" : `${l.owner}/${l.repo}`}
+                </Chip>
                 {l.path ? <Chip tone="accent">{l.path}</Chip> : <Chip tone="muted">repo-wide</Chip>}
                 <span>{l.content}</span>
               </li>
