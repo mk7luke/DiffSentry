@@ -359,9 +359,15 @@ export function useDeleteChannel() {
 }
 
 export function useTestChannel() {
-  // Test does not change config, so no invalidation needed; caller reads result.
+  const qc = useQueryClient();
+  // A test send records a delivery row, so refresh the notifications view (Recent
+  // deliveries) on success. The mutation result (ok/detail) is still returned to
+  // the caller for display.
   return useMutation({
     mutationFn: (id: number) => apiSend<{ id: number; ok: boolean; detail: string }>(`/notifications/channels/${id}/test`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: NOTIF_KEY });
+    },
   });
 }
 

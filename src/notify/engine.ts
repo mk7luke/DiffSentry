@@ -263,11 +263,13 @@ class NotificationEngine {
     const digest = getWeeklyDigest(7);
     const msg = renderDigestMessage(digest, dashboardOrigin());
     const channels = new Map(getNotificationChannels().map((c) => [c.id, c]));
-    let delivered = false;
+    let attempted = false; // an enabled channel was found and dispatch was called
+    let delivered = false; // at least one dispatch returned ok
     for (const rule of digestRules) {
       if (rule.channel_id == null) continue;
       const channel = channels.get(rule.channel_id);
       if (!channel || channel.enabled !== 1) continue;
+      attempted = true;
       const result = await dispatchToChannel(channel, msg, {
         trigger: "digest",
         target: rule.scope ?? "global",
@@ -276,15 +278,21 @@ class NotificationEngine {
       });
       if (result.ok) delivered = true;
     }
-    // Only record the week as sent once at least one channel accepted the digest,
-    // so a transient delivery outage during the send window doesn't silently
-    // burn this week's digest — the next tick (or restart) can retry.
-    if (!delivered) {
+    // Retry next tick ONLY when we actually tried to deliver and every attempt
+    // failed — that's the transient-outage case where the week shouldn't be
+    // burned. If no attempt was even possible (no enabled channel on any digest
+    // rule), there's nothing to retry, so mark the week sent like the no-rules
+    // case to avoid re-evaluating every hour in the window.
+    if (attempted && !delivered) {
       logger.warn({ weekKey, rules: digestRules.length }, "Weekly digest: no channel accepted delivery — not marking the week sent");
       return;
     }
     upsertSettingOverride({ scope: "global", key: "digest.lastSentWeek", value: weekKey, updatedBy: "system" });
-    logger.info({ weekKey, rules: digestRules.length }, "Weekly digest sent");
+    if (delivered) {
+      logger.info({ weekKey, rules: digestRules.length }, "Weekly digest sent");
+    } else {
+      logger.info({ weekKey, rules: digestRules.length }, "Weekly digest: no eligible channel — marked week sent without delivering");
+    }
   }
 }
 
