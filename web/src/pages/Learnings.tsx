@@ -406,6 +406,21 @@ function NewLearningCard({ repoLabels }: { repoLabels: string[] }) {
   const [content, setContent] = useState("");
   const [path, setPath] = useState("");
 
+  // Keep scope/target coherent when the discovered repo list shifts underneath
+  // us (e.g. deleting the last learning in a repo drops it from repoLabels via
+  // a refetch). Without this, target can point at a repo that no longer exists
+  // and scope can stay "repo" with nothing left to select. We only flip repo→
+  // global (never yank a user who deliberately chose global), and only replace a
+  // target that's no longer a known repo.
+  useEffect(() => {
+    if (repoLabels.length === 0) {
+      setScope((s) => (s === "repo" ? "global" : s));
+      setTarget("");
+      return;
+    }
+    setTarget((t) => (repoLabels.includes(t) ? t : repoLabels[0]));
+  }, [repoLabels]);
+
   const createRepo = useCreateLearning();
   const createGlobal = useCreateGlobalLearning();
   const pending = createRepo.isPending || createGlobal.isPending;
