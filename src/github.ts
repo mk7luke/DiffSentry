@@ -106,7 +106,7 @@ export class GitHubClient {
    * inspect the webhook config, and read recent deliveries — none of which a
    * single installation token can see.
    */
-  async getAppOctokit(): Promise<Octokit> {
+  getAppOctokit(): Octokit {
     return new Octokit({
       authStrategy: createAppAuth,
       auth: {
@@ -124,19 +124,10 @@ export class GitHubClient {
    * can render a partial-but-useful diagnostic rather than failing outright.
    */
   async getAppDiagnostics(): Promise<GithubDiagnostics> {
-    let app: Octokit;
-    try {
-      app = await this.getAppOctokit();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return {
-        app: null,
-        installations: [],
-        webhook: { configuredUrl: null, deliveries: [] },
-        rateLimit: null,
-        error: message,
-      };
-    }
+    // Constructing the client never performs I/O — App JWT authentication is
+    // lazy and first exercised by getAuthenticated() below, where a bad App
+    // ID / private key surfaces as the top-level `error`.
+    const app = this.getAppOctokit();
 
     const result: GithubDiagnostics = {
       app: null,
@@ -176,6 +167,9 @@ export class GitHubClient {
         };
         try {
           const instOcto = await this.getInstallationOctokit(inst.id);
+          // One page is enough for the 50-name preview: per_page=100 ≥ the cap,
+          // and `total_count` is the authoritative full count (not page-limited),
+          // so repoCount + truncated stay accurate without paginating.
           const { data } = await instOcto.apps.listReposAccessibleToInstallation({ per_page: 100 });
           const repos = data.repositories ?? [];
           info.repoCount = data.total_count ?? repos.length;
