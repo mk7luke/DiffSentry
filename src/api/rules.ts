@@ -12,7 +12,6 @@ import {
   getCustomRule,
   insertAuditLog,
   insertCustomRule,
-  renameCustomRuleHits,
   updateCustomRule,
 } from "../storage/dao.js";
 import { listCustomRulesWithHits } from "../dashboard/queries.js";
@@ -194,7 +193,10 @@ export function registerRuleRoutes(router: Router, deps: RuleDeps): void {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const pattern = typeof body.pattern === "string" ? body.pattern : "";
     const flags = str(body.flags)?.trim() || undefined;
-    const pathGlob = str(body.pathGlob ?? body.path_glob);
+    // Trim like parseRuleBody so a whitespace-only glob is treated as absent —
+    // otherwise the tester would apply " " as a real glob and show no matches
+    // even though the persisted rule clears it.
+    const pathGlob = str(body.pathGlob ?? body.path_glob)?.trim() || undefined;
     const filename = str(body.filename);
     const snippet = typeof body.snippet === "string" ? body.snippet : "";
     if (!pattern) {
@@ -287,11 +289,8 @@ export function registerRuleRoutes(router: Router, deps: RuleDeps): void {
         sendError(res, 500, "internal", "Failed to update custom rule.");
         return;
       }
-      // On rename, carry the rule's historical pattern_hits to the new name so
-      // analytics aren't orphaned (hits join custom_rules by name).
-      if (input.name != null && input.name !== existing.name) {
-        renameCustomRuleHits(existing.name, input.name);
-      }
+      // No hit migration needed on rename: pattern_hits reference the rule by its
+      // stable id (custom_rule_id), so the analytics join survives a rename.
       const updated = getCustomRule(id);
       recordRuleChange(req, "update", id, updated?.name ?? existing.name, updated?.scope ?? existing.scope);
       sendData(res, { rule: updated });

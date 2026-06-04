@@ -192,13 +192,19 @@ export function validatePattern(pattern: string, flags?: string): { ok: boolean;
 // rule. The last two both record as source='custom' but render distinct footers.
 type PatternOrigin = "builtin" | "config" | "custom";
 
+/** An admin custom rule carries its DB id so recorded hits can be tied back to
+ * the exact rule (the stable analytics key), never matched by name. */
+export type EngineCustomRule = AntiPattern & { id?: number };
+
 type CompiledPattern = {
   rule: AntiPattern & { severity: CommentSeverity; type: CommentType };
   regex: RegExp;
   origin: PatternOrigin;
+  /** Set only for admin-authored custom rules. */
+  customRuleId?: number;
 };
 
-function compileUserPattern(r: AntiPattern, origin: PatternOrigin): CompiledPattern | null {
+function compileUserPattern(r: AntiPattern, origin: PatternOrigin, customRuleId?: number): CompiledPattern | null {
   const rx = compile(r);
   if (!rx) return null;
   return {
@@ -209,12 +215,13 @@ function compileUserPattern(r: AntiPattern, origin: PatternOrigin): CompiledPatt
     },
     regex: rx,
     origin,
+    customRuleId,
   };
 }
 
 function buildPatterns(
   repoConfig: RepoConfig | undefined,
-  customRules: AntiPattern[] = [],
+  customRules: EngineCustomRule[] = [],
 ): CompiledPattern[] {
   const out: CompiledPattern[] = [];
   const builtinEnabled = repoConfig?.reviews?.builtin_patterns !== false;
@@ -236,7 +243,7 @@ function buildPatterns(
   // Admin-authored rules from the command center (already filtered to enabled +
   // applicable scope by the DAO). They compose with built-ins and file rules.
   for (const r of customRules) {
-    const c = compileUserPattern(r, "custom");
+    const c = compileUserPattern(r, "custom", r.id);
     if (c) out.push(c);
   }
   return out;
@@ -245,7 +252,7 @@ function buildPatterns(
 export function runPatternChecks(
   files: FileChange[],
   repoConfig: RepoConfig | undefined,
-  customRules: AntiPattern[] = [],
+  customRules: EngineCustomRule[] = [],
 ): ReviewComment[] {
   const patterns = buildPatterns(repoConfig, customRules);
   if (patterns.length === 0) return [];
@@ -303,6 +310,7 @@ export function runPatternChecks(
               aiAgentPrompt,
               fingerprint,
               patternSource: p.origin === "builtin" ? "builtin" : "custom",
+              customRuleId: p.customRuleId,
               body: renderInlineCommentBody({
                 title,
                 body,

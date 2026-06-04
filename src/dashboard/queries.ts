@@ -747,10 +747,12 @@ export interface CustomRuleWithHits {
 }
 
 /**
- * List every custom rule joined to its hit-counts (source='custom' rows in
- * pattern_hits keyed by rule name). Newest rule first. Empty when persistence
- * is off — the table may not exist yet, so this degrades to [] rather than
- * throwing.
+ * List every custom rule joined to its hit-counts. Hits are tied to the rule by
+ * `pattern_hits.custom_rule_id` — a stable id, never the rule name — so a YAML
+ * anti_pattern (which also records as source='custom' but carries no id) can't
+ * inflate an admin rule's counts, and renaming a rule keeps its history intact.
+ * Newest rule first. Empty when persistence is off — the table may not exist yet,
+ * so this degrades to [] rather than throwing.
  */
 export function listCustomRulesWithHits(): CustomRuleWithHits[] {
   const db = openDatabase();
@@ -765,15 +767,15 @@ export function listCustomRulesWithHits(): CustomRuleWithHits[] {
                 h.last_hit               AS last_hit
          FROM custom_rules cr
          LEFT JOIN (
-           SELECT ph.rule_name,
+           SELECT ph.custom_rule_id,
                   COUNT(*) AS hits_total,
                   SUM(CASE WHEN rv.created_at >= ? THEN 1 ELSE 0 END) AS hits_30d,
                   MAX(rv.created_at) AS last_hit
            FROM pattern_hits ph
            LEFT JOIN reviews rv ON rv.id = ph.review_id
-           WHERE ph.source = 'custom'
-           GROUP BY ph.rule_name
-         ) h ON h.rule_name = cr.name
+           WHERE ph.custom_rule_id IS NOT NULL
+           GROUP BY ph.custom_rule_id
+         ) h ON h.custom_rule_id = cr.id
          ORDER BY cr.id DESC`,
       )
       .all(thirty) as CustomRuleWithHits[];

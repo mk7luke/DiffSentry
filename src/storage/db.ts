@@ -331,6 +331,33 @@ function ensureFindingsTriageColumns(db: DB): void {
 }
 
 /**
+ * Idempotently add `custom_rule_id` to pattern_hits. This is the stable
+ * discriminator that ties a recorded hit to the admin-authored custom rule that
+ * produced it (null for built-in heuristics and `.diffsentry.yaml` anti_patterns,
+ * which share `source` values by name). Analytics join + rename by this id, never
+ * by rule name, so a YAML anti-pattern can't be conflated with — or clobbered by
+ * — an admin rule that happens to share its name.
+ *
+ * Requires the `pattern_hits` table (created by migration 1) to already exist.
+ */
+function ensurePatternHitsCustomRuleId(db: DB): void {
+  const hasPatternHits = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'pattern_hits'")
+    .get();
+  if (!hasPatternHits) {
+    throw new Error(
+      "Migration 3 (custom_rules) requires the `pattern_hits` table from migration 1, but it is missing — " +
+        "the schema_version ledger is inconsistent with the database. Refusing to proceed.",
+    );
+  }
+  const cols = new Set(
+    (db.prepare("PRAGMA table_info(pattern_hits)").all() as Array<{ name: string }>).map((c) => c.name),
+  );
+  if (!cols.has("custom_rule_id")) db.exec("ALTER TABLE pattern_hits ADD COLUMN custom_rule_id INTEGER");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_pattern_hits_custom_rule ON pattern_hits(custom_rule_id)");
+}
+
+/**
  * Ordered migration set. Applied in array order inside a transaction each, and
  * tracked in the `schema_version` ledger by version number. Append new
  * migrations here with the next contiguous version — never edit or reorder an
@@ -339,7 +366,7 @@ function ensureFindingsTriageColumns(db: DB): void {
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "v1_baseline", sql: SCHEMA_V1 },
   { version: 2, name: "command_center", sql: SCHEMA_V2, post: ensureFindingsTriageColumns },
-  { version: 3, name: "custom_rules", sql: SCHEMA_V3 },
+  { version: 3, name: "custom_rules", sql: SCHEMA_V3, post: ensurePatternHitsCustomRuleId },
 ];
 
 /** Highest version this binary knows how to migrate to. */

@@ -699,23 +699,6 @@ export function updateCustomRule(id: number, input: Partial<CustomRuleInput>): b
   }
 }
 
-/**
- * Re-point historical pattern_hits from a rule's old name to its new one, so a
- * rename doesn't orphan analytics (listCustomRulesWithHits joins hits by name).
- * Custom-rule names are globally unique, so matching on the exact old name +
- * source='custom' is unambiguous. Best-effort; never throws.
- */
-export function renameCustomRuleHits(oldName: string, newName: string): void {
-  if (oldName === newName) return;
-  const db = openDatabase();
-  if (!db) return;
-  try {
-    db.prepare(`UPDATE pattern_hits SET rule_name = ? WHERE rule_name = ? AND source = 'custom'`).run(newName, oldName);
-  } catch (err) {
-    logger.debug({ err, oldName, newName }, "dao.renameCustomRuleHits failed");
-  }
-}
-
 /** Delete a custom rule. Returns true when a row was removed. */
 export function deleteCustomRule(id: number): boolean {
   const db = openDatabase();
@@ -730,12 +713,16 @@ export function deleteCustomRule(id: number): boolean {
   }
 }
 
+/** An AntiPattern plus its DB id, so recorded hits can be tied back to the exact
+ * admin rule (the stable analytics key) rather than matched by name. */
+export type CustomRuleForEngine = AntiPattern & { id: number };
+
 /**
  * Load the enabled custom rules that apply to a repo — global rules plus any
- * scoped to exactly `owner/repo` — shaped as AntiPattern for the pattern engine.
- * Empty when persistence is off, so the engine simply runs without them.
+ * scoped to exactly `owner/repo` — shaped as AntiPattern (+ id) for the pattern
+ * engine. Empty when persistence is off, so the engine simply runs without them.
  */
-export function listCustomRulesForRepo(owner: string, repo: string): AntiPattern[] {
+export function listCustomRulesForRepo(owner: string, repo: string): CustomRuleForEngine[] {
   const db = openDatabase();
   if (!db) return [];
   if (!ensureCommandCenterSchema(db, ["custom_rules"])) return [];
@@ -748,6 +735,7 @@ export function listCustomRulesForRepo(owner: string, repo: string): AntiPattern
       )
       .all(`${owner}/${repo}`) as CustomRuleRow[];
     return rows.map((r) => ({
+      id: r.id,
       name: r.name,
       pattern: r.pattern,
       flags: r.flags ?? undefined,
@@ -989,17 +977,24 @@ export function recordPatternHits(opts: {
   owner: string;
   repo: string;
   reviewId: number | null;
-  hits: Array<{ ruleName: string; source: "builtin" | "custom" | "safety"; fingerprint?: string }>;
+  hits: Array<{
+    ruleName: string;
+    source: "builtin" | "custom" | "safety";
+    fingerprint?: string;
+    /** Set only for admin-authored custom rules — the stable join key analytics
+     * use so they're never conflated with same-named YAML anti_patterns. */
+    customRuleId?: number | null;
+  }>;
 }): void {
   const db = openDatabase();
   if (!db || opts.hits.length === 0) return;
   try {
     const stmt = db.prepare(
-      `INSERT INTO pattern_hits (owner, repo, rule_name, source, fingerprint, review_id) VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO pattern_hits (owner, repo, rule_name, source, fingerprint, review_id, custom_rule_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
     const tx = db.transaction((rows: typeof opts.hits) => {
       for (const r of rows) {
-        stmt.run(opts.owner, opts.repo, r.ruleName, r.source, r.fingerprint ?? null, opts.reviewId);
+        stmt.run(opts.owner, opts.repo, r.ruleName, r.source, r.fingerprint ?? null, opts.reviewId, r.customRuleId ?? null);
       }
     });
     tx(opts.hits);

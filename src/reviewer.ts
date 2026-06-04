@@ -1039,6 +1039,7 @@ export class Reviewer {
               ruleName: f.title ?? "pattern",
               source: (f.patternSource ?? (f.body?.includes("Project anti-pattern") ? "custom" : "builtin")) as "builtin" | "custom",
               fingerprint: f.fingerprint,
+              customRuleId: f.customRuleId,
             })),
           ],
         });

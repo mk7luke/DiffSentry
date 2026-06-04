@@ -170,6 +170,10 @@ export interface ReviewComment {
    *  re-sniffing the rendered body. "builtin" = shipped heuristic; "custom" =
    *  a `.diffsentry.yaml` anti-pattern or an admin-authored command-center rule. */
   patternSource?: "builtin" | "custom";
+  /** The admin custom-rule id that produced this finding (only for command-center
+   *  rules; absent for built-ins and `.diffsentry.yaml` anti_patterns). The stable
+   *  key analytics use so a hit is never matched to a rule by name. */
+  customRuleId?: number;
 }
 
 // ─── Review Result ─────────────────────────────────────────────
