@@ -283,9 +283,11 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   }
 
   // ─── Guided first-run diagnostics (read viewer+, tests author+) ─────
-  if (deps.diagnostics) {
-    registerDiagnosticsRoutes(router, { diagnostics: deps.diagnostics, requireRole, csrf, authEnabled });
-  }
+  // Always mounted: the static env+DB checks (and the webhook self-test) need
+  // no provider and drive the setup wizard, so they must work even on a
+  // minimally-wired instance. Provider-backed probes (AI test, GitHub
+  // introspection) answer "unavailable" explicitly when no provider is passed.
+  registerDiagnosticsRoutes(router, { diagnostics: deps.diagnostics, requireRole, csrf, authEnabled });
 
   // ─── Webhook deliveries (admin) ────────────────────────────────────
   // Inspection (list + full payload) and admin replay. The GET endpoints are

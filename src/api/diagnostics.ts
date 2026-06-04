@@ -48,7 +48,11 @@ export interface DiagnosticsProvider {
 }
 
 export interface DiagnosticsRouteDeps {
-  diagnostics: DiagnosticsProvider;
+  /** Provider-backed probes (AI reachability + GitHub App introspection). When
+   * omitted, the static `GET /diagnostics` and the webhook self-test still work;
+   * the provider-backed endpoints answer explicitly that the probe is
+   * unavailable rather than 404-ing the whole surface. */
+  diagnostics?: DiagnosticsProvider;
   requireRole: (role: Role) => import("express").RequestHandler;
   csrf: CsrfRuntime;
   /** Whether OAuth is configured (mirrors the router's authEnabled). */
@@ -242,6 +246,20 @@ function summarize(checks: DiagnosticCheck[]): { ok: number; warn: number; fail:
   };
 }
 
+/** Provider + model derived straight from env — the fallback used for the
+ * static config summary (and the test-ai response) when no provider is wired.
+ * Mirrors the model defaults in src/config.ts. */
+function envAiTarget(): { provider: string; model: string } {
+  const provider = (process.env.AI_PROVIDER || "anthropic").trim();
+  const model =
+    provider === "openai"
+      ? process.env.OPENAI_MODEL || "gpt-4o"
+      : provider === "openai-compatible"
+        ? process.env.LOCAL_AI_MODEL || ""
+        : process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
+  return { provider, model };
+}
+
 export function registerDiagnosticsRoutes(router: Router, deps: DiagnosticsRouteDeps): void {
   const { diagnostics, requireRole, csrf, authEnabled } = deps;
   const author = requireRole("author");
@@ -256,7 +274,8 @@ export function registerDiagnosticsRoutes(router: Router, deps: DiagnosticsRoute
       const checks = buildChecks(authEnabled);
       const summary = summarize(checks);
       const counts = getHealthCounts();
-      const target = diagnostics.aiTarget();
+      // Static surface — works with or without a provider; fall back to env.
+      const target = diagnostics ? diagnostics.aiTarget() : envAiTarget();
       const oauthCfg = loadAuthConfigFromEnv();
       sendData(res, {
         checks,
@@ -288,6 +307,19 @@ export function registerDiagnosticsRoutes(router: Router, deps: DiagnosticsRoute
 
   // ── GET /diagnostics/github — live probe ─────────────────────────
   router.get("/diagnostics/github", viewer, async (_req, res) => {
+    if (!diagnostics) {
+      sendData(res, {
+        app: null,
+        installations: [],
+        webhook: { configuredUrl: null, deliveries: [] },
+        rateLimit: null,
+        error: "GitHub diagnostics are unavailable on this instance (no provider configured).",
+        reachable: false,
+        connectedRepos: 0,
+        installationCount: 0,
+      });
+      return;
+    }
     try {
       const gh = await diagnostics.getGithubDiagnostics();
       const connectedRepos = gh.installations.reduce((n, i) => n + i.repoCount, 0);
@@ -306,7 +338,14 @@ export function registerDiagnosticsRoutes(router: Router, deps: DiagnosticsRoute
   // ── POST /diagnostics/test-ai — author+, audited ─────────────────
   router.post("/diagnostics/test-ai", author, csrf.verify, async (req: Request, res: Response) => {
     const actor = getActor(req);
-    const result = await diagnostics.testAiProvider();
+    const result = diagnostics
+      ? await diagnostics.testAiProvider()
+      : {
+          ok: false as const,
+          ...envAiTarget(),
+          latencyMs: 0,
+          error: "AI provider is not available on this instance.",
+        };
     insertAuditLog({
       actorLogin: actor?.login ?? null,
       actorRole: actor?.role ?? null,

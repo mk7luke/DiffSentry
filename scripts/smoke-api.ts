@@ -279,6 +279,54 @@ async function main() {
     const unknownEndpoint = await get("/api/v1/nope");
     ok("unknown endpoint → 404 JSON", unknownEndpoint.status === 404 && unknownEndpoint.json.error.code === "not_found");
 
+    // ── Diagnostics WITHOUT a provider wired ───────────────────────
+    // The static env+DB checks (and the webhook self-test) must still work so
+    // the setup wizard functions on a minimally-wired instance; provider-backed
+    // probes degrade explicitly instead of 404-ing the whole surface.
+    {
+      const noProvApp = express();
+      noProvApp.use("/api/v1", createApiRouter({ learningsDir })); // no diagnostics provider
+      const noProvServer = noProvApp.listen(0);
+      const noProvPort = (noProvServer.address() as { port: number }).port;
+      const req = (method: "GET" | "POST", pathname: string) =>
+        new Promise<{ status: number; json: any }>((resolve, reject) => {
+          const r = http.request({ hostname: "127.0.0.1", port: noProvPort, path: pathname, method }, (resp) => {
+            const chunks: Buffer[] = [];
+            resp.on("data", (c) => chunks.push(c));
+            resp.on("end", () => {
+              const body = Buffer.concat(chunks).toString("utf8");
+              resolve({ status: resp.statusCode ?? 0, json: body ? JSON.parse(body) : null });
+            });
+          });
+          r.on("error", reject);
+          r.end();
+        });
+      try {
+        const d = await req("GET", "/api/v1/diagnostics");
+        ok(
+          "no-provider: GET /diagnostics → 200 static checks + env-derived config",
+          d.status === 200 && Array.isArray(d.json.data.checks) && d.json.data.config.provider === "anthropic",
+        );
+        const ghd = await req("GET", "/api/v1/diagnostics/github");
+        ok(
+          "no-provider: GET /diagnostics/github → 200 reachable:false + error",
+          ghd.status === 200 && ghd.json.data.reachable === false && typeof ghd.json.data.error === "string",
+        );
+        const tAi = await req("POST", "/api/v1/diagnostics/test-ai");
+        ok(
+          "no-provider: POST test-ai → ok:false (provider unavailable)",
+          tAi.status === 200 && tAi.json.data.ok === false && typeof tAi.json.data.error === "string",
+        );
+        const tWh = await req("POST", "/api/v1/diagnostics/test-webhook");
+        ok(
+          "no-provider: POST test-webhook → still verifies (needs no provider)",
+          tWh.status === 200 && tWh.json.data.ok === true,
+        );
+      } finally {
+        noProvServer.close();
+      }
+    }
+
     // Auth gate — a second app with auth wired returns 401 JSON (not a redirect)
     // for an unauthenticated request.
     const { createAuth } = await import("../src/dashboard/auth.js");
