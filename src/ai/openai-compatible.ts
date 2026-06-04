@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { AIProvider, PRContext, ReviewResult, WalkthroughResult, RepoConfig, Learning, IssueContext } from "../types.js";
 import { buildReviewPrompt, buildWalkthroughPrompt, buildChatPrompt, buildIssueChatPrompt } from "./prompt.js";
 import { parseReviewResponse, parseWalkthroughResponse } from "./parse.js";
+import { recordAiUsage } from "./cost.js";
 import { logger } from "../logger.js";
 
 // Adapter for any OpenAI-compatible `/v1/chat/completions` endpoint:
@@ -37,6 +38,20 @@ export class OpenAICompatibleProvider implements AIProvider {
     this.providerLabel = opts.providerLabel || "openai-compatible";
   }
 
+  /** Record token usage + cost for one call (best-effort, never throws). */
+  private track(
+    usage: { prompt_tokens?: number; completion_tokens?: number } | undefined | null,
+    kind: string,
+  ): void {
+    recordAiUsage({
+      provider: this.providerLabel,
+      model: this.model,
+      inputTokens: usage?.prompt_tokens,
+      outputTokens: usage?.completion_tokens,
+      fallbackKind: kind,
+    });
+  }
+
   private async jsonCall(system: string, user: string, maxTokens: number) {
     return this.client.chat.completions.create({
       model: this.model,
@@ -65,6 +80,7 @@ export class OpenAICompatibleProvider implements AIProvider {
       },
       "OpenAI-compatible review response received"
     );
+    this.track(response.usage, "review");
 
     return parseReviewResponse(text, context);
   }
@@ -85,6 +101,7 @@ export class OpenAICompatibleProvider implements AIProvider {
       },
       "OpenAI-compatible walkthrough response received"
     );
+    this.track(response.usage, "walkthrough");
 
     return parseWalkthroughResponse(text);
   }
@@ -112,6 +129,7 @@ export class OpenAICompatibleProvider implements AIProvider {
       },
       "OpenAI-compatible chat response received"
     );
+    this.track(response.usage, "chat");
 
     return text;
   }
@@ -126,6 +144,7 @@ export class OpenAICompatibleProvider implements AIProvider {
       ],
       ...(opts?.json ? { response_format: { type: "json_object" as const } } : {}),
     });
+    this.track(response.usage, "complete");
     return response.choices[0]?.message?.content || "";
   }
 
@@ -152,6 +171,7 @@ export class OpenAICompatibleProvider implements AIProvider {
       },
       "OpenAI-compatible issue chat response received"
     );
+    this.track(response.usage, "issue_chat");
 
     return text;
   }

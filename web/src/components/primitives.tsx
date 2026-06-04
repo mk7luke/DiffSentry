@@ -66,6 +66,31 @@ export function PageHeader(props: { title: ReactNode; subtitle?: ReactNode; righ
   );
 }
 
+export function Switch(props: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+  "aria-label"?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={props.checked}
+      aria-label={props["aria-label"]}
+      disabled={props.disabled}
+      className={`switch${props.checked ? " on" : ""}`}
+      onClick={() => {
+        if (!props.disabled) props.onChange(!props.checked);
+      }}
+    >
+      <span className="switch-track">
+        <span className="switch-thumb" />
+      </span>
+    </button>
+  );
+}
+
 export function Chip(props: {
   tone?: "neutral" | "muted" | "good" | "warn" | "danger" | "accent" | "sev-crit" | "sev-major" | "sev-minor" | "sev-nit";
   uppercase?: boolean;
