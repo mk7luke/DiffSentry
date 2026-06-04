@@ -372,6 +372,11 @@ async function main() {
     } catch {
       // best effort
     }
+    try {
+      fs.rmSync(learningsDir, { recursive: true, force: true });
+    } catch {
+      // best effort
+    }
     for (const [k, v] of Object.entries(prevEnv)) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
