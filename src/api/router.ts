@@ -18,6 +18,7 @@ import {
 import { insertAuditLog, setRole } from "../storage/dao.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
+import { registerCostRoutes } from "./cost.js";
 import { registerSettingsRoutes } from "./settings.js";
 import { registerTokenRoutes } from "./tokens.js";
 import { authenticateBearer, extractBearer, requiredScopeForMethod } from "./token-auth.js";
@@ -342,6 +343,9 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   if (deps.reviewer) {
     registerActionRoutes(router, { reviewer: deps.reviewer, requireRole, csrf: writeCsrf });
   }
+
+  // ─── Cost (read for all; budget writes are admin) ──────────────────
+  registerCostRoutes(router, { requireRole, csrf });
 
   // ─── Settings (operator controls, admin) ───────────────────────────
   // Global + per-repo overrides (pause-all, auto-review, profile, log level,

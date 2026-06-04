@@ -40,6 +40,20 @@ export interface ActionPayload {
   detail?: string;
 }
 
+/** AI-spend budget exceeded — emitted from the cost instrumentation. */
+export interface BudgetAlertPayload {
+  /** 'global' or 'owner/repo'. */
+  scope: string;
+  owner: string | null;
+  repo: string | null;
+  /** YYYY-MM the alert is for. */
+  month: string;
+  /** Month-to-date spend that tripped the budget. */
+  spentUsd: number;
+  /** The configured monthly ceiling. */
+  budgetUsd: number;
+}
+
 /** An operator settings override changed — emitted from the settings API. */
 export interface SettingsChangedPayload {
   /** 'global' or 'owner/repo'. */
@@ -157,6 +171,7 @@ export interface BusEventMap {
   "review.finished": ReviewLifecyclePayload;
   "review.failed": ReviewLifecyclePayload;
   "action.performed": ActionPayload;
+  "budget.exceeded": BudgetAlertPayload;
   "settings.changed": SettingsChangedPayload;
   "token.changed": TokenChangePayload;
   "rule.changed": RuleChangedPayload;

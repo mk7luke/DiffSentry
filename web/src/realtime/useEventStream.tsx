@@ -26,6 +26,7 @@ export type StreamTopic =
   | "review.finished"
   | "review.failed"
   | "action.performed"
+  | "budget.exceeded"
   | "settings.changed"
   | "token.changed"
   | "rule.changed"
@@ -51,6 +52,15 @@ export interface ActionPayload {
   role: string | null;
   result: string;
   detail?: string;
+}
+
+export interface BudgetAlertPayload {
+  scope: string;
+  owner: string | null;
+  repo: string | null;
+  month: string;
+  spentUsd: number;
+  budgetUsd: number;
 }
 
 export interface SettingsChangedPayload {
@@ -119,6 +129,7 @@ const TOPICS: StreamTopic[] = [
   "review.finished",
   "review.failed",
   "action.performed",
+  "budget.exceeded",
   "settings.changed",
   "token.changed",
   "rule.changed",

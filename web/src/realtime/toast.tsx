@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useEventStream,
   type ActionPayload,
+  type BudgetAlertPayload,
   type ConfigUpdatePayload,
   type LearningChangePayload,
   type ReviewLifecyclePayload,
@@ -176,6 +177,19 @@ function StreamToasts() {
           title: `${who} · ${p.action} · ${ref}`,
           body: p.detail,
         });
+        return;
+      }
+      if (env.topic === "budget.exceeded") {
+        const p = env.payload as BudgetAlertPayload;
+        push({
+          id: `budget-${p.scope}-${p.month}`,
+          tone: "danger",
+          title: `Budget exceeded · ${p.scope}`,
+          body: `$${p.spentUsd.toFixed(2)} spent of $${p.budgetUsd.toFixed(2)} (${p.month})`,
+          ttl: 0,
+        });
+        // Keep an open Cost screen (gauges, MTD, projection) in sync with the crossing.
+        void qc.invalidateQueries({ queryKey: ["cost"] });
         return;
       }
       if (env.topic === "config.updated") {

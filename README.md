@@ -711,6 +711,9 @@ untouched.
 - `/findings` — cross-repo filterable explorer (severity, source, repo,
   free-text, age) with a "recurring fingerprints" group.
 - `/patterns` — every pattern-rule hit with 30d + all-time counts.
+- `/cost` — AI spend: spend-over-time stacked by model, top repositories,
+  tokens-vs-dollars per model, month-to-date + projected month-end, and a budget
+  gauge per scope (admins can set/clear monthly ceilings inline).
 - `/rules` — **admin only** — author custom anti-pattern rules (name, severity,
   scope, regex, optional path glob, message/advice). A live tester runs the
   pattern against a pasted snippet and highlights matches without persisting,
@@ -766,7 +769,8 @@ in the sidebar) to open a keyboard-first palette that combines three things:
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/queue`, `/repos`,
 `/repos/:owner/:repo`, `/repos/:owner/:repo/prs/:number`,
-`/repos/:owner/:repo/config`, `/findings`, `/patterns`, `/rules` (admin),
+`/repos/:owner/:repo/config`, `/findings`, `/patterns`, `/cost`
+(`?range=7d|30d|90d|mtd&group=repo|model|day|kind`), `/rules` (admin),
 `/search?q=`, the analytics trio `/analytics/authors`,
 `/analytics/authors/:author`, `/analytics/trends` (all accept `?days=`, default
 30, clamped 1–365), `/audit` (admin), `/tokens` (admin), `/webhooks` +
@@ -775,7 +779,8 @@ failure. Read endpoints: `GET /me`, `/health`, `/queue`, `/repos`,
 **`GET /api/v1/openapi.json`** (OpenAPI 3) and the rendered docs page
 **`GET /api/v1/docs`** are public. `GET /queue` returns the live review-pipeline
 snapshot from an in-process registry (works regardless of persistence). Write
-endpoints: `POST /roles` (admin) sets/clears a role override; `GET`/`POST /tokens`
+endpoints: `POST /roles` (admin) sets/clears a role override; `POST /cost/budget`
+(admin) `{ scope, monthlyUsd }` sets/clears a monthly budget; `GET`/`POST /tokens`
 + `DELETE /tokens/:id` (admin) manage platform API tokens; `POST/PUT/DELETE /rules`
 (admin) manage custom rules and `POST /rules/test` (admin) tests a candidate
 pattern against a snippet without persisting; `PUT /repos/:owner/:repo/config`
@@ -881,12 +886,31 @@ event bus. The review engine publishes `review.started` / `review.finished` /
 state transition (queued → running → done/failed/canceled, including phase
 changes), every command action publishes `action.performed`, a custom rule
 change publishes `rule.changed`, a config edit publishes `config.updated`, a
-settings change publishes `settings.changed`, and a webhook replay publishes
-`webhook.replayed`. The SPA opens one `EventSource`,
-surfaces events as toasts, drives the live queue board, and live-refetches the
-affected PR — so a re-review's findings appear without a refresh. The stream
-heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed
-events on reconnect via `Last-Event-ID`.
+settings change publishes `settings.changed`, a webhook replay publishes
+`webhook.replayed`, and the cost instrumentation publishes `budget.exceeded`
+when month-to-date spend crosses a configured ceiling. The SPA opens one
+`EventSource`, surfaces events as toasts, drives the live queue board, and
+live-refetches the affected PR — so a re-review's findings appear without a
+refresh. The stream heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s)
+and replays missed events on reconnect via `Last-Event-ID`.
+
+**AI cost tracking**
+
+Every provider call (Anthropic, OpenAI, or any OpenAI-compatible endpoint)
+records its token usage and a computed USD cost to a `cost_events` row, tagged
+with `owner/repo/number/review_id/kind` (`review`, `chat`, `finishing-touch`,
+`issue`, …). Attribution is threaded through an `AsyncLocalStorage` context the
+engine establishes around each unit of work, so concurrent reviews never
+cross-attribute and the `AIProvider` interface is unchanged. During a review the
+events are buffered and stamped with the `review_id` once the review row exists.
+
+Cost is derived from a built-in per-model price table (USD per 1M input/output
+tokens); override or extend it with `AI_MODEL_PRICES` (a JSON map of model id or
+family prefix → `{ input, output }`). Unknown models still record tokens at a
+zero cost until a price is added. **Budgets** are monthly USD ceilings per scope
+(`global` or `owner/repo`), stored in `settings_overrides` and managed on the
+Cost page; the first crossing within a month emits the `budget.exceeded` event
+and writes an `audit_log` entry (deduped per scope/month).
 
 **Platform API (bearer tokens)**
 

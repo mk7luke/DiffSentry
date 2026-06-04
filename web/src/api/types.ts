@@ -297,6 +297,59 @@ export interface PatternsResponse {
   rules: PatternRuleRow[];
 }
 
+// ─── Cost / AI spend ─────────────────────────────────────────────────
+
+export interface CostTotals {
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  events: number;
+}
+
+export interface CostGroupRow {
+  key: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  events: number;
+}
+
+export interface CostDailyModelRow {
+  day: string; // YYYY-MM-DD
+  model: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+export interface BudgetView {
+  scope: string; // 'global' | 'owner/repo'
+  monthlyUsd: number;
+  spentUsd: number;
+  pct: number;
+  exceeded: boolean;
+  updatedBy: string | null;
+  updatedAt: string | null;
+}
+
+export interface CostResponse {
+  range: string;
+  since: string | null;
+  group: string | null;
+  totals: CostTotals;
+  monthToDate: number;
+  projectedMonthEnd: number;
+  dayOfMonth: number;
+  daysInMonth: number;
+  byModel: CostGroupRow[];
+  byRepo: CostGroupRow[];
+  byKind: CostGroupRow[];
+  daily: CostDailyModelRow[];
+  models: string[];
+  budgets: BudgetView[];
+  grouped?: CostGroupRow[];
+}
+
 // ─── Settings (operator controls) ───────────────────────────────────
 
 export type Profile = "chill" | "assertive";

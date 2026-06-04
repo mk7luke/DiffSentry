@@ -24,6 +24,7 @@
     "smoke:queue": "tsx scripts/smoke-queue.ts",
     "smoke:migrate": "tsx scripts/migrate-smoke.ts",
     "smoke:dao": "tsx scripts/smoke-dao.ts",
+    "smoke:cost": "tsx scripts/smoke-cost.ts",
     "smoke:webhooks": "tsx scripts/smoke-webhooks.ts",
     "smoke:signature": "tsx scripts/smoke-signature.ts",
     "serve:seeded": "tsx scripts/serve-seeded.ts"

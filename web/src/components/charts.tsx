@@ -177,6 +177,145 @@ export function Hbar({ label, critical, major, total, max, href }: { label: stri
   );
 }
 
+// ── Cost charts ──────────────────────────────────────────────────────
+
+/** Stable categorical palette for model/series coloring. */
+export const SERIES_COLORS = [
+  "#5a8dff",
+  "#9a6bff",
+  "#4ade80",
+  "#fbbf24",
+  "#fb923c",
+  "#fb6d82",
+  "#22d3ee",
+  "#f472b6",
+  "#a3e635",
+  "#94a3b8",
+] as const;
+
+/** Assign a stable color to each key, in the order given. */
+export function assignColors(keys: string[]): Map<string, string> {
+  const m = new Map<string, string>();
+  keys.forEach((k, i) => m.set(k, SERIES_COLORS[i % SERIES_COLORS.length]));
+  return m;
+}
+
+export interface StackedDay {
+  day: string; // YYYY-MM-DD
+  /** Per-series value for this day, keyed by series name. */
+  parts: Record<string, number>;
+}
+
+/**
+ * Generic stacked daily bar (e.g. spend per day, segmented by model). Colors
+ * come from `colors`; series stack in `order`. Reuses the .chart-bar primitives
+ * with inline segment colors since the series set is dynamic.
+ */
+export function StackedBar({
+  days,
+  order,
+  colors,
+  formatValue,
+}: {
+  days: StackedDay[];
+  order: string[];
+  colors: Map<string, string>;
+  formatValue: (n: number) => string;
+}) {
+  const totals = days.map((d) => order.reduce((s, k) => s + (d.parts[k] ?? 0), 0));
+  const max = Math.max(1e-9, ...totals);
+  const grandTotal = totals.reduce((s, n) => s + n, 0);
+  const midIdx = Math.floor(days.length / 2);
+  if (grandTotal <= 0) {
+    return <EmptyState title="No spend in this window" hint="Run a review to start recording cost events." />;
+  }
+  return (
+    <>
+      <div className="chart-bar">
+        {days.map((d, i) => {
+          const total = totals[i];
+          if (total <= 0) {
+            return (
+              <div className="col" key={i} title={`${d.day} · no spend`}>
+                <div className="empty-dot" />
+              </div>
+            );
+          }
+          const title = `${d.day} · ${formatValue(total)}`;
+          return (
+            <div className="col" key={i} title={title}>
+              {order.map((k) => {
+                const v = d.parts[k] ?? 0;
+                if (v <= 0) return null;
+                const h = (v / max) * 100;
+                return (
+                  <div
+                    key={k}
+                    className="seg"
+                    style={{ height: `${h.toFixed(1)}%`, background: colors.get(k) ?? "#5a8dff" }}
+                  />
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+      <div className="chart-xaxis">
+        {days.map((d, i) => {
+          const show = i === 0 || i === midIdx || i === days.length - 1;
+          return <span key={i}>{show ? d.day.slice(5) : ""}</span>;
+        })}
+      </div>
+      <div className="chart-legend">
+        {order.map((k) => (
+          <span className="it" key={k}>
+            <span className="sw" style={{ background: colors.get(k) ?? "#5a8dff" }} />
+            {k}
+          </span>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/** A single budget gauge: spent vs. monthly ceiling, color by utilization. */
+export function BudgetGauge({
+  label,
+  spentUsd,
+  monthlyUsd,
+  pct,
+  exceeded,
+  formatValue,
+}: {
+  label: string;
+  spentUsd: number;
+  monthlyUsd: number;
+  pct: number;
+  exceeded: boolean;
+  formatValue: (n: number) => string;
+}) {
+  const tone = exceeded ? "crit" : pct >= 80 ? "warn" : "good";
+  const fillPct = Math.min(100, Math.max(0, pct));
+  return (
+    <div className="gauge">
+      <div className="gauge-head">
+        <span className="gauge-label" title={label}>
+          {label}
+        </span>
+        <span className={`gauge-pct ${tone}`}>{pct}%</span>
+      </div>
+      <div className="gauge-track">
+        <div className={`gauge-fill ${tone}`} style={{ width: `${fillPct.toFixed(1)}%` }} />
+      </div>
+      <div className="gauge-foot">
+        <span className="mono">{formatValue(spentUsd)}</span>
+        <span className="muted"> / {formatValue(monthlyUsd)} mo</span>
+        {exceeded ? <span className="gauge-flag">over budget</span> : null}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Compact SVG line sparkline for a single numeric series — used for per-author
  * activity trends and hot-path-over-time rows. Renders a flat baseline when the
