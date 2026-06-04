@@ -73,6 +73,7 @@ async function main() {
   let fileSha = "sha-0";
   let transientFail = false;
   let failCreateRefOnce = false;
+  let failPullsCreateOnce = false;
   const octokit = {
     repos: {
       get: (args: unknown) => {
@@ -121,10 +122,20 @@ async function main() {
         }
         return Promise.resolve({ data: {} });
       },
+      deleteRef: (args: unknown) => {
+        calls.push({ method: "git.deleteRef", args: [args] });
+        return Promise.resolve({ data: {} });
+      },
     },
     pulls: {
       create: (args: unknown) => {
         calls.push({ method: "pulls.create", args: [args] });
+        if (failPullsCreateOnce) {
+          // Simulate a failure after the branch was created; commitViaPr should
+          // best-effort delete the orphaned branch and rethrow.
+          failPullsCreateOnce = false;
+          return Promise.reject(Object.assign(new Error("validation failed"), { status: 422 }));
+        }
         return Promise.resolve({ data: { number: 99, html_url: "https://github.com/acme/web/pull/99" } });
       },
     },
@@ -310,6 +321,13 @@ async function main() {
     const refsAfter = calls.filter((c) => c.method === "git.createRef").length;
     ok("pr branch 422 → retried + succeeds", prRetry.status === 200 && prRetry.json.data.mode === "pr" && refsAfter - refsBefore === 2);
 
+    // ── A failure after branch creation cleans up the orphaned branch ──
+    failPullsCreateOnce = true;
+    const delBefore = calls.filter((c) => c.method === "git.deleteRef").length;
+    const prFail = await req("PUT", CFG, { session: adminSess, csrf: true, body: { yaml: "chat:\n  auto_reply: false\n", mode: "pr" } });
+    const delAfter = calls.filter((c) => c.method === "git.deleteRef").length;
+    ok("pr failure after createRef → 500 + branch deleted", prFail.status === 500 && delAfter - delBefore === 1);
+
     // ── Transient GitHub errors are NOT cached as "no config" ──────────
     // First GET hits a one-shot 500 → null (uncached); the next GET recovers.
     transientFail = true;
@@ -329,7 +347,9 @@ async function main() {
     console.log("\nall config smoke checks passed ✓");
   } finally {
     sse.destroy();
-    server.close();
+    // Wait for the HTTP server to fully stop before closing the DB so no
+    // in-flight handler touches a closed database.
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     closeDatabase();
     try {
       fs.unlinkSync(tmpDb);

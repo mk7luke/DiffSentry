@@ -192,25 +192,36 @@ async function commitViaPr(
       throw err;
     }
   }
-  const sha = await currentFileSha(octokit, owner, repo, branch);
-  await octokit.repos.createOrUpdateFileContents({
-    owner,
-    repo,
-    path: PATH,
-    message,
-    content: Buffer.from(content).toString("base64"),
-    branch,
-    ...(sha ? { sha } : {}),
-  });
-  const pr = await octokit.pulls.create({
-    owner,
-    repo,
-    base: defaultBranch,
-    head: branch,
-    title: message.split("\n")[0] || "Update .diffsentry.yaml",
-    body: "Update `.diffsentry.yaml` from the DiffSentry command center.",
-  });
-  return { mode: "pr", branch, prNumber: pr.data.number, prUrl: pr.data.html_url };
+  // The branch now exists; if any later step fails, best-effort delete it so we
+  // don't leave an orphaned branch behind, then rethrow the original error.
+  try {
+    const sha = await currentFileSha(octokit, owner, repo, branch);
+    await octokit.repos.createOrUpdateFileContents({
+      owner,
+      repo,
+      path: PATH,
+      message,
+      content: Buffer.from(content).toString("base64"),
+      branch,
+      ...(sha ? { sha } : {}),
+    });
+    const pr = await octokit.pulls.create({
+      owner,
+      repo,
+      base: defaultBranch,
+      head: branch,
+      title: message.split("\n")[0] || "Update .diffsentry.yaml",
+      body: "Update `.diffsentry.yaml` from the DiffSentry command center.",
+    });
+    return { mode: "pr", branch, prNumber: pr.data.number, prUrl: pr.data.html_url };
+  } catch (err) {
+    try {
+      await octokit.git.deleteRef({ owner, repo, ref: `heads/${branch}` });
+    } catch (cleanupErr) {
+      logger.warn({ err: cleanupErr, owner, repo, branch }, "api: failed to clean up config PR branch after error");
+    }
+    throw err;
+  }
 }
 
 function branchName(): string {
