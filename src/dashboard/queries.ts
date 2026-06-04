@@ -878,6 +878,293 @@ export function getRoleOverrides(): RoleOverrideRow[] {
   }
 }
 
+// ─── Analytics: authors & org-wide trends ──────────────────────────
+//
+// "Author" here is the PR author (prs.author). Every review is attributed to
+// its PR's author via a LEFT JOIN, falling back to the '(unknown)' bucket when
+// the PR row is absent — so author aggregates sum back to the org-wide totals
+// (the per-repo numbers from getDailyActivity / getRepoOverview use the same
+// reviews⋈findings grain). All windows are "reviews created within N days".
+
+const UNKNOWN_AUTHOR = "(unknown)";
+
+function daysCutoff(days: number): string {
+  const d = Math.min(Math.max(Math.floor(days), 1), 365);
+  return new Date(Date.now() - d * 24 * 60 * 60 * 1000).toISOString();
+}
+
+export interface AuthorStatRow {
+  author: string;
+  prs_reviewed: number;
+  reviews: number;
+  avg_risk: number | null;
+  findings: number;
+  critical: number;
+  major: number;
+  minor: number;
+  nit: number;
+  /** Findings with an explicit accept/dismiss verdict (accepted IS NOT NULL). */
+  triaged: number;
+  /** Triaged findings the team kept (accepted = 1). */
+  accepted: number;
+}
+
+/**
+ * Per-author leaderboard for the last `days` days. `avg_risk` is the mean of
+ * each PR's latest review risk_score (so iterating on one PR doesn't inflate
+ * it); finding counts span every review iteration (matching the org totals).
+ * Authors with no findings still appear (LEFT JOIN), with zeroed counts.
+ */
+export function getAuthorLeaderboard(days = 30): AuthorStatRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  const cutoff = daysCutoff(days);
+  return db
+    .prepare(
+      `WITH scoped AS (
+         SELECT rv.id, rv.owner, rv.repo, rv.number, rv.risk_score, rv.created_at,
+                COALESCE(p.author, '${UNKNOWN_AUTHOR}') AS author
+         FROM reviews rv
+         LEFT JOIN prs p ON p.owner = rv.owner AND p.repo = rv.repo AND p.number = rv.number
+         WHERE rv.created_at >= ?
+       ),
+       latest AS (
+         SELECT s.author, s.risk_score
+         FROM scoped s
+         WHERE s.id = (
+           SELECT s2.id FROM scoped s2
+           WHERE s2.owner = s.owner AND s2.repo = s.repo AND s2.number = s.number
+           ORDER BY s2.created_at DESC, s2.id DESC LIMIT 1
+         )
+       ),
+       pr_stats AS (
+         SELECT author, COUNT(*) AS prs_reviewed, AVG(risk_score) AS avg_risk
+         FROM latest GROUP BY author
+       ),
+       finding_stats AS (
+         SELECT s.author,
+                COUNT(DISTINCT s.id) AS reviews,
+                COUNT(f.id) AS findings,
+                SUM(CASE WHEN f.severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+                SUM(CASE WHEN f.severity = 'major'    THEN 1 ELSE 0 END) AS major,
+                SUM(CASE WHEN f.severity = 'minor'    THEN 1 ELSE 0 END) AS minor,
+                SUM(CASE WHEN f.severity = 'nit'      THEN 1 ELSE 0 END) AS nit,
+                SUM(CASE WHEN f.accepted IS NOT NULL THEN 1 ELSE 0 END) AS triaged,
+                SUM(CASE WHEN f.accepted = 1 THEN 1 ELSE 0 END) AS accepted
+         FROM scoped s
+         LEFT JOIN findings f ON f.review_id = s.id
+         GROUP BY s.author
+       )
+       SELECT ps.author, ps.prs_reviewed, ps.avg_risk,
+              fs.reviews, fs.findings, fs.critical, fs.major, fs.minor, fs.nit,
+              fs.triaged, fs.accepted
+       FROM pr_stats ps
+       JOIN finding_stats fs ON fs.author = ps.author
+       ORDER BY ps.prs_reviewed DESC, fs.findings DESC, ps.author ASC`,
+    )
+    .all(cutoff) as AuthorStatRow[];
+}
+
+export interface AuthorDayRow {
+  author: string;
+  day: string; // YYYY-MM-DD
+  reviews: number;
+  critical: number;
+  major: number;
+  minor: number;
+  nit: number;
+}
+
+/** Daily review+severity bins per author — drives the leaderboard sparklines. */
+export function getAuthorDailyActivity(days = 30): AuthorDayRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  const cutoff = daysCutoff(days);
+  return db
+    .prepare(
+      `SELECT COALESCE(p.author, '${UNKNOWN_AUTHOR}') AS author,
+              substr(rv.created_at, 1, 10) AS day,
+              COUNT(DISTINCT rv.id) AS reviews,
+              SUM(CASE WHEN f.severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+              SUM(CASE WHEN f.severity = 'major'    THEN 1 ELSE 0 END) AS major,
+              SUM(CASE WHEN f.severity = 'minor'    THEN 1 ELSE 0 END) AS minor,
+              SUM(CASE WHEN f.severity = 'nit'      THEN 1 ELSE 0 END) AS nit
+       FROM reviews rv
+       LEFT JOIN prs p ON p.owner = rv.owner AND p.repo = rv.repo AND p.number = rv.number
+       LEFT JOIN findings f ON f.review_id = rv.id
+       WHERE rv.created_at >= ?
+       GROUP BY author, day
+       ORDER BY author, day ASC`,
+    )
+    .all(cutoff) as AuthorDayRow[];
+}
+
+/** Hottest paths (critical+major) for one author across all repos, last `days`. */
+export function getAuthorHotPaths(author: string, days = 90): HotPathRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  const cutoff = daysCutoff(days);
+  return db
+    .prepare(
+      `SELECT f.path AS path,
+              SUM(CASE WHEN f.severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+              SUM(CASE WHEN f.severity = 'major'    THEN 1 ELSE 0 END) AS major,
+              COUNT(*) AS total
+       FROM findings f
+       JOIN reviews rv ON rv.id = f.review_id
+       LEFT JOIN prs p ON p.owner = rv.owner AND p.repo = rv.repo AND p.number = rv.number
+       WHERE COALESCE(p.author, '${UNKNOWN_AUTHOR}') = ?
+         AND rv.created_at >= ? AND f.path IS NOT NULL
+       GROUP BY f.path
+       HAVING (critical + major) > 0
+       ORDER BY critical DESC, major DESC, total DESC
+       LIMIT 10`,
+    )
+    .all(author, cutoff) as HotPathRow[];
+}
+
+export interface AuthorPRRow {
+  owner: string;
+  repo: string;
+  number: number;
+  title: string | null;
+  latest_at: string;
+  review_count: number;
+  latest_approval: string | null;
+  latest_risk_score: number | null;
+  latest_risk_level: string | null;
+  total_findings: number;
+}
+
+/** Recent PRs authored by `author` across every repo, latest activity first. */
+export function getAuthorPRs(author: string, days = 90, limit = 50): AuthorPRRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  const cutoff = daysCutoff(days);
+  return db
+    .prepare(
+      `WITH scoped AS (
+         SELECT rv.id, rv.owner, rv.repo, rv.number, rv.created_at,
+                rv.approval, rv.risk_score, rv.risk_level,
+                COALESCE(p.author, '${UNKNOWN_AUTHOR}') AS author, p.title AS title
+         FROM reviews rv
+         LEFT JOIN prs p ON p.owner = rv.owner AND p.repo = rv.repo AND p.number = rv.number
+         WHERE rv.created_at >= ?
+       )
+       SELECT s.owner, s.repo, s.number, s.title,
+              MAX(s.created_at) AS latest_at,
+              COUNT(DISTINCT s.id) AS review_count,
+              (SELECT COUNT(*) FROM findings f
+                 JOIN reviews rv2 ON rv2.id = f.review_id
+                 WHERE rv2.owner = s.owner AND rv2.repo = s.repo AND rv2.number = s.number
+                   AND rv2.created_at >= ?) AS total_findings,
+              (SELECT s2.approval FROM scoped s2
+                 WHERE s2.owner = s.owner AND s2.repo = s.repo AND s2.number = s.number
+                 ORDER BY s2.created_at DESC, s2.id DESC LIMIT 1) AS latest_approval,
+              (SELECT s2.risk_score FROM scoped s2
+                 WHERE s2.owner = s.owner AND s2.repo = s.repo AND s2.number = s.number
+                 ORDER BY s2.created_at DESC, s2.id DESC LIMIT 1) AS latest_risk_score,
+              (SELECT s2.risk_level FROM scoped s2
+                 WHERE s2.owner = s.owner AND s2.repo = s.repo AND s2.number = s.number
+                 ORDER BY s2.created_at DESC, s2.id DESC LIMIT 1) AS latest_risk_level
+       FROM scoped s
+       WHERE s.author = ?
+       GROUP BY s.owner, s.repo, s.number
+       ORDER BY latest_at DESC
+       LIMIT ?`,
+    )
+    .all(cutoff, cutoff, author, limit) as AuthorPRRow[];
+}
+
+export interface RiskBucketRow {
+  level: string; // low | moderate | elevated | high | critical | unscored
+  count: number;
+}
+
+/**
+ * Distribution of reviews by risk level over the last `days` days. Buckets are
+ * derived from risk_score using the same thresholds as the review engine
+ * (insights.ts) so the labels line up with the risk badge; rows with no score
+ * fall into 'unscored'.
+ */
+export function getRiskDistribution(days = 30): RiskBucketRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  const cutoff = daysCutoff(days);
+  return db
+    .prepare(
+      `SELECT CASE
+                WHEN risk_score IS NULL THEN 'unscored'
+                WHEN risk_score >= 75 THEN 'critical'
+                WHEN risk_score >= 55 THEN 'high'
+                WHEN risk_score >= 35 THEN 'elevated'
+                WHEN risk_score >= 15 THEN 'moderate'
+                ELSE 'low'
+              END AS level,
+              COUNT(*) AS count
+       FROM reviews
+       WHERE created_at >= ?
+       GROUP BY level`,
+    )
+    .all(cutoff) as RiskBucketRow[];
+}
+
+export interface HotPathTrendPoint {
+  path: string;
+  day: string; // YYYY-MM-DD
+  critical: number;
+  major: number;
+  total: number;
+}
+
+export interface HotPathTrends {
+  paths: HotPathRow[];
+  series: HotPathTrendPoint[];
+}
+
+/**
+ * Org-wide hottest paths over time: the top `limit` paths by critical+major
+ * findings in the window, plus daily finding bins for each so the UI can trace
+ * how a hot path heats up or cools down. Returns `{ paths, series }`.
+ */
+export function getHotPathTrends(days = 30, limit = 8): HotPathTrends {
+  const db = openDatabase();
+  if (!db) return { paths: [], series: [] };
+  const cutoff = daysCutoff(days);
+  const paths = db
+    .prepare(
+      `SELECT f.path AS path,
+              SUM(CASE WHEN f.severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+              SUM(CASE WHEN f.severity = 'major'    THEN 1 ELSE 0 END) AS major,
+              COUNT(*) AS total
+       FROM findings f
+       JOIN reviews rv ON rv.id = f.review_id
+       WHERE rv.created_at >= ? AND f.path IS NOT NULL AND f.path <> ''
+       GROUP BY f.path
+       HAVING (critical + major) > 0
+       ORDER BY critical DESC, major DESC, total DESC
+       LIMIT ?`,
+    )
+    .all(cutoff, limit) as HotPathRow[];
+  if (paths.length === 0) return { paths: [], series: [] };
+  const placeholders = paths.map(() => "?").join(", ");
+  const series = db
+    .prepare(
+      `SELECT f.path AS path,
+              substr(rv.created_at, 1, 10) AS day,
+              SUM(CASE WHEN f.severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+              SUM(CASE WHEN f.severity = 'major'    THEN 1 ELSE 0 END) AS major,
+              COUNT(*) AS total
+       FROM findings f
+       JOIN reviews rv ON rv.id = f.review_id
+       WHERE rv.created_at >= ? AND f.path IN (${placeholders})
+       GROUP BY f.path, day
+       ORDER BY f.path, day ASC`,
+    )
+    .all(cutoff, ...paths.map((p) => p.path)) as HotPathTrendPoint[];
+  return { paths, series };
+}
+
 // ─── Impact report ──────────────────────────────────────────────────
 // The marketing/leadership surface: "what DiffSentry has done for you" over a
 // time range. Every metric is derived from the raw reviews/findings/prs tables

@@ -706,6 +706,12 @@ untouched.
   scope, regex, optional path glob, message/advice). A live tester runs the
   pattern against a pasted snippet and highlights matches without persisting,
   and the active-rules table joins each rule to its pattern-hit counts.
+- `/leaderboard` — per-author review activity over a 7/30/90-day window
+  (PRs reviewed, avg risk, findings/PR by severity, acceptance rate, trend
+  sparkline), sortable, with a click-through author drill-down (severity mix,
+  hot paths, recent PRs). Framed as where review effort lands, not a scoreboard.
+- `/trends` — org-wide activity over time, risk-level distribution, and
+  hot-paths-over-time (top paths by critical+major with a per-path trend line).
 - `/learnings` — manage the `@bot learn` learnings the reviewer applies:
   searchable list of global + per-repo learnings, inline edit, path-glob
   badges, create, bulk delete, dedupe suggestions, "promote to global", and a
@@ -740,7 +746,9 @@ in the sidebar) to open a keyboard-first palette that combines three things:
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/queue`, `/repos`,
 `/repos/:owner/:repo`, `/repos/:owner/:repo/prs/:number`, `/findings`,
-`/patterns`, `/rules` (admin), `/search?q=`, `/audit` (admin), `/webhooks` +
+`/patterns`, `/rules` (admin), `/search?q=`, the analytics trio
+`/analytics/authors`, `/analytics/authors/:author`, `/analytics/trends` (all
+accept `?days=`, default 30, clamped 1–365), `/audit` (admin), and `/webhooks` +
 `/webhooks/:id` (admin). `GET /queue` returns the live review-pipeline snapshot
 from an in-process registry (works regardless of persistence). Write endpoints:
 `POST /roles` (admin) sets/clears a role override; `POST/PUT/DELETE /rules`
