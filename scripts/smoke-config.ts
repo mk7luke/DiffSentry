@@ -128,12 +128,15 @@ async function main() {
             return Promise.reject(Object.assign(new Error("rate limited"), { status: 500 }));
           }
           if (fileContent === null) return Promise.reject(Object.assign(new Error("not found"), { status: 404 }));
+          // Return a deterministic, ref-specific sha so a test can assert the sha
+          // read for a branch is the same one written back to that branch.
+          const ref = (args as { ref?: string }).ref;
           return Promise.resolve({
             data: {
               type: "file",
               encoding: "base64",
               content: Buffer.from(fileContent).toString("base64"),
-              sha: fileSha,
+              sha: ref ? `sha-${ref}` : fileSha,
             },
           });
         },
@@ -414,13 +417,20 @@ async function main() {
     const prRef = await req("PUT", CFG, { session: adminSess, csrf: true, body: { yaml: "issues:\n  auto_summary:\n    enabled: false\n", mode: "pr" } });
     const refCalls = calls.slice(refBase);
     const writeCall = refCalls.find((c) => c.method === "repos.createOrUpdateFileContents");
-    const writeBranch = (writeCall?.args[0] as { branch?: string } | undefined)?.branch;
-    const readAtWriteBranch = refCalls.some(
+    const writeArgs = writeCall?.args[0] as { branch?: string; sha?: string } | undefined;
+    const writeBranch = writeArgs?.branch;
+    const readCall = refCalls.find(
       (c) => c.method === "repos.getContent" && (c.args[0] as { ref?: string } | undefined)?.ref === writeBranch,
     );
     ok(
       "pr-mode reads existing config at the write branch (slash-safe ref)",
-      prRef.status === 200 && typeof writeBranch === "string" && writeBranch.includes("/") && readAtWriteBranch,
+      prRef.status === 200 &&
+        typeof writeBranch === "string" &&
+        writeBranch.includes("/") &&
+        !!readCall &&
+        // The sha written must be the one read for that same branch (`sha-<ref>`),
+        // proving currentFileSha's result actually flows into the write.
+        writeArgs?.sha === `sha-${writeBranch}`,
     );
 
     // ── Transient GitHub errors are NOT cached as "no config" ──────────
