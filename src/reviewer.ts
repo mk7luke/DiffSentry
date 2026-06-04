@@ -30,6 +30,7 @@ import { detectDescriptionDrift, renderDriftBlock, reviewCommitMessages, renderC
 import { createHash } from "node:crypto";
 import { logger } from "./logger.js";
 import { bus } from "./realtime/bus.js";
+import { reviewQueue, type ReviewHandle } from "./realtime/queue.js";
 
 function normalizePatchForHash(patch: string): string {
   // Strip metadata lines + leading +/- markers, collapse all whitespace,
@@ -140,7 +141,9 @@ function resumeNotice(): string {
 // In-memory state per PR
 const pausedPRs = new Set<string>();
 const reviewCountByPR = new Map<string, number>();
-const activeReviews = new Map<string, AbortController>();
+// In-flight reviews + their lifecycle live in the shared reviewQueue registry
+// (src/realtime/queue.ts), which owns the AbortControllers that used to sit in
+// a bare `activeReviews` map here and additionally powers the /queue board.
 
 // In-memory state per issue. Separate keyspace from PRs because GitHub uses
 // the same number sequence for both — we don't want pausing PR #42 to also
@@ -215,12 +218,8 @@ export class Reviewer {
   // ─── Abort on PR Close ───────────────────────────────────────
   handlePRClose(owner: string, repo: string, pullNumber: number): void {
     const key = prKey(owner, repo, pullNumber);
-    const controller = activeReviews.get(key);
-    if (controller) {
-      logger.info({ owner, repo, pr: pullNumber }, "Aborting in-flight review (PR closed)");
-      controller.abort();
-      activeReviews.delete(key);
-    }
+    // Aborts the in-flight review (if any) and marks the queue card canceled.
+    reviewQueue.cancel(owner, repo, pullNumber);
     // Clean up state
     pausedPRs.delete(key);
     reviewCountByPR.delete(key);
@@ -269,6 +268,25 @@ export class Reviewer {
     return this.handlePullRequest(installationId, owner, repo, pullNumber, mode);
   }
 
+  /**
+   * Run a chat command from the dashboard by synthesizing an "@bot <cmd>"
+   * comment and routing it through the normal command handler — the same path
+   * the webhook and the finishing-touches checkboxes use. The reply lands as a
+   * top-level PR comment (the "issue" kind ignores commentId, so the synthetic
+   * `0` is harmless). `command` is the raw phrase, e.g. "summary" or
+   * "generate tests"; parseCommand maps it to the concrete action.
+   */
+  async runCommand(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    command: string,
+  ): Promise<void> {
+    const synthetic = `@${this.config.botName} ${command}`;
+    await this.handleComment(installationId, owner, repo, pullNumber, synthetic, 0, "issue");
+  }
+
   // ─── Main PR Review Handler ──────────────────────────────────
   async handlePullRequest(
     installationId: number,
@@ -286,9 +304,12 @@ export class Reviewer {
       return;
     }
 
-    // Set up abort controller
-    const abortController = new AbortController();
-    activeReviews.set(key, abortController);
+    // Register in the queue board as "queued" and take its abort handle. The
+    // handle owns the AbortController (cancellation) and drives the live board
+    // through queued → running → done | failed | canceled. It is pinned to this
+    // attempt, so a superseding review for the same PR can't finalize our card.
+    const review: ReviewHandle = reviewQueue.enqueue(owner, repo, pullNumber, mode);
+    const signal = review.signal;
 
     // Lifecycle on the bus (command-center realtime). Emitted once we commit to
     // running — after the pause/abort-state checks above — and balanced by a
@@ -339,6 +360,10 @@ export class Reviewer {
         }
       }
 
+      // All skip-gates passed — we're committed to reviewing. Flip the board
+      // card from queued → running so its live elapsed timer starts ticking.
+      review.start("preparing");
+
       // Post initial "in review" status comment
       const statusBody = STATUS_MARKER + "\n" +
         `> :eyes: **DiffSentry** is reviewing this ${mode === "full" ? "pull request" : "update"}... hang tight.`;
@@ -360,7 +385,7 @@ export class Reviewer {
         ).catch((err) => log.warn({ err }, "Failed to set pending commit status"));
       }
 
-      if (abortController.signal.aborted) return;
+      if (signal.aborted) return;
 
       // Note: push-driven auto-resolve now runs from server.ts on synchronize
       // *before* this gated path, so paused/draft/ignored PRs still resolve
@@ -446,7 +471,8 @@ export class Reviewer {
         ? await fetchLinkedIssues(octokit, owner, repo, issueNumbers)
         : [];
 
-      if (abortController.signal.aborted) return;
+      if (signal.aborted) return;
+      review.phase("reviewing");
 
       // Build enhanced prompt context by injecting knowledge into the AI prompt
       // (Guidelines and issues are injected via the prompt builder's learnings param)
@@ -497,7 +523,7 @@ export class Reviewer {
           : Promise.resolve(null),
       ]);
 
-      if (abortController.signal.aborted) return;
+      if (signal.aborted) return;
 
       // Find related PRs for walkthrough
       let relatedPRsSection = "";
@@ -972,6 +998,7 @@ export class Reviewer {
         { commentCount: reviewResult.comments.length, approval: reviewResult.approval },
         "Review complete, submitting to GitHub"
       );
+      review.phase("posting review");
       await this.github.submitReview(installationId, context, reviewResult);
 
       // Upsert the sticky pinned status comment (separate from the
@@ -1057,7 +1084,7 @@ export class Reviewer {
       reviewCountByPR.set(key, currentCount + 1);
 
     } catch (err) {
-      if (abortController.signal.aborted) {
+      if (signal.aborted) {
         log.info("Review aborted (PR closed)");
         return;
       }
@@ -1066,7 +1093,15 @@ export class Reviewer {
       log.error({ err }, "Review failed");
       throw err;
     } finally {
-      activeReviews.delete(key);
+      // Resolve the queue card. cancel() may already have finalized it as
+      // canceled out-of-band — these calls are no-ops once the card is terminal.
+      if (reviewOutcome === "failed") {
+        review.fail(reviewError ?? "Review failed");
+      } else if (signal.aborted) {
+        review.canceled();
+      } else {
+        review.complete();
+      }
       // Always emit a terminal event so subscribers can clear "in progress"
       // state, whether the run completed, was skipped early, was aborted, or
       // failed. An aborted run is reported as finished (it terminated cleanly).

@@ -51,6 +51,48 @@ export interface RuleChangedPayload {
   role: string | null;
 }
 
+/** The state machine behind the review-pipeline board. */
+export type ReviewQueueState = "queued" | "running" | "done" | "failed" | "canceled";
+
+/**
+ * A single review's lifecycle as tracked by the in-memory queue registry
+ * (src/realtime/queue.ts). Published verbatim as `queue.updated` and returned
+ * by GET /api/v1/queue. Fully JSON-serializable — the AbortController that
+ * actually drives cancellation is held out-of-band by the registry.
+ */
+export interface ReviewQueueEntry {
+  /** `${owner}/${repo}#${number}` — stable per PR across attempts. */
+  key: string;
+  owner: string;
+  repo: string;
+  number: number;
+  mode: "full" | "incremental";
+  state: ReviewQueueState;
+  /** Free-text phase shown on the running card (e.g. "reviewing"). */
+  phase: string | null;
+  /** ISO time the review entered the queue. */
+  enqueuedAt: string;
+  /** ISO time it transitioned to running (null while still queued). */
+  startedAt: string | null;
+  /** ISO time it reached a terminal state (null while active). */
+  finishedAt: string | null;
+  /** Error message for the failed lane (never a stack trace). */
+  error: string | null;
+  /** Monotonic per-PR attempt counter — bumped on each (re-)enqueue. */
+  attempt: number;
+}
+
+/** An admin replayed a stored webhook delivery — emitted from the API. */
+export interface WebhookReplayPayload {
+  /** rowid of the original delivery that was replayed. */
+  id: number;
+  /** rowid of the new delivery row recorded for the replay (null if DB off). */
+  newDeliveryId: number | null;
+  event: string;
+  action: string | null;
+  actor: string | null;
+}
+
 /** Topic → payload map. Add new topics here so publish/subscribe stay typed. */
 export interface BusEventMap {
   "review.started": ReviewLifecyclePayload;
@@ -58,6 +100,8 @@ export interface BusEventMap {
   "review.failed": ReviewLifecyclePayload;
   "action.performed": ActionPayload;
   "rule.changed": RuleChangedPayload;
+  "queue.updated": ReviewQueueEntry;
+  "webhook.replayed": WebhookReplayPayload;
 }
 
 export type BusTopic = keyof BusEventMap;
@@ -128,5 +172,9 @@ class EventBus {
   }
 }
 
-/** Process-wide singleton. Import this everywhere — do not construct your own. */
-export const bus = new EventBus();
+/** Process-wide singleton. Import this everywhere — do not construct your own.
+ * Pinned to globalThis so the instance survives any module-duplication a
+ * bundler/loader might introduce (a no-op in the normal single-graph runtime);
+ * this keeps publishers and the SSE subscriber on the same bus. */
+const busGlobal = globalThis as unknown as { __diffsentryBus?: EventBus };
+export const bus: EventBus = busGlobal.__diffsentryBus ?? (busGlobal.__diffsentryBus = new EventBus());

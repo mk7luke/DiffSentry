@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode } from "react";
+import type { ReviewQueueEntry } from "../api/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // useEventStream — a single shared EventSource over /api/v1/stream.
@@ -25,7 +26,9 @@ export type StreamTopic =
   | "review.finished"
   | "review.failed"
   | "action.performed"
-  | "rule.changed";
+  | "rule.changed"
+  | "queue.updated"
+  | "webhook.replayed";
 
 export interface ReviewLifecyclePayload {
   owner: string;
@@ -55,6 +58,18 @@ export interface RuleChangedPayload {
   role: string | null;
 }
 
+/** Payload of a `queue.updated` event — the canonical board entry shape, kept
+ * in one place to avoid drift. */
+export type QueueUpdatedPayload = ReviewQueueEntry;
+
+export interface WebhookReplayPayload {
+  id: number;
+  newDeliveryId: number | null;
+  event: string;
+  action: string | null;
+  actor: string | null;
+}
+
 /** Every topic the server emits — the SSE `event:` names we listen for. */
 const TOPICS: StreamTopic[] = [
   "review.started",
@@ -62,6 +77,8 @@ const TOPICS: StreamTopic[] = [
   "review.failed",
   "action.performed",
   "rule.changed",
+  "queue.updated",
+  "webhook.replayed",
 ];
 
 type Listener = (env: StreamEnvelope) => void;
