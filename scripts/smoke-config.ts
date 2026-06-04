@@ -178,12 +178,17 @@ async function main() {
         getInstallationOctokit: () => Promise.resolve(octokit as any),
       }),
     );
-    server = app.listen(0);
-    server.on("connection", (socket) => {
+    const s = http.createServer(app);
+    server = s;
+    // Attach the connection tracker before listening so no socket can slip past
+    // it, then wait for the "listening" event before reading the bound address
+    // (address() is only reliable after listening).
+    s.on("connection", (socket) => {
       sockets.add(socket);
       socket.on("close", () => sockets.delete(socket));
     });
-    const port = (server.address() as { port: number }).port;
+    await new Promise<void>((resolve) => s.listen(0, () => resolve()));
+    const port = (s.address() as { port: number }).port;
 
     interface Resp {
       status: number;
