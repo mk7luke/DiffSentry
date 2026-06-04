@@ -949,14 +949,14 @@ export function getAuthorHotPaths(author: string, days = 90): HotPathRow[] {
        FROM findings f
        JOIN reviews rv ON rv.id = f.review_id
        LEFT JOIN prs p ON p.owner = rv.owner AND p.repo = rv.repo AND p.number = rv.number
-       WHERE COALESCE(p.author, ?) = ?
+       WHERE COALESCE(p.author, '${UNKNOWN_AUTHOR}') = ?
          AND rv.created_at >= ? AND f.path IS NOT NULL
        GROUP BY f.path
        HAVING (critical + major) > 0
        ORDER BY critical DESC, major DESC, total DESC
        LIMIT 10`,
     )
-    .all(UNKNOWN_AUTHOR, author, cutoff) as HotPathRow[];
+    .all(author, cutoff) as HotPathRow[];
 }
 
 export interface AuthorPRRow {

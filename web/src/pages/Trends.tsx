@@ -5,7 +5,7 @@ import { Card, Metric, PageHeader } from "../components/primitives";
 import { Donut, LineSpark, StackedSeverityBar, type DonutSlice } from "../components/charts";
 import { EmptyState, QueryBoundary } from "../components/states";
 import { buildDaySeries, type DayBin } from "../lib/format";
-import { DaysPicker } from "./Leaderboard";
+import { DaysPicker, normalizeDays } from "./Leaderboard";
 import type { DailyActivityRow, HotPathTrendPoint, RiskBucketRow } from "../api/types";
 
 // Risk levels in severity order, with the colors used by the risk badge.
@@ -49,7 +49,7 @@ function pathSeries(series: HotPathTrendPoint[], path: string, days: number): nu
 
 export function TrendsPage() {
   const [params, setParams] = useSearchParams();
-  const days = Number.parseInt(params.get("days") ?? "30", 10) || 30;
+  const days = normalizeDays(params.get("days"));
   const query = useTrends(days);
   const setDays = (d: number) => {
     const next = new URLSearchParams(params);

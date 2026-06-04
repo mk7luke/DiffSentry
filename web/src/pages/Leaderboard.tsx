@@ -10,6 +10,14 @@ import { buildDaySeries, relativeTime, type DayBin } from "../lib/format";
 import type { AuthorDayRow, AuthorStatRow } from "../api/types";
 
 const DAYS_OPTIONS = [7, 30, 90] as const;
+export type DaysOption = (typeof DAYS_OPTIONS)[number];
+
+/** Constrain a raw `?days=` URL value to one of the offered windows (default 30),
+ * so the picker always has an active state and labels never show an off-menu value. */
+export function normalizeDays(raw: string | null): DaysOption {
+  const n = Number.parseInt(raw ?? "", 10);
+  return (DAYS_OPTIONS as readonly number[]).includes(n) ? (n as DaysOption) : 30;
+}
 
 /** Window picker shared by the analytics pages — preserves other URL params. */
 export function DaysPicker({
@@ -68,7 +76,7 @@ function compare(a: Derived, b: Derived, key: SortKey): number {
 
 export function LeaderboardPage() {
   const [params, setParams] = useSearchParams();
-  const days = Number.parseInt(params.get("days") ?? "30", 10) || 30;
+  const days = normalizeDays(params.get("days"));
   const selected = params.get("author");
   const query = useAuthorAnalytics(days);
 

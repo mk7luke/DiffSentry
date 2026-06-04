@@ -222,6 +222,16 @@ async function main() {
         aliceDetail.json.data.prs.some((p: any) => p.number === 42),
     );
 
+    // '(unknown)' bucket: other-repo#7 has a review + critical finding but no
+    // prs row, so it attributes to '(unknown)'. Its hot paths must still resolve
+    // (guards the COALESCE author filter in getAuthorHotPaths).
+    const unknownDetail = await get("/api/v1/analytics/authors/" + encodeURIComponent("(unknown)"));
+    ok(
+      "analytics '(unknown)' drill-down → hot paths for PR-less reviews",
+      unknownDetail.status === 200 &&
+        unknownDetail.json.data.hotPaths.some((p: any) => p.path === "src/auth.ts"),
+    );
+
     const noAuthor = await get("/api/v1/analytics/authors/nobody");
     ok("analytics unknown author → 404 JSON", noAuthor.status === 404 && noAuthor.json.error.code === "not_found");
 
