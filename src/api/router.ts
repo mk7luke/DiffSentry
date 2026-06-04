@@ -15,7 +15,16 @@ import {
   getActor,
   type RoleConfig,
 } from "../dashboard/roles.js";
-import { insertAuditLog, setRole } from "../storage/dao.js";
+import {
+  insertAuditLog,
+  setRole,
+  triageFinding,
+  bulkTriageFindings,
+  getFindingCoords,
+  getFindingIdsByFingerprint,
+  type FindingCoords,
+} from "../storage/dao.js";
+import { bus } from "../realtime/bus.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
 import { registerCostRoutes } from "./cost.js";
@@ -58,6 +67,7 @@ import {
   listRepos,
   queryFindings,
   queryFingerprintGroups,
+  queryRecurringFindings,
   repoExists,
   searchEntities,
   type AuthorStatRow,
@@ -141,10 +151,94 @@ function parseFindingFilters(q: Record<string, unknown>): FindingFilters {
     repo: str("repo"),
     q: str("q"),
     fingerprint: str("fingerprint"),
+    triage: str("triage"),
     ageDays: num("age") ?? undefined,
     limit: num("limit") ?? 100,
     offset: num("offset") ?? 0,
   };
+}
+
+// ─── Triage helpers ──────────────────────────────────────────────────────
+type TriageState = "accepted" | "dismissed" | "snoozed";
+
+/** Triage opts for triageFinding/bulkTriageFindings derived from a state. */
+interface TriageWrite {
+  accepted?: boolean | null;
+  snoozedUntil?: string | null;
+  triagedBy?: string | null;
+  triageNote?: string | null;
+}
+
+/**
+ * Translate the public { state, until, note } payload into the DAO write shape.
+ * accept/dismiss are terminal (they clear any snooze); snooze sets the deadline
+ * and leaves the accept/dismiss decision untouched. Returns null when the
+ * payload is invalid (bad state, or snooze without a usable future date).
+ */
+function buildTriageWrite(
+  state: unknown,
+  until: unknown,
+  note: unknown,
+  actorLogin: string | null,
+): TriageWrite | null {
+  if (state !== "accepted" && state !== "dismissed" && state !== "snoozed") return null;
+  const write: TriageWrite = { triagedBy: actorLogin };
+  if (typeof note === "string" && note.trim().length > 0) write.triageNote = note.trim().slice(0, 2000);
+  if (state === "accepted") {
+    write.accepted = true;
+    write.snoozedUntil = null;
+  } else if (state === "dismissed") {
+    write.accepted = false;
+    write.snoozedUntil = null;
+  } else {
+    // snoozed — require a parseable date that is in the future.
+    if (typeof until !== "string" || until.trim().length === 0) return null;
+    const ms = Date.parse(until);
+    if (!Number.isFinite(ms)) return null;
+    if (ms <= Date.now()) return null;
+    write.snoozedUntil = new Date(ms).toISOString();
+  }
+  return write;
+}
+
+/**
+ * Audit + publish a completed triage. One audit_log row summarizes the write;
+ * an `action.performed` event is emitted per distinct PR the affected findings
+ * live on (deduped) so any open PR view refreshes live.
+ */
+function recordTriage(
+  actorLogin: string | null,
+  actorRole: string | null,
+  coords: FindingCoords[],
+  state: TriageState,
+  payload: Record<string, unknown>,
+): void {
+  const targetRef = coords.length === 1 ? String(coords[0].id) : `${coords.length} findings`;
+  insertAuditLog({
+    actorLogin,
+    actorRole,
+    action: "finding.triage",
+    targetType: "finding",
+    targetRef,
+    payload: { state, ...payload },
+    result: "ok",
+  });
+  const seen = new Set<string>();
+  for (const c of coords) {
+    const key = `${c.owner}/${c.repo}#${c.number}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    bus.publish("action.performed", {
+      owner: c.owner,
+      repo: c.repo,
+      number: c.number,
+      action: "triage",
+      actor: actorLogin,
+      role: actorRole,
+      result: "ok",
+      detail: state,
+    });
+  }
 }
 
 // Supported impact ranges. Bare numbers (e.g. "30") are also accepted and
@@ -539,6 +633,142 @@ export function createApiRouter(deps: ApiDeps): express.Router {
     } catch (err) {
       logger.error({ err }, "api /findings failed");
       sendError(res, 500, "internal", "Failed to load findings.");
+    }
+  });
+
+  // ─── /findings/recurring ───────────────────────────────────────────
+  // Fingerprints ranked by how often they reappear, with a triage rollup so
+  // the UI can dismiss a whole class at once. Read-only; any authed role.
+  router.get("/findings/recurring", (req, res) => {
+    try {
+      const filters = parseFindingFilters(req.query as Record<string, unknown>);
+      const rows = queryRecurringFindings(filters, filters.limit ?? 100);
+      sendData(res, { rows, filters });
+    } catch (err) {
+      logger.error({ err }, "api /findings/recurring failed");
+      sendError(res, 500, "internal", "Failed to load recurring findings.");
+    }
+  });
+
+  // ─── /findings/triage (bulk write, author+) ─────────────────────────
+  // Apply one triage state to many findings — by explicit id list or by
+  // fingerprint (dismiss/accept a whole recurring class). Full write contract:
+  // requireRole('author') + CSRF + audit_log + bus event per affected PR.
+  router.post("/findings/triage", requireRole("author"), csrf.verify, (req, res) => {
+    const actor = getActor(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const write = buildTriageWrite(body.state, body.until, body.note, actor?.login ?? null);
+    if (!write) {
+      sendError(res, 400, "bad_request", "Body needs state ('accepted'|'dismissed'|'snoozed') and, for snoozed, a future 'until' date.");
+      return;
+    }
+    // Resolve the target id set: an explicit id list, or every finding in a
+    // fingerprint class. An explicit list must be all positive integers — a
+    // malformed entry is rejected (400) rather than silently dropped, and the
+    // list is de-duplicated so a repeated id isn't counted twice.
+    let ids: number[];
+    // Did the caller pass an explicit id list? Explicit ids are all-or-nothing
+    // (every id must resolve); a fingerprint class is whatever currently matches.
+    let fromIds = false;
+    if (Array.isArray(body.ids)) {
+      fromIds = true;
+      // An explicitly-provided id list must be non-empty — reject `ids: []`
+      // here rather than letting it fall through to the generic
+      // "no ids/fingerprint" error, which conflates it with an unmatched class.
+      if (body.ids.length === 0) {
+        sendError(res, 400, "bad_request", "'ids' must be a non-empty array of positive integers.");
+        return;
+      }
+      const parsed = body.ids.map((v) => (typeof v === "number" ? v : Number(v)));
+      if (parsed.some((n) => !Number.isInteger(n) || n <= 0)) {
+        sendError(res, 400, "bad_request", "'ids' must contain only positive integers.");
+        return;
+      }
+      ids = [...new Set(parsed)];
+    } else if (typeof body.fingerprint === "string" && body.fingerprint.length > 0) {
+      ids = getFindingIdsByFingerprint(body.fingerprint);
+    } else {
+      sendError(res, 400, "bad_request", "Provide a non-empty 'ids' array or a 'fingerprint'.");
+      return;
+    }
+    if (ids.length === 0) {
+      sendError(res, 400, "bad_request", "Provide a non-empty 'ids' array or a 'fingerprint' that matches findings.");
+      return;
+    }
+    if (ids.length > 1000) {
+      sendError(res, 400, "bad_request", "Too many findings in one request (max 1000).");
+      return;
+    }
+    try {
+      // Resolve coordinates first so we only triage + audit findings that
+      // actually exist; a request whose ids match nothing is a 404, and we
+      // never write a misleading audit row for zero real matches.
+      const coords = getFindingCoords(ids);
+      if (coords.length === 0) {
+        sendError(res, 404, "not_found", "No findings matched the given ids or fingerprint.");
+        return;
+      }
+      // Explicit id requests are all-or-nothing: if any requested id is absent,
+      // 404 before writing rather than partially triaging the subset that
+      // exists. (Fingerprint-class triage resolves to whatever currently matches,
+      // so it has no such requirement.)
+      if (fromIds && coords.length !== ids.length) {
+        const found = new Set(coords.map((c) => c.id));
+        const missing = ids.filter((n) => !found.has(n));
+        sendError(res, 404, "not_found", `Unknown finding id(s): ${missing.join(", ")}.`);
+        return;
+      }
+      const matchedIds = coords.map((c) => c.id);
+      const changed = bulkTriageFindings({ ids: matchedIds, ...write });
+      recordTriage(actor?.login ?? null, actor?.role ?? null, coords, body.state as TriageState, {
+        until: write.snoozedUntil ?? undefined,
+        note: write.triageNote ?? undefined,
+        requested: ids.length,
+        matched: matchedIds.length,
+        changed,
+      });
+      sendData(res, { requested: ids.length, matched: matchedIds.length, changed, state: body.state });
+    } catch (err) {
+      logger.error({ err }, "api POST /findings/triage failed");
+      sendError(res, 500, "internal", "Failed to triage findings.");
+    }
+  });
+
+  // ─── /findings/:id/triage (single write, author+) ───────────────────
+  router.post("/findings/:id/triage", requireRole("author"), csrf.verify, (req: Request<{ id: string }>, res) => {
+    const actor = getActor(req);
+    const id = Number.parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) {
+      sendError(res, 400, "bad_request", "Invalid finding id.");
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const write = buildTriageWrite(body.state, body.until, body.note, actor?.login ?? null);
+    if (!write) {
+      sendError(res, 400, "bad_request", "Body needs state ('accepted'|'dismissed'|'snoozed') and, for snoozed, a future 'until' date.");
+      return;
+    }
+    try {
+      // Resolve coordinates first so the write/audit sequence matches the bulk
+      // endpoint's resolve-then-write contract: a non-existent id is a 404
+      // before any write is attempted.
+      const coords = getFindingCoords([id]);
+      if (coords.length === 0) {
+        sendError(res, 404, "not_found", `No finding with id ${id}.`);
+        return;
+      }
+      // triageFinding returns a boolean; normalize to a 0/1 count so the single
+      // and bulk endpoints share the { changed: number } response shape.
+      const changed = triageFinding({ findingId: id, ...write }) ? 1 : 0;
+      recordTriage(actor?.login ?? null, actor?.role ?? null, coords, body.state as TriageState, {
+        until: write.snoozedUntil ?? undefined,
+        note: write.triageNote ?? undefined,
+        changed,
+      });
+      sendData(res, { id, changed, state: body.state });
+    } catch (err) {
+      logger.error({ err, id }, "api POST /findings/:id/triage failed");
+      sendError(res, 500, "internal", "Failed to triage finding.");
     }
   });
 

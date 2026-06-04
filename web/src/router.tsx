@@ -7,6 +7,7 @@ import { QueuePage } from "./pages/Queue";
 import { RepoDetailPage } from "./pages/RepoDetail";
 import { PRDetailPage } from "./pages/PRDetail";
 import { FindingsPage } from "./pages/Findings";
+import { RecurringPage } from "./pages/Recurring";
 import { PatternsPage } from "./pages/Patterns";
 import { CostPage } from "./pages/Cost";
 import { RulesPage } from "./pages/Rules";
@@ -55,6 +56,7 @@ export const router = createBrowserRouter([
       { path: "/repos/:owner/:repo", element: <RepoDetailPage /> },
       { path: "/repos/:owner/:repo/pr/:number", element: <PRDetailPage /> },
       { path: "/findings", element: <FindingsPage /> },
+      { path: "/findings/recurring", element: <RecurringPage /> },
       { path: "/patterns", element: <PatternsPage /> },
       { path: "/cost", element: <CostPage /> },
       { path: "/rules", element: <RulesPage /> },

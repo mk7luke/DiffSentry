@@ -22,7 +22,7 @@ import { suggestReviewersFromBlame, renderSuggestedReviewers, combineReviewers, 
 import { loadCodeowners, ownersForFiles, renderCodeownersBlock } from "./codeowners.js";
 import { findPriorBotThreadsForPaths, renderPriorDiscussionsBlock, diffWithOtherPR, renderDiffPRReply } from "./cross-pr.js";
 import { renderStickyStatus, STICKY_MARKER } from "./sticky-status.js";
-import { recordRepo, recordPR, recordReview, recordFindings, recordPatternHits, recordIssue, recordIssueAction, listCustomRulesForRepo } from "./storage/dao.js";
+import { recordRepo, recordPR, recordReview, recordFindings, recordPatternHits, recordIssue, recordIssueAction, getSuppressedFingerprints, listCustomRulesForRepo } from "./storage/dao.js";
 import { runSafetyScanners } from "./safety-scanner.js";
 import { runPatternChecks } from "./pattern-checks.js";
 import { scanDependencyChanges, renderDepBlock } from "./dep-scanner.js";
@@ -1014,6 +1014,28 @@ export class Reviewer {
           }
           return true;
         });
+      }
+
+      // Opt-in: suppress findings whose fingerprint a human has dismissed (or
+      // currently snoozed) in the command center. Off by default — gated on
+      // DIFFSENTRY_SUPPRESS_DISMISSED so triage data never silently changes
+      // review output unless an operator explicitly turns it on. The read
+      // no-ops gracefully (empty set) when persistence is disabled.
+      if (process.env.DIFFSENTRY_SUPPRESS_DISMISSED === "1") {
+        const suppressed = getSuppressedFingerprints();
+        if (suppressed.size > 0) {
+          const before = reviewResult.comments.length;
+          reviewResult.comments = reviewResult.comments.filter((c) => {
+            const fp = c.fingerprint;
+            if (fp && suppressed.has(fp)) {
+              log.debug({ fp, path: c.path, line: c.line }, "Suppressing dismissed/snoozed finding (triage feedback)");
+              return false;
+            }
+            return true;
+          });
+          const dropped = before - reviewResult.comments.length;
+          if (dropped > 0) log.info({ dropped }, "Suppressed findings via triage feedback");
+        }
       }
 
       // If the AI didn't supply a usable summary, regenerate from the

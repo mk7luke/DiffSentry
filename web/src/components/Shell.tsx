@@ -2,7 +2,7 @@ import type { ComponentType, ReactNode, SVGProps } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
 import type { Capabilities } from "../api/types";
-import { AuditIcon, CostIcon, FindingsIcon, ImpactIcon, KeyIcon, LeaderboardIcon, LearningsIcon, LogoIcon, OverviewIcon, PatternsIcon, QueueIcon, RulesIcon, SearchIcon, SettingsIcon, TrendsIcon, WebhooksIcon } from "./icons";
+import { AuditIcon, CostIcon, FindingsIcon, ImpactIcon, KeyIcon, LeaderboardIcon, LearningsIcon, LogoIcon, OverviewIcon, PatternsIcon, QueueIcon, RecurringIcon, RulesIcon, SearchIcon, SettingsIcon, TrendsIcon, WebhooksIcon } from "./icons";
 import { CommandPalette, openCommandPalette } from "./CommandPalette";
 import { SetupWizard } from "./SetupWizard";
 
@@ -22,7 +22,8 @@ const NAV: NavItem[] = [
   { to: "/", label: "Overview", Icon: OverviewIcon, end: true },
   { to: "/impact", label: "Impact", Icon: ImpactIcon, end: false },
   { to: "/queue", label: "Queue", Icon: QueueIcon, end: false },
-  { to: "/findings", label: "Findings", Icon: FindingsIcon, end: false },
+  { to: "/findings", label: "Findings", Icon: FindingsIcon, end: true },
+  { to: "/findings/recurring", label: "Recurring", Icon: RecurringIcon, end: false },
   { to: "/patterns", label: "Patterns", Icon: PatternsIcon, end: false },
   { to: "/cost", label: "Cost", Icon: CostIcon, end: false },
   { to: "/rules", label: "Custom rules", Icon: RulesIcon, end: false, cap: "manageConfig" },

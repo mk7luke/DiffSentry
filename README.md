@@ -545,6 +545,7 @@ GitHub webhook
 | `DASHBOARD_AUTHOR_LOGINS` | No | | Comma-separated logins granted the `author` role. |
 | `DASHBOARD_SESSION_SECRET` | No | `GITHUB_WEBHOOK_SECRET` | HMAC key for the dashboard session + CSRF cookies. |
 | `DASHBOARD_SSE_HEARTBEAT_MS` | No | `25000` | Heartbeat interval (ms, min 1000) for the `/api/v1/stream` SSE feed. |
+| `DIFFSENTRY_SUPPRESS_DISMISSED` | No | | Set to `1` so new reviews drop findings whose fingerprint was dismissed or is currently snoozed via triage. Off by default — triage never changes review output unless enabled. |
 | `DASHBOARD_CONFIG_PR_BRANCH_PREFIX` | No | `diffsentry/config` | Branch-name prefix used when an admin edits `.diffsentry.yaml` from the dashboard and chooses "open a PR". |
 | `IMPACT_MINUTES_PER_FINDING` | No | `15` | Reviewer-minutes-saved-per-finding heuristic for the Impact report's time-saved estimate. The only estimated figure on that page; all other numbers are counted from the raw tables. |
 
@@ -709,7 +710,10 @@ untouched.
 - `/repos/:owner/:repo/pr/:number` — latest review snapshot, full findings
   table, all-reviews list, events timeline, link back to GitHub.
 - `/findings` — cross-repo filterable explorer (severity, source, repo,
-  free-text, age) with a "recurring fingerprints" group.
+  free-text, age, **triage state**) with inline + bulk **triage** controls
+  (accept / dismiss / snooze-with-date + note) and a recurring-fingerprints group.
+- `/findings/recurring` — fingerprints ranked by how often they reappear, with a
+  per-class triage rollup and one-click accept/dismiss of a whole class.
 - `/patterns` — every pattern-rule hit with 30d + all-time counts.
 - `/cost` — AI spend: spend-over-time stacked by model, top repositories,
   tokens-vs-dollars per model, month-to-date + projected month-end, and a budget
@@ -769,7 +773,7 @@ in the sidebar) to open a keyboard-first palette that combines three things:
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/queue`, `/repos`,
 `/repos/:owner/:repo`, `/repos/:owner/:repo/prs/:number`,
-`/repos/:owner/:repo/config`, `/findings`, `/patterns`, `/cost`
+`/repos/:owner/:repo/config`, `/findings`, `/findings/recurring`, `/patterns`, `/cost`
 (`?range=7d|30d|90d|mtd&group=repo|model|day|kind`), `/rules` (admin),
 `/search?q=`, the analytics trio `/analytics/authors`,
 `/analytics/authors/:author`, `/analytics/trends` (all accept `?days=`, default
@@ -815,9 +819,9 @@ tiny completion at the configured provider (proving the key works), and
 the verifier accepts. These reuse existing config and the review engine — **no
 new environment variables** are introduced.
 
-**Command actions** (`author`+) drive the review engine from the dashboard. Each
-is `requireRole('author')` + CSRF gated, writes an `audit_log` row, and emits an
-SSE event:
+**Command actions** (`author`+) drive the review engine and findings triage from
+the dashboard. Each is `requireRole('author')` + CSRF gated, writes an
+`audit_log` row, and emits an SSE event:
 
 | Endpoint | Effect |
 |---|---|
@@ -826,12 +830,20 @@ SSE event:
 | `POST .../prs/:number/pause` / `.../resume` | Pause / resume automatic + manual reviews. |
 | `POST .../prs/:number/cancel` | Abort any in-flight review (handlePRClose semantics). |
 | `POST .../prs/:number/command` `{ command }` | Run a chat command on the PR by synthesizing an `@bot <cmd>` through `handleComment` — returns `202`, runs in the background. `command` is allowlisted: `summary`, `tldr`, `ship`, `changelog`, `generate_tests`, `generate_docstrings`. |
+| `POST /findings/:id/triage` `{ state, until?, note? }` | Triage one finding — `state` is `accepted`\|`dismissed`\|`snoozed` (snooze needs a future `until`). |
+| `POST /findings/triage` `{ ids[]\|fingerprint, state, until?, note? }` | Bulk-triage many findings, or a whole fingerprint class at once. |
 
 The PR-detail and repo-detail screens render an **action bar** wiring up these
 endpoints — re-review (full/incremental), resolve/pause/resume/cancel, and the
 chat commands as buttons. The repo screen's bar targets the most recent PR. The
 whole write surface is hidden for viewers; each button shows a spinner +
 optimistic toast and reports the audit-logged result.
+
+**Triage feedback into reviews** is opt-in. Triage state always persists and is
+visible in the UI + audit log, but reviews ignore it by default. Set
+`DIFFSENTRY_SUPPRESS_DISMISSED=1` to have new reviews drop any finding whose
+fingerprint is dismissed or currently snoozed — so the engine never changes its
+output from triage data unless an operator explicitly enables it.
 
 **Custom rules** (`admin`) extend the pattern engine from the UI. `POST /rules`,
 `PUT /rules/:id`, and `DELETE /rules/:id` manage admin-authored anti-patterns

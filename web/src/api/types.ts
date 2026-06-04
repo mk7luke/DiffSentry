@@ -4,6 +4,18 @@
 
 export type Severity = "critical" | "major" | "minor" | "nit";
 
+/** The three triage decisions a user can apply to a finding. */
+export type TriageState = "accepted" | "dismissed" | "snoozed";
+
+/** Triage columns shared by explorer + PR finding rows (mirror queries.ts). */
+export interface TriageColumns {
+  accepted: number | null; // 1 = accepted, 0 = dismissed, null = undecided
+  snoozed_until: string | null;
+  triaged_by: string | null;
+  triaged_at: string | null;
+  triage_note: string | null;
+}
+
 // ─── Rows (mirror src/dashboard/queries.ts) ─────────────────────────
 
 export interface RepoOverviewRow {
@@ -117,7 +129,7 @@ export interface PRReviewRow {
   finding_count: number;
 }
 
-export interface PRFindingRow {
+export interface PRFindingRow extends TriageColumns {
   id: number;
   path: string | null;
   line: number | null;
@@ -140,7 +152,7 @@ export interface EventRow {
   payload_json: string | null;
 }
 
-export interface FindingExplorerRow {
+export interface FindingExplorerRow extends TriageColumns {
   id: number;
   owner: string;
   repo: string;
@@ -161,6 +173,7 @@ export interface FindingFilters {
   repo?: string;
   q?: string;
   fingerprint?: string;
+  triage?: string;
   ageDays?: number;
   limit?: number;
   offset?: number;
@@ -173,6 +186,36 @@ export interface FingerprintGroupRow {
   occurrences: number;
   repos: number;
   last_seen: string;
+}
+
+export interface RecurringFindingRow {
+  fingerprint: string;
+  title: string | null;
+  severity: string | null;
+  occurrences: number;
+  repos: number;
+  prs: number;
+  first_seen: string;
+  last_seen: string;
+  accepted_count: number;
+  dismissed_count: number;
+  snoozed_count: number;
+  untriaged_count: number;
+}
+
+export interface RecurringResponse {
+  rows: RecurringFindingRow[];
+  filters: FindingFilters;
+}
+
+/** Server response from a triage write (single or bulk). */
+export interface TriageResult {
+  id?: number;
+  requested?: number;
+  /** Bulk only — how many of the requested ids matched existing findings. */
+  matched?: number;
+  changed: number;
+  state: TriageState;
 }
 
 export interface HealthCounts {

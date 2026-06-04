@@ -36,9 +36,12 @@ async function main() {
     .run("mk7luke", "other-repo", 7, "ffff", "assertive", "comment", "Security-adjacent refactor.", 42, "elevated", 4, 0, 0, hoursAgo(79)).lastInsertRowid;
 
   const insertFinding = db.prepare(`INSERT INTO findings (review_id, path, line, type, severity, title, body, fingerprint, source, confidence) VALUES (?,?,?,?,?,?,?,?,?,?)`);
-  insertFinding.run(r1, "src/limiter.ts", 42, "issue", "critical", "Race condition", "Concurrent access to counter is unsynchronized.", "fp1", "ai", "high");
+  const f1Id = Number(insertFinding.run(r1, "src/limiter.ts", 42, "issue", "critical", "Race condition", "Concurrent access to counter is unsynchronized.", "fp1", "ai", "high").lastInsertRowid);
   insertFinding.run(r1, "src/limiter.ts", 88, "issue", "major", "Missing null check", "token may be null.", "fp2", "ai", "medium");
   insertFinding.run(r4owner, "src/auth.ts", 5, "security", "critical", "Secret in code", "Hardcoded token.", "fp4", "safety", "high");
+  // A second finding sharing fingerprint fp2 on a *different* repo/PR so the
+  // recurring view has a genuine 2-occurrence, 2-repo, 2-PR class to group.
+  insertFinding.run(r4owner, "src/limiter.ts", 88, "issue", "major", "Missing null check", "token may be null.", "fp2", "ai", "medium");
 
   const insertHit = db.prepare(`INSERT INTO pattern_hits (owner, repo, rule_name, source, fingerprint, review_id) VALUES (?,?,?,?,?,?)`);
   insertHit.run("mk7luke", "diffsentry-sandbox", "no-console", "builtin", "fp-x1", r1);
@@ -98,21 +101,23 @@ async function main() {
     });
   }
 
-  async function post(pathname: string): Promise<{ status: number; json: any }> {
+  async function post(pathname: string, body?: unknown): Promise<{ status: number; json: any }> {
     return await new Promise((resolve, reject) => {
+      const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
+      const headers: Record<string, string | number> = { "Content-Type": "application/json" };
+      if (payload) headers["Content-Length"] = payload.length;
       const req = http.request(
-        `http://127.0.0.1:${port}${pathname}`,
-        { method: "POST", headers: { "Content-Type": "application/json" } },
+        { hostname: "127.0.0.1", port, path: pathname, method: "POST", headers },
         (r) => {
           const chunks: Buffer[] = [];
           r.on("data", (c) => chunks.push(c));
           r.on("end", () => {
-            const body = Buffer.concat(chunks).toString("utf8");
+            const text = Buffer.concat(chunks).toString("utf8");
             let json: any = null;
             try {
-              json = body ? JSON.parse(body) : null;
+              json = text ? JSON.parse(text) : null;
             } catch {
-              reject(new Error(`non-JSON body for POST ${pathname}: ${body.slice(0, 120)}`));
+              reject(new Error(`non-JSON body for POST ${pathname}: ${text.slice(0, 120)}`));
               return;
             }
             resolve({ status: r.statusCode ?? 0, json });
@@ -120,6 +125,7 @@ async function main() {
         },
       );
       req.on("error", reject);
+      if (payload) req.write(payload);
       req.end();
     });
   }
@@ -176,6 +182,93 @@ async function main() {
       filtered.status === 200 &&
         filtered.json.data.rows.every((f: any) => f.severity === "critical" && f.source === "safety") &&
         filtered.json.data.rows.some((f: any) => f.title === "Secret in code"),
+    );
+
+    // ── Triage: single finding ───────────────────────────────────────
+    const triage1 = await post(`/api/v1/findings/${f1Id}/triage`, { state: "dismissed", note: "false positive" });
+    ok("triage single → 200 changed", triage1.status === 200 && triage1.json.data.changed === 1 && triage1.json.data.state === "dismissed");
+
+    const afterDismiss = await get(`/api/v1/findings?triage=dismissed`);
+    ok(
+      "triage persisted → finding now dismissed",
+      afterDismiss.status === 200 &&
+        afterDismiss.json.data.rows.some((f: any) => f.id === f1Id && f.accepted === 0 && f.triage_note === "false positive"),
+    );
+
+    // Idempotent re-apply changes nothing (survives reload / repeat).
+    const triage1Again = await post(`/api/v1/findings/${f1Id}/triage`, { state: "dismissed", note: "false positive" });
+    ok("triage idempotent → 0 changed on repeat", triage1Again.status === 200 && triage1Again.json.data.changed === 0);
+
+    // Snooze requires a future date; a past one is rejected.
+    const badSnooze = await post(`/api/v1/findings/${f1Id}/triage`, { state: "snoozed", until: "2000-01-01" });
+    ok("snooze past date → 400", badSnooze.status === 400 && badSnooze.json.error.code === "bad_request");
+
+    const unknownTriage = await post(`/api/v1/findings/999999/triage`, { state: "accepted" });
+    ok("triage unknown id → 404", unknownTriage.status === 404 && unknownTriage.json.error.code === "not_found");
+
+    // ── Recurring view groups by fingerprint ──────────────────────────
+    const recurring = await get(`/api/v1/findings/recurring`);
+    const fp2group = recurring.json?.data?.rows?.find((g: any) => g.fingerprint === "fp2");
+    ok(
+      "recurring → fp2 grouped (2 occurrences, 2 repos, 2 PRs)",
+      recurring.status === 200 && !!fp2group && fp2group.occurrences === 2 && fp2group.repos === 2 && fp2group.prs === 2,
+    );
+
+    // Filtered recurring query — proves buildFindingsWhere params bind in the
+    // right placeholder order alongside the SELECT's `now` and HAVING/LIMIT.
+    const recurringMajor = await get(`/api/v1/findings/recurring?severity=major`);
+    ok(
+      "recurring?severity=major → fp2 only (major class)",
+      recurringMajor.status === 200 &&
+        recurringMajor.json.data.rows.some((g: any) => g.fingerprint === "fp2" && g.severity === "major") &&
+        recurringMajor.json.data.rows.every((g: any) => g.severity === "major"),
+    );
+    const recurringCritical = await get(`/api/v1/findings/recurring?severity=critical`);
+    ok(
+      "recurring?severity=critical → excludes the major fp2 class",
+      recurringCritical.status === 200 && !recurringCritical.json.data.rows.some((g: any) => g.fingerprint === "fp2"),
+    );
+
+    // ── Bulk triage a whole fingerprint class ─────────────────────────
+    const bulk = await post(`/api/v1/findings/triage`, { fingerprint: "fp2", state: "accepted", note: "known + acceptable" });
+    ok(
+      "bulk triage by fingerprint → 2 matched/changed",
+      bulk.status === 200 && bulk.json.data.changed === 2 && bulk.json.data.requested === 2 && bulk.json.data.matched === 2,
+    );
+
+    const recurringAfter = await get(`/api/v1/findings/recurring`);
+    const fp2after = recurringAfter.json.data.rows.find((g: any) => g.fingerprint === "fp2");
+    ok("recurring rollup → fp2 accepted_count = 2", !!fp2after && fp2after.accepted_count === 2);
+
+    const bulkEmpty = await post(`/api/v1/findings/triage`, { state: "accepted" });
+    ok("bulk triage with no targets → 400", bulkEmpty.status === 400 && bulkEmpty.json.error.code === "bad_request");
+
+    const bulkEmptyArr = await post(`/api/v1/findings/triage`, { ids: [], state: "accepted" });
+    ok("bulk triage empty ids array → 400 (distinct from no-target)", bulkEmptyArr.status === 400 && bulkEmptyArr.json.error.code === "bad_request");
+
+    const bulkMalformed = await post(`/api/v1/findings/triage`, { ids: [f1Id, "abc", -3], state: "accepted" });
+    ok("bulk triage malformed ids → 400 (not silently dropped)", bulkMalformed.status === 400 && bulkMalformed.json.error.code === "bad_request");
+
+    const bulkMissing = await post(`/api/v1/findings/triage`, { ids: [987654, 987655], state: "accepted" });
+    ok("bulk triage non-existent ids → 404", bulkMissing.status === 404 && bulkMissing.json.error.code === "not_found");
+
+    // Explicit ids are all-or-nothing: one real + one missing id must 404
+    // (no partial triage of the existing subset).
+    const bulkPartial = await post(`/api/v1/findings/triage`, { ids: [f1Id, 987654], state: "accepted" });
+    ok(
+      "bulk triage partial-match ids → 404 (all-or-nothing)",
+      bulkPartial.status === 404 && bulkPartial.json.error.code === "not_found" && /987654/.test(bulkPartial.json.error.message),
+    );
+
+    // De-dup: a repeated id is counted once (matched/requested both 1).
+    const bulkDedup = await post(`/api/v1/findings/triage`, { ids: [f1Id, f1Id], state: "dismissed" });
+    ok("bulk triage dedups repeated ids → matched 1", bulkDedup.status === 200 && bulkDedup.json.data.matched === 1 && bulkDedup.json.data.requested === 1);
+
+    // ── Triage shows in the audit log ─────────────────────────────────
+    const audit = await get(`/api/v1/audit`);
+    ok(
+      "audit log → finding.triage rows present",
+      audit.status === 200 && audit.json.data.rows.some((r: any) => r.action === "finding.triage"),
     );
 
     const patterns = await get("/api/v1/patterns");
@@ -284,10 +377,10 @@ async function main() {
         aliceRow.findings === 2 &&
         aliceRow.critical === 1 &&
         aliceRow.major === 1 &&
-        aliceRow.triaged === 0 && // nothing triaged in the seed → acceptance is null in the UI
+        aliceRow.triaged === 2 && // the triage suite above dismissed fp1 + accepted the fp2 class — both of alice's findings now carry an accepted value
         unknownRow &&
         unknownRow.critical === 1 && // other-repo review has no prs row → '(unknown)' bucket
-        sumFindings === 3 && // 2 (alice) + 1 (unknown) = every finding in the DB
+        sumFindings === 4 && // 2 (alice) + 2 (unknown: fp4 + the recurring-fixture fp2) = every finding in the DB
         sumPRs === 2 &&
         Array.isArray(authors.json.data.series),
     );
