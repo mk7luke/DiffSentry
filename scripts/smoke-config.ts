@@ -57,6 +57,9 @@ async function main() {
   let server: import("node:http").Server | undefined;
   let sse: import("node:http").ClientRequest | undefined;
   let closeDatabase: (() => void) | undefined;
+  // Track live sockets so teardown can destroy them — the long-lived SSE stream
+  // (and keep-alive req() sockets) would otherwise keep server.close() pending.
+  const sockets = new Set<import("node:net").Socket>();
 
   try {
     tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ds-config-smoke-"));
@@ -176,6 +179,10 @@ async function main() {
       }),
     );
     server = app.listen(0);
+    server.on("connection", (socket) => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
+    });
     const port = (server.address() as { port: number }).port;
 
     interface Resp {
@@ -391,6 +398,10 @@ async function main() {
     console.log("\nall config smoke checks passed ✓");
   } finally {
     if (sse) sse.destroy();
+    // Destroy any still-open sockets (the SSE stream, keep-alive req sockets) so
+    // server.close() resolves promptly instead of waiting on live connections.
+    for (const socket of sockets) socket.destroy();
+    sockets.clear();
     if (server) {
       const s = server;
       // Wait for the HTTP server to fully stop before closing the DB so no
