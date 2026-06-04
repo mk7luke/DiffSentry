@@ -1,7 +1,10 @@
 /**
- * Stand up the SPA + API (open/admin mode) with seeded data for visual review
- * of the operator-settings UI. Run: PORT=8092 npx tsx scripts/preview-spa.ts
- * Requires `npm run build:web` first so web/dist exists.
+ * Serve the built SPA (web/dist) + JSON API with seeded data for visual review.
+ * Open mode (no OAuth) → local admin, so the Branding admin form, operator
+ * settings, and the Audit screen are all visible.
+ *
+ * Build first: npm run build:web   (so web/dist exists)
+ * Run:         PORT=8092 npx tsx scripts/preview-spa.ts
  */
 import express from "express";
 import os from "node:os";
@@ -13,6 +16,7 @@ async function main() {
 
   const { openDatabase } = await import("../src/storage/db.js");
   const { createApiRouter } = await import("../src/api/router.js");
+  const { upsertSettingOverride } = await import("../src/storage/dao.js");
 
   const db = openDatabase();
   if (!db) throw new Error("failed to open db");
@@ -30,20 +34,25 @@ async function main() {
     db.prepare(`INSERT INTO repos (owner, repo, installation_id, first_seen, last_seen) VALUES (?, ?, ?, ?, ?)`)
       .run(r.owner, r.repo, 1, daysAgo(60), hoursAgo(r.h));
   }
+
+  db.prepare(`INSERT INTO prs (owner, repo, number, title, author, state, base_sha, head_sha, created_at) VALUES (?,?,?,?,?,?,?,?,?)`)
+    .run("interact", "atlas", 128, "Add rate limiter", "alice", "open", "aaaaaaa", "bbbbbbb", hoursAgo(10));
   const rv = db.prepare(
     `INSERT INTO reviews (owner, repo, number, sha, profile, approval, summary, risk_score, risk_level, files_processed, files_skipped_similar, files_skipped_trivial, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-  );
-  db.prepare(`INSERT INTO prs (owner, repo, number, title, author, state, base_sha, head_sha, created_at) VALUES (?,?,?,?,?,?,?,?,?)`)
-    .run("interact", "atlas", 101, "Add rate limiter", "alice", "open", "b", "h", hoursAgo(3));
-  rv.run("interact", "atlas", 101, "sha101", "chill", "comment", "## Summary\n\nLooks fine.", 42, "elevated", 5, 1, 0, hoursAgo(2));
+  ).run("interact", "atlas", 128, "bbbbbbb", "assertive", "request_changes", "## Summary\n\nTwo critical findings on the limiter.", 82, "critical", 6, 0, 0, hoursAgo(9)).lastInsertRowid as number;
+  const f = db.prepare(`INSERT INTO findings (review_id, path, line, type, severity, title, body, fingerprint, source, confidence) VALUES (?,?,?,?,?,?,?,?,?,?)`);
+  f.run(rv, "src/limiter.ts", 42, "issue", "critical", "Race condition", "Concurrent counter access is unsynchronized.", "fp1", "ai", "high");
+  f.run(rv, "src/limiter.ts", 88, "issue", "major", "Missing null check", "token may be null.", "fp2", "ai", "medium");
+  f.run(rv, "src/auth.ts", 5, "security", "minor", "Weak default", "Use a stronger default.", "fp3", "safety", "medium");
+  db.prepare(`INSERT INTO pattern_hits (owner, repo, rule_name, source, fingerprint, review_id) VALUES (?,?,?,?,?,?)`).run("interact", "atlas", "no-console", "builtin", "fpx", rv);
+  db.prepare(`INSERT INTO events (owner, repo, number, ts, kind, payload_json) VALUES (?,?,?,?,?,?)`).run("interact", "atlas", 128, hoursAgo(10), "pull_request.opened", null);
 
-  // Seed a per-repo override so the repo card shows a non-default state.
-  const { upsertSettingOverride } = await import("../src/storage/dao.js");
+  // Seed a per-repo override so the operator-settings repo card shows a non-default state.
   upsertSettingOverride({ scope: "interact/atlas", key: "profile", value: "assertive", updatedBy: "local" });
 
+  const webDist = path.join(__dirname, "..", "web", "dist");
   const app = express();
   app.use("/api/v1", createApiRouter({ learningsDir: path.join(os.tmpdir(), "ds-preview-spa-learnings") }));
-  const webDist = path.join(__dirname, "..", "web", "dist");
   app.use(express.static(webDist));
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api")) return next();
@@ -51,7 +60,7 @@ async function main() {
   });
 
   const port = Number.parseInt(process.env.PORT ?? "8092", 10);
-  app.listen(port, () => console.log(`\n  SPA preview (open/admin): http://localhost:${port}/settings\n`));
+  app.listen(port, () => console.log(`\n  SPA preview (open/admin): http://localhost:${port}/  (db: ${tmpDb})\n`));
 }
 
 main().catch((err) => {

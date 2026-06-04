@@ -5,6 +5,8 @@ import { apiGet, apiSend } from "./client";
 import type {
   ApiScope,
   AuditResponse,
+  BrandingResponse,
+  BrandingUpdate,
   CostResponse,
   CreatedToken,
   AuthorDetailResponse,
@@ -24,6 +26,7 @@ import type {
   LearningsResponse,
   LearningTestResponse,
   MeResponse,
+  NotificationsResponse,
   PatternsResponse,
   PRDetailResponse,
   RecurringResponse,
@@ -47,6 +50,8 @@ import type {
   WebhookDeliveryDetail,
   WebhooksResponse,
 } from "./types";
+
+export const BRANDING_QUERY_KEY = ["branding"] as const;
 
 export function useMe() {
   return useQuery({
@@ -264,6 +269,53 @@ export function useAudit(query: AuditQuery, enabled: boolean) {
   });
 }
 
+// ─── Notifications ──────────────────────────────────────────────────
+
+const NOTIF_KEY = ["notifications"];
+
+export function useNotifications(enabled: boolean) {
+  return useQuery({
+    queryKey: NOTIF_KEY,
+    queryFn: () => apiGet<NotificationsResponse>("/notifications"),
+    enabled,
+    // Deliveries trickle in from background events; refresh periodically while open.
+    refetchInterval: 20_000,
+  });
+}
+
+/** Generic notification mutation: invalidates the notifications query on success. */
+function useNotifMutation<TVars>(fn: (vars: TVars) => Promise<unknown>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: NOTIF_KEY });
+    },
+  });
+}
+
+/** Instance branding (name + accent). Readable by any authenticated role; the
+ * SPA applies it as the theme accent + sidebar wordmark + document title. */
+export function useBranding() {
+  return useQuery({
+    queryKey: BRANDING_QUERY_KEY,
+    queryFn: () => apiGet<BrandingResponse>("/settings/branding"),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Admin: update instance branding. Returns the resolved branding. */
+export function useSetBranding() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: BrandingUpdate) => apiSend<BrandingResponse>("/settings/branding", { body: vars }),
+    onSuccess: (data) => {
+      qc.setQueryData(BRANDING_QUERY_KEY, data);
+      void qc.invalidateQueries({ queryKey: ["audit"] });
+    },
+  });
+}
+
 /** AI spend rollups for the Cost page. `range` is e.g. "7d" | "30d" | "90d" | "mtd". */
 export function useCost(range: string) {
   return useQuery({
@@ -283,6 +335,62 @@ export function useSetBudget() {
       void qc.invalidateQueries({ queryKey: ["cost"] });
     },
   });
+}
+
+export interface ChannelInput {
+  type: string;
+  name?: string | null;
+  config: Record<string, unknown>;
+  enabled?: boolean;
+}
+
+export function useCreateChannel() {
+  return useNotifMutation((vars: ChannelInput) => apiSend("/notifications/channels", { body: vars }));
+}
+
+export function useUpdateChannel() {
+  return useNotifMutation((vars: { id: number; patch: Partial<ChannelInput> }) =>
+    apiSend(`/notifications/channels/${vars.id}`, { method: "PUT", body: vars.patch }),
+  );
+}
+
+export function useDeleteChannel() {
+  return useNotifMutation((id: number) => apiSend(`/notifications/channels/${id}`, { method: "DELETE" }));
+}
+
+export function useTestChannel() {
+  const qc = useQueryClient();
+  // A test send records a delivery row, so refresh the notifications view (Recent
+  // deliveries) on success. The mutation result (ok/detail) is still returned to
+  // the caller for display.
+  return useMutation({
+    mutationFn: (id: number) => apiSend<{ id: number; ok: boolean; detail: string }>(`/notifications/channels/${id}/test`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: NOTIF_KEY });
+    },
+  });
+}
+
+export interface RuleInput {
+  name?: string | null;
+  scope?: string;
+  condition: { event: string; minSeverity?: string };
+  channelId?: number | null;
+  enabled?: boolean;
+}
+
+export function useCreateAlertRule() {
+  return useNotifMutation((vars: RuleInput) => apiSend("/notifications/rules", { body: vars }));
+}
+
+export function useUpdateAlertRule() {
+  return useNotifMutation((vars: { id: number; patch: Partial<RuleInput> }) =>
+    apiSend(`/notifications/rules/${vars.id}`, { method: "PUT", body: vars.patch }),
+  );
+}
+
+export function useDeleteAlertRule() {
+  return useNotifMutation((id: number) => apiSend(`/notifications/rules/${id}`, { method: "DELETE" }));
 }
 
 // ─── Settings (operator controls, admin) ────────────────────────────

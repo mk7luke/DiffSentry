@@ -260,6 +260,7 @@ export interface Capabilities {
   manageConfig: boolean;
   manageRoles: boolean;
   viewAudit: boolean;
+  manageNotifications: boolean;
   manageTokens: boolean;
 }
 
@@ -338,6 +339,74 @@ export interface FindingsResponse {
 
 export interface PatternsResponse {
   rules: PatternRuleRow[];
+}
+
+// ─── Notifications ──────────────────────────────────────────────────
+
+export type ChannelType = "slack" | "discord" | "webhook" | "email";
+export type AlertEventType = "finding" | "review_failed" | "budget" | "digest" | "any";
+
+export interface NotificationChannel {
+  id: number;
+  type: ChannelType;
+  name: string | null;
+  enabled: boolean;
+  /** Redacted config — secrets are masked server-side. */
+  config: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string | null;
+}
+
+export interface AlertRuleCondition {
+  event: AlertEventType;
+  minSeverity?: Severity;
+}
+
+export interface AlertRule {
+  id: number;
+  name: string | null;
+  scope: string | null;
+  condition: AlertRuleCondition;
+  channel_id: number | null;
+  enabled: boolean;
+  created_by: string | null;
+  created_at: string | null;
+}
+
+export interface NotificationDeliveryRow {
+  id: number;
+  ts: string;
+  channel_id: number | null;
+  channel_type: string | null;
+  channel_name: string | null;
+  rule_id: number | null;
+  rule_name: string | null;
+  trigger: string | null;
+  target: string | null;
+  title: string | null;
+  status: string;
+  detail: string | null;
+}
+
+export interface NotificationsResponse {
+  channels: NotificationChannel[];
+  rules: AlertRule[];
+  deliveries: NotificationDeliveryRow[];
+  channelTypes: ChannelType[];
+  eventTypes: AlertEventType[];
+}
+
+/** Resolved instance branding (admin override → env → built-in default). */
+export interface BrandingResponse {
+  instanceName: string;
+  accentColor: string;
+}
+
+/** Branding write payload. Omit a field to leave it unchanged; send null/"" to
+ * clear that override and revert to the env / built-in default. */
+export interface BrandingUpdate {
+  instanceName?: string | null;
+  accentColor?: string | null;
 }
 
 // ─── Cost / AI spend ─────────────────────────────────────────────────

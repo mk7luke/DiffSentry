@@ -17,6 +17,7 @@ const VIEWER_CAPS: Capabilities = {
   manageConfig: false,
   manageRoles: false,
   viewAudit: false,
+  manageNotifications: false,
   manageTokens: false,
 };
 

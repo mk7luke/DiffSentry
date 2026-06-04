@@ -17,15 +17,18 @@ html {
 body {
   margin: 0;
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: var(--body-font);
   line-height: 1.45;
   font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: radial-gradient(ellipse 1400px 600px at 50% -10%, rgba(90, 141, 255, 0.06), transparent 60%),
+  background: radial-gradient(ellipse 1400px 600px at 50% -10%, var(--page-glow), transparent 60%),
     var(--bg);
   color: var(--text-1);
   min-height: 100vh;
+  /* Theme/density flips restyle instantly; ease color so the swap reads as a
+     deliberate transition rather than a flash. */
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
 h1,
 h2,
@@ -148,7 +151,7 @@ code {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 7px 10px;
+  padding: var(--pad-snav-y) var(--pad-snav-x);
   border-radius: var(--r-sm);
   font-size: 13px;
   color: var(--text-2);
@@ -384,7 +387,7 @@ body.nav-locked {
 /* ── Main + page chrome ────────────────────────────────────────── */
 .main {
   min-width: 0;
-  padding: 26px var(--page-gutter) 60px;
+  padding: var(--pad-main-y) var(--page-gutter) 60px;
   max-width: var(--page-max);
   width: 100%;
 }
@@ -444,7 +447,7 @@ body.nav-locked {
 
 /* ── Card ──────────────────────────────────────────────────────── */
 .card {
-  background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-elev) 50%, #10131c 100%);
+  background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-elev) 50%, var(--bg-card-2) 100%);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
@@ -467,9 +470,9 @@ body.nav-locked {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 11px 14px;
+  padding: var(--pad-card-head-y) var(--pad-card-head-x);
   border-bottom: 1px solid var(--line-soft);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent);
+  background: linear-gradient(180deg, var(--inset-hi-soft), transparent);
   flex-shrink: 0;
 }
 .card-head h2,
@@ -486,7 +489,7 @@ body.nav-locked {
   letter-spacing: 0.01em;
 }
 .card-body {
-  padding: 14px;
+  padding: var(--pad-card);
   flex: 1;
   min-height: 0;
 }
@@ -494,7 +497,7 @@ body.nav-locked {
   padding: 0;
 }
 .card-body.tight {
-  padding: 10px 14px;
+  padding: var(--pad-cell-y) var(--pad-card);
 }
 .card-body.chart {
   padding: 16px 14px 8px;
@@ -508,7 +511,7 @@ body.nav-locked {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 14px 16px;
+  padding: var(--pad-metric-y) var(--pad-metric-x);
   background: var(--bg-elev);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
@@ -522,10 +525,10 @@ body.nav-locked {
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
+  background: linear-gradient(90deg, transparent, var(--inset-hi), transparent);
 }
 .metric.hero {
-  padding: 18px 20px;
+  padding: var(--pad-metric-hero-y) var(--pad-metric-hero-x);
   background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-elev-2) 100%);
 }
 .metric-label {
@@ -600,37 +603,37 @@ body.nav-locked {
 }
 .chip.sev-crit {
   background: var(--sev-crit-soft);
-  color: #ffbfc9;
+  color: var(--sev-crit-text);
   border-color: var(--sev-crit-line);
 }
 .chip.sev-major {
   background: var(--sev-major-soft);
-  color: #ffcfa4;
+  color: var(--sev-major-text);
   border-color: var(--sev-major-line);
 }
 .chip.sev-minor {
   background: var(--sev-minor-soft);
-  color: #ffe1a0;
+  color: var(--sev-minor-text);
   border-color: var(--sev-minor-line);
 }
 .chip.sev-nit {
   background: var(--sev-nit-soft);
-  color: #c3cbd9;
+  color: var(--sev-nit-text);
   border-color: var(--sev-nit-line);
 }
 .chip.good {
   background: var(--good-soft);
-  color: #bff5d1;
+  color: var(--good-text);
   border-color: var(--good-line);
 }
 .chip.warn {
   background: var(--warn-soft);
-  color: #ffe1a0;
+  color: var(--warn-text);
   border-color: var(--warn-line);
 }
 .chip.danger {
   background: var(--danger-soft);
-  color: #ffc7c7;
+  color: var(--danger-text);
   border-color: var(--danger-line);
 }
 .chip.accent {
@@ -673,7 +676,7 @@ body.nav-locked {
 }
 .btn-primary {
   background: linear-gradient(180deg, var(--accent-bright) 0%, var(--accent) 100%);
-  color: #0a0c13;
+  color: var(--accent-contrast);
   font-weight: 600;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.2) inset, 0 4px 14px -4px var(--accent-glow);
 }
@@ -711,7 +714,7 @@ body.nav-locked {
 }
 .tbl thead th {
   text-align: left;
-  padding: 9px 14px;
+  padding: var(--pad-thead-y) var(--pad-cell-x);
   font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -728,7 +731,7 @@ body.nav-locked {
   text-align: right;
 }
 .tbl tbody td {
-  padding: 10px 14px;
+  padding: var(--pad-cell-y) var(--pad-cell-x);
   color: var(--text-1);
   border-bottom: 1px solid var(--line-soft);
   vertical-align: middle;
@@ -804,7 +807,7 @@ body.nav-locked {
   background: var(--sev-nit);
 }
 .tbl.rail tbody td {
-  border-bottom-color: rgba(30, 34, 48, 0.6);
+  border-bottom-color: var(--line-soft);
 }
 
 /* ── Forms ─────────────────────────────────────────────────────── */
@@ -851,7 +854,7 @@ label.field {
   grid-template-columns: 1fr auto;
   gap: 10px 16px;
   padding: 14px 16px;
-  background: linear-gradient(180deg, var(--bg-elev) 0%, #10131c 100%);
+  background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-card-2) 100%);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   transition: border-color 0.15s, background 0.15s, transform 0.15s;
@@ -1472,12 +1475,12 @@ label.field {
 .logrow .lvl.error,
 .logrow .lvl.fatal {
   background: var(--danger-soft);
-  color: #ffc7c7;
+  color: var(--danger-text);
   border: 1px solid var(--danger-line);
 }
 .logrow .lvl.warn {
   background: var(--warn-soft);
-  color: #ffe1a0;
+  color: var(--warn-text);
   border: 1px solid var(--warn-line);
 }
 .logrow .msg {
@@ -1488,7 +1491,7 @@ label.field {
 /* ── Grids ─────────────────────────────────────────────────────── */
 .grid {
   display: grid;
-  gap: 14px;
+  gap: var(--grid-gap);
 }
 .grid.stack {
   grid-template-columns: 1fr;
@@ -1504,7 +1507,7 @@ label.field {
 }
 .grid.hero {
   grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr);
-  gap: 14px;
+  gap: var(--grid-gap);
 }
 @media (max-width: 1000px) {
   .grid.hero {
@@ -1883,7 +1886,7 @@ label.field {
 }
 .rolechip.role-author {
   background: var(--good-soft);
-  color: #bff5d1;
+  color: var(--good-text);
   border-color: var(--good-line);
 }
 .rolechip.role-viewer,
@@ -2099,6 +2102,164 @@ label.field {
     grid-column: auto;
   }
 }
+/* ─── Theme / density controls (W1 theming) ────────────────────────── */
+/* Segmented control — a row of options where exactly one is active. Used for
+   the theme picker (dark/light/system) and density (comfortable/compact). */
+.segmented {
+  display: inline-flex;
+  background: var(--bg-deep);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  padding: 2px;
+  gap: 2px;
+}
+.segmented .seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+.segmented .seg-btn svg {
+  width: 14px;
+  height: 14px;
+}
+.segmented .seg-btn:hover {
+  color: var(--text);
+}
+.segmented .seg-btn.active {
+  background: var(--accent-soft);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+/* Field rows in the Appearance card. */
+.appearance-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line-soft);
+  flex-wrap: wrap;
+}
+.appearance-row:last-child {
+  border-bottom: 0;
+}
+.appearance-row .label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.appearance-row .label .name {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+}
+.appearance-row .label .hint {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+/* Compact icon button to toggle theme from the sidebar foot. */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+  border: 1px solid transparent;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+  flex-shrink: 0;
+}
+.theme-toggle svg {
+  width: 15px;
+  height: 15px;
+}
+.theme-toggle:hover {
+  color: var(--text);
+  background: var(--bg-elev);
+  border-color: var(--line-strong);
+}
+
+/* ─── Branding form (admin) ─────────────────────────────────────────── */
+.branding-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.branding-form .row {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+.branding-form .grow {
+  flex: 1;
+  min-width: 180px;
+}
+/* Native color input styled as a tidy swatch sitting next to a hex text field. */
+.color-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.color-field input[type="color"] {
+  width: 38px;
+  height: 34px;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-deep);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.color-field input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.color-field input[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: 3px;
+}
+.color-field input[type="text"] {
+  width: 120px;
+  font-family: var(--font-mono);
+  text-transform: lowercase;
+}
+.branding-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.branding-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent-bright);
+  font-weight: 600;
+  font-size: 12px;
+}
+.branding-preview .swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
 /* ── Custom rule builder (Rules screen) ────────────────────────── */
 .rule-form {
   display: flex;

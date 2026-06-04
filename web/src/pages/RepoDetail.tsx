@@ -174,9 +174,9 @@ export function RepoDetailPage() {
                     ) : (
                       <Donut
                         slices={[
-                          { label: "Changes requested", value: changesN, color: "#fb6d82" },
-                          { label: "Commented", value: commentN, color: "#9aa0b2" },
-                          { label: "Approved", value: approveN, color: "#4ade80" },
+                          { label: "Changes requested", value: changesN, color: "var(--sev-crit)" },
+                          { label: "Commented", value: commentN, color: "var(--neutral-swatch)" },
+                          { label: "Approved", value: approveN, color: "var(--good)" },
                         ]}
                       />
                     )}

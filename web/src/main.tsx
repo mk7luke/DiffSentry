@@ -9,6 +9,8 @@ import { ToastProvider } from "./realtime/toast";
 import { PWAProvider } from "./pwa/usePWA";
 import { PWAPrompts } from "./pwa/PWAPrompts";
 import { initPersistence } from "./lib/persist";
+import { ThemeProvider } from "./theme/useTheme";
+import { BrandingProvider } from "./theme/useBranding";
 import "./styles/tokens.css";
 import "./styles/base.css";
 
@@ -34,18 +36,22 @@ async function bootstrap() {
 
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <PWAProvider>
-          <AuthProvider>
-            <EventStreamProvider>
-              <ToastProvider>
-                <RouterProvider router={router} />
-                <PWAPrompts />
-              </ToastProvider>
-            </EventStreamProvider>
-          </AuthProvider>
-        </PWAProvider>
-      </QueryClientProvider>
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <PWAProvider>
+            <AuthProvider>
+              <EventStreamProvider>
+                <BrandingProvider>
+                  <ToastProvider>
+                    <RouterProvider router={router} />
+                    <PWAPrompts />
+                  </ToastProvider>
+                </BrandingProvider>
+              </EventStreamProvider>
+            </AuthProvider>
+          </PWAProvider>
+        </QueryClientProvider>
+      </ThemeProvider>
     </StrictMode>,
   );
 }
