@@ -188,6 +188,8 @@ function StreamToasts() {
           body: `$${p.spentUsd.toFixed(2)} spent of $${p.budgetUsd.toFixed(2)} (${p.month})`,
           ttl: 0,
         });
+        // Keep an open Cost screen (gauges, MTD, projection) in sync with the crossing.
+        void qc.invalidateQueries({ queryKey: ["cost"] });
         return;
       }
       if (env.topic === "config.updated") {
