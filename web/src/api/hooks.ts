@@ -123,6 +123,7 @@ export function useRecurring(query: FindingsQuery) {
         source: query.source,
         repo: query.repo,
         q: query.q,
+        fingerprint: query.fingerprint,
         triage: query.triage,
         age: query.age,
         limit: query.limit,
