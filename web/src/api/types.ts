@@ -307,8 +307,8 @@ export interface CustomRuleRow {
   scope: string;
   kind: string;
   name: string;
-  severity: string;
-  type: string;
+  severity: RuleSeverity;
+  type: RuleType;
   pattern: string;
   flags: string | null;
   path_glob: string | null;
