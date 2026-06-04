@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type MouseEvent, type ReactNode, type SVGProps } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../auth/useAuth";
@@ -88,7 +88,7 @@ function Sidebar({ onNavigate }: { onNavigate: () => void }) {
 
   // Sign-out clears the user-scoped offline cache before the full-page redirect
   // so the next visitor on this device can't read this user's cached data.
-  const signOut = (e: React.MouseEvent<HTMLAnchorElement>) => {
+  const signOut = (e: MouseEvent<HTMLAnchorElement>) => {
     e.preventDefault();
     const href = e.currentTarget.href;
     void purgePersistedCache(queryClient).finally(() => {
