@@ -8,6 +8,7 @@ import { RepoDetailPage } from "./pages/RepoDetail";
 import { PRDetailPage } from "./pages/PRDetail";
 import { FindingsPage } from "./pages/Findings";
 import { PatternsPage } from "./pages/Patterns";
+import { RulesPage } from "./pages/Rules";
 import { LeaderboardPage } from "./pages/Leaderboard";
 import { TrendsPage } from "./pages/Trends";
 import { LearningsPage } from "./pages/Learnings";
@@ -53,6 +54,7 @@ export const router = createBrowserRouter([
       { path: "/repos/:owner/:repo/pr/:number", element: <PRDetailPage /> },
       { path: "/findings", element: <FindingsPage /> },
       { path: "/patterns", element: <PatternsPage /> },
+      { path: "/rules", element: <RulesPage /> },
       { path: "/leaderboard", element: <LeaderboardPage /> },
       { path: "/trends", element: <TrendsPage /> },
       { path: "/learnings", element: <LearningsPage /> },

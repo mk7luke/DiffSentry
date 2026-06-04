@@ -40,6 +40,17 @@ export interface ActionPayload {
   detail?: string;
 }
 
+/** A custom anti-pattern rule was created, updated, or deleted via the API. */
+export interface RuleChangedPayload {
+  /** The rule id (null only when a delete raced a missing row). */
+  id: number | null;
+  name: string;
+  scope: string;
+  action: "create" | "update" | "delete";
+  actor: string | null;
+  role: string | null;
+}
+
 /** A repo's .diffsentry.yaml was changed from the command center. */
 export interface ConfigUpdatePayload {
   owner: string;
@@ -123,6 +134,7 @@ export interface BusEventMap {
   "review.finished": ReviewLifecyclePayload;
   "review.failed": ReviewLifecyclePayload;
   "action.performed": ActionPayload;
+  "rule.changed": RuleChangedPayload;
   "config.updated": ConfigUpdatePayload;
   "learning.changed": LearningChangePayload;
   "queue.updated": ReviewQueueEntry;

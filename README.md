@@ -710,6 +710,10 @@ untouched.
 - `/findings` — cross-repo filterable explorer (severity, source, repo,
   free-text, age) with a "recurring fingerprints" group.
 - `/patterns` — every pattern-rule hit with 30d + all-time counts.
+- `/rules` — **admin only** — author custom anti-pattern rules (name, severity,
+  scope, regex, optional path glob, message/advice). A live tester runs the
+  pattern against a pasted snippet and highlights matches without persisting,
+  and the active-rules table joins each rule to its pattern-hit counts.
 - `/leaderboard` — per-author review activity over a 7/30/90-day window
   (PRs reviewed, avg risk, findings/PR by severity, acceptance rate, trend
   sparkline), sortable, with a click-through author drill-down (severity mix,
@@ -757,20 +761,22 @@ in the sidebar) to open a keyboard-first palette that combines three things:
 Standard envelope: `{ data }` on success, `{ error: { code, message } }` on
 failure. Read endpoints: `GET /me`, `/health`, `/queue`, `/repos`,
 `/repos/:owner/:repo`, `/repos/:owner/:repo/prs/:number`,
-`/repos/:owner/:repo/config`, `/findings`, `/patterns`, `/search?q=`, the
-analytics trio `/analytics/authors`, `/analytics/authors/:author`,
-`/analytics/trends` (all accept `?days=`, default 30, clamped 1–365),
-`/audit` (admin), `/webhooks` + `/webhooks/:id` (admin), `/diagnostics` (static
-config + DB checks), and `/diagnostics/github` (live App probe). `GET /queue`
-returns the live review-pipeline snapshot from an in-process registry (works
-regardless of persistence). Write endpoints: `POST /roles` (admin) sets/clears a
-role override; `PUT /repos/:owner/:repo/config` (admin) edits `.diffsentry.yaml`;
-`POST /webhooks/:id/replay` (admin) re-dispatches a stored delivery;
-`POST /diagnostics/test-ai` and `POST /diagnostics/test-webhook` (both `author`+,
-CSRF + audited) run the provider reachability and webhook-secret self-tests. When
-OAuth is configured every endpoint requires a valid session (401 JSON otherwise);
-the queries reuse the same SQL as the legacy dashboard and no-op gracefully when
-persistence is disabled.
+`/repos/:owner/:repo/config`, `/findings`, `/patterns`, `/rules` (admin),
+`/search?q=`, the analytics trio `/analytics/authors`,
+`/analytics/authors/:author`, `/analytics/trends` (all accept `?days=`, default
+30, clamped 1–365), `/audit` (admin), `/webhooks` + `/webhooks/:id` (admin),
+`/diagnostics` (static config + DB checks), and `/diagnostics/github` (live App
+probe). `GET /queue` returns the live review-pipeline snapshot from an in-process
+registry (works regardless of persistence). Write endpoints: `POST /roles`
+(admin) sets/clears a role override; `POST/PUT/DELETE /rules` (admin) manage
+custom rules and `POST /rules/test` (admin) tests a candidate pattern against a
+snippet without persisting; `PUT /repos/:owner/:repo/config` (admin) edits
+`.diffsentry.yaml`; `POST /webhooks/:id/replay` (admin) re-dispatches a stored
+delivery; `POST /diagnostics/test-ai` and `POST /diagnostics/test-webhook` (both
+`author`+, CSRF + audited) run the provider reachability and webhook-secret
+self-tests. When OAuth is configured every endpoint requires a valid session
+(401 JSON otherwise); the queries reuse the same SQL as the legacy dashboard and
+no-op gracefully when persistence is disabled.
 
 **Webhook capture & replay.** Every delivery to `POST /webhook` is persisted to
 `webhook_deliveries` (event, action, repo, PR/issue number, `X-GitHub-Delivery`
@@ -813,6 +819,16 @@ chat commands as buttons. The repo screen's bar targets the most recent PR. The
 whole write surface is hidden for viewers; each button shows a spinner +
 optimistic toast and reports the audit-logged result.
 
+**Custom rules** (`admin`) extend the pattern engine from the UI. `POST /rules`,
+`PUT /rules/:id`, and `DELETE /rules/:id` manage admin-authored anti-patterns
+(stored in the `custom_rules` table, migration v3); each is `requireRole('admin')`
++ CSRF gated, writes an `audit_log` row, and publishes a `rule.changed` SSE event.
+Enabled rules — global, or scoped to one `owner/repo` — compile into the review
+engine alongside the built-ins and the `.diffsentry.yaml` `anti_patterns`, and
+their hits are recorded with `source='custom'` so they show up in pattern
+analytics. `POST /rules/test` compiles + runs a candidate pattern against a
+pasted snippet (no persistence) for the live tester.
+
 **Config editor** (`admin`) — edit a repo's `.diffsentry.yaml` from the dashboard
 (`/repos/:owner/:repo/config`). `GET .../config` returns the current YAML on the
 default branch, the parsed + merged-with-defaults effective config, and a JSON
@@ -829,11 +845,11 @@ also invalidates the 5-minute config read cache.
 event bus. The review engine publishes `review.started` / `review.finished` /
 `review.failed`, the in-memory review queue publishes `queue.updated` on every
 state transition (queued → running → done/failed/canceled, including phase
-changes), every command action publishes `action.performed`, a config edit
-publishes `config.updated`, and a webhook replay publishes `webhook.replayed`.
-The SPA opens one `EventSource`, surfaces events as toasts, drives the live queue
-board, and live-refetches the affected PR — so a re-review's findings appear
-without a refresh. The stream
+changes), every command action publishes `action.performed`, a custom rule
+change publishes `rule.changed`, a config edit publishes `config.updated`, and a
+webhook replay publishes `webhook.replayed`. The SPA opens one `EventSource`,
+surfaces events as toasts, drives the live queue board, and live-refetches the
+affected PR — so a re-review's findings appear without a refresh. The stream
 heartbeats every `DASHBOARD_SSE_HEARTBEAT_MS` (default 25s) and replays missed
 events on reconnect via `Last-Event-ID`.
 

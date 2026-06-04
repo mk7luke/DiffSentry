@@ -26,6 +26,7 @@ export type StreamTopic =
   | "review.finished"
   | "review.failed"
   | "action.performed"
+  | "rule.changed"
   | "config.updated"
   | "learning.changed"
   | "queue.updated"
@@ -48,6 +49,15 @@ export interface ActionPayload {
   role: string | null;
   result: string;
   detail?: string;
+}
+
+export interface RuleChangedPayload {
+  id: number | null;
+  name: string;
+  scope: string;
+  action: "create" | "update" | "delete";
+  actor: string | null;
+  role: string | null;
 }
 
 export interface ConfigUpdatePayload {
@@ -91,6 +101,7 @@ const TOPICS: StreamTopic[] = [
   "review.finished",
   "review.failed",
   "action.performed",
+  "rule.changed",
   "config.updated",
   "learning.changed",
   "queue.updated",

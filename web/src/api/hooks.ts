@@ -7,6 +7,9 @@ import type {
   AuthorDetailResponse,
   AuthorsResponse,
   ConfigUpdateResult,
+  CustomRuleInput,
+  CustomRuleRow,
+  CustomRulesResponse,
   DiagnosticsResponse,
   FindingsResponse,
   GithubDiagnosticsResponse,
@@ -25,6 +28,7 @@ import type {
   ReplayResponse,
   ReposResponse,
   Role,
+  RuleTestResult,
   SearchResponse,
   TestAiResult,
   TestWebhookResult,
@@ -189,6 +193,28 @@ export function useAudit(query: AuditQuery, enabled: boolean) {
   });
 }
 
+// ─── Custom rules (admin) ───────────────────────────────────────────
+
+/** Admin: list custom anti-pattern rules with their hit-counts. */
+export function useCustomRules(enabled: boolean) {
+  return useQuery({
+    queryKey: ["rules"],
+    queryFn: () => apiGet<CustomRulesResponse>("/rules"),
+    enabled,
+  });
+}
+
+/** Admin: create a custom rule. */
+export function useCreateRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: CustomRuleInput) => apiSend<{ rule: CustomRuleRow }>("/rules", { body: vars }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["rules"] });
+    },
+  });
+}
+
 // ─── Diagnostics / first-run experience ─────────────────────────────
 
 export function useDiagnostics() {
@@ -253,6 +279,46 @@ export function useUpdateRepoConfig(owner: string, repo: string) {
       }
       void qc.invalidateQueries({ queryKey: ["audit"] });
     },
+  });
+}
+
+/** Admin: update an existing custom rule (partial fields). */
+export function useUpdateRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number } & Partial<CustomRuleInput>) => {
+      const { id, ...body } = vars;
+      return apiSend<{ rule: CustomRuleRow }>(`/rules/${id}`, { method: "PUT", body });
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["rules"] });
+    },
+  });
+}
+
+/** Admin: delete a custom rule. */
+export function useDeleteRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend<{ id: number }>(`/rules/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["rules"] });
+    },
+  });
+}
+
+export interface RuleTestVars {
+  pattern: string;
+  flags?: string;
+  pathGlob?: string;
+  filename?: string;
+  snippet: string;
+}
+
+/** Admin: test a candidate rule against a pasted snippet (no persistence). */
+export function useTestRule() {
+  return useMutation({
+    mutationFn: (vars: RuleTestVars) => apiSend<RuleTestResult>("/rules/test", { body: vars }),
   });
 }
 

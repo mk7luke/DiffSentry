@@ -18,6 +18,7 @@ import {
 import { insertAuditLog, setRole } from "../storage/dao.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
+import { registerRuleRoutes } from "./rules.js";
 import { registerDiagnosticsRoutes, type DiagnosticsProvider } from "./diagnostics.js";
 import { registerConfigRoutes, loadRepoConfigYaml } from "./config.js";
 import { registerLearningRoutes } from "./learnings.js";
@@ -264,6 +265,12 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   if (deps.reviewer) {
     registerActionRoutes(router, { reviewer: deps.reviewer, requireRole, csrf });
   }
+
+  // ─── Custom anti-pattern rules (admin) ─────────────────────────────
+  // CRUD + a no-persist tester. Independent of the reviewer surface, so it is
+  // always mounted: the same write contract (requireRole('admin') + CSRF +
+  // audit_log + bus event) as the command actions above.
+  registerRuleRoutes(router, { requireRole, csrf });
 
   // ─── Guided first-run diagnostics (read viewer+, tests author+) ─────
   // Always mounted: the static env+DB checks (and the webhook self-test) need
