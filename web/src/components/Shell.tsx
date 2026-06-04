@@ -189,6 +189,12 @@ export function Shell() {
   // Modal semantics apply only when the drawer is open AND we're on mobile.
   const drawerModalOpen = navOpen && isMobileNav;
 
+  // Leaving the mobile breakpoint closes the drawer, so it can't silently
+  // reopen (and re-engage the modal) when the viewport returns to mobile.
+  useEffect(() => {
+    if (!isMobileNav) setNavOpen(false);
+  }, [isMobileNav]);
+
   // Close the drawer on any route change so a tapped nav link doesn't leave it
   // hanging open over the new page.
   useEffect(() => {
@@ -258,13 +264,13 @@ export function Shell() {
   }, [drawerModalOpen]);
 
   return (
-    <div className={`app${navOpen ? " nav-open" : ""}`}>
+    <div className={`app${drawerModalOpen ? " nav-open" : ""}`}>
       <header ref={topbarRef} className="topbar">
         <button
           ref={menuButtonRef}
           className="topbar-menu"
-          aria-label={navOpen ? "Close navigation" : "Open navigation"}
-          aria-expanded={navOpen}
+          aria-label={drawerModalOpen ? "Close navigation" : "Open navigation"}
+          aria-expanded={drawerModalOpen}
           aria-controls="app-sidebar"
           onClick={() => {
             restoreFocusRef.current = true;
@@ -296,7 +302,7 @@ export function Shell() {
 
       <div
         className="nav-backdrop"
-        hidden={!navOpen}
+        hidden={!drawerModalOpen}
         onClick={() => setNavOpen(false)}
         aria-hidden="true"
       />
