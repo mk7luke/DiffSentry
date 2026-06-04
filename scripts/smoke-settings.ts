@@ -330,10 +330,13 @@ async function main() {
 
     console.log("\nall settings smoke checks passed ✓");
   } finally {
-    // Force-close any lingering sockets (the long-lived SSE connection) and wait
-    // for each to actually close before stopping the server. The `close` listener
-    // is attached before destroy() so it can't be missed, and the Set only holds
-    // still-open sockets (closed ones are removed on their `close` event).
+    // Stop accepting new connections FIRST (server.close halts the listener
+    // synchronously), so nothing can be accepted after we snapshot the socket
+    // set. Then force-close the lingering sockets (the long-lived SSE one) and
+    // await their close before awaiting the server's full shutdown. The `close`
+    // listener is attached before destroy() so it can't be missed, and the Set
+    // only holds still-open sockets (closed ones are removed on their `close`).
+    const serverClosed = new Promise<void>((resolve) => server.close(() => resolve()));
     await Promise.all(
       [...sockets].map(
         (socket) =>
@@ -343,9 +346,9 @@ async function main() {
           }),
       ),
     );
-    // Then wait for the Express server to fully stop before tearing down the DB
-    // and temp files so no in-flight handler touches a closed handle.
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await serverClosed;
+    // The server has fully stopped; safe to tear down the DB and temp files
+    // without any in-flight handler touching a closed handle.
     closeDatabase();
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
