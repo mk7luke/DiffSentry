@@ -250,6 +250,41 @@ CREATE TABLE IF NOT EXISTS roles (
 // migration 2's `post` step — SQLite ADD COLUMN has no IF NOT EXISTS, so we
 // guard each add against PRAGMA table_info to stay idempotent.
 
+/**
+ * Migration 3 — admin-authored custom anti-pattern rules. The built-in pattern
+ * checks (src/pattern-checks.ts) and `.diffsentry.yaml` anti_patterns are
+ * static; this lets an admin add/edit/disable rules from the command center.
+ * Each enabled rule (global, or scoped to one owner/repo) is compiled into the
+ * pattern engine alongside the built-ins, and its hits are recorded in
+ * pattern_hits with source='custom' (joined back here for hit-counts).
+ *
+ * Strictly additive: one new table (IF NOT EXISTS).
+ */
+const SCHEMA_V3 = `
+CREATE TABLE IF NOT EXISTS custom_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  scope TEXT NOT NULL DEFAULT 'global',   -- 'global' | 'owner/repo'
+  kind TEXT NOT NULL DEFAULT 'regex',     -- 'regex' (AST reserved for later)
+  name TEXT NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'minor', -- critical | major | minor | trivial
+  type TEXT NOT NULL DEFAULT 'suggestion',-- issue | suggestion | nitpick | documentation | security
+  pattern TEXT NOT NULL,                  -- regex source
+  flags TEXT,                             -- optional regex flags
+  path_glob TEXT,                         -- optional minimatch glob restricting scope
+  message TEXT,                           -- plain-English explanation
+  advice TEXT,                            -- optional fix recipe
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT,
+  created_at TEXT,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_custom_rules_scope ON custom_rules(scope);
+CREATE INDEX IF NOT EXISTS idx_custom_rules_enabled ON custom_rules(enabled);
+-- Names must be globally unique: pattern_hits is joined back to a rule by name
+-- for hit-counts, so two same-named rules would conflate their analytics.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_rules_name ON custom_rules(name);
+`;
+
 export interface Migration {
   version: number;
   name: string;
@@ -296,6 +331,33 @@ function ensureFindingsTriageColumns(db: DB): void {
 }
 
 /**
+ * Idempotently add `custom_rule_id` to pattern_hits. This is the stable
+ * discriminator that ties a recorded hit to the admin-authored custom rule that
+ * produced it (null for built-in heuristics and `.diffsentry.yaml` anti_patterns,
+ * which share `source` values by name). Analytics join + rename by this id, never
+ * by rule name, so a YAML anti-pattern can't be conflated with — or clobbered by
+ * — an admin rule that happens to share its name.
+ *
+ * Requires the `pattern_hits` table (created by migration 1) to already exist.
+ */
+function ensurePatternHitsCustomRuleId(db: DB): void {
+  const hasPatternHits = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'pattern_hits'")
+    .get();
+  if (!hasPatternHits) {
+    throw new Error(
+      "Migration 3 (custom_rules) requires the `pattern_hits` table from migration 1, but it is missing — " +
+        "the schema_version ledger is inconsistent with the database. Refusing to proceed.",
+    );
+  }
+  const cols = new Set(
+    (db.prepare("PRAGMA table_info(pattern_hits)").all() as Array<{ name: string }>).map((c) => c.name),
+  );
+  if (!cols.has("custom_rule_id")) db.exec("ALTER TABLE pattern_hits ADD COLUMN custom_rule_id INTEGER");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_pattern_hits_custom_rule ON pattern_hits(custom_rule_id)");
+}
+
+/**
  * Ordered migration set. Applied in array order inside a transaction each, and
  * tracked in the `schema_version` ledger by version number. Append new
  * migrations here with the next contiguous version — never edit or reorder an
@@ -304,6 +366,7 @@ function ensureFindingsTriageColumns(db: DB): void {
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "v1_baseline", sql: SCHEMA_V1 },
   { version: 2, name: "command_center", sql: SCHEMA_V2, post: ensureFindingsTriageColumns },
+  { version: 3, name: "custom_rules", sql: SCHEMA_V3, post: ensurePatternHitsCustomRuleId },
 ];
 
 /** Highest version this binary knows how to migrate to. */

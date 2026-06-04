@@ -17,13 +17,29 @@ function escapeHtmlAttr(value: string): string {
     .replace(/>/g, "&gt;");
 }
 
+/**
+ * Serialize a value as a JS literal safe to inline inside a `<script>` block.
+ * Plain JSON.stringify is NOT sufficient here: a `</script>` (or `<!--`) in the
+ * value would break out of the script element, and U+2028 / U+2029 are valid in
+ * JSON strings but are line terminators in JS — both would corrupt the page.
+ * We JSON-stringify then neutralize `<`, `>`, `&`, and the two separators via
+ * `\uXXXX` escapes, which JSON.parse / the JS engine read back identically.
+ */
+function serializeScriptJson(value: unknown): string {
+  return JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, (ch) =>
+    "\\u" + ch.charCodeAt(0).toString(16).padStart(4, "0"),
+  );
+}
+
 /** Render the standalone docs page. `specUrl` is fetched client-side. */
 export function renderDocsPage(opts: { specUrl?: string } = {}): string {
   const specUrl = opts.specUrl ?? "/api/v1/openapi.json";
-  // The default specUrl is a constant, but the param is overridable — escape it
-  // for the HTML href so a quote-bearing value can't break out of the attribute.
-  // The inlined script still uses JSON.stringify(specUrl) (safe in JS context).
+  // The default specUrl is a constant, but the param is overridable, so escape
+  // it for each context it lands in: escapeHtmlAttr for the HTML href, and
+  // serializeScriptJson for the inlined script (JSON.stringify alone is not
+  // safe inside a <script> element — see that helper).
   const specHref = escapeHtmlAttr(specUrl);
+  const specUrlJs = serializeScriptJson(specUrl);
   // The viewer script is inlined; it fetches the spec and builds the DOM. Kept
   // intentionally compact — it groups operations by tag and renders method,
   // path, summary, params, and the security schemes each operation accepts.
@@ -98,7 +114,7 @@ export function renderDocsPage(opts: { specUrl?: string } = {}): string {
 <main id="root"><div class="loading">Loading spec…</div></main>
 <script>
 (function () {
-  var SPEC_URL = ${JSON.stringify(specUrl)};
+  var SPEC_URL = ${specUrlJs};
   var METHOD_ORDER = ["get", "post", "put", "delete", "patch"];
 
   function el(tag, cls, text) {

@@ -34,6 +34,8 @@ export interface Capabilities {
   triageFindings: boolean;
   /** Trigger reviews (full/incremental re-review of a PR). */
   triggerReview: boolean;
+  /** Create / edit / delete / promote @bot learnings. */
+  manageLearnings: boolean;
   /** Change per-repo / global review configuration. */
   manageConfig: boolean;
   /** Grant/revoke per-login role overrides. */
@@ -52,6 +54,7 @@ export function capabilitiesFor(role: Role): Capabilities {
     viewDashboard: true,
     triageFindings: isAuthor,
     triggerReview: isAuthor,
+    manageLearnings: isAuthor,
     manageConfig: isAdmin,
     manageRoles: isAdmin,
     viewAudit: isAdmin,

@@ -3,9 +3,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useEventStream,
   type ActionPayload,
+  type ConfigUpdatePayload,
+  type LearningChangePayload,
   type ReviewLifecyclePayload,
   type StreamEnvelope,
   type TokenChangePayload,
+  type WebhookReplayPayload,
 } from "./useEventStream";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -172,6 +175,34 @@ function StreamToasts() {
           tone: p.result === "ok" || p.result === "accepted" ? "info" : "danger",
           title: `${who} · ${p.action} · ${ref}`,
           body: p.detail,
+        });
+        return;
+      }
+      if (env.topic === "config.updated") {
+        const p = env.payload as ConfigUpdatePayload;
+        const who = p.actor ? `@${p.actor}` : "someone";
+        push({
+          tone: "info",
+          title: `${who} updated config · ${p.owner}/${p.repo}`,
+          body: p.mode === "pr" ? `Opened PR #${p.prNumber}` : `Committed to ${p.branch}`,
+        });
+        return;
+      }
+      if (env.topic === "learning.changed") {
+        const p = env.payload as LearningChangePayload;
+        const who = p.actor ? `@${p.actor}` : "someone";
+        const where = p.scope === "global" ? "global" : `${p.owner}/${p.repo}`;
+        const what = p.action === "bulk_delete" ? `deleted ${p.count ?? 0} learnings` : `learning ${p.action}`;
+        push({ tone: "info", title: `${who} · ${what}`, body: where });
+        return;
+      }
+      if (env.topic === "webhook.replayed") {
+        const p = env.payload as WebhookReplayPayload;
+        const who = p.actor ? `@${p.actor}` : "someone";
+        push({
+          tone: "info",
+          title: `${who} replayed webhook · ${p.event}`,
+          body: p.newDeliveryId ? `New delivery #${p.newDeliveryId} (from #${p.id})` : `Replayed delivery #${p.id}`,
         });
       }
     },
