@@ -74,9 +74,18 @@ async function main() {
   const server = app.listen(0);
   const port = (server.address() as { port: number }).port;
 
+  // Track open sockets so teardown can force-close a lingering connection (the
+  // long-lived /api/v1/stream SSE one) instead of letting server.close() hang
+  // waiting for it to end on its own.
+  const sockets = new Set<import("node:net").Socket>();
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  });
+
   interface Resp {
     status: number;
-    json: any;
+    json: unknown;
   }
   function req(
     method: string,
@@ -102,7 +111,7 @@ async function main() {
           res.on("data", (c) => chunks.push(c));
           res.on("end", () => {
             const text = Buffer.concat(chunks).toString("utf8");
-            let json: any = null;
+            let json: unknown = null;
             try {
               json = text ? JSON.parse(text) : null;
             } catch {
@@ -113,9 +122,25 @@ async function main() {
         },
       );
       r.on("error", reject);
+      // Bound every request so a hung server fails the smoke with a clear error
+      // instead of stalling indefinitely.
+      r.setTimeout(5000, () => {
+        r.destroy(new Error(`request timeout: ${method} ${pathname}`));
+      });
       if (payload) r.write(payload);
       r.end();
     });
+  }
+
+  /** Narrow a JSON response to its `data.settings` object before asserting on
+   *  its fields — turns a shape drift into a clear failure rather than reading
+   *  through `any`. */
+  function settingsOf(resp: Resp): Record<string, unknown> {
+    const settings = (resp.json as { data?: { settings?: unknown } } | null)?.data?.settings;
+    if (typeof settings !== "object" || settings === null) {
+      throw new Error(`expected data.settings in response, got: ${JSON.stringify(resp.json)?.slice(0, 200)}`);
+    }
+    return settings as Record<string, unknown>;
   }
 
   function ok(label: string, cond: boolean) {
@@ -142,7 +167,7 @@ async function main() {
     // Compare against the canonical defaults exported by the settings module
     // (single source of truth) rather than re-stating the literals here.
     const fresh = await req("GET", "/settings", { session: adminSess });
-    const s = fresh.json.data.settings;
+    const s = settingsOf(fresh);
     ok(
       "GET /settings (admin) → documented defaults",
       fresh.status === 200 &&
@@ -154,7 +179,7 @@ async function main() {
 
     // ── Pause-All kill switch ────────────────────────────────────────────
     const pause = await req("PUT", "/settings", { session: adminSess, csrf: true, body: { pauseAll: true } });
-    ok("PUT pauseAll=true → 200 + reflected", pause.status === 200 && pause.json.data.settings.pauseAll === true);
+    ok("PUT pauseAll=true → 200 + reflected", pause.status === 200 && settingsOf(pause).pauseAll === true);
     ok("isPauseAll() now true (kill switch live)", isPauseAll() === true);
 
     // ── Log level persisted + resolved (the value applyPersistedSettings reads
@@ -162,7 +187,7 @@ async function main() {
     // in isolation; the live in-process mutation isn't re-checked here because
     // the harness's cross-path import duplicates the logger module). ──────────
     const lvlResp = await req("PUT", "/settings", { session: adminSess, csrf: true, body: { logLevel: "debug" } });
-    ok("PUT logLevel → 200 + reflected", lvlResp.status === 200 && lvlResp.json.data.settings.logLevel === "debug");
+    ok("PUT logLevel → 200 + reflected", lvlResp.status === 200 && settingsOf(lvlResp).logLevel === "debug");
     ok("logLevel override persisted + resolved", getGlobalSettings().logLevel === "debug");
 
     // ── defaultProfile + maxFiles round-trip ─────────────────────────────
@@ -171,9 +196,10 @@ async function main() {
       csrf: true,
       body: { defaultProfile: "assertive", maxFiles: 25 },
     });
+    const profileSettings = settingsOf(profileResp);
     ok(
       "PUT defaultProfile + maxFiles → reflected",
-      profileResp.json.data.settings.defaultProfile === "assertive" && profileResp.json.data.settings.maxFiles === 25,
+      profileSettings.defaultProfile === "assertive" && profileSettings.maxFiles === 25,
     );
     ok("resolveProfileOverride() → assertive (global)", resolveProfileOverride("nope", "nope") === "assertive");
     ok("resolveMaxFilesOverride() → 25 (global)", resolveMaxFilesOverride("nope", "nope") === 25);
@@ -210,16 +236,17 @@ async function main() {
       csrf: true,
       body: { autoReview: false, profile: "chill" },
     });
+    const repoSettings = settingsOf(repoSet);
     ok(
       "PUT repo settings → reflected",
-      repoSet.status === 200 && repoSet.json.data.settings.autoReview === false && repoSet.json.data.settings.profile === "chill",
+      repoSet.status === 200 && repoSettings.autoReview === false && repoSettings.profile === "chill",
     );
     ok("isAutoReviewEnabled(acme/web) → false (repo override wins)", isAutoReviewEnabled("acme", "web") === false);
     ok("resolveProfileOverride(acme/web) → chill (repo wins over global)", resolveProfileOverride("acme", "web") === "chill");
 
     // ── Clearing a per-repo override reverts to inherit ──────────────────
     const cleared = await req("PUT", "/repos/acme/web/settings", { session: adminSess, csrf: true, body: { autoReview: null } });
-    ok("PUT repo autoReview=null → cleared", cleared.status === 200 && cleared.json.data.settings.autoReview === null);
+    ok("PUT repo autoReview=null → cleared", cleared.status === 200 && settingsOf(cleared).autoReview === null);
     // Global autoReview default is still true → repo now inherits true.
     ok("isAutoReviewEnabled(acme/web) → true after clear (inherits global)", isAutoReviewEnabled("acme", "web") === true);
 
@@ -294,8 +321,11 @@ async function main() {
 
     console.log("\nall settings smoke checks passed ✓");
   } finally {
-    // Wait for the Express server to fully stop before tearing down the DB and
-    // removing the temp file, so no in-flight handler touches a closed handle.
+    // Force-close any lingering sockets (the long-lived SSE connection) so
+    // server.close() resolves instead of waiting on them, then wait for the
+    // Express server to fully stop before tearing down the DB and temp files so
+    // no in-flight handler touches a closed handle.
+    for (const socket of sockets) socket.destroy();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     closeDatabase();
     try {
