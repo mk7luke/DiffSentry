@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type MouseEvent, type ReactNode, type SVGProps } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType, type MouseEvent, type ReactNode, type SVGProps } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../auth/useAuth";
@@ -173,6 +173,17 @@ export function Shell() {
   // focus there when it closes.
   const restoreFocusRef = useRef(false);
 
+  // Close the drawer from a user-initiated dismissal (Escape, the in-drawer
+  // close button, the backdrop) and flag the restore effect to return focus to
+  // the menu button — so keyboard/AT focus never drops to <body> when the modal
+  // goes away. Route-change and desktop-breakpoint closures deliberately don't
+  // use this: those navigate away / hide the menu button, so there's nothing to
+  // restore to. Stable (refs + setState only), so it's safe in effect deps.
+  const closeDrawerAndRestoreFocus = useCallback(() => {
+    restoreFocusRef.current = true;
+    setNavOpen(false);
+  }, []);
+
   // The sidebar is only a modal drawer at the mobile breakpoint (matches the
   // CSS); on desktop it's a static complementary region. Tracking the
   // breakpoint means a resize from a mobile (open) layout to desktop can't
@@ -224,7 +235,7 @@ export function Shell() {
     if (!drawerModalOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setNavOpen(false);
+        closeDrawerAndRestoreFocus();
         return;
       }
       if (e.key === "Tab") {
@@ -247,7 +258,7 @@ export function Shell() {
       window.removeEventListener("keydown", onKey);
       document.body.classList.remove("nav-locked");
     };
-  }, [drawerModalOpen]);
+  }, [drawerModalOpen, closeDrawerAndRestoreFocus]);
 
   // Move focus into the drawer as it opens. A layout effect, so it runs before
   // the (passive) inert effect marks the top bar inert — focus goes straight
@@ -303,10 +314,7 @@ export function Shell() {
         <button
           className="drawer-close"
           aria-label="Close navigation"
-          onClick={() => {
-            restoreFocusRef.current = true;
-            setNavOpen(false);
-          }}
+          onClick={closeDrawerAndRestoreFocus}
         >
           <CloseIcon />
         </button>
@@ -315,7 +323,7 @@ export function Shell() {
       <div
         className="nav-backdrop"
         hidden={!drawerModalOpen}
-        onClick={() => setNavOpen(false)}
+        onClick={closeDrawerAndRestoreFocus}
         aria-hidden="true"
       />
 
