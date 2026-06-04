@@ -36,7 +36,11 @@ function csrfFor(session: string): string {
 }
 
 async function main() {
-  const tmpDb = path.join(os.tmpdir(), `ds-settings-smoke-${Date.now()}.db`);
+  // An isolated temp dir keeps the DB plus its SQLite -wal/-shm sidecars together
+  // so a single recursive remove cleans everything up; mkdtemp also avoids any
+  // same-millisecond name collision between runs.
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ds-settings-smoke-"));
+  const tmpDb = path.join(tmpDir, "settings.db");
   process.env.DB_PATH = tmpDb;
   process.env.DASHBOARD_ADMIN_LOGINS = "adminuser";
 
@@ -167,11 +171,11 @@ async function main() {
     // Compare against the canonical defaults exported by the settings module
     // (single source of truth) rather than re-stating the literals here.
     const fresh = await req("GET", "/settings", { session: adminSess });
+    ok("GET /settings (admin) → 200", fresh.status === 200);
     const s = settingsOf(fresh);
     ok(
       "GET /settings (admin) → documented defaults",
-      fresh.status === 200 &&
-        s.pauseAll === GLOBAL_SETTING_DEFAULTS.pauseAll &&
+      s.pauseAll === GLOBAL_SETTING_DEFAULTS.pauseAll &&
         s.autoReview === GLOBAL_SETTING_DEFAULTS.autoReview &&
         s.defaultProfile === GLOBAL_SETTING_DEFAULTS.defaultProfile &&
         s.maxFiles === GLOBAL_SETTING_DEFAULTS.maxFiles,
@@ -196,6 +200,7 @@ async function main() {
       csrf: true,
       body: { defaultProfile: "assertive", maxFiles: 25 },
     });
+    ok("PUT defaultProfile + maxFiles → 200", profileResp.status === 200);
     const profileSettings = settingsOf(profileResp);
     ok(
       "PUT defaultProfile + maxFiles → reflected",
@@ -236,10 +241,11 @@ async function main() {
       csrf: true,
       body: { autoReview: false, profile: "chill" },
     });
+    ok("PUT repo settings → 200", repoSet.status === 200);
     const repoSettings = settingsOf(repoSet);
     ok(
       "PUT repo settings → reflected",
-      repoSet.status === 200 && repoSettings.autoReview === false && repoSettings.profile === "chill",
+      repoSettings.autoReview === false && repoSettings.profile === "chill",
     );
     ok("isAutoReviewEnabled(acme/web) → false (repo override wins)", isAutoReviewEnabled("acme", "web") === false);
     ok("resolveProfileOverride(acme/web) → chill (repo wins over global)", resolveProfileOverride("acme", "web") === "chill");
@@ -259,11 +265,14 @@ async function main() {
     // ── Audit log captured the writes ────────────────────────────────────
     const { getAuditLog } = await import("../src/dashboard/queries.js");
     const audit = getAuditLog({ limit: 100, offset: 0 });
-    const actions = new Set(audit.rows.map((r: any) => r.action));
+    type AuditRow = (typeof audit.rows)[number];
+    const actions = new Set(audit.rows.map((r: AuditRow) => r.action));
     ok("audit_log has settings.set + settings.clear", actions.has("settings.set") && actions.has("settings.clear"));
     ok(
       "audit row attributes actor + setting target",
-      audit.rows.some((r: any) => r.action === "settings.set" && r.actor_login === "adminuser" && r.target_ref === "global:pauseAll"),
+      audit.rows.some(
+        (r: AuditRow) => r.action === "settings.set" && r.actor_login === "adminuser" && r.target_ref === "global:pauseAll",
+      ),
     );
 
     // ── SSE stream delivers a live settings.changed event (end-to-end proof
@@ -321,15 +330,25 @@ async function main() {
 
     console.log("\nall settings smoke checks passed ✓");
   } finally {
-    // Force-close any lingering sockets (the long-lived SSE connection) so
-    // server.close() resolves instead of waiting on them, then wait for the
-    // Express server to fully stop before tearing down the DB and temp files so
-    // no in-flight handler touches a closed handle.
-    for (const socket of sockets) socket.destroy();
+    // Force-close any lingering sockets (the long-lived SSE connection) and wait
+    // for each to actually close before stopping the server. The `close` listener
+    // is attached before destroy() so it can't be missed, and the Set only holds
+    // still-open sockets (closed ones are removed on their `close` event).
+    await Promise.all(
+      [...sockets].map(
+        (socket) =>
+          new Promise<void>((resolve) => {
+            socket.once("close", () => resolve());
+            socket.destroy();
+          }),
+      ),
+    );
+    // Then wait for the Express server to fully stop before tearing down the DB
+    // and temp files so no in-flight handler touches a closed handle.
     await new Promise<void>((resolve) => server.close(() => resolve()));
     closeDatabase();
     try {
-      fs.unlinkSync(tmpDb);
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch {
       // best effort
     }
