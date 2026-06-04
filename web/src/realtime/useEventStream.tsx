@@ -28,6 +28,9 @@ export type StreamTopic =
   | "action.performed"
   | "settings.updated"
   | "budget.exceeded"
+  | "finding.surfaced"
+  | "notification.delivered"
+  | "config.changed"
   | "settings.changed"
   | "token.changed"
   | "rule.changed"
@@ -138,6 +141,9 @@ const TOPICS: StreamTopic[] = [
   "action.performed",
   "settings.updated",
   "budget.exceeded",
+  "finding.surfaced",
+  "notification.delivered",
+  "config.changed",
   "settings.changed",
   "token.changed",
   "rule.changed",

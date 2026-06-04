@@ -40,6 +40,49 @@ export interface ActionPayload {
   detail?: string;
 }
 
+/** A review produced findings — emitted once per completed review (after the
+ *  findings are persisted), carrying a per-severity breakdown so the alert
+ *  engine can match rules like "critical finding in repo X". */
+export interface FindingSurfacedPayload {
+  owner: string;
+  repo: string;
+  number: number;
+  /** Total findings across this review. */
+  total: number;
+  /** Count by severity bucket (0 when absent). */
+  critical: number;
+  major: number;
+  minor: number;
+  nit: number;
+  /** Highest severity present, or null when none. */
+  worst: "critical" | "major" | "minor" | "nit" | null;
+  /** Title of a representative (highest-severity) finding, for the message. */
+  sample?: string | null;
+}
+
+/** A notification was dispatched (or failed) to a channel. Emitted by the alert
+ *  engine so the Notifications screen's "recent deliveries" updates live. */
+export interface NotificationDeliveredPayload {
+  channelId: number | null;
+  channelType: string | null;
+  channelName: string | null;
+  ruleName: string | null;
+  trigger: string;
+  target: string;
+  status: "ok" | "error";
+  detail?: string;
+}
+
+/** Command-center configuration changed (channel/rule created, edited, removed).
+ *  Emitted by the admin write endpoints so other connected dashboards refresh. */
+export interface ConfigChangedPayload {
+  /** What kind of config changed, e.g. "channel" | "rule". */
+  kind: string;
+  /** The mutation, e.g. "create" | "update" | "delete". */
+  op: string;
+  actor: string | null;
+}
+
 /** Instance settings changed (e.g. branding) — emitted from the admin write
  * endpoint so every connected dashboard can re-brand live without a refresh. */
 export interface SettingsUpdatedPayload {
@@ -182,6 +225,9 @@ export interface BusEventMap {
   "review.finished": ReviewLifecyclePayload;
   "review.failed": ReviewLifecyclePayload;
   "action.performed": ActionPayload;
+  "finding.surfaced": FindingSurfacedPayload;
+  "notification.delivered": NotificationDeliveredPayload;
+  "config.changed": ConfigChangedPayload;
   "settings.updated": SettingsUpdatedPayload;
   "budget.exceeded": BudgetAlertPayload;
   "settings.changed": SettingsChangedPayload;

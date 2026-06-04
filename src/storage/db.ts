@@ -246,6 +246,34 @@ CREATE TABLE IF NOT EXISTS roles (
   granted_at TEXT
 );
 `;
+
+/**
+ * Migration 4 — notification delivery log. Records every dispatch the alert
+ * engine, test-send button, and weekly digest make to a channel, so the
+ * Notifications screen can show "recent deliveries" and operators can see why a
+ * message did (or didn't) go out. The channels/rules themselves are stored in
+ * the v2 `notification_channels` / `alert_rules` tables.
+ *
+ * Strictly additive (new table only) — same rules as every other migration.
+ */
+const SCHEMA_V4 = `
+CREATE TABLE IF NOT EXISTS notification_deliveries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,
+  channel_id INTEGER,
+  channel_type TEXT,
+  channel_name TEXT,
+  rule_id INTEGER,
+  rule_name TEXT,
+  trigger TEXT,            -- 'finding' | 'review_failed' | 'budget' | 'digest' | 'test'
+  target TEXT,             -- 'owner/repo#123' | scope | '—'
+  title TEXT,
+  status TEXT NOT NULL,    -- 'ok' | 'error'
+  detail TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_notif_deliveries_ts ON notification_deliveries(ts);
+CREATE INDEX IF NOT EXISTS idx_notif_deliveries_channel ON notification_deliveries(channel_id);
+`;
 // The findings triage columns are added by ensureFindingsTriageColumns() in
 // migration 2's `post` step — SQLite ADD COLUMN has no IF NOT EXISTS, so we
 // guard each add against PRAGMA table_info to stay idempotent.
@@ -367,6 +395,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 1, name: "v1_baseline", sql: SCHEMA_V1 },
   { version: 2, name: "command_center", sql: SCHEMA_V2, post: ensureFindingsTriageColumns },
   { version: 3, name: "custom_rules", sql: SCHEMA_V3, post: ensurePatternHitsCustomRuleId },
+  { version: 4, name: "notification_deliveries", sql: SCHEMA_V4 },
 ];
 
 /** Highest version this binary knows how to migrate to. */

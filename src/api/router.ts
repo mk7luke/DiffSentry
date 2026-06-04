@@ -35,6 +35,7 @@ import {
 import { bus } from "../realtime/bus.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
+import { registerNotificationRoutes } from "./notifications.js";
 import { registerCostRoutes } from "./cost.js";
 import { registerSettingsRoutes } from "./settings.js";
 import { registerTokenRoutes } from "./tokens.js";
@@ -445,6 +446,11 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   if (deps.reviewer) {
     registerActionRoutes(router, { reviewer: deps.reviewer, requireRole, csrf: writeCsrf });
   }
+
+  // ─── Notification settings (admin write) ───────────────────────────
+  // Channels, alert rules, test-send, and the delivery log. No reviewer
+  // dependency — always mounted. Admin-gated inside registerNotificationRoutes.
+  registerNotificationRoutes(router, { requireRole, csrf });
 
   // ─── Cost (read for all; budget writes are admin) ──────────────────
   registerCostRoutes(router, { requireRole, csrf });

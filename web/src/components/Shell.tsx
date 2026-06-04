@@ -4,7 +4,7 @@ import { useAuth } from "../auth/useAuth";
 import { useInstanceBranding } from "../theme/useBranding";
 import { SidebarThemeToggle } from "./appearance";
 import type { Capabilities } from "../api/types";
-import { AuditIcon, CostIcon, FindingsIcon, ImpactIcon, KeyIcon, LeaderboardIcon, LearningsIcon, LogoIcon, OverviewIcon, PatternsIcon, QueueIcon, RecurringIcon, RulesIcon, SearchIcon, SettingsIcon, TrendsIcon, WebhooksIcon } from "./icons";
+import { AlertIcon, AuditIcon, CostIcon, FindingsIcon, ImpactIcon, KeyIcon, LeaderboardIcon, LearningsIcon, LogoIcon, OverviewIcon, PatternsIcon, QueueIcon, RecurringIcon, RulesIcon, SearchIcon, SettingsIcon, TrendsIcon, WebhooksIcon } from "./icons";
 import { CommandPalette, openCommandPalette } from "./CommandPalette";
 import { SetupWizard } from "./SetupWizard";
 
@@ -35,6 +35,7 @@ const NAV: NavItem[] = [
   { to: "/audit", label: "Audit log", Icon: AuditIcon, end: false, cap: "viewAudit" },
   { to: "/webhooks", label: "Webhooks", Icon: WebhooksIcon, end: false, cap: "viewAudit" },
   { to: "/tokens", label: "API tokens", Icon: KeyIcon, end: false, cap: "manageTokens" },
+  { to: "/notifications", label: "Notifications", Icon: AlertIcon, end: false, cap: "manageNotifications" },
   { to: "/settings", label: "Settings", Icon: SettingsIcon, end: false },
 ];
 
