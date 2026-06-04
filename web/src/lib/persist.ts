@@ -125,27 +125,47 @@ export function applyPersistedDataForOwner(login: string | null, queryClient: Qu
   if (!store || !login) return;
   const owner = store.getItem(OWNER_KEY);
 
-  if (owner && owner !== login) {
-    // Different user on this device — drop everything before it's trusted.
+  // Trust the staged cache only when the owner marker exactly matches this
+  // login. A missing owner marker is NOT a match: we can't prove an owner-less
+  // blob belongs to this user, so it must not be hydrated.
+  if (pendingRestore && owner === login) {
+    hydrate(queryClient, pendingRestore.clientState);
     pendingRestore = null;
-    void purgePersistedCache(queryClient);
-    store.setItem(OWNER_KEY, login);
+    return; // OWNER_KEY already equals login — nothing to write.
+  }
+
+  // Otherwise the staged/persisted blob can't be trusted for this login (a
+  // different owner, or an owner marker that's absent while a blob is staged).
+  // Drop it — in memory and on disk — and claim the cache for the verified
+  // login. purgePersistedCache writes OWNER_KEY itself, so we never call
+  // setItem right after it removes the key.
+  if (pendingRestore || (owner && owner !== login)) {
+    pendingRestore = null;
+    void purgePersistedCache(queryClient, login);
     return;
   }
 
-  // Same owner (or first run): safe to hydrate the deferred data now.
-  if (pendingRestore) {
-    hydrate(queryClient, pendingRestore.clientState);
-    pendingRestore = null;
-  }
+  // Same owner with nothing staged, or a genuine first run — just claim it.
   store.setItem(OWNER_KEY, login);
 }
 
-/** Drop all persisted + in-memory cached data. Wired to sign-out. */
-export async function purgePersistedCache(queryClient: QueryClient): Promise<void> {
+/**
+ * Drop all persisted + in-memory cached data. Pass `nextOwner` to immediately
+ * re-claim the (now-empty) cache for a verified login; omit it (sign-out) to
+ * leave the cache owner-less. The OWNER_KEY write/clear happens synchronously
+ * here, before the async client removal, so callers never have to set it
+ * separately and risk racing this function's own removal.
+ */
+export async function purgePersistedCache(
+  queryClient: QueryClient,
+  nextOwner: string | null = null,
+): Promise<void> {
   pendingRestore = null;
   queryClient.clear();
-  if (store) store.removeItem(OWNER_KEY);
+  if (store) {
+    if (nextOwner) store.setItem(OWNER_KEY, nextOwner);
+    else store.removeItem(OWNER_KEY);
+  }
   if (persister) {
     try {
       await persister.removeClient();
