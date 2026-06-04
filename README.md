@@ -706,6 +706,11 @@ untouched.
   scope, regex, optional path glob, message/advice). A live tester runs the
   pattern against a pasted snippet and highlights matches without persisting,
   and the active-rules table joins each rule to its pattern-hit counts.
+- `/learnings` — manage the `@bot learn` learnings the reviewer applies:
+  searchable list of global + per-repo learnings, inline edit, path-glob
+  badges, create, bulk delete, dedupe suggestions, "promote to global", and a
+  "test against a file path" preview. Reads are open to viewers; create/edit/
+  delete require `author`.
 - `/audit` — **admin only** — the audit trail (who did what, when) plus a
   per-login role-override editor.
 - `/webhooks` — **admin only** — every raw webhook delivery GitHub sent
@@ -817,6 +822,7 @@ double-submit token as an `X-CSRF-Token` header.
 | View dashboard & findings | ✅ | ✅ | ✅ |
 | Triage findings | — | ✅ | ✅ |
 | Trigger reviews | — | ✅ | ✅ |
+| Manage learnings | — | ✅ | ✅ |
 | Manage config | — | — | ✅ |
 | Manage role overrides | — | — | ✅ |
 | View audit log | — | — | ✅ |

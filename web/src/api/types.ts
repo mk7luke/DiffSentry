@@ -213,6 +213,7 @@ export interface Capabilities {
   viewDashboard: boolean;
   triageFindings: boolean;
   triggerReview: boolean;
+  manageLearnings: boolean;
   manageConfig: boolean;
   manageRoles: boolean;
   viewAudit: boolean;
@@ -353,6 +354,42 @@ export interface RuleTestResult {
   error?: string;
   applies: boolean;
   matches: RuleTestMatch[];
+}
+
+// ─── Learnings management ────────────────────────────────────────────
+
+export type LearningScope = "global" | "repo";
+
+export interface RepoLearnings {
+  owner: string;
+  repo: string;
+  learnings: Learning[];
+}
+
+/** A learning flattened across scopes, as returned inside dedupe groups and the
+ * path-test response. `owner`/`repo` are present only for repo-scoped entries. */
+export interface FlatLearning {
+  scope: LearningScope;
+  owner?: string;
+  repo?: string;
+  id: string;
+  content: string;
+  path?: string;
+}
+
+export interface DuplicateGroup {
+  members: FlatLearning[];
+}
+
+export interface LearningsResponse {
+  global: Learning[];
+  repos: RepoLearnings[];
+  duplicates: DuplicateGroup[];
+}
+
+export interface LearningTestResponse {
+  path: string;
+  matched: FlatLearning[];
 }
 
 // ─── Impact report (mirror ImpactReport in src/dashboard/queries.ts) ──

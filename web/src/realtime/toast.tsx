@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import {
   useEventStream,
   type ActionPayload,
+  type LearningChangePayload,
   type ReviewLifecyclePayload,
   type StreamEnvelope,
   type WebhookReplayPayload,
@@ -158,6 +159,14 @@ function StreamToasts() {
           title: `${who} · ${p.action} · ${ref}`,
           body: p.detail,
         });
+        return;
+      }
+      if (env.topic === "learning.changed") {
+        const p = env.payload as LearningChangePayload;
+        const who = p.actor ? `@${p.actor}` : "someone";
+        const where = p.scope === "global" ? "global" : `${p.owner}/${p.repo}`;
+        const what = p.action === "bulk_delete" ? `deleted ${p.count ?? 0} learnings` : `learning ${p.action}`;
+        push({ tone: "info", title: `${who} · ${what}`, body: where });
         return;
       }
       if (env.topic === "webhook.replayed") {

@@ -136,6 +136,7 @@ async function main() {
       meAuthor.status === 200 &&
         meAuthor.json.data.user.role === "author" &&
         meAuthor.json.data.user.capabilities.triggerReview === true &&
+        meAuthor.json.data.user.capabilities.manageLearnings === true &&
         meAuthor.json.data.user.capabilities.viewAudit === false &&
         meAuthor.json.data.user.capabilities.manageConfig === false,
     );
@@ -146,6 +147,7 @@ async function main() {
       meViewer.status === 200 &&
         meViewer.json.data.user.role === "viewer" &&
         meViewer.json.data.user.capabilities.viewDashboard === true &&
+        meViewer.json.data.user.capabilities.manageLearnings === false &&
         meViewer.json.data.user.capabilities.triggerReview === false,
     );
 
