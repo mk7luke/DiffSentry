@@ -201,6 +201,7 @@ async function main() {
         if (opts.body !== undefined) {
           payload = JSON.stringify(opts.body);
           headers["Content-Type"] = "application/json";
+          headers["Content-Length"] = Buffer.byteLength(payload).toString();
         }
         // Settle exactly once, and destroy the socket on error so a failed
         // request can't leave a dangling connection for the finally to wait on.
