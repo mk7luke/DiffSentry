@@ -263,7 +263,9 @@ async function main() {
 
     console.log("\nall settings smoke checks passed ✓");
   } finally {
-    server.close();
+    // Wait for the Express server to fully stop before tearing down the DB and
+    // removing the temp file, so no in-flight handler touches a closed handle.
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     closeDatabase();
     try {
       fs.unlinkSync(tmpDb);
