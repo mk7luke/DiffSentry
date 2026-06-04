@@ -27,6 +27,7 @@ export type StreamTopic =
   | "review.failed"
   | "action.performed"
   | "config.updated"
+  | "learning.changed"
   | "queue.updated"
   | "webhook.replayed";
 
@@ -61,6 +62,17 @@ export interface ConfigUpdatePayload {
   prUrl?: string;
 }
 
+export interface LearningChangePayload {
+  scope: "global" | "repo";
+  owner?: string;
+  repo?: string;
+  action: string;
+  id?: string;
+  count?: number;
+  actor: string | null;
+  role: string | null;
+}
+
 /** Payload of a `queue.updated` event — the canonical board entry shape, kept
  * in one place to avoid drift. */
 export type QueueUpdatedPayload = ReviewQueueEntry;
@@ -80,6 +92,7 @@ const TOPICS: StreamTopic[] = [
   "review.failed",
   "action.performed",
   "config.updated",
+  "learning.changed",
   "queue.updated",
   "webhook.replayed",
 ];

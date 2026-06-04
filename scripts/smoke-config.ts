@@ -53,14 +53,14 @@ async function main() {
   // can clean up whatever exists even if a setup step (env mutation, dynamic
   // import, openDatabase, recordRepo, app.listen, …) throws — and process.env
   // is restored no matter where we fail.
-  let tmpDb: string | undefined;
-  let learningsDir: string | undefined;
+  let tmpRoot: string | undefined;
   let server: import("node:http").Server | undefined;
   let sse: import("node:http").ClientRequest | undefined;
   let closeDatabase: (() => void) | undefined;
 
   try {
-    tmpDb = path.join(os.tmpdir(), `ds-config-smoke-${Date.now()}.db`);
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ds-config-smoke-"));
+    const tmpDb = path.join(tmpRoot, "smoke.db");
     process.env.DB_PATH = tmpDb;
     process.env.DASHBOARD_ADMIN_LOGINS = "adminuser";
     process.env.DASHBOARD_AUTHOR_LOGINS = "authoruser";
@@ -80,7 +80,7 @@ async function main() {
     recordRepo({ owner: "acme", repo: "web", installationId: 42 });
     recordRepo({ owner: "acme", repo: "transient", installationId: 42 });
 
-    learningsDir = path.join(os.tmpdir(), `ds-config-learnings-${Date.now()}`);
+    const learningsDir = path.join(tmpRoot, "learnings");
     fs.mkdirSync(learningsDir, { recursive: true });
 
     // ── Fake installation Octokit: holds the current file + records writes. ──
@@ -385,16 +385,9 @@ async function main() {
       await new Promise<void>((resolve) => s.close(() => resolve()));
     }
     if (closeDatabase) closeDatabase();
-    if (tmpDb) {
+    if (tmpRoot) {
       try {
-        fs.unlinkSync(tmpDb);
-      } catch {
-        // best effort
-      }
-    }
-    if (learningsDir) {
-      try {
-        fs.rmSync(learningsDir, { recursive: true, force: true });
+        fs.rmSync(tmpRoot, { recursive: true, force: true });
       } catch {
         // best effort
       }

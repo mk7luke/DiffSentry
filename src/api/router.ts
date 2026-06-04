@@ -19,6 +19,7 @@ import { insertAuditLog, setRole } from "../storage/dao.js";
 import { registerStreamRoute } from "./stream.js";
 import { registerActionRoutes, type ReviewerActions } from "./actions.js";
 import { registerConfigRoutes, loadRepoConfigYaml } from "./config.js";
+import { registerLearningRoutes } from "./learnings.js";
 import { reviewQueue } from "../realtime/queue.js";
 import { registerWebhookRoutes, type ReplayWebhook } from "./webhooks.js";
 import {
@@ -213,7 +214,7 @@ function bestScore(q: string, ...fields: Array<string | null | undefined>): numb
 
 export function createApiRouter(deps: ApiDeps): express.Router {
   const router = express.Router();
-  void new LearningsStore(deps.learningsDir); // reserved for future write endpoints
+  const learningsStore = new LearningsStore(deps.learningsDir);
 
   const authEnabled = !!deps.auth;
   const roleConfig = deps.roleConfig ?? loadRoleConfigFromEnv();
@@ -257,6 +258,11 @@ export function createApiRouter(deps: ApiDeps): express.Router {
     requireRole,
     csrf,
   });
+
+  // ─── Learnings management (read: any role; write: author+ with CSRF) ─
+  // Independent of the reviewer — operates directly on the JSON store the
+  // engine reads at review time, so edits here are reflected in future reviews.
+  registerLearningRoutes(router, { learnings: learningsStore, requireRole, csrf });
 
   // ─── Webhook deliveries (admin) ────────────────────────────────────
   // Inspection (list + full payload) and admin replay. The GET endpoints are
