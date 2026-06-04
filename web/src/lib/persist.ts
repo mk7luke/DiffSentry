@@ -128,7 +128,10 @@ export async function initPersistence(queryClient: QueryClient): Promise<void> {
  * still loading) `pendingRestore` stays pending and no cached authenticated
  * data is hydrated, so nothing renders until owner verification succeeds.
  */
-export function applyPersistedDataForOwner(login: string | null, queryClient: QueryClient): void {
+export async function applyPersistedDataForOwner(
+  login: string | null,
+  queryClient: QueryClient,
+): Promise<void> {
   if (!store || !login) return;
   const owner = store.getItem(OWNER_KEY);
 
@@ -148,7 +151,7 @@ export function applyPersistedDataForOwner(login: string | null, queryClient: Qu
   // setItem right after it removes the key.
   if (pendingRestore || (owner && owner !== login)) {
     pendingRestore = null;
-    void purgePersistedCache(queryClient, login);
+    await purgePersistedCache(queryClient, login);
     return;
   }
 
@@ -157,12 +160,24 @@ export function applyPersistedDataForOwner(login: string | null, queryClient: Qu
 
   // Genuine first run on this device (no owner marker yet). The persistence
   // subscriber may already have written an *ownerless* blob this session, so
-  // drop any persisted client before claiming the cache — we never bind an
-  // unverified on-disk blob to this login. The live queryClient is untouched
-  // (no clear / refetch); the subscriber re-persists under the new owner on the
-  // next change.
-  if (persister) void persister.removeClient();
+  // drop it before claiming — in a controlled order so a queued removal can't
+  // later delete the authenticated cache: stop the writer, AWAIT the removal,
+  // claim the owner, then resume persisting. The live queryClient is untouched
+  // (no clear / refetch); the resumed subscriber re-persists under the new owner
+  // on the next change.
+  unsubscribePersistence?.();
+  unsubscribePersistence = null;
+  if (persister) {
+    try {
+      await persister.removeClient();
+    } catch {
+      /* ignore */
+    }
+  }
   store.setItem(OWNER_KEY, login);
+  if (persister) {
+    unsubscribePersistence = persistQueryClientSubscribe({ queryClient, persister, ...persistOptions });
+  }
 }
 
 /**

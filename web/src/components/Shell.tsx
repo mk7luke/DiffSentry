@@ -148,12 +148,25 @@ function Sidebar({ onNavigate }: { onNavigate: () => void }) {
   );
 }
 
+/** Visible, focusable elements inside `el`, in DOM order — for the drawer trap. */
+function getFocusable(el: HTMLElement | null): HTMLElement[] {
+  if (!el) return [];
+  const sel =
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  return Array.from(el.querySelectorAll<HTMLElement>(sel)).filter((n) => n.offsetParent !== null);
+}
+
 export function Shell() {
   const [navOpen, setNavOpen] = useState(false);
   const location = useLocation();
   const { instanceName } = useInstanceBranding();
   const topbarRef = useRef<HTMLElement>(null);
   const mainRef = useRef<HTMLElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  // True while the drawer was opened from the menu button, so we know to return
+  // focus there when it closes.
+  const restoreFocusRef = useRef(false);
 
   // Close the drawer on any route change so a tapped nav link doesn't leave it
   // hanging open over the new page.
@@ -170,11 +183,28 @@ export function Shell() {
     }
   }, [navOpen]);
 
-  // Escape closes the drawer; lock body scroll while it's open on mobile.
+  // While open: lock body scroll, close on Escape, and trap Tab within the
+  // drawer so focus can't reach the (inert) background behind the backdrop.
   useEffect(() => {
     if (!navOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setNavOpen(false);
+      if (e.key === "Escape") {
+        setNavOpen(false);
+        return;
+      }
+      if (e.key === "Tab") {
+        const f = getFocusable(drawerRef.current);
+        if (f.length === 0) return;
+        const first = f[0];
+        const last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
     document.body.classList.add("nav-locked");
@@ -184,15 +214,32 @@ export function Shell() {
     };
   }, [navOpen]);
 
+  // Move focus into the drawer when it opens, and restore it to the menu button
+  // when it closes (when that's what opened it). Declared after the inert effect
+  // so the background is interactive again before we focus the trigger.
+  useEffect(() => {
+    if (navOpen) {
+      const drawer = drawerRef.current;
+      (drawer?.querySelector<HTMLElement>(".drawer-close") ?? getFocusable(drawer)[0])?.focus();
+    } else if (restoreFocusRef.current) {
+      restoreFocusRef.current = false;
+      menuButtonRef.current?.focus();
+    }
+  }, [navOpen]);
+
   return (
     <div className={`app${navOpen ? " nav-open" : ""}`}>
       <header ref={topbarRef} className="topbar">
         <button
+          ref={menuButtonRef}
           className="topbar-menu"
           aria-label={navOpen ? "Close navigation" : "Open navigation"}
           aria-expanded={navOpen}
           aria-controls="app-sidebar"
-          onClick={() => setNavOpen((open) => !open)}
+          onClick={() => {
+            restoreFocusRef.current = true;
+            setNavOpen((open) => !open);
+          }}
         >
           <MenuIcon />
         </button>
@@ -204,6 +251,7 @@ export function Shell() {
       </header>
 
       <div
+        ref={drawerRef}
         className="sidebar-wrap"
         role={navOpen ? "dialog" : undefined}
         aria-modal={navOpen || undefined}
