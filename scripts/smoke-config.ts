@@ -48,209 +48,221 @@ async function main() {
     DASHBOARD_ADMIN_LOGINS: process.env.DASHBOARD_ADMIN_LOGINS,
     DASHBOARD_AUTHOR_LOGINS: process.env.DASHBOARD_AUTHOR_LOGINS,
   };
-  const tmpDb = path.join(os.tmpdir(), `ds-config-smoke-${Date.now()}.db`);
-  process.env.DB_PATH = tmpDb;
-  process.env.DASHBOARD_ADMIN_LOGINS = "adminuser";
-  process.env.DASHBOARD_AUTHOR_LOGINS = "authoruser";
 
-  const { openDatabase, closeDatabase } = await import("../src/storage/db.js");
-  const { createApiRouter } = await import("../src/api/router.js");
-  const { createAuth } = await import("../src/dashboard/auth.js");
-  const { recordRepo } = await import("../src/storage/dao.js");
-  const { getAuditLog } = await import("../src/dashboard/queries.js");
-
-  const db = openDatabase();
-  if (!db) throw new Error("failed to open temp db");
-  recordRepo({ owner: "acme", repo: "web", installationId: 42 });
-  recordRepo({ owner: "acme", repo: "transient", installationId: 42 });
-
-  const learningsDir = path.join(os.tmpdir(), `ds-config-learnings-${Date.now()}`);
-  fs.mkdirSync(learningsDir, { recursive: true });
-
-  // ── Fake installation Octokit: holds the current file + records writes. ──
-  const calls: Call[] = [];
-  let fileContent: string | null = "reviews:\n  profile: chill\n";
-  let fileSha = "sha-0";
-  let transientFail = false;
-  let failCreateRefOnce = false;
-  let failPullsCreateOnce = false;
-  const octokit = {
-    repos: {
-      get: (args: unknown) => {
-        calls.push({ method: "repos.get", args: [args] });
-        return Promise.resolve({ data: { default_branch: "main" } });
-      },
-      getContent: (args: unknown) => {
-        calls.push({ method: "repos.getContent", args: [args] });
-        if (transientFail) {
-          // One-shot transient failure (e.g. rate limit / 5xx) — must NOT be cached.
-          transientFail = false;
-          return Promise.reject(Object.assign(new Error("rate limited"), { status: 500 }));
-        }
-        if (fileContent === null) return Promise.reject(Object.assign(new Error("not found"), { status: 404 }));
-        return Promise.resolve({
-          data: {
-            type: "file",
-            encoding: "base64",
-            content: Buffer.from(fileContent).toString("base64"),
-            sha: fileSha,
-          },
-        });
-      },
-      createOrUpdateFileContents: (args: any) => {
-        calls.push({ method: "repos.createOrUpdateFileContents", args: [args] });
-        // A commit to the default branch mutates what reads return next.
-        if (args.branch === "main") {
-          fileContent = Buffer.from(args.content, "base64").toString("utf-8");
-          fileSha = `sha-${calls.length}`;
-        }
-        return Promise.resolve({ data: { commit: { sha: "commit-abc" } } });
-      },
-    },
-    git: {
-      getRef: (args: unknown) => {
-        calls.push({ method: "git.getRef", args: [args] });
-        return Promise.resolve({ data: { object: { sha: "base-sha" } } });
-      },
-      createRef: (args: unknown) => {
-        calls.push({ method: "git.createRef", args: [args] });
-        if (failCreateRefOnce) {
-          // Simulate a one-shot ref-already-exists collision; commitViaPr should
-          // regenerate the branch name and retry.
-          failCreateRefOnce = false;
-          return Promise.reject(Object.assign(new Error("Reference already exists"), { status: 422 }));
-        }
-        return Promise.resolve({ data: {} });
-      },
-      deleteRef: (args: unknown) => {
-        calls.push({ method: "git.deleteRef", args: [args] });
-        return Promise.resolve({ data: {} });
-      },
-    },
-    pulls: {
-      create: (args: unknown) => {
-        calls.push({ method: "pulls.create", args: [args] });
-        if (failPullsCreateOnce) {
-          // Simulate a failure after the branch was created; commitViaPr should
-          // best-effort delete the orphaned branch and rethrow.
-          failPullsCreateOnce = false;
-          return Promise.reject(Object.assign(new Error("validation failed"), { status: 422 }));
-        }
-        return Promise.resolve({ data: { number: 99, html_url: "https://github.com/acme/web/pull/99" } });
-      },
-    },
-  };
-
-  const auth = createAuth({
-    clientId: "cid",
-    clientSecret: "csecret",
-    allowedLogins: ["adminuser", "authoruser", "vieweruser"],
-    allowedOrgs: [],
-    sessionSecret: SESSION_SECRET,
-    baseUrl: "http://localhost/dashboard",
-  });
-
-  const app = express();
-  app.use(
-    "/api/v1",
-    createApiRouter({
-      learningsDir,
-      auth,
-      getInstallationOctokit: () => Promise.resolve(octokit as any),
-    }),
-  );
-  const server = app.listen(0);
-  const port = (server.address() as { port: number }).port;
-
-  interface Resp {
-    status: number;
-    json: any;
-  }
-  function req(method: string, pathname: string, opts: { session?: string; csrf?: boolean; body?: unknown } = {}): Promise<Resp> {
-    return new Promise((resolve, reject) => {
-      const headers: Record<string, string> = { Accept: "application/json" };
-      const cookies: string[] = [];
-      if (opts.session) cookies.push(`ds_session=${opts.session}`);
-      if (opts.session && opts.csrf) cookies.push(`ds_csrf=${csrfFor(opts.session)}`);
-      if (cookies.length) headers["Cookie"] = cookies.join("; ");
-      if (opts.session && opts.csrf) headers["X-CSRF-Token"] = csrfFor(opts.session);
-      let payload: string | undefined;
-      if (opts.body !== undefined) {
-        payload = JSON.stringify(opts.body);
-        headers["Content-Type"] = "application/json";
-      }
-      const r = http.request({ hostname: "127.0.0.1", port, path: `/api/v1${pathname}`, method, headers }, (res) => {
-        const chunks: Buffer[] = [];
-        res.on("data", (c) => chunks.push(c));
-        res.on("end", () => {
-          const text = Buffer.concat(chunks).toString("utf8");
-          let json: any = null;
-          try {
-            json = text ? JSON.parse(text) : null;
-          } catch {
-            json = { _raw: text };
-          }
-          resolve({ status: res.statusCode ?? 0, json });
-        });
-      });
-      r.on("error", reject);
-      if (payload) r.write(payload);
-      r.end();
-    });
-  }
-
-  function ok(label: string, cond: boolean) {
-    if (!cond) throw new Error(`[${label}] assertion failed`);
-    console.log(`  ✓ ${label}`);
-  }
-
-  const adminSess = sessionValue("adminuser", 1);
-  const authorSess = sessionValue("authoruser", 2);
-  const viewerSess = sessionValue("vieweruser", 3);
-  const CFG = "/repos/acme/web/config";
-
-  // Capture bus events through the real SSE stream (proves the action → bus →
-  // SSE path on the shared bus instance the handlers use).
-  const busEvents: Array<{ topic: string; payload: any }> = [];
-  const sse = http.request(
-    { hostname: "127.0.0.1", port, path: "/api/v1/stream", method: "GET", headers: { Accept: "text/event-stream", Cookie: `ds_session=${adminSess}` } },
-    (res) => {
-      res.setEncoding("utf8");
-      let buf = "";
-      res.on("data", (chunk: string) => {
-        buf += chunk;
-        let idx: number;
-        while ((idx = buf.indexOf("\n\n")) >= 0) {
-          const frame = buf.slice(0, idx);
-          buf = buf.slice(idx + 2);
-          const topic = /^event: (.+)$/m.exec(frame)?.[1];
-          const dataLine = /^data: (.+)$/m.exec(frame)?.[1];
-          if (topic && dataLine) {
-            try {
-              busEvents.push({ topic, payload: JSON.parse(dataLine).payload });
-            } catch {
-              // ignore non-JSON frames (retry:, heartbeats)
-            }
-          }
-        }
-      });
-    },
-  );
-  sse.on("error", () => {});
-  sse.end();
-  // Let the SSE connection establish before triggering actions.
-  await new Promise((r) => setTimeout(r, 80));
-
-  // Poll busEvents for a matching frame (SSE delivery is async).
-  async function waitForEvent(match: (e: { topic: string; payload: any }) => boolean): Promise<boolean> {
-    for (let i = 0; i < 40; i++) {
-      if (busEvents.some(match)) return true;
-      await new Promise((r) => setTimeout(r, 25));
-    }
-    return false;
-  }
+  // Resources are declared out here and created inside the try, so the finally
+  // can clean up whatever exists even if a setup step (env mutation, dynamic
+  // import, openDatabase, recordRepo, app.listen, …) throws — and process.env
+  // is restored no matter where we fail.
+  let tmpDb: string | undefined;
+  let learningsDir: string | undefined;
+  let server: import("node:http").Server | undefined;
+  let sse: import("node:http").ClientRequest | undefined;
+  let closeDatabase: (() => void) | undefined;
 
   try {
+    tmpDb = path.join(os.tmpdir(), `ds-config-smoke-${Date.now()}.db`);
+    process.env.DB_PATH = tmpDb;
+    process.env.DASHBOARD_ADMIN_LOGINS = "adminuser";
+    process.env.DASHBOARD_AUTHOR_LOGINS = "authoruser";
+
+    const dbModule = await import("../src/storage/db.js");
+    const { createApiRouter } = await import("../src/api/router.js");
+    const { createAuth } = await import("../src/dashboard/auth.js");
+    const { recordRepo } = await import("../src/storage/dao.js");
+    const { getAuditLog } = await import("../src/dashboard/queries.js");
+    closeDatabase = dbModule.closeDatabase;
+
+    const db = dbModule.openDatabase();
+    if (!db) throw new Error("failed to open temp db");
+    recordRepo({ owner: "acme", repo: "web", installationId: 42 });
+    recordRepo({ owner: "acme", repo: "transient", installationId: 42 });
+
+    learningsDir = path.join(os.tmpdir(), `ds-config-learnings-${Date.now()}`);
+    fs.mkdirSync(learningsDir, { recursive: true });
+
+    // ── Fake installation Octokit: holds the current file + records writes. ──
+    const calls: Call[] = [];
+    let fileContent: string | null = "reviews:\n  profile: chill\n";
+    let fileSha = "sha-0";
+    let transientFail = false;
+    let failCreateRefOnce = false;
+    let failPullsCreateOnce = false;
+    const octokit = {
+      repos: {
+        get: (args: unknown) => {
+          calls.push({ method: "repos.get", args: [args] });
+          return Promise.resolve({ data: { default_branch: "main" } });
+        },
+        getContent: (args: unknown) => {
+          calls.push({ method: "repos.getContent", args: [args] });
+          if (transientFail) {
+            // One-shot transient failure (e.g. rate limit / 5xx) — must NOT be cached.
+            transientFail = false;
+            return Promise.reject(Object.assign(new Error("rate limited"), { status: 500 }));
+          }
+          if (fileContent === null) return Promise.reject(Object.assign(new Error("not found"), { status: 404 }));
+          return Promise.resolve({
+            data: {
+              type: "file",
+              encoding: "base64",
+              content: Buffer.from(fileContent).toString("base64"),
+              sha: fileSha,
+            },
+          });
+        },
+        createOrUpdateFileContents: (args: any) => {
+          calls.push({ method: "repos.createOrUpdateFileContents", args: [args] });
+          // A commit to the default branch mutates what reads return next.
+          if (args.branch === "main") {
+            fileContent = Buffer.from(args.content, "base64").toString("utf-8");
+            fileSha = `sha-${calls.length}`;
+          }
+          return Promise.resolve({ data: { commit: { sha: "commit-abc" } } });
+        },
+      },
+      git: {
+        getRef: (args: unknown) => {
+          calls.push({ method: "git.getRef", args: [args] });
+          return Promise.resolve({ data: { object: { sha: "base-sha" } } });
+        },
+        createRef: (args: unknown) => {
+          calls.push({ method: "git.createRef", args: [args] });
+          if (failCreateRefOnce) {
+            // Simulate a one-shot ref-already-exists collision; commitViaPr should
+            // regenerate the branch name and retry.
+            failCreateRefOnce = false;
+            return Promise.reject(Object.assign(new Error("Reference already exists"), { status: 422 }));
+          }
+          return Promise.resolve({ data: {} });
+        },
+        deleteRef: (args: unknown) => {
+          calls.push({ method: "git.deleteRef", args: [args] });
+          return Promise.resolve({ data: {} });
+        },
+      },
+      pulls: {
+        create: (args: unknown) => {
+          calls.push({ method: "pulls.create", args: [args] });
+          if (failPullsCreateOnce) {
+            // Simulate a failure after the branch was created; commitViaPr should
+            // best-effort delete the orphaned branch and rethrow.
+            failPullsCreateOnce = false;
+            return Promise.reject(Object.assign(new Error("validation failed"), { status: 422 }));
+          }
+          return Promise.resolve({ data: { number: 99, html_url: "https://github.com/acme/web/pull/99" } });
+        },
+      },
+    };
+
+    const auth = createAuth({
+      clientId: "cid",
+      clientSecret: "csecret",
+      allowedLogins: ["adminuser", "authoruser", "vieweruser"],
+      allowedOrgs: [],
+      sessionSecret: SESSION_SECRET,
+      baseUrl: "http://localhost/dashboard",
+    });
+
+    const app = express();
+    app.use(
+      "/api/v1",
+      createApiRouter({
+        learningsDir,
+        auth,
+        getInstallationOctokit: () => Promise.resolve(octokit as any),
+      }),
+    );
+    server = app.listen(0);
+    const port = (server.address() as { port: number }).port;
+
+    interface Resp {
+      status: number;
+      json: any;
+    }
+    function req(method: string, pathname: string, opts: { session?: string; csrf?: boolean; body?: unknown } = {}): Promise<Resp> {
+      return new Promise((resolve, reject) => {
+        const headers: Record<string, string> = { Accept: "application/json" };
+        const cookies: string[] = [];
+        if (opts.session) cookies.push(`ds_session=${opts.session}`);
+        if (opts.session && opts.csrf) cookies.push(`ds_csrf=${csrfFor(opts.session)}`);
+        if (cookies.length) headers["Cookie"] = cookies.join("; ");
+        if (opts.session && opts.csrf) headers["X-CSRF-Token"] = csrfFor(opts.session);
+        let payload: string | undefined;
+        if (opts.body !== undefined) {
+          payload = JSON.stringify(opts.body);
+          headers["Content-Type"] = "application/json";
+        }
+        const r = http.request({ hostname: "127.0.0.1", port, path: `/api/v1${pathname}`, method, headers }, (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (c) => chunks.push(c));
+          res.on("end", () => {
+            const text = Buffer.concat(chunks).toString("utf8");
+            let json: any = null;
+            try {
+              json = text ? JSON.parse(text) : null;
+            } catch {
+              json = { _raw: text };
+            }
+            resolve({ status: res.statusCode ?? 0, json });
+          });
+        });
+        r.on("error", reject);
+        if (payload) r.write(payload);
+        r.end();
+      });
+    }
+
+    function ok(label: string, cond: boolean) {
+      if (!cond) throw new Error(`[${label}] assertion failed`);
+      console.log(`  ✓ ${label}`);
+    }
+
+    const adminSess = sessionValue("adminuser", 1);
+    const authorSess = sessionValue("authoruser", 2);
+    const viewerSess = sessionValue("vieweruser", 3);
+    const CFG = "/repos/acme/web/config";
+
+    // Capture bus events through the real SSE stream (proves the action → bus →
+    // SSE path on the shared bus instance the handlers use).
+    const busEvents: Array<{ topic: string; payload: any }> = [];
+    sse = http.request(
+      { hostname: "127.0.0.1", port, path: "/api/v1/stream", method: "GET", headers: { Accept: "text/event-stream", Cookie: `ds_session=${adminSess}` } },
+      (res) => {
+        res.setEncoding("utf8");
+        let buf = "";
+        res.on("data", (chunk: string) => {
+          buf += chunk;
+          let idx: number;
+          while ((idx = buf.indexOf("\n\n")) >= 0) {
+            const frame = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            const topic = /^event: (.+)$/m.exec(frame)?.[1];
+            const dataLine = /^data: (.+)$/m.exec(frame)?.[1];
+            if (topic && dataLine) {
+              try {
+                busEvents.push({ topic, payload: JSON.parse(dataLine).payload });
+              } catch {
+                // ignore non-JSON frames (retry:, heartbeats)
+              }
+            }
+          }
+        });
+      },
+    );
+    sse.on("error", () => {});
+    sse.end();
+    // Let the SSE connection establish before triggering actions.
+    await new Promise((r) => setTimeout(r, 80));
+
+    // Poll busEvents for a matching frame (SSE delivery is async).
+    async function waitForEvent(match: (e: { topic: string; payload: any }) => boolean): Promise<boolean> {
+      for (let i = 0; i < 40; i++) {
+        if (busEvents.some(match)) return true;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      return false;
+    }
+
     // ── GET returns YAML + schema + effective (viewer allowed) ─────────
     const get = await req("GET", CFG, { session: viewerSess });
     ok("GET config(viewer) → 200", get.status === 200);
@@ -362,20 +374,27 @@ async function main() {
 
     console.log("\nall config smoke checks passed ✓");
   } finally {
-    sse.destroy();
-    // Wait for the HTTP server to fully stop before closing the DB so no
-    // in-flight handler touches a closed database.
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    closeDatabase();
-    try {
-      fs.unlinkSync(tmpDb);
-    } catch {
-      // best effort
+    if (sse) sse.destroy();
+    if (server) {
+      const s = server;
+      // Wait for the HTTP server to fully stop before closing the DB so no
+      // in-flight handler touches a closed database.
+      await new Promise<void>((resolve) => s.close(() => resolve()));
     }
-    try {
-      fs.rmSync(learningsDir, { recursive: true, force: true });
-    } catch {
-      // best effort
+    if (closeDatabase) closeDatabase();
+    if (tmpDb) {
+      try {
+        fs.unlinkSync(tmpDb);
+      } catch {
+        // best effort
+      }
+    }
+    if (learningsDir) {
+      try {
+        fs.rmSync(learningsDir, { recursive: true, force: true });
+      } catch {
+        // best effort
+      }
     }
     for (const [k, v] of Object.entries(prevEnv)) {
       if (v === undefined) delete process.env[k];
