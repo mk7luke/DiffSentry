@@ -18,7 +18,10 @@ COPY package.json package-lock.json* ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY src/ ./src/
-RUN npm run build
+# Server only — `npm run build` would also run build:web (npm --prefix web ci),
+# but web/ is never copied into this stage. The SPA is built in the web-builder
+# stage above and copied into the runtime image below.
+RUN npm run build:server
 
 # ── Stage 3: runtime (single container serves API + webhook + SPA) ───
 FROM node:22-slim
