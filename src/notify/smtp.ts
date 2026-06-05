@@ -51,6 +51,52 @@ export function smtpConfigFromEnv(): SmtpConfig | null {
   };
 }
 
+/**
+ * Build an SmtpConfig from an email channel's stored config (the SMTP transport
+ * now lives in notification_channels.config_json, configured in the dashboard),
+ * falling back PER FIELD to the NOTIFY_SMTP_* env so any existing env-based setup
+ * keeps working as a default. Returns null when neither the channel config nor
+ * env supplies the two required fields (host + from).
+ *
+ * `secure` is derived from whichever source actually provided the port, so a
+ * channel that sets its own port can't accidentally inherit env's TLS decision:
+ * an explicit `config.secure` always wins; otherwise a channel-supplied port
+ * implies secure only at 465, and an env-supplied port follows env's own rule.
+ */
+export function smtpConfigFromChannel(config: Record<string, unknown>): SmtpConfig | null {
+  const env = smtpConfigFromEnv();
+  const str = (k: string) => (typeof config[k] === "string" ? (config[k] as string).trim() : "");
+  const host = str("host") || env?.host || "";
+  const from = str("from") || env?.from || "";
+  if (!host || !from) return null;
+
+  const explicitSecure = typeof config.secure === "boolean" ? config.secure : undefined;
+  const cfgPort =
+    typeof config.port === "number" && Number.isFinite(config.port) && config.port > 0 ? config.port : undefined;
+
+  let port: number;
+  let secure: boolean;
+  if (cfgPort !== undefined) {
+    port = cfgPort;
+    secure = explicitSecure ?? cfgPort === 465;
+  } else if (env) {
+    port = env.port;
+    secure = explicitSecure ?? env.secure ?? false;
+  } else {
+    port = 587;
+    secure = explicitSecure ?? false;
+  }
+
+  return {
+    host,
+    port,
+    from,
+    user: str("user") || env?.user || undefined,
+    pass: (typeof config.pass === "string" && config.pass.length > 0 ? config.pass : undefined) ?? env?.pass ?? undefined,
+    secure,
+  };
+}
+
 const CONNECT_TIMEOUT_MS = 10_000;
 
 /** A live SMTP dialog over one socket. Reads CRLF-framed replies and writes

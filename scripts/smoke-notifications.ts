@@ -27,8 +27,9 @@ import { openDatabase, closeDatabase } from "../src/storage/db.js";
 import { createApiRouter } from "../src/api/router.js";
 import { createAuth } from "../src/dashboard/auth.js";
 import { startNotifications, notificationEngine } from "../src/notify/engine.js";
+import { smtpConfigFromChannel } from "../src/notify/smtp.js";
 import { bus } from "../src/realtime/bus.js";
-import { getNotificationDeliveries, getAuditLog } from "../src/dashboard/queries.js";
+import { getNotificationChannels, getNotificationDeliveries, getAuditLog } from "../src/dashboard/queries.js";
 
 const SESSION_SECRET = "notif-smoke-secret";
 
@@ -52,6 +53,8 @@ const MUTATED_ENV = [
   "DASHBOARD_AUTHOR_LOGINS",
   "NOTIFY_ALLOW_INSECURE_WEBHOOKS",
   "NOTIFY_ALLOW_PRIVATE_WEBHOOKS",
+  "NOTIFY_SMTP_HOST",
+  "NOTIFY_SMTP_FROM",
 ] as const;
 
 async function main() {
@@ -381,6 +384,74 @@ async function main() {
     await new Promise((r) => setTimeout(r, 150));
     ok("test-send(disabled channel) → nothing delivered", received.length === 0);
     await req("PUT", `/notifications/channels/${channelId}`, { session: admin, csrf: true, body: { enabled: true } });
+
+    // ── Email channel: SMTP is configured in the UI (stored in config_json) ──
+    const emailCreate = await req("POST", "/notifications/channels", {
+      session: admin,
+      csrf: true,
+      body: {
+        type: "email",
+        name: "ops-email",
+        config: { to: "oncall@example.com", host: "smtp.example.com", port: 587, from: "bot@example.com", user: "smtpuser", pass: "smtp-secret", secure: false },
+      },
+    });
+    ok("create email channel(admin, full SMTP) → 201", emailCreate.status === 201 && typeof emailCreate.json.data.id === "number");
+    const emailId: number = emailCreate.json.data.id;
+
+    // GET hides the SMTP password but surfaces the non-secret transport fields.
+    const list2 = await req("GET", "/notifications", { session: admin });
+    const ech = list2.json.data.channels.find((c: any) => c.id === emailId);
+    ok(
+      "email channel GET hides pass, shows host/from/to + passSet",
+      !!ech &&
+        ech.config.pass === undefined &&
+        ech.config.passSet === true &&
+        ech.config.host === "smtp.example.com" &&
+        ech.config.from === "bot@example.com" &&
+        ech.config.to === "oncall@example.com",
+    );
+
+    // The password is actually persisted to config_json (not dropped on the way in).
+    const rawRow = getNotificationChannels().find((c) => c.id === emailId);
+    const rawCfg = rawRow?.config_json ? JSON.parse(rawRow.config_json) : {};
+    ok("email SMTP password persisted to config_json", rawCfg.pass === "smtp-secret");
+
+    // Editing another field WITHOUT re-sending the password preserves the secret.
+    const emailEdit = await req("PUT", `/notifications/channels/${emailId}`, {
+      session: admin,
+      csrf: true,
+      body: { config: { to: "oncall@example.com", host: "smtp.example.com", from: "alerts@example.com", port: 587 } },
+    });
+    ok("update email channel(no pass) → 200", emailEdit.status === 200);
+    const rawRow2 = getNotificationChannels().find((c) => c.id === emailId);
+    const rawCfg2 = rawRow2?.config_json ? JSON.parse(rawRow2.config_json) : {};
+    ok("editing email without pass preserves the stored secret", rawCfg2.pass === "smtp-secret" && rawCfg2.from === "alerts@example.com");
+
+    // A bad SMTP port is rejected at validation time.
+    const badPort = await req("POST", "/notifications/channels", {
+      session: admin,
+      csrf: true,
+      body: { type: "email", name: "bad", config: { to: "a@b.co", port: 99999 } },
+    });
+    ok("create email channel(port 99999) → 400", badPort.status === 400 && badPort.json.error.code === "bad_request");
+
+    // smtpConfigFromChannel merges channel fields first, with env as a per-field fallback.
+    process.env.NOTIFY_SMTP_HOST = "env-smtp.example.com";
+    process.env.NOTIFY_SMTP_FROM = "env-from@example.com";
+    const merged = smtpConfigFromChannel({ to: "x@example.com", host: "cfg-smtp.example.com", from: "cfg-from@example.com", port: 2525, pass: "p" });
+    ok(
+      "smtpConfigFromChannel: channel fields win over env",
+      !!merged && merged.host === "cfg-smtp.example.com" && merged.from === "cfg-from@example.com" && merged.port === 2525,
+    );
+    const mergedFallback = smtpConfigFromChannel({ to: "x@example.com" });
+    ok(
+      "smtpConfigFromChannel: env fills unset host/from",
+      !!mergedFallback && mergedFallback.host === "env-smtp.example.com" && mergedFallback.from === "env-from@example.com",
+    );
+    delete process.env.NOTIFY_SMTP_HOST;
+    delete process.env.NOTIFY_SMTP_FROM;
+    // With neither channel host/from nor env, there's nothing to send with.
+    ok("smtpConfigFromChannel: null when host/from absent everywhere", smtpConfigFromChannel({ to: "x@example.com" }) === null);
 
     // ── Deliveries recorded ────────────────────────────────────────────
     const deliveries = getNotificationDeliveries(50);

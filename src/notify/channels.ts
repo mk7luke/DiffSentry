@@ -1,5 +1,5 @@
 import { logger } from "../logger.js";
-import { sendMail, smtpConfigFromEnv } from "./smtp.js";
+import { sendMail, smtpConfigFromChannel } from "./smtp.js";
 import { checkWebhookUrlSafe } from "./ssrf.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -133,8 +133,13 @@ async function deliverWebhook(config: Record<string, unknown>, msg: ChannelMessa
 async function deliverEmail(config: Record<string, unknown>, msg: ChannelMessage): Promise<DeliveryResult> {
   const to = typeof config.to === "string" ? config.to : "";
   if (!to) return { ok: false, detail: "missing recipient (to)" };
-  const smtp = smtpConfigFromEnv();
-  if (!smtp) return { ok: false, detail: "SMTP not configured (set NOTIFY_SMTP_HOST + NOTIFY_SMTP_FROM)" };
+  const smtp = smtpConfigFromChannel(config);
+  if (!smtp) {
+    return {
+      ok: false,
+      detail: "SMTP not configured (set host + from on the channel, or NOTIFY_SMTP_HOST + NOTIFY_SMTP_FROM)",
+    };
+  }
   const bodyLines = [msg.text];
   if (msg.fields) for (const f of msg.fields) bodyLines.push(`${f.label}: ${f.value}`);
   if (msg.url) bodyLines.push("", msg.url);
@@ -184,7 +189,16 @@ export function redactChannelConfig(type: string, config: Record<string, unknown
     out.url = mask(config.url);
     if (config.headers) out.headers = "(set)";
   } else if (type === "email") {
+    // Recipient + SMTP transport fields are config (not secrets) — show them so
+    // the form can prefill. The SMTP password is the only secret: never return
+    // it; expose a boolean so the UI can show "configured" without the value.
     out.to = config.to; // recipient address is not a secret — show it
+    if (config.host !== undefined) out.host = config.host;
+    if (config.port !== undefined) out.port = config.port;
+    if (config.from !== undefined) out.from = config.from;
+    if (config.user !== undefined) out.user = config.user;
+    if (config.secure !== undefined) out.secure = config.secure;
+    out.passSet = typeof config.pass === "string" && config.pass.length > 0;
   }
   return out;
 }

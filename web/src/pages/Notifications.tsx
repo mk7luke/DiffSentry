@@ -106,23 +106,37 @@ function ChannelsCard({ channels }: { channels: NotificationChannel[] }) {
 
   const [type, setType] = useState<ChannelType>("slack");
   const [name, setName] = useState("");
-  const [secret, setSecret] = useState(""); // webhookUrl / url / email "to"
+  const [secret, setSecret] = useState(""); // webhookUrl / url (non-email channels)
+  const EMPTY_EMAIL = { to: "", host: "", port: "", from: "", user: "", pass: "", secure: false };
+  const [email, setEmail] = useState(EMPTY_EMAIL);
 
-  const secretLabel =
-    type === "email" ? "Recipient email" : type === "webhook" ? "Webhook URL" : "Incoming webhook URL";
+  const secretLabel = type === "webhook" ? "Webhook URL" : "Incoming webhook URL";
+  // An email channel only needs a recipient to be created — the SMTP server
+  // fields are optional and fall back to the NOTIFY_SMTP_* env at send time.
+  const canSubmit = type === "email" ? email.to.trim().length > 0 : secret.trim().length > 0;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const value = secret.trim();
-    if (!value) return;
-    const config: Record<string, unknown> =
-      type === "email" ? { to: value } : type === "webhook" ? { url: value } : { webhookUrl: value };
+    if (!canSubmit) return;
+    let config: Record<string, unknown>;
+    if (type === "email") {
+      config = { to: email.to.trim(), secure: email.secure };
+      if (email.host.trim()) config.host = email.host.trim();
+      if (email.from.trim()) config.from = email.from.trim();
+      if (email.port.trim()) config.port = Number(email.port.trim());
+      if (email.user.trim()) config.user = email.user.trim();
+      if (email.pass) config.pass = email.pass;
+    } else {
+      const value = secret.trim();
+      config = type === "webhook" ? { url: value } : { webhookUrl: value };
+    }
     create.mutate(
       { type, name: name.trim() || null, config },
       {
         onSuccess: () => {
           setName("");
           setSecret("");
+          setEmail(EMPTY_EMAIL);
           push({ tone: "success", title: "Channel added" });
         },
         onError: (err) => push({ tone: "danger", title: "Add failed", body: msg(err) }),
@@ -159,19 +173,54 @@ function ChannelsCard({ channels }: { channels: NotificationChannel[] }) {
           Name
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. #eng-alerts" autoComplete="off" />
         </label>
-        <label className="field" style={{ flex: 1, minWidth: 240 }}>
-          {secretLabel}
-          <input
-            value={secret}
-            onChange={(e) => setSecret(e.target.value)}
-            placeholder={type === "email" ? "team@example.com" : "https://…"}
-            autoComplete="off"
-          />
-        </label>
-        <button type="submit" className="btn btn-primary" disabled={create.isPending || !secret.trim()}>
+        {type === "email" ? (
+          <>
+            <label className="field" style={{ minWidth: 200 }}>
+              Recipient email
+              <input value={email.to} onChange={(e) => setEmail((s) => ({ ...s, to: e.target.value }))} placeholder="oncall@example.com" autoComplete="off" />
+            </label>
+            <label className="field" style={{ minWidth: 200 }}>
+              SMTP host
+              <input value={email.host} onChange={(e) => setEmail((s) => ({ ...s, host: e.target.value }))} placeholder="smtp.example.com" autoComplete="off" />
+            </label>
+            <label className="field" style={{ width: 90 }}>
+              Port
+              <input value={email.port} onChange={(e) => setEmail((s) => ({ ...s, port: e.target.value }))} placeholder="587" inputMode="numeric" autoComplete="off" />
+            </label>
+            <label className="field" style={{ minWidth: 200 }}>
+              From address
+              <input value={email.from} onChange={(e) => setEmail((s) => ({ ...s, from: e.target.value }))} placeholder="diffsentry@example.com" autoComplete="off" />
+            </label>
+            <label className="field" style={{ minWidth: 150 }}>
+              Username
+              <input value={email.user} onChange={(e) => setEmail((s) => ({ ...s, user: e.target.value }))} placeholder="(optional)" autoComplete="off" />
+            </label>
+            <label className="field" style={{ minWidth: 150 }}>
+              Password
+              <input type="password" value={email.pass} onChange={(e) => setEmail((s) => ({ ...s, pass: e.target.value }))} placeholder="(optional)" autoComplete="new-password" />
+            </label>
+            <label className="field" style={{ justifyContent: "end" }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+                <input type="checkbox" checked={email.secure} onChange={(e) => setEmail((s) => ({ ...s, secure: e.target.checked }))} />
+                Implicit TLS (465)
+              </span>
+            </label>
+          </>
+        ) : (
+          <label className="field" style={{ flex: 1, minWidth: 240 }}>
+            {secretLabel}
+            <input value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="https://…" autoComplete="off" />
+          </label>
+        )}
+        <button type="submit" className="btn btn-primary" disabled={create.isPending || !canSubmit}>
           {create.isPending ? "Adding…" : "Add channel"}
         </button>
       </form>
+      {type === "email" ? (
+        <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+          Leave the SMTP server fields blank to use the <span className="mono">NOTIFY_SMTP_*</span> environment defaults. After saving, use “Send test” to verify delivery.
+        </p>
+      ) : null}
 
       {channels.length === 0 ? (
         <p className="muted" style={{ fontSize: 12, marginTop: 14 }}>
