@@ -97,11 +97,18 @@ function validateWebhookHeaders(raw: unknown): { headers?: Record<string, string
   return { headers };
 }
 
+/** Matches a single bare email address (no display name, no CRLF). */
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
 /** Validate a channel config for its type. Returns the cleaned config or an error.
- *  Async because webhook URL validation may perform a DNS lookup (SSRF guard). */
+ *  Async because webhook URL validation may perform a DNS lookup (SSRF guard).
+ *  `existing` is the channel's currently-stored config (on update only); it lets
+ *  the email case carry an unchanged SMTP password forward when the caller edits
+ *  other fields without re-sending the secret. */
 async function validateChannelConfig(
   type: string,
   config: unknown,
+  existing?: Record<string, unknown>,
 ): Promise<{ config: Record<string, unknown> } | { error: string }> {
   const c = config && typeof config === "object" && !Array.isArray(config) ? (config as Record<string, unknown>) : {};
   const str = (k: string) => (typeof c[k] === "string" ? (c[k] as string).trim() : "");
@@ -125,8 +132,43 @@ async function validateChannelConfig(
     }
     case "email": {
       const to = str("to");
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return { error: "A valid recipient email (to) is required." };
-      return { config: { to } };
+      if (!EMAIL_RE.test(to)) return { error: "A valid recipient email (to) is required." };
+      const out: Record<string, unknown> = { to };
+      // SMTP transport fields are all optional — anything omitted falls back to
+      // the NOTIFY_SMTP_* env at send time (see smtpConfigFromChannel).
+      const host = str("host");
+      if (host) {
+        if (/[\s]/.test(host)) return { error: "SMTP host must not contain whitespace." };
+        out.host = host;
+      }
+      const from = str("from");
+      if (from) {
+        if (!EMAIL_RE.test(from)) return { error: "SMTP From must be a valid email address." };
+        out.from = from;
+      }
+      if (c.port !== undefined && c.port !== null && c.port !== "") {
+        const port = typeof c.port === "number" ? c.port : Number.parseInt(String(c.port), 10);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+          return { error: "SMTP port must be an integer between 1 and 65535." };
+        }
+        out.port = port;
+      }
+      const user = str("user");
+      if (user) {
+        if (/[\r\n]/.test(user)) return { error: "SMTP username must not contain line breaks." };
+        out.user = user;
+      }
+      if (typeof c.secure === "boolean") out.secure = c.secure;
+      // Secret handling: take a newly-supplied password; otherwise preserve the
+      // one already stored so editing another field can't silently wipe it. An
+      // explicit empty string clears it (revert to env / unauthenticated relay).
+      if (typeof c.pass === "string") {
+        if (/[\r\n]/.test(c.pass)) return { error: "SMTP password must not contain line breaks." };
+        if (c.pass.length > 0) out.pass = c.pass;
+      } else if (existing && typeof existing.pass === "string" && existing.pass.length > 0) {
+        out.pass = existing.pass;
+      }
+      return { config: out };
     }
     default:
       return { error: `Unknown channel type. Use one of: ${CHANNEL_TYPES.join(", ")}.` };
@@ -283,7 +325,15 @@ export function registerNotificationRoutes(router: Router, deps: NotificationDep
     if (body.name !== undefined) patch.name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : null;
     if (body.enabled !== undefined) patch.enabled = body.enabled !== false;
     if (body.config !== undefined) {
-      const validated = await validateChannelConfig(existing.type, body.config);
+      // Parse the stored config so the validator can carry an unchanged SMTP
+      // password forward when the caller edits other fields (email channels).
+      let existingConfig: Record<string, unknown> = {};
+      try {
+        existingConfig = existing.config_json ? (JSON.parse(existing.config_json) as Record<string, unknown>) : {};
+      } catch {
+        existingConfig = {};
+      }
+      const validated = await validateChannelConfig(existing.type, body.config, existingConfig);
       if ("error" in validated) {
         sendError(res, 400, "bad_request", validated.error);
         return;
