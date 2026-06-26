@@ -28,6 +28,11 @@ interface Args {
   limit: number;
 }
 
+export interface BackfillResult {
+  totalRepos: number;
+  totalPRs: number;
+}
+
 function parseArgs(argv: string[]): Args {
   const out: Args = { limit: 200 };
   for (let i = 0; i < argv.length; i++) {
@@ -42,13 +47,19 @@ function parseArgs(argv: string[]): Args {
   return out;
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+/**
+ * Core backfill routine, callable both from the CLI (below) and from the
+ * dashboard self-seed path (src/cli/auto-backfill.ts) on boot. Requires SQLite
+ * to be enabled; throws if persistence is off so callers can decide how to
+ * surface that (the CLI exits 1; the boot seeder logs and moves on).
+ */
+export async function runBackfill(opts: { repo?: string; limit?: number } = {}): Promise<BackfillResult> {
+  const limit = Math.max(1, opts.limit ?? 200);
+  const repoFilter = opts.repo;
   const config = loadConfig();
   const db = openDatabase();
   if (!db) {
-    console.error("Backfill requires SQLite to be enabled (DB_PATH != \"\").");
-    process.exit(1);
+    throw new Error('Backfill requires SQLite to be enabled (DB_PATH != "").');
   }
 
   const appOctokit = new Octokit({
@@ -74,7 +85,7 @@ async function main() {
     for (const r of repos) {
       const owner = r.owner.login;
       const name = r.name;
-      if (args.repo && `${owner}/${name}`.toLowerCase() !== args.repo.toLowerCase()) continue;
+      if (repoFilter && `${owner}/${name}`.toLowerCase() !== repoFilter.toLowerCase()) continue;
 
       recordRepo({ owner, repo: name, installationId });
       totalRepos++;
@@ -86,10 +97,10 @@ async function main() {
         per_page: 100,
       }, (resp, done) => {
         const all = resp.data;
-        if (all.length >= args.limit) done();
+        if (all.length >= limit) done();
         return all;
       });
-      const slice = prs.slice(0, args.limit);
+      const slice = prs.slice(0, limit);
 
       for (const pr of slice) {
         recordPR(
@@ -129,10 +140,31 @@ async function main() {
   }
 
   logger.info({ totalRepos, totalPRs }, "backfill: done");
-  console.log(`Backfilled ${totalRepos} repos and ${totalPRs} PRs.`);
+  return { totalRepos, totalPRs };
 }
 
-main().catch((err) => {
-  logger.error({ err }, "backfill failed");
-  process.exit(1);
-});
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  try {
+    const { totalRepos, totalPRs } = await runBackfill(args);
+    console.log(`Backfilled ${totalRepos} repos and ${totalPRs} PRs.`);
+  } catch (err) {
+    // Persistence-off is the one expected, user-actionable failure — give a
+    // clean message and exit 1 instead of a stack trace.
+    if (err instanceof Error && /Backfill requires SQLite/.test(err.message)) {
+      console.error(err.message);
+      process.exit(1);
+    }
+    throw err;
+  }
+}
+
+// Only run as the CLI entrypoint (`node dist/cli/backfill.js` / `tsx
+// src/cli/backfill.ts`). When imported for `runBackfill` (e.g. by the dashboard
+// self-seed path) this guard keeps the module side-effect-free.
+if (require.main === module) {
+  main().catch((err) => {
+    logger.error({ err }, "backfill failed");
+    process.exit(1);
+  });
+}

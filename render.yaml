@@ -1,0 +1,41 @@
+# Render Blueprint for DiffSentry — https://render.com/docs/blueprint-spec
+#
+# One-click-ish deploy: push this repo to GitHub, then in Render create a new
+# "Blueprint" pointing at it. Render builds the existing Dockerfile, attaches a
+# persistent disk for the SQLite DB, and prompts for the secret env vars below
+# (the ones marked `sync: false`).
+#
+# Note: a managed host can't mount a local private-key file, so set the App's
+# private key INLINE via GITHUB_PRIVATE_KEY (paste the full .pem contents) rather
+# than GITHUB_PRIVATE_KEY_PATH. The app reads either (see src/config.ts).
+services:
+  - type: web
+    name: diffsentry
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter            # has persistent-disk support; bump as needed
+    healthCheckPath: /health
+    autoDeploy: true
+    disk:
+      name: diffsentry-data
+      mountPath: /app/data   # SQLite DB + learnings live here (see Dockerfile)
+      sizeGB: 1
+    envVars:
+      # App binds to $PORT (defaults to 3005); Render routes public traffic to it.
+      - key: PORT
+        value: 3005
+      # ── GitHub App (secrets — entered in the Render dashboard) ──
+      - key: GITHUB_APP_ID
+        sync: false
+      - key: GITHUB_PRIVATE_KEY        # paste the full .pem contents
+        sync: false
+      - key: GITHUB_WEBHOOK_SECRET
+        sync: false
+      # ── AI provider ──
+      - key: AI_PROVIDER
+        value: anthropic               # anthropic | openai | openai-compatible
+      - key: ANTHROPIC_API_KEY         # swap for OPENAI_API_KEY / LOCAL_AI_* per provider
+        sync: false
+      # ── Web dashboard (optional) ──
+      - key: ENABLE_DASHBOARD
+        value: 1

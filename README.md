@@ -292,6 +292,11 @@ cost surprises).
 
 ## Setup
 
+> **In a hurry?** [docs/QUICK_START.md](docs/QUICK_START.md) is a ~10-minute path
+> from zero to a reviewed test PR (`npm run setup` writes your `.env` for you).
+> For running it durably — Docker, systemd, managed hosts, Kubernetes — see
+> [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ### 1. Create a GitHub App
 1. **Settings → Developer settings → GitHub Apps → New GitHub App**.
 2. Webhook URL: `https://yourdomain.com/webhook`.
