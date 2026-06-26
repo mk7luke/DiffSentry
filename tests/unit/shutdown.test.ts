@@ -1,5 +1,5 @@
 import type { Server } from "node:http";
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 // Disable persistence for the whole file BEFORE any openDatabase() runs: the
 // review queue's finalize() best-effort-persists via recordEvent(), which would
@@ -26,6 +26,11 @@ afterAll(() => {
   if (ORIGINAL_DB_PATH === undefined) delete process.env.DB_PATH;
   else process.env.DB_PATH = ORIGINAL_DB_PATH;
 });
+
+// Mirror of DEFAULT_CONNECTION_DRAIN_MS in src/shutdown.ts (no SHUTDOWN_DRAIN_MS
+// override is set, so the default applies). Used to advance fake timers past the
+// connection-drain grace.
+const DEFAULT_DRAIN_MS = 5_000;
 
 describe("reviewQueue.cancelAll", () => {
   it("aborts every in-flight review and returns the count", () => {
@@ -68,7 +73,13 @@ describe("gracefulShutdown", () => {
     // sequence ran AND that a second signal is a no-op (the `shuttingDown` latch).
     // The two phases are asserted explicitly below rather than in separate tests
     // because the latch state is what links them.
+    // Fake timers so we control the connection-drain grace; both the spy and the
+    // timers are torn down per-test (onTestFinished runs even if an assertion
+    // throws) so a global primitive like process.exit can't leak past this test.
+    vi.useFakeTimers();
+    onTestFinished(() => vi.useRealTimers());
     const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    onTestFinished(() => exit.mockRestore());
     const close = vi.fn((cb?: (err?: Error) => void) => cb?.());
     const closeIdle = vi.fn();
     const closeAll = vi.fn();
@@ -80,12 +91,17 @@ describe("gracefulShutdown", () => {
     await gracefulShutdown("SIGTERM", server);
 
     expect(close).toHaveBeenCalledTimes(1);
-    // Both socket-draining calls fire so keep-alive + long-lived (SSE) sockets
-    // can't hold close() open past the deadline.
+    // Idle keep-alive sockets are dropped immediately so they can't hold close()
+    // open; active sockets are NOT force-closed yet — they get the drain grace.
     expect(closeIdle).toHaveBeenCalledTimes(1);
-    expect(closeAll).toHaveBeenCalledTimes(1);
+    expect(closeAll).not.toHaveBeenCalled();
     expect(handle.signal.aborted).toBe(true);
     expect(exit).toHaveBeenCalledWith(0);
+
+    // After the drain grace elapses, lingering sockets (e.g. SSE streams) are
+    // force-closed so close() can resolve before the hard deadline.
+    vi.advanceTimersByTime(DEFAULT_DRAIN_MS);
+    expect(closeAll).toHaveBeenCalledTimes(1);
 
     // Phase 2 — because process.exit was stubbed the process is still alive in
     // the test, so a second signal exercises the `shuttingDown` latch: it must

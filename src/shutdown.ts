@@ -31,6 +31,16 @@ function shutdownTimeoutMs(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_SHUTDOWN_TIMEOUT_MS;
 }
 
+/** How long active requests get to drain before lingering sockets are
+ *  force-closed. Kept below the overall deadline so close() can still resolve
+ *  cleanly. Overridable via SHUTDOWN_DRAIN_MS (0 = force-close immediately). */
+const DEFAULT_CONNECTION_DRAIN_MS = 5_000;
+
+function connectionDrainMs(): number {
+  const raw = Number.parseInt(process.env.SHUTDOWN_DRAIN_MS ?? "", 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_CONNECTION_DRAIN_MS;
+}
+
 /** Latched so a second signal (or a signal mid-shutdown) can't re-enter. */
 let shuttingDown = false;
 
@@ -56,8 +66,11 @@ function closePersistenceBestEffort(): void {
 }
 
 /** Stop accepting new connections and resolve once the server is fully closed.
- *  Long-lived sockets (SSE dashboard streams, keep-alive) would otherwise hold
- *  close() open indefinitely, so we drop them explicitly; the hard timeout in
+ *  server.close() stops new connections and waits for active requests to finish.
+ *  We drop idle keep-alive sockets immediately so they don't hold it open, let
+ *  in-flight requests drain for a short grace, then force-close whatever is left
+ *  — chiefly long-lived SSE dashboard streams that never end on their own and
+ *  would otherwise block close() until the hard deadline. The hard timeout in
  *  gracefulShutdown is the final backstop if any of this wedges. */
 function closeServer(server: Server): Promise<void> {
   return new Promise((resolve) => {
@@ -65,9 +78,19 @@ function closeServer(server: Server): Promise<void> {
       if (err) logger.debug({ err }, "shutdown: server.close reported an error");
       resolve();
     });
-    // Both guarded — added in Node 18.2; no-ops on older runtimes.
+    // Drop idle (no active request) keep-alive sockets right away — safe and
+    // keeps close() from waiting on them. Guarded — added in Node 18.2.
     server.closeIdleConnections?.();
-    server.closeAllConnections?.();
+    // Force-close the stragglers only after a drain grace, so a normal SIGTERM
+    // doesn't cut off requests that are still being served. Unref'd so the timer
+    // can't by itself keep the process alive; harmless if close() already fired.
+    const drain = connectionDrainMs();
+    if (drain <= 0) {
+      server.closeAllConnections?.();
+    } else {
+      const force = setTimeout(() => server.closeAllConnections?.(), drain);
+      if (typeof force.unref === "function") force.unref();
+    }
   });
 }
 
