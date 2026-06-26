@@ -124,6 +124,29 @@ class ReviewQueue {
   }
 
   /**
+   * Abort every in-flight review and mark each canceled — the graceful-shutdown
+   * path. Reuses the same per-PR AbortController + finalize machinery as the
+   * single-PR cancel(), so a review threading the signal unwinds exactly as it
+   * would on an out-of-band cancel. Returns how many active reviews were
+   * canceled; a no-op (returns 0) when nothing is running. Safe to call twice.
+   */
+  cancelAll(): number {
+    let canceled = 0;
+    // Snapshot the controller keys first: finalize() mutates both maps as it
+    // runs, so iterating the live map directly would be unsafe.
+    for (const key of Array.from(this.controllers.keys())) {
+      const controller = this.controllers.get(key);
+      if (controller && !controller.signal.aborted) controller.abort();
+      const entry = this.entries.get(key);
+      if (entry && !isTerminal(entry.state)) {
+        this.finalize(key, entry.attempt, "canceled");
+        canceled++;
+      }
+    }
+    return canceled;
+  }
+
+  /**
    * The board snapshot: active entries first (oldest first), then the most
    * recent terminal cards (newest first).
    */
