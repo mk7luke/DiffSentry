@@ -5,6 +5,7 @@ import {
   ipv4IsPrivate,
   ipv6IsPrivate,
   ipv6ToBytes,
+  pinnedLookup,
 } from "../../src/notify/ssrf.js";
 
 // SSRF guard for outbound webhook targets. Fails closed: only public
@@ -186,5 +187,49 @@ describe("checkWebhookUrlSafe", () => {
   it("permits private egress only when the explicit flag is set", async () => {
     process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS = "true";
     expect(await checkWebhookUrlSafe("https://127.0.0.1/hook")).toBeNull();
+  });
+});
+
+describe("pinnedLookup (DNS pinning at connect time)", () => {
+  const saved = process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS;
+  beforeEach(() => {
+    delete process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS;
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS;
+    else process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS = saved;
+  });
+
+  const lookupOnce = (host: string, options: { family?: number; all?: boolean } = {}) =>
+    new Promise<{ err: NodeJS.ErrnoException | null; address?: unknown; family?: number }>((resolve) => {
+      pinnedLookup(host, options, (err, address, family) => resolve({ err, address, family }));
+    });
+
+  it("rejects a host that resolves only to a private/loopback address", async () => {
+    // localhost resolves to 127.0.0.1 / ::1 — both private, so nothing is safe.
+    const { err, address } = await lookupOnce("localhost");
+    expect(err).toBeInstanceOf(Error);
+    expect(address).toBeUndefined();
+  });
+
+  it("returns the private address when private egress is explicitly allowed", async () => {
+    process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS = "true";
+    const { err, address } = await lookupOnce("localhost", { family: 4 });
+    expect(err).toBeNull();
+    expect(address).toMatch(/^127\./);
+  });
+
+  it("returns validated public addresses for a real hostname", async () => {
+    // dns.example resolves to public addresses (93.184.x / 96.7.x range).
+    const { err, address, family } = await lookupOnce("example.com", { family: 4 });
+    // Tolerate offline CI (DNS failure) — but if it resolves, it must be a v4
+    // address and must not be a private one (the whole point of the pin).
+    if (err) {
+      expect(err).toBeInstanceOf(Error);
+      return;
+    }
+    expect(typeof address).toBe("string");
+    expect(family).toBe(4);
+    expect(ipv4IsPrivate(address as string)).toBe(false);
   });
 });

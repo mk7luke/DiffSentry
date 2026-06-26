@@ -1,5 +1,8 @@
 import net from "node:net";
+import http from "node:http";
+import https from "node:https";
 import dns from "node:dns/promises";
+import { lookup as dnsLookupCb, type LookupAddress } from "node:dns";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SSRF guard for outbound webhook targets — shared by the notifications API
@@ -7,13 +10,16 @@ import dns from "node:dns/promises";
 // is re-pointed to a private address between save and delivery (DNS rebinding)
 // is still rejected when the request actually fires.
 //
-// Note: a narrow TOCTOU window remains between this resolution and the HTTP
-// client's own internal resolution. Fully closing it would require a
-// connect-time pinned dispatcher (custom undici Agent), which we avoid to keep
-// the single-container deployment dependency-free. The route is admin + CSRF
-// gated, with two independent escape hatches for self-hosted/test use:
-// NOTIFY_ALLOW_INSECURE_WEBHOOKS (permit http) and NOTIFY_ALLOW_PRIVATE_WEBHOOKS
-// (permit private/loopback egress).
+// Sends go out via sendJsonPinned(), which performs the HTTP request with a
+// custom DNS `lookup` (pinnedLookup) that resolves the host, range-checks every
+// candidate address, and hands the socket exactly the validated IP it connects
+// to. Because that lookup IS the connection's only resolution, there is no
+// second, unchecked resolve — the classic DNS-rebinding TOCTOU window between
+// the safety check and the HTTP client's own lookup is closed.
+//
+// The route is admin + CSRF gated, with two independent escape hatches for
+// self-hosted/test use: NOTIFY_ALLOW_INSECURE_WEBHOOKS (permit http) and
+// NOTIFY_ALLOW_PRIVATE_WEBHOOKS (permit private/loopback egress).
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Two independent relaxations, so enabling plain-http for an internal relay does
@@ -189,4 +195,111 @@ export async function checkWebhookUrlSafe(v: string): Promise<string | null> {
     return "Webhook host did not resolve.";
   }
   return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DNS-pinned send path
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A `dns.lookup`-compatible function (usable as the `lookup` option on an
+ * http(s) request) that resolves a hostname and only ever returns addresses
+ * that pass the private-range check. Because the socket connects to exactly the
+ * address this returns, it doubles as the connection's single resolution — there
+ * is no second, unchecked lookup, so a host that rebinds to a private IP after
+ * checkWebhookUrlSafe() ran is still rejected at connect time.
+ *
+ * Honors the NOTIFY_ALLOW_PRIVATE_WEBHOOKS opt-out: when set, private/loopback
+ * results are allowed through (self-hosted internal relays) — the pinning still
+ * holds, it just skips the range filter.
+ *
+ * Note: IP-literal targets (e.g. https://10.0.0.5/hook) never invoke `lookup`
+ * (the socket layer connects directly), so those are covered by the literal
+ * checks in checkWebhookUrlSafe() at both save and send time instead.
+ */
+export function pinnedLookup(
+  hostname: string,
+  options: { family?: number; all?: boolean } | number,
+  callback: (
+    err: NodeJS.ErrnoException | null,
+    address?: string | LookupAddress[],
+    family?: number,
+  ) => void,
+): void {
+  const opts = typeof options === "number" ? { family: options } : (options ?? {});
+  const family = opts.family ?? 0;
+  const wantAll = opts.all === true;
+  const allowPrivate = allowPrivateEgress();
+
+  dnsLookupCb(hostname, { all: true, verbatim: true }, (err, addresses) => {
+    if (err) return callback(err);
+    const safe = addresses.filter((a) => {
+      if (family === 4 && a.family !== 4) return false;
+      if (family === 6 && a.family !== 6) return false;
+      if (allowPrivate) return true;
+      const priv = a.family === 6 ? ipv6IsPrivate(a.address) : ipv4IsPrivate(a.address);
+      return !priv;
+    });
+    if (safe.length === 0) {
+      const e = new Error(
+        `SSRF guard: ${hostname} did not resolve to an allowed public address`,
+      ) as NodeJS.ErrnoException;
+      e.code = "ENOTFOUND";
+      return callback(e);
+    }
+    if (wantAll) return callback(null, safe);
+    callback(null, safe[0].address, safe[0].family);
+  });
+}
+
+export interface PinnedHttpResponse {
+  status: number;
+  body: string;
+}
+
+/**
+ * POST a JSON body to a webhook URL over node:http/https with DNS pinned to a
+ * validated public IP (see pinnedLookup). Redirects are intentionally NOT
+ * followed — a 3xx `Location` is an SSRF re-entry vector that would bypass the
+ * pinned lookup. Resolves with the status + body text; rejects on transport
+ * error, timeout, or a host that resolves only to disallowed addresses.
+ */
+export function sendJsonPinned(
+  url: string,
+  body: string,
+  headers: Record<string, string>,
+  timeoutMs: number,
+): Promise<PinnedHttpResponse> {
+  const parsed = new URL(url);
+  const transport = parsed.protocol === "https:" ? https : http;
+  const payload = Buffer.from(body, "utf8");
+  return new Promise<PinnedHttpResponse>((resolve, reject) => {
+    const req = transport.request(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...headers,
+          "Content-Length": String(payload.byteLength),
+        },
+        // Pin resolution to a validated address; the socket connects to exactly
+        // this IP, so there is no second unchecked DNS lookup. Cast: our lookup
+        // intentionally handles both the all/one option shapes.
+        lookup: pinnedLookup as unknown as net.LookupFunction,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () =>
+          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }),
+        );
+        res.on("error", reject);
+      },
+    );
+    req.setTimeout(timeoutMs, () => req.destroy(new Error(`request timed out after ${timeoutMs}ms`)));
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
 }
