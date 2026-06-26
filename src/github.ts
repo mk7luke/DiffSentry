@@ -3,6 +3,174 @@ import { Octokit } from "@octokit/rest";
 import { Config, FileChange, PRContext, ReviewResult, IssueContext, IssueComment } from "./types.js";
 import { logger } from "./logger.js";
 
+// ─── Rate-limit / transient-error backoff ──────────────────────────
+// Every Octokit instance this module hands out (installation- and App-level)
+// is wrapped with the retry behaviour below via an `octokit.hook.wrap`, so
+// both the review path and the dashboard/diagnostics path benefit without any
+// per-call-site changes. REST and GraphQL both flow through the same
+// `request` hook in @octokit/core, so a single wrap covers them.
+//
+// Policy:
+//   - Primary rate limit (403/429 with x-ratelimit-remaining: 0): wait until
+//     x-ratelimit-reset, capped.
+//   - Secondary / abuse rate limit (retry-after header): honour retry-after,
+//     capped.
+//   - Transient 5xx: exponential backoff with jitter.
+//   - At most MAX_RETRIES attempts; each wait capped at MAX_RETRY_WAIT_MS.
+//   - A live AbortSignal short-circuits both the wait and any further retry,
+//     so a cancelled review stops hammering GitHub immediately.
+
+const MAX_RETRIES = 3;
+const MAX_RETRY_WAIT_MS = 60_000;
+const BASE_BACKOFF_MS = 1_000;
+
+/** Thrown when an AbortSignal fires while we're waiting to retry. */
+class AbortError extends Error {
+  constructor(message = "Operation aborted") {
+    super(message);
+    this.name = "AbortError";
+  }
+}
+
+/** Minimal view of an Octokit RequestError — only the fields we read. */
+interface RetryableError {
+  status?: number;
+  response?: { headers?: Record<string, string | undefined> };
+}
+
+function errHeaders(err: RetryableError): Record<string, string | undefined> {
+  return err?.response?.headers ?? {};
+}
+
+/** A 403/429 that GitHub flagged as a rate-limit (vs a plain permission 403). */
+function isRateLimited(err: RetryableError): boolean {
+  const status = err?.status;
+  if (status === 429) return true;
+  if (status === 403) {
+    const h = errHeaders(err);
+    return h["retry-after"] != null || h["x-ratelimit-remaining"] === "0";
+  }
+  return false;
+}
+
+/** Transient server-side failures worth a retry. */
+function isTransientServerError(err: RetryableError): boolean {
+  const status = err?.status;
+  return typeof status === "number" && status >= 500 && status <= 599;
+}
+
+const clampWait = (ms: number): number => Math.max(0, Math.min(ms, MAX_RETRY_WAIT_MS));
+
+/** How long to wait before retrying a rate-limited request. */
+function rateLimitWaitMs(err: RetryableError): number {
+  const h = errHeaders(err);
+  // Secondary/abuse limit: GitHub tells us exactly how long to wait.
+  const retryAfter = h["retry-after"];
+  if (retryAfter != null) {
+    const secs = Number(retryAfter);
+    if (Number.isFinite(secs)) return clampWait(secs * 1000);
+  }
+  // Primary limit: wait until the window resets (epoch seconds).
+  const reset = h["x-ratelimit-reset"];
+  if (reset != null) {
+    const resetSecs = Number(reset);
+    if (Number.isFinite(resetSecs)) {
+      return clampWait(Math.max(resetSecs * 1000 - Date.now(), BASE_BACKOFF_MS));
+    }
+  }
+  // No usable header — fall back to a conservative fixed wait.
+  return clampWait(BASE_BACKOFF_MS);
+}
+
+/** Exponential backoff with jitter for transient 5xx. */
+function backoffWaitMs(attempt: number): number {
+  const base = BASE_BACKOFF_MS * 2 ** attempt;
+  const jitter = base * 0.2 * Math.random();
+  return clampWait(base + jitter);
+}
+
+/** Promise that resolves after `ms`, or rejects with AbortError if `signal` fires. */
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new AbortError());
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new AbortError());
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * Run a single Octokit request with rate-limit-aware retries. `request` and
+ * `options` are the values passed by `octokit.hook.wrap("request", ...)`.
+ * Exported for unit testing.
+ */
+export async function requestWithRetry(
+  request: (options: any) => Promise<any>,
+  options: any,
+  signal?: AbortSignal,
+  log = logger
+): Promise<any> {
+  for (let attempt = 0; ; attempt++) {
+    if (signal?.aborted) throw new AbortError();
+    try {
+      return await request(options);
+    } catch (err) {
+      // A cancelled review must not keep retrying — surface immediately.
+      if (signal?.aborted) throw err;
+
+      const rateLimited = isRateLimited(err as RetryableError);
+      const transient = isTransientServerError(err as RetryableError);
+      if ((!rateLimited && !transient) || attempt >= MAX_RETRIES) throw err;
+
+      const waitMs = rateLimited
+        ? rateLimitWaitMs(err as RetryableError)
+        : backoffWaitMs(attempt);
+
+      log.warn(
+        {
+          attempt: attempt + 1,
+          maxRetries: MAX_RETRIES,
+          waitMs,
+          status: (err as RetryableError)?.status,
+          reason: rateLimited ? "rate-limit" : "transient-5xx",
+          method: options?.method,
+          url: options?.url,
+        },
+        "GitHub API backoff: retrying after rate-limit/transient error"
+      );
+
+      try {
+        await abortableDelay(waitMs, signal);
+      } catch {
+        // Aborted while waiting — stop retrying, surface the original error so
+        // the caller's `signal.aborted` check treats it as a clean cancel.
+        throw err;
+      }
+    }
+  }
+}
+
+/**
+ * Register the retry hook on an Octokit instance. `signal`, when supplied,
+ * makes every request on this instance abort-aware (used by the review path
+ * so a cancelled review stops retrying).
+ */
+function installRetryHook(octokit: Octokit, signal?: AbortSignal): Octokit {
+  octokit.hook.wrap("request", (request, options) =>
+    requestWithRetry(request as (o: any) => Promise<any>, options, signal)
+  );
+  return octokit;
+}
+
 // ─── GitHub App diagnostics (first-run experience) ─────────────────
 // Shapes returned by getAppDiagnostics(), consumed by the API diagnostics
 // route and the SPA's setup wizard / Diagnostics screen. Every field is
@@ -89,8 +257,8 @@ export class GitHubClient {
     this.config = config;
   }
 
-  async getInstallationOctokit(installationId: number): Promise<Octokit> {
-    return new Octokit({
+  async getInstallationOctokit(installationId: number, signal?: AbortSignal): Promise<Octokit> {
+    const octokit = new Octokit({
       authStrategy: createAppAuth,
       auth: {
         appId: this.config.githubAppId,
@@ -98,6 +266,7 @@ export class GitHubClient {
         installationId,
       },
     });
+    return installRetryHook(octokit, signal);
   }
 
   /**
@@ -106,14 +275,15 @@ export class GitHubClient {
    * inspect the webhook config, and read recent deliveries — none of which a
    * single installation token can see.
    */
-  getAppOctokit(): Octokit {
-    return new Octokit({
+  getAppOctokit(signal?: AbortSignal): Octokit {
+    const octokit = new Octokit({
       authStrategy: createAppAuth,
       auth: {
         appId: this.config.githubAppId,
         privateKey: this.config.githubPrivateKey,
       },
     });
+    return installRetryHook(octokit, signal);
   }
 
   /**
@@ -231,9 +401,11 @@ export class GitHubClient {
     repo: string,
     pullNumber: number,
     /** Per-review max-files override (operator setting); falls back to config. */
-    maxFiles?: number
+    maxFiles?: number,
+    /** Aborts in-flight retries when the review is cancelled. */
+    signal?: AbortSignal
   ): Promise<PRContext> {
-    const octokit = await this.getInstallationOctokit(installationId);
+    const octokit = await this.getInstallationOctokit(installationId, signal);
 
     const [pr, filesResponse] = await Promise.all([
       octokit.pulls.get({ owner, repo, pull_number: pullNumber }),
@@ -352,9 +524,10 @@ export class GitHubClient {
   async submitReview(
     installationId: number,
     context: PRContext,
-    result: ReviewResult
+    result: ReviewResult,
+    signal?: AbortSignal
   ): Promise<void> {
-    const octokit = await this.getInstallationOctokit(installationId);
+    const octokit = await this.getInstallationOctokit(installationId, signal);
     const log = logger.child({ owner: context.owner, repo: context.repo, pr: context.pullNumber });
 
     // Dismiss previous DiffSentry reviews so we don't pile up stale comments
@@ -435,9 +608,10 @@ export class GitHubClient {
     owner: string,
     repo: string,
     pullNumber: number,
-    body: string
+    body: string,
+    signal?: AbortSignal
   ): Promise<void> {
-    const octokit = await this.getInstallationOctokit(installationId);
+    const octokit = await this.getInstallationOctokit(installationId, signal);
     await octokit.issues.createComment({
       owner,
       repo,
@@ -451,8 +625,9 @@ export class GitHubClient {
     owner: string,
     repo: string,
     pullNumber: number,
+    signal?: AbortSignal,
   ): Promise<Array<{ sha: string; message: string; author?: string }>> {
-    const octokit = await this.getInstallationOctokit(installationId);
+    const octokit = await this.getInstallationOctokit(installationId, signal);
     const commits = await octokit.paginate(octokit.pulls.listCommits, {
       owner,
       repo,
@@ -493,9 +668,10 @@ export class GitHubClient {
     repo: string,
     pullNumber: number,
     body: string,
-    marker: string
+    marker: string,
+    signal?: AbortSignal
   ): Promise<void> {
-    const octokit = await this.getInstallationOctokit(installationId);
+    const octokit = await this.getInstallationOctokit(installationId, signal);
     const log = logger.child({ owner, repo, pr: pullNumber });
 
     const comments = await octokit.paginate(octokit.issues.listComments, {
@@ -533,9 +709,10 @@ export class GitHubClient {
     owner: string,
     repo: string,
     pullNumber: number,
-    body: string
+    body: string,
+    signal?: AbortSignal
   ): Promise<void> {
-    const octokit = await this.getInstallationOctokit(installationId);
+    const octokit = await this.getInstallationOctokit(installationId, signal);
     await octokit.pulls.update({
       owner,
       repo,
@@ -816,9 +993,10 @@ export class GitHubClient {
     sha: string,
     state: "pending" | "success" | "failure" | "error",
     description: string,
-    context: string = "DiffSentry"
+    context: string = "DiffSentry",
+    signal?: AbortSignal
   ): Promise<void> {
-    const octokit = await this.getInstallationOctokit(installationId);
+    const octokit = await this.getInstallationOctokit(installationId, signal);
     await octokit.repos.createCommitStatus({
       owner,
       repo,
@@ -835,10 +1013,11 @@ export class GitHubClient {
     owner: string,
     repo: string,
     pullNumber: number,
-    labels: string[]
+    labels: string[],
+    signal?: AbortSignal
   ): Promise<void> {
     if (labels.length === 0) return;
-    const octokit = await this.getInstallationOctokit(installationId);
+    const octokit = await this.getInstallationOctokit(installationId, signal);
     const log = logger.child({ owner, repo, pr: pullNumber });
     try {
       await octokit.issues.addLabels({
@@ -859,10 +1038,11 @@ export class GitHubClient {
     owner: string,
     repo: string,
     pullNumber: number,
-    reviewers: string[]
+    reviewers: string[],
+    signal?: AbortSignal
   ): Promise<void> {
     if (reviewers.length === 0) return;
-    const octokit = await this.getInstallationOctokit(installationId);
+    const octokit = await this.getInstallationOctokit(installationId, signal);
     const log = logger.child({ owner, repo, pr: pullNumber });
     // Strip @ prefix if present
     const cleaned = reviewers.map((r) => r.replace(/^@/, ""));
@@ -885,9 +1065,10 @@ export class GitHubClient {
     owner: string,
     repo: string,
     pullNumber: number,
-    changedFiles: string[]
+    changedFiles: string[],
+    signal?: AbortSignal
   ): Promise<Array<{ number: number; title: string; url: string; state: string }>> {
-    const octokit = await this.getInstallationOctokit(installationId);
+    const octokit = await this.getInstallationOctokit(installationId, signal);
     const results: Array<{ number: number; title: string; url: string; state: string }> = [];
     try {
       // Find open PRs that touch the same files (limited search)
