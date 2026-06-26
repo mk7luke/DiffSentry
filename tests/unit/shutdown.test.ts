@@ -1,11 +1,13 @@
 import type { Server } from "node:http";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Disable persistence for the whole file BEFORE any openDatabase() runs: the
 // review queue's finalize() best-effort-persists via recordEvent(), which would
 // otherwise open ./data/diffsentry.db. With DB_PATH="" the first open latches
 // the singleton disabled, so flush/close are exercised on the no-op path —
-// exactly the persistence-disabled behavior we want to assert.
+// exactly the persistence-disabled behavior we want to assert. Captured and
+// restored in afterAll so the env mutation stays self-contained to this file.
+const ORIGINAL_DB_PATH = process.env.DB_PATH;
 process.env.DB_PATH = "";
 
 import { reviewQueue } from "../../src/realtime/queue.js";
@@ -18,6 +20,11 @@ import { gracefulShutdown, registerProcessHandlers, resetLifecycleStateForTests 
 // later test sees gracefulShutdown() / registerProcessHandlers().
 beforeEach(() => {
   resetLifecycleStateForTests();
+});
+
+afterAll(() => {
+  if (ORIGINAL_DB_PATH === undefined) delete process.env.DB_PATH;
+  else process.env.DB_PATH = ORIGINAL_DB_PATH;
 });
 
 describe("reviewQueue.cancelAll", () => {

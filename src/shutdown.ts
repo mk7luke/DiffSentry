@@ -39,12 +39,16 @@ let shuttingDown = false;
  *  notification engine elsewhere in the codebase). */
 let handlersRegistered = false;
 
-/** Synchronous best-effort cleanup shared by the fatal-error paths. better-sqlite3
- *  close() is synchronous, so this is safe to call right before process.exit even
- *  when the event loop can no longer be trusted. */
+/** Synchronous best-effort DB close shared by the fatal-error paths. We
+ *  deliberately do NOT flush/checkpoint here (unlike the graceful path):
+ *  closeDatabase() is the essential resource release, committed transactions are
+ *  already durable in the WAL, and SQLite checkpoints the WAL on the final
+ *  connection close anyway. Skipping the flush keeps this path minimal in an
+ *  already-undefined process state and guarantees the close itself runs — a
+ *  throwing flush must not pre-empt closeDatabase(). better-sqlite3 close() is
+ *  synchronous, so this is safe right before process.exit. */
 function closePersistenceBestEffort(): void {
   try {
-    flushDatabase();
     closeDatabase();
   } catch {
     // Best-effort only — we're already on the way out.
