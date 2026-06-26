@@ -86,5 +86,9 @@ export async function withAiTimeout<T>(
     return await Promise.race([fn(controller.signal), deadline]);
   } finally {
     if (timer) clearTimeout(timer);
+    // If `fn` settled before the deadline fired, the controller is still "live".
+    // Abort it so any downstream work bound to the shared signal is canceled
+    // consistently. (The timeout path already aborted, hence the guard.)
+    if (!controller.signal.aborted) controller.abort();
   }
 }

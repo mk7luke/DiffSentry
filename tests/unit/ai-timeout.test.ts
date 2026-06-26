@@ -60,6 +60,33 @@ describe("withAiTimeout", () => {
     expect(tracked).toBe(false);
   });
 
+  it("aborts the signal once the call settles successfully before the deadline", async () => {
+    let captured: AbortSignal | undefined;
+    const result = await withAiTimeout(
+      { provider: "anthropic", operation: "complete", timeoutMs: 1000 },
+      async (signal) => {
+        captured = signal;
+        return "done";
+      },
+    );
+    expect(result).toBe("done");
+    expect(captured?.aborted).toBe(true);
+  });
+
+  it("aborts the signal when the call rejects before the deadline", async () => {
+    let captured: AbortSignal | undefined;
+    const err = await withAiTimeout(
+      { provider: "openai", operation: "review", timeoutMs: 1000 },
+      async (signal) => {
+        captured = signal;
+        throw new Error("boom");
+      },
+    ).catch((e) => e);
+    expect(isAiTimeoutError(err)).toBe(false);
+    expect(String(err.message)).toBe("boom");
+    expect(captured?.aborted).toBe(true);
+  });
+
   it("treats a non-positive timeout as 'no bound' and still resolves", async () => {
     const result = await withAiTimeout(
       { provider: "anthropic", operation: "complete", timeoutMs: 0 },
