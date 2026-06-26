@@ -85,10 +85,10 @@ export async function withAiTimeout<T>(
   try {
     return await Promise.race([fn(controller.signal), deadline]);
   } finally {
+    // Only the timer callback aborts the controller, and only when the deadline
+    // actually expires. If `fn` settled first we just cancel the pending timer —
+    // we must NOT abort here, or a successful/ordinary-error call would leave the
+    // signal in an `aborted` state and mislead anything observing it.
     if (timer) clearTimeout(timer);
-    // If `fn` settled before the deadline fired, the controller is still "live".
-    // Abort it so any downstream work bound to the shared signal is canceled
-    // consistently. (The timeout path already aborted, hence the guard.)
-    if (!controller.signal.aborted) controller.abort();
   }
 }

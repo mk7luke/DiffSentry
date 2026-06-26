@@ -60,7 +60,7 @@ describe("withAiTimeout", () => {
     expect(tracked).toBe(false);
   });
 
-  it("aborts the signal once the call settles successfully before the deadline", async () => {
+  it("leaves the signal un-aborted when the call succeeds before the deadline", async () => {
     let captured: AbortSignal | undefined;
     const result = await withAiTimeout(
       { provider: "anthropic", operation: "complete", timeoutMs: 1000 },
@@ -70,10 +70,11 @@ describe("withAiTimeout", () => {
       },
     );
     expect(result).toBe("done");
-    expect(captured?.aborted).toBe(true);
+    // Only an actual timeout aborts the signal — a successful call must not.
+    expect(captured?.aborted).toBe(false);
   });
 
-  it("aborts the signal when the call rejects before the deadline", async () => {
+  it("propagates an ordinary error without aborting the signal", async () => {
     let captured: AbortSignal | undefined;
     const err = await withAiTimeout(
       { provider: "openai", operation: "review", timeoutMs: 1000 },
@@ -84,7 +85,8 @@ describe("withAiTimeout", () => {
     ).catch((e) => e);
     expect(isAiTimeoutError(err)).toBe(false);
     expect(String(err.message)).toBe("boom");
-    expect(captured?.aborted).toBe(true);
+    // An ordinary failure isn't a cancellation, so the signal stays un-aborted.
+    expect(captured?.aborted).toBe(false);
   });
 
   it("treats a non-positive timeout as 'no bound' and still resolves", async () => {
