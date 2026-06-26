@@ -28,6 +28,7 @@ const STATE_RANK: Record<ReviewQueueState, number> = {
   done: 2,
   failed: 2,
   canceled: 2,
+  dead_letter: 2,
 };
 // Monotonic rank: attempt dominates (×10 ≫ the max state rank of 2), then the
 // lifecycle only moves forward. A higher attempt or a later state always wins;
@@ -54,7 +55,7 @@ function mergeHydrate(existing: ReviewQueueEntry | undefined, incoming: ReviewQu
 }
 
 function isTerminal(state: ReviewQueueState): boolean {
-  return state === "done" || state === "failed" || state === "canceled";
+  return state === "done" || state === "failed" || state === "canceled" || state === "dead_letter";
 }
 
 function fmtElapsed(ms: number): string {
@@ -84,6 +85,7 @@ const STATE_LABEL: Record<ReviewQueueState, string> = {
   done: "Done",
   failed: "Failed",
   canceled: "Canceled",
+  dead_letter: "Dead-letter",
 };
 
 interface LaneDef {
@@ -101,7 +103,7 @@ const LANES: LaneDef[] = [
   { key: "queued", title: "Queued", match: (s) => s === "queued", tone: "neutral", terminal: false },
   { key: "running", title: "Running", match: (s) => s === "running", tone: "accent", terminal: false },
   { key: "done", title: "Done", match: (s) => s === "done" || s === "canceled", tone: "good", terminal: true },
-  { key: "failed", title: "Failed", match: (s) => s === "failed", tone: "danger", terminal: true },
+  { key: "failed", title: "Failed", match: (s) => s === "failed" || s === "dead_letter", tone: "danger", terminal: true },
 ];
 
 function QueueCard({ entry, now }: { entry: ReviewQueueEntry; now: number }) {
@@ -133,9 +135,9 @@ function QueueCard({ entry, now }: { entry: ReviewQueueEntry; now: number }) {
         ) : null}
       </div>
 
-      {entry.state === "failed" && entry.error ? (
+      {(entry.state === "failed" || entry.state === "dead_letter") && entry.error ? (
         <div className="qcard-error mono" title={entry.error}>
-          {entry.error}
+          {entry.state === "dead_letter" ? `Gave up after retries — ${entry.error}` : entry.error}
         </div>
       ) : null}
 
@@ -153,7 +155,7 @@ function QueueCard({ entry, now }: { entry: ReviewQueueEntry; now: number }) {
             Cancel
           </ActionButton>
         ) : null}
-        {entry.state === "failed" || entry.state === "canceled" ? (
+        {entry.state === "failed" || entry.state === "canceled" || entry.state === "dead_letter" ? (
           <ActionButton
             path={`${enc}/review`}
             body={{ mode: entry.mode }}

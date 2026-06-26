@@ -30,7 +30,7 @@ import { bus, type ReviewQueueEntry, type ReviewQueueState } from "./bus.js";
 const TERMINAL_RETENTION = 40;
 
 function isTerminal(state: ReviewQueueState): boolean {
-  return state === "done" || state === "failed" || state === "canceled";
+  return state === "done" || state === "failed" || state === "canceled" || state === "dead_letter";
 }
 
 /**
@@ -144,6 +144,38 @@ class ReviewQueue {
       }
     }
     return canceled;
+  }
+
+  /**
+   * Promote a PR's card to the terminal `dead_letter` state — the job-runner
+   * calls this once a review has exhausted its bounded transient-error retries.
+   * Unlike the per-attempt transitions, this is allowed to override an already
+   * terminal card (the last attempt left it `failed`), so the board reflects the
+   * give-up rather than a single failure. Records a `review.dead_letter` event so
+   * the Ops Console stream surfaces it. No-op when the PR has no card (e.g. the
+   * DB-backed job outlived its in-memory board entry).
+   */
+  markDeadLetter(owner: string, repo: string, num: number, error?: string): void {
+    const key = this.keyFor(owner, repo, num);
+    const entry = this.entries.get(key);
+    if (!entry || entry.state === "dead_letter") return;
+    entry.state = "dead_letter";
+    entry.phase = null;
+    entry.error = error ?? entry.error ?? null;
+    if (!entry.finishedAt) entry.finishedAt = new Date().toISOString();
+    const controller = this.controllers.get(key);
+    if (controller && !controller.signal.aborted) controller.abort();
+    this.controllers.delete(key);
+    this.emit(entry);
+
+    recordEvent({
+      owner,
+      repo,
+      number: num,
+      kind: "review.dead_letter",
+      payload: { mode: entry.mode, attempt: entry.attempt, error: entry.error },
+    });
+    this.prune();
   }
 
   /**

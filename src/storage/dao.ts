@@ -1659,3 +1659,179 @@ export function recordPatternHits(opts: {
     logger.debug({ err }, "dao.recordPatternHits failed");
   }
 }
+
+// ---------------------------------------------------------------------------
+// Durable review queue (schema v5). The crash-safe shadow of the in-memory
+// reviewQueue board: every queued/in-flight review is persisted so a restart can
+// re-enqueue work that was running when the process died. The job-runner
+// (src/realtime/jobs.ts) owns these rows; the live board stays in-memory. All
+// best-effort no-ops when the DB is disabled — recovery simply finds nothing.
+// ---------------------------------------------------------------------------
+
+/** Durable lifecycle states. `done` rows are deleted (recovery only cares about
+ *  unfinished work); `failed`/`dead_letter` are retained for visibility. */
+export type ReviewJobState = "queued" | "running" | "done" | "failed" | "dead_letter";
+
+/** A row of the review_jobs table, as stored. */
+export interface ReviewJobRow {
+  key: string;
+  run_id: string;
+  owner: string;
+  repo: string;
+  number: number;
+  mode: "full" | "incremental";
+  installation_id: number;
+  state: ReviewJobState;
+  attempts: number;
+  last_error: string | null;
+  enqueued_at: string;
+  updated_at: string;
+}
+
+/** Build the canonical durable-job key — must match the in-memory queue key. */
+function reviewJobKey(owner: string, repo: string, number: number): string {
+  return `${owner}/${repo}#${number}`;
+}
+
+/**
+ * Upsert the durable record for a review attempt. Overwrites any prior row for
+ * the same PR (PK = key), stamping the caller's `runId` — the token later
+ * terminal writes guard on, so a superseded attempt can't finalize the row that
+ * replaced it. Best-effort no-op when persistence is disabled.
+ */
+export function upsertReviewJob(opts: {
+  runId: string;
+  owner: string;
+  repo: string;
+  number: number;
+  mode: "full" | "incremental";
+  installationId: number;
+  state: ReviewJobState;
+  attempts: number;
+  lastError?: string | null;
+}): void {
+  const db = openDatabase();
+  if (!db) return;
+  try {
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO review_jobs
+         (key, run_id, owner, repo, number, mode, installation_id, state, attempts, last_error, enqueued_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET
+         run_id = excluded.run_id,
+         mode = excluded.mode,
+         installation_id = excluded.installation_id,
+         state = excluded.state,
+         attempts = excluded.attempts,
+         last_error = excluded.last_error,
+         updated_at = excluded.updated_at`,
+    ).run(
+      reviewJobKey(opts.owner, opts.repo, opts.number),
+      opts.runId,
+      opts.owner,
+      opts.repo,
+      opts.number,
+      opts.mode,
+      opts.installationId,
+      opts.state,
+      opts.attempts,
+      opts.lastError ?? null,
+      now,
+      now,
+    );
+  } catch (err) {
+    logger.debug({ err }, "dao.upsertReviewJob failed");
+  }
+}
+
+/**
+ * Finalize a durable review job. Guarded on `runId` so only the run that still
+ * owns the row can finalize it — a superseded attempt is a silent no-op. A
+ * `done` outcome deletes the row (recovery only re-runs unfinished work);
+ * `failed`/`dead_letter` update it in place for visibility. Returns true when a
+ * row actually transitioned.
+ */
+export function markReviewJobTerminal(opts: {
+  owner: string;
+  repo: string;
+  number: number;
+  runId: string;
+  state: "done" | "failed" | "dead_letter";
+  lastError?: string | null;
+}): boolean {
+  const db = openDatabase();
+  if (!db) return false;
+  const key = reviewJobKey(opts.owner, opts.repo, opts.number);
+  try {
+    if (opts.state === "done") {
+      const info = db.prepare(`DELETE FROM review_jobs WHERE key = ? AND run_id = ?`).run(key, opts.runId);
+      return info.changes > 0;
+    }
+    const info = db
+      .prepare(`UPDATE review_jobs SET state = ?, last_error = ?, updated_at = ? WHERE key = ? AND run_id = ?`)
+      .run(opts.state, opts.lastError ?? null, new Date().toISOString(), key, opts.runId);
+    return info.changes > 0;
+  } catch (err) {
+    logger.debug({ err }, "dao.markReviewJobTerminal failed");
+    return false;
+  }
+}
+
+/**
+ * Delete the durable job for a PR unconditionally (no run_id guard) — the
+ * user-driven cancel / PR-closed path, where operator intent overrides whatever
+ * run currently owns the row, so boot recovery won't resurrect a review the user
+ * deliberately stopped.
+ */
+export function deleteReviewJob(owner: string, repo: string, number: number): void {
+  const db = openDatabase();
+  if (!db) return;
+  try {
+    db.prepare(`DELETE FROM review_jobs WHERE key = ?`).run(reviewJobKey(owner, repo, number));
+  } catch (err) {
+    logger.debug({ err }, "dao.deleteReviewJob failed");
+  }
+}
+
+/**
+ * Every review job still unfinished (queued or running) — the set boot recovery
+ * re-enqueues. Empty when persistence is disabled.
+ */
+export function listInFlightReviewJobs(): ReviewJobRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  try {
+    return db
+      .prepare(`SELECT * FROM review_jobs WHERE state IN ('queued', 'running') ORDER BY enqueued_at ASC`)
+      .all() as ReviewJobRow[];
+  } catch (err) {
+    logger.debug({ err }, "dao.listInFlightReviewJobs failed");
+    return [];
+  }
+}
+
+/**
+ * Idempotency claim for a GitHub webhook delivery. Returns true when this
+ * delivery id is seen for the first time (caller should process it), false when
+ * it was already recorded (a redelivery — caller should skip to avoid a
+ * duplicate review). INSERT OR IGNORE makes the claim atomic.
+ *
+ * When persistence is disabled there is nothing to dedupe against, so we return
+ * true (process it) — idempotency degrades to the prior at-least-once behavior
+ * rather than silently dropping every delivery.
+ */
+export function claimWebhookDelivery(deliveryId: string): boolean {
+  const db = openDatabase();
+  if (!db) return true;
+  if (!deliveryId) return true;
+  try {
+    const info = db
+      .prepare(`INSERT OR IGNORE INTO processed_deliveries (delivery_id, ts) VALUES (?, ?)`)
+      .run(deliveryId, new Date().toISOString());
+    return info.changes > 0;
+  } catch (err) {
+    logger.debug({ err }, "dao.claimWebhookDelivery failed");
+    return true;
+  }
+}

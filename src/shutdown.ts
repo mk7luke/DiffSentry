@@ -44,6 +44,16 @@ function connectionDrainMs(): number {
 /** Latched so a second signal (or a signal mid-shutdown) can't re-enter. */
 let shuttingDown = false;
 
+/**
+ * Whether graceful shutdown has begun. The job-runner consults this to decide
+ * NOT to schedule another retry backoff once we're tearing down — it leaves the
+ * durable job row `running` so boot recovery re-enqueues it, rather than burning
+ * the shutdown grace sleeping on a retry that may never run.
+ */
+export function isShuttingDown(): boolean {
+  return shuttingDown;
+}
+
 /** Latched so a repeat registerProcessHandlers() call can't stack duplicate
  *  process listeners (mirrors the idempotent boot of the bus / queue /
  *  notification engine elsewhere in the codebase). */

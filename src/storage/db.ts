@@ -313,6 +313,45 @@ CREATE INDEX IF NOT EXISTS idx_custom_rules_enabled ON custom_rules(enabled);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_rules_name ON custom_rules(name);
 `;
 
+/**
+ * Migration 5 — durable review queue + webhook idempotency. Two concerns:
+ *
+ *  - `review_jobs`: the crash-safe record of every queued/in-flight review, so a
+ *    restart can re-enqueue work that was running when the process died. One row
+ *    per PR (PK = `owner/repo#number`); a per-attempt `run_id` token guards
+ *    terminal writes so a superseded run can never finalize (or delete) the row
+ *    that replaced it. The in-memory reviewQueue stays the live board — this is
+ *    purely the durable shadow the boot-time recovery reads.
+ *  - `processed_deliveries`: the idempotency ledger keyed by GitHub's
+ *    X-GitHub-Delivery id, so a redelivered webhook can't trigger a duplicate
+ *    review. INSERT OR IGNORE + changes() is the claim primitive.
+ *
+ * Strictly additive (two new tables) — same rules as every other migration.
+ */
+const SCHEMA_V5 = `
+CREATE TABLE IF NOT EXISTS review_jobs (
+  key TEXT PRIMARY KEY,            -- 'owner/repo#number' — one durable row per PR
+  run_id TEXT NOT NULL,            -- per-attempt token; terminal writes guard on it
+  owner TEXT NOT NULL,
+  repo TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  mode TEXT NOT NULL,              -- 'full' | 'incremental'
+  installation_id INTEGER NOT NULL,
+  state TEXT NOT NULL,             -- 'queued' | 'running' | 'failed' | 'dead_letter'
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  enqueued_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_review_jobs_state ON review_jobs(state);
+
+CREATE TABLE IF NOT EXISTS processed_deliveries (
+  delivery_id TEXT PRIMARY KEY,
+  ts TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_processed_deliveries_ts ON processed_deliveries(ts);
+`;
+
 export interface Migration {
   version: number;
   name: string;
@@ -396,6 +435,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 2, name: "command_center", sql: SCHEMA_V2, post: ensureFindingsTriageColumns },
   { version: 3, name: "custom_rules", sql: SCHEMA_V3, post: ensurePatternHitsCustomRuleId },
   { version: 4, name: "notification_deliveries", sql: SCHEMA_V4 },
+  { version: 5, name: "durable_queue", sql: SCHEMA_V5 },
 ];
 
 /** Highest version this binary knows how to migrate to. */

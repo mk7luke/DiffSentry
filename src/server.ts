@@ -3,15 +3,26 @@ import path from "node:path";
 import { Config } from "./types.js";
 import { Reviewer } from "./reviewer.js";
 import { logger } from "./logger.js";
-import { recordWebhookDelivery } from "./storage/dao.js";
+import { recordWebhookDelivery, claimWebhookDelivery } from "./storage/dao.js";
 import { createDashboardRouter } from "./dashboard/routes.js";
 import { createApiRouter } from "./api/router.js";
 import { createAuth, loadAuthConfigFromEnv } from "./dashboard/auth.js";
 import { applyPersistedSettings } from "./settings/overrides.js";
 import { dispatchWebhookEvent, extractWebhookMeta } from "./webhook/dispatch.js";
 import { verifyWebhookSignature } from "./webhook/signature.js";
+import { recoverInFlightJobs } from "./realtime/jobs.js";
 
-export function createServer(config: Config) {
+export interface CreatedServer {
+  app: express.Express;
+  /**
+   * Re-enqueue any review jobs that were in-flight when the process last
+   * stopped. Call once after the HTTP listener is up (persistence must already
+   * be open). No-op (returns 0) when persistence is disabled or nothing pended.
+   */
+  recover: () => number;
+}
+
+export function createServer(config: Config): CreatedServer {
   const app = express();
   const reviewer = new Reviewer(config);
 
@@ -178,6 +189,17 @@ export function createServer(config: Config) {
       return;
     }
 
+    // Idempotency: GitHub retries deliveries (and may double-send), each carrying
+    // the same X-GitHub-Delivery id. Claim it once; a redelivery we've already
+    // processed is acknowledged 200 but NOT re-dispatched, so a single push can't
+    // trigger duplicate reviews. The delivery is still recorded above for the
+    // inspection view. No-op (always claims) when persistence is disabled.
+    if (deliveryId && !claimWebhookDelivery(deliveryId)) {
+      logger.info({ deliveryId, event }, "Duplicate webhook delivery — already processed, skipping dispatch");
+      res.status(200).json({ status: "duplicate" });
+      return;
+    }
+
     const { status, body: responseBody } = await dispatchWebhookEvent(
       { reviewer, botName: config.botName },
       event,
@@ -205,5 +227,12 @@ export function createServer(config: Config) {
     });
   }
 
-  return app;
+  return {
+    app,
+    recover: () =>
+      recoverInFlightJobs({
+        handlePullRequest: (installationId, owner, repo, number, mode) =>
+          reviewer.handlePullRequest(installationId, owner, repo, number, mode),
+      }),
+  };
 }
