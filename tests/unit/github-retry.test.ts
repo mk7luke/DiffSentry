@@ -123,6 +123,47 @@ describe("requestWithRetry", () => {
     expect(req.count()).toBe(1);
   });
 
+  it("forwards the AbortSignal into the underlying request options", async () => {
+    const controller = new AbortController();
+    let seen: any;
+    const req = Object.assign(
+      async (options: any) => {
+        seen = options;
+        return { data: "ok" };
+      },
+      { count: () => 1 }
+    );
+    await requestWithRetry(req, { method: "GET", url: "/x" }, controller.signal, quietLog);
+    expect(seen.request?.signal).toBe(controller.signal);
+  });
+
+  it("preserves caller-supplied options.request when forwarding the signal", async () => {
+    const controller = new AbortController();
+    let seen: any;
+    const req = async (options: any) => {
+      seen = options;
+      return { data: "ok" };
+    };
+    await requestWithRetry(
+      req,
+      { method: "GET", url: "/x", request: { timeout: 1234 } },
+      controller.signal,
+      quietLog
+    );
+    expect(seen.request?.signal).toBe(controller.signal);
+    expect(seen.request?.timeout).toBe(1234);
+  });
+
+  it("does not add a request.signal when no signal is supplied", async () => {
+    let seen: any;
+    const req = async (options: any) => {
+      seen = options;
+      return { data: "ok" };
+    };
+    await requestWithRetry(req, { method: "GET", url: "/x" }, undefined, quietLog);
+    expect(seen.request?.signal).toBeUndefined();
+  });
+
   it("rejects immediately if the signal is already aborted", async () => {
     const controller = new AbortController();
     controller.abort();

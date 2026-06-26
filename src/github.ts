@@ -119,10 +119,16 @@ export async function requestWithRetry(
   signal?: AbortSignal,
   log = logger
 ): Promise<any> {
+  // Forward the abort signal to the underlying Octokit/fetch request so an
+  // in-flight call is cancelled too — not just the backoff wait between
+  // retries. Preserve any caller-supplied `options.request`.
+  const requestOptions = signal
+    ? { ...options, request: { ...(options?.request ?? {}), signal } }
+    : options;
   for (let attempt = 0; ; attempt++) {
     if (signal?.aborted) throw new AbortError();
     try {
-      return await request(options);
+      return await request(requestOptions);
     } catch (err) {
       // A cancelled review must not keep retrying — surface immediately.
       if (signal?.aborted) throw err;
