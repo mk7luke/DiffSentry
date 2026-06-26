@@ -526,6 +526,23 @@ export function openDatabase(): DB | null {
   }
 }
 
+/**
+ * Flush pending writes to durable storage. better-sqlite3 is synchronous so
+ * every committed write is already on disk, but in WAL mode those commits live
+ * in the -wal sidecar until a checkpoint folds them into the main database
+ * file. Run a TRUNCATE checkpoint on shutdown so we exit with a clean, fully
+ * merged database and an empty WAL. Best-effort and a no-op when persistence is
+ * disabled or the handle is already closed.
+ */
+export function flushDatabase(): void {
+  if (!_db) return;
+  try {
+    _db.pragma("wal_checkpoint(TRUNCATE)");
+  } catch (err) {
+    logger.debug({ err }, "flushDatabase: WAL checkpoint failed");
+  }
+}
+
 export function closeDatabase(): void {
   if (_db) {
     try {
