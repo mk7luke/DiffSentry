@@ -48,6 +48,11 @@ describe("gracefulShutdown", () => {
   });
 
   it("drains the server, cancels reviews, and exits 0 (idempotent)", async () => {
+    // In production process.exit(0) is the last statement gracefulShutdown runs;
+    // stubbing it to a no-op lets the awaited call return so we can assert the
+    // sequence ran AND that a second signal is a no-op (the `shuttingDown` latch).
+    // The two phases are asserted explicitly below rather than in separate tests
+    // because the latch state is what links them.
     const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
     const close = vi.fn((cb?: (err?: Error) => void) => cb?.());
     const closeAll = vi.fn();
@@ -55,6 +60,7 @@ describe("gracefulShutdown", () => {
 
     const handle = reviewQueue.enqueue("o", "r", 99, "full");
 
+    // Phase 1 — first signal runs the full drain → cancel → close → exit(0).
     await gracefulShutdown("SIGTERM", server);
 
     expect(close).toHaveBeenCalledTimes(1);
@@ -62,7 +68,9 @@ describe("gracefulShutdown", () => {
     expect(handle.signal.aborted).toBe(true);
     expect(exit).toHaveBeenCalledWith(0);
 
-    // Latched: a second signal must not re-run the sequence.
+    // Phase 2 — because process.exit was stubbed the process is still alive in
+    // the test, so a second signal exercises the `shuttingDown` latch: it must
+    // return immediately without re-running any shutdown step.
     close.mockClear();
     await gracefulShutdown("SIGINT", server);
     expect(close).not.toHaveBeenCalled();
@@ -74,26 +82,25 @@ describe("registerProcessHandlers", () => {
     vi.restoreAllMocks();
   });
 
-  it("attaches crash-safety and signal handlers without throwing", () => {
+  it("registers the crash-safety + signal handlers exactly once (idempotent)", () => {
     const server = { close: vi.fn((cb?: () => void) => cb?.()) } as unknown as Server;
-    const before = {
-      unhandledRejection: process.listenerCount("unhandledRejection"),
-      uncaughtException: process.listenerCount("uncaughtException"),
-      sigterm: process.listenerCount("SIGTERM"),
-      sigint: process.listenerCount("SIGINT"),
-    };
+    // Stub process.on so we observe the registrations WITHOUT attaching real
+    // listeners to the live process — no global teardown (removeAllListeners)
+    // that could clobber listeners the test runner itself owns.
+    const onSpy = vi.spyOn(process, "on").mockImplementation(() => process);
 
     registerProcessHandlers(server);
 
-    expect(process.listenerCount("unhandledRejection")).toBe(before.unhandledRejection + 1);
-    expect(process.listenerCount("uncaughtException")).toBe(before.uncaughtException + 1);
-    expect(process.listenerCount("SIGTERM")).toBe(before.sigterm + 1);
-    expect(process.listenerCount("SIGINT")).toBe(before.sigint + 1);
+    const events = onSpy.mock.calls.map((c) => c[0]);
+    expect(events).toEqual(
+      expect.arrayContaining(["unhandledRejection", "uncaughtException", "SIGTERM", "SIGINT"]),
+    );
+    const firstCallCount = onSpy.mock.calls.length;
 
-    // Clean up the listeners we just registered so we don't leak across files.
-    process.removeAllListeners("unhandledRejection");
-    process.removeAllListeners("uncaughtException");
-    process.removeAllListeners("SIGTERM");
-    process.removeAllListeners("SIGINT");
+    // Idempotent: a repeat call must not stack duplicate listeners.
+    registerProcessHandlers(server);
+    expect(onSpy.mock.calls.length).toBe(firstCallCount);
+
+    onSpy.mockRestore();
   });
 });

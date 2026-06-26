@@ -34,6 +34,11 @@ function shutdownTimeoutMs(): number {
 /** Latched so a second signal (or a signal mid-shutdown) can't re-enter. */
 let shuttingDown = false;
 
+/** Latched so a repeat registerProcessHandlers() call can't stack duplicate
+ *  process listeners (mirrors the idempotent boot of the bus / queue /
+ *  notification engine elsewhere in the codebase). */
+let handlersRegistered = false;
+
 /** Synchronous best-effort cleanup shared by the fatal-error paths. better-sqlite3
  *  close() is synchronous, so this is safe to call right before process.exit even
  *  when the event loop can no longer be trusted. */
@@ -119,6 +124,9 @@ export async function gracefulShutdown(signal: string, server: Server | null): P
  * the HTTP listener is created.
  */
 export function registerProcessHandlers(server: Server): void {
+  if (handlersRegistered) return;
+  handlersRegistered = true;
+
   // An unhandled rejection leaves a promise chain in an unknown state; Node's
   // own roadmap treats this as fatal. Log the full reason and exit non-zero.
   process.on("unhandledRejection", (reason) => {
