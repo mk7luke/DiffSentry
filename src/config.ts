@@ -1,6 +1,18 @@
 import fs from "fs";
 import { Config } from "./types.js";
 
+// Canonical list of accepted AI providers. This is the single source of truth
+// for the AI_PROVIDER enum — the runtime loader (below), the diagnostics check,
+// and the interactive setup CLI all import it rather than re-hardcoding the
+// strings, so a new provider is added in exactly one place and a typo like
+// "claude" can never silently pass validation in one path while failing another.
+export const AI_PROVIDERS = ["anthropic", "openai", "openai-compatible"] as const;
+export type AiProvider = (typeof AI_PROVIDERS)[number];
+
+export function isAiProvider(value: string): value is AiProvider {
+  return (AI_PROVIDERS as readonly string[]).includes(value);
+}
+
 // Canonical default model names. These literals live here only — other modules
 // (e.g. the diagnostics config summary) import these rather than re-hardcoding.
 export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
@@ -16,6 +28,11 @@ export function loadConfig(): Config {
 
   const aiProvider = (process.env.AI_PROVIDER || "anthropic") as Config["aiProvider"];
 
+  if (!isAiProvider(aiProvider)) {
+    throw new Error(
+      `AI_PROVIDER must be one of: ${AI_PROVIDERS.join(", ")} (got: ${aiProvider})`
+    );
+  }
   if (aiProvider === "anthropic" && !process.env.ANTHROPIC_API_KEY) {
     throw new Error("ANTHROPIC_API_KEY is required when AI_PROVIDER=anthropic");
   }
@@ -32,11 +49,6 @@ export function loadConfig(): Config {
     throw new Error(
       "LOCAL_AI_MODEL is required when AI_PROVIDER=openai-compatible " +
         "(the model name your local server exposes, e.g. 'llama3.1:70b' or 'qwen2.5-coder')"
-    );
-  }
-  if (aiProvider !== "anthropic" && aiProvider !== "openai" && aiProvider !== "openai-compatible") {
-    throw new Error(
-      `AI_PROVIDER must be one of: anthropic, openai, openai-compatible (got: ${aiProvider})`
     );
   }
   if (!process.env.GITHUB_APP_ID) {

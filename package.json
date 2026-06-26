@@ -8,6 +8,7 @@
     "build:server": "tsc",
     "build:web": "npm --prefix web ci && npm --prefix web run build",
     "start": "node dist/index.js",
+    "setup": "tsx scripts/setup.ts",
     "dev": "tsx watch src/index.ts",
     "dev:web": "npm --prefix web run dev",
     "e2e": "tsx tests/e2e/cli.ts",

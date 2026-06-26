@@ -4,7 +4,7 @@ import type { Role } from "../dashboard/roles.js";
 import { getActor } from "../dashboard/roles.js";
 import type { CsrfRuntime } from "../dashboard/auth.js";
 import { loadAuthConfigFromEnv } from "../dashboard/auth.js";
-import { DEFAULT_ANTHROPIC_MODEL, DEFAULT_OPENAI_MODEL } from "../config.js";
+import { AI_PROVIDERS, DEFAULT_ANTHROPIC_MODEL, DEFAULT_OPENAI_MODEL } from "../config.js";
 import { signWebhookPayload, verifyWebhookSignature } from "../webhook/signature.js";
 import { insertAuditLog } from "../storage/dao.js";
 import { openDatabase } from "../storage/db.js";
@@ -100,7 +100,7 @@ function privateKeyState(): { ok: boolean; detail: string } {
   }
 }
 
-const VALID_PROVIDERS = ["anthropic", "openai", "openai-compatible"];
+const VALID_PROVIDERS = AI_PROVIDERS;
 
 /** Build the static (no-network) check list from the environment + DB. */
 function buildChecks(authEnabled: boolean, persistenceEnabled: boolean): DiagnosticCheck[] {
@@ -145,7 +145,7 @@ function buildChecks(authEnabled: boolean, persistenceEnabled: boolean): Diagnos
 
   // ── AI provider ─────────────────────────────────────────────────
   const provider = (process.env.AI_PROVIDER || "anthropic").trim();
-  const providerValid = VALID_PROVIDERS.includes(provider);
+  const providerValid = (VALID_PROVIDERS as readonly string[]).includes(provider);
   checks.push({
     id: "ai.provider",
     category: "ai",

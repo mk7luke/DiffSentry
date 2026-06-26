@@ -3,6 +3,7 @@ import { loadConfig } from "./config.js";
 import { createServer } from "./server.js";
 import { openDatabase } from "./storage/db.js";
 import { startNotifications } from "./notify/engine.js";
+import { maybeAutoBackfill } from "./cli/auto-backfill.js";
 import { logger } from "./logger.js";
 
 const config = loadConfig();
@@ -18,4 +19,8 @@ app.listen(config.port, () => {
     { port: config.port, provider: config.aiProvider },
     "DiffSentry is running"
   );
+  // Seed the dashboard from history on a fresh install (no-op unless the
+  // dashboard is on, persistence is enabled, and the DB is empty). Runs in the
+  // background so it never delays the listener coming up.
+  maybeAutoBackfill();
 });
