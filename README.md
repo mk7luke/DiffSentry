@@ -1116,6 +1116,12 @@ installed repo so the dashboard isn't empty on first run. Accepts
 verifies every route end-to-end (overview, repo detail, PR detail, findings
 filters, patterns, settings, auth redirect).
 
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for local
+setup, the `npm run smoke:*` test suite, the dev loop, and branch/PR
+conventions. Notable changes are tracked in [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
-MIT
+[MIT](LICENSE) © DiffSentry contributors
