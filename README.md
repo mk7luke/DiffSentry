@@ -1,8 +1,104 @@
 # DiffSentry
 
-Self-hosted AI-powered GitHub pull-request review bot. CodeRabbit-shape comments
-plus a layer of opinionated insights, scanners, and Socratic chat commands you
-won't get from CodeRabbit.
+[![Time to first review: ~10 min](https://img.shields.io/badge/time_to_first_review-~10_min-5a8dff)](docs/QUICK_START.md)
+[![Self-hosted](https://img.shields.io/badge/self--hosted-yes-2ea043)](#setup)
+[![Runs on local models](https://img.shields.io/badge/local_models-Ollama%20%7C%20vLLM%20%7C%20LM%20Studio-8957e5)](#using-local-models-ollama-lm-studio-vllm-llamacpp-localai)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](#license)
+
+**Ship reviewed PRs faster — a self-hosted AI reviewer that runs on _your_ models, keeps your code on _your_ infrastructure, and grows smarter with every review.**
+
+DiffSentry posts CodeRabbit-shape walkthroughs, inline comments, and a sticky status check on every pull request — then layers on risk scoring, coverage/dependency signals, a full analytics dashboard, and Socratic chat commands you drive with `@bot`.
+
+- **🔒 Self-hosted, runs on your own models** — Anthropic, OpenAI, or _any_ OpenAI-compatible endpoint, including fully-local Ollama / LM Studio / vLLM / llama.cpp. Your code never has to leave your network.
+- **📊 Full analytics dashboard** — a built-in command-center SPA: live ops console, cost tracking, risk trends, findings explorer, pattern analytics, and a review leaderboard.
+- **🎯 Signals other bots skip** — a 0–100 risk score on every walkthrough, a test-coverage signal, and dependency-change parsing across npm / pip / cargo / go / ruby manifests.
+- **🧠 Institutional memory** — teach it with `@bot learn`, and inline comments automatically surface prior bot discussions on the same file from earlier merged PRs.
+
+**Quick links:** [🚀 Quick Start](docs/QUICK_START.md) · [🎬 Demo](#see-it-in-action) · [📚 Full reference](#full-reference)
+
+> ⏱️ **Time to first review: ~10 minutes.** Follow the [Quick Start](docs/QUICK_START.md) to go from zero to a reviewed PR.
+
+## DiffSentry vs CodeRabbit
+
+DiffSentry is built for teams that want to **own their review pipeline** — the model, the data, and the dashboard. The comparison below focuses on the deployment and control model, where the differences are structural; it is **not** a feature-by-feature audit of CodeRabbit's hosted product.
+
+| | DiffSentry | CodeRabbit |
+|---|---|---|
+| Hosting model | **Self-hosted** — your own container/infra | Hosted SaaS |
+| License | **Open source (MIT)** | Proprietary |
+| AI provider | Anthropic, OpenAI, or **any OpenAI-compatible** endpoint | Vendor-managed |
+| Local / offline models | ✅ Ollama, LM Studio, vLLM, llama.cpp, LocalAI | Not part of a hosted SaaS model |
+| Where your code is processed | On your infra — never leaves the network with local models | By the hosted service |
+| Pricing | Your AI API spend — **$0 with local models** | Subscription |
+| Setup time | ~10 minutes (self-host) | ~1 minute (SaaS) |
+
+On top of the CodeRabbit-style walkthrough, inline comments, and sticky status check, DiffSentry layers on (see [What it does](#what-it-does) for the full detail):
+
+- a **0–100 risk score** on every walkthrough, with sparkline history;
+- **test-coverage** and **dependency-change** signals;
+- **pre-AI safety scanners** — secrets, merge markers, and perf/footgun heuristics — at zero LLM cost;
+- **Socratic chat commands** (`rubber-duck`, `5why`, `ship`, `tldr`, …);
+- `@bot learn` **institutional memory** and a **self-hosted analytics dashboard** (cost, trends, leaderboard, findings & pattern analytics).
+
+**Choose CodeRabbit if a one-minute, zero-infrastructure SaaS setup matters most to you** — it's a mature hosted product and there's nothing to run or maintain. Choose DiffSentry when self-hosting, model choice (including local models), data control, and an owned analytics surface are worth ~10 minutes of setup.
+
+## See it in action
+
+<table>
+  <tr>
+    <td width="50%">
+      <a href="docs/screenshots/actionbar-pr-detail.png"><img src="docs/screenshots/actionbar-pr-detail.png" alt="PR detail page with review snapshot, risk score, findings table, and action bar" /></a>
+      <br /><sub><b>PR detail</b> — latest review snapshot, risk score, full findings table, events timeline, and an action bar (re-review, resolve, pause/resume, chat commands).</sub>
+    </td>
+    <td width="50%">
+      <a href="docs/screenshots/actionbar-repo-detail.png"><img src="docs/screenshots/actionbar-repo-detail.png" alt="Repo detail page with risk chart, approval mix, hot paths, and firing rules" /></a>
+      <br /><sub><b>Repo detail</b> — findings over 30 days, 90-day risk, approval mix, hot paths, top firing pattern rules, recent PRs, learnings, and the live <code>.diffsentry.yaml</code>.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <a href="docs/screenshots/custom-rules.png"><img src="docs/screenshots/custom-rules.png" alt="Custom rules authoring screen with a live regex tester" /></a>
+      <br /><sub><b>Custom rules</b> — author regex anti-pattern rules in the dashboard with a live tester that highlights matches against a pasted snippet before you save.</sub>
+    </td>
+    <td width="50%">
+      <a href="docs/images/api-docs.png"><img src="docs/images/api-docs.png" alt="Rendered OpenAPI documentation for the platform API" /></a>
+      <br /><sub><b>API docs</b> — the rendered OpenAPI 3 reference at <code>/api/v1/docs</code> covering every read &amp; write endpoint of the platform API.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <a href="docs/images/api-tokens.png"><img src="docs/images/api-tokens.png" alt="API tokens management screen" /></a>
+      <br /><sub><b>API tokens</b> — mint scoped bearer tokens (<code>read</code> / <code>review</code>) for CI and integrations; the secret is shown once.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <br />
+      <b>🎬 Demo GIF — coming soon</b>
+      <br /><sub>A short capture of a real PR review will live here.</sub>
+      <br /><br />
+      <b>🚀 Live sandbox demo — coming soon</b>
+      <br /><sub>A hosted instance you can click through, no install required.</sub>
+      <!-- TODO(A4/D2): replace the two placeholders above with (1) docs/demo.gif showing an end-to-end PR review and (2) the hosted/sandbox demo URL. -->
+    </td>
+  </tr>
+</table>
+
+---
+
+## Full reference
+
+Everything below documents DiffSentry in full. Jump to a section:
+
+- [What it does](#what-it-does)
+- [Setup](#setup)
+- [Per-repo configuration](#per-repo-configuration)
+- [End-to-end test harness](#end-to-end-test-harness)
+- [Architecture](#architecture)
+- [Webhook events handled](#webhook-events-handled)
+- [Environment variables](#environment-variables)
+- [Using local models (Ollama, LM Studio, vLLM, llama.cpp, LocalAI)](#using-local-models-ollama-lm-studio-vllm-llamacpp-localai)
+- [Development workflow](#development-workflow)
+- [Web dashboard](#web-dashboard)
+- [License](#license)
 
 ## What it does
 
