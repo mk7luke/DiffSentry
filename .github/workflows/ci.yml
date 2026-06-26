@@ -58,7 +58,14 @@ jobs:
       # to start enforcing once the existing findings are burned down.
       - name: ESLint
         id: eslint
-        run: npm run lint 2>&1 | tee lint.log
+        shell: bash
+        # Explicit pipefail so the step outcome reflects ESLint's exit code,
+        # not tee's — keeping the pass/⚠️ banner below truthful. (GitHub's
+        # default bash already sets pipefail, but stating it makes the
+        # correctness of `steps.eslint.outcome` independent of that default.)
+        run: |
+          set -o pipefail
+          npm run lint 2>&1 | tee lint.log
         continue-on-error: true
 
       - name: Publish lint results to job summary
