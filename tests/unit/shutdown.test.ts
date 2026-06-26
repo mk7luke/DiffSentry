@@ -1,5 +1,5 @@
 import type { Server } from "node:http";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Disable persistence for the whole file BEFORE any openDatabase() runs: the
 // review queue's finalize() best-effort-persists via recordEvent(), which would
@@ -10,7 +10,15 @@ process.env.DB_PATH = "";
 
 import { reviewQueue } from "../../src/realtime/queue.js";
 import { flushDatabase, closeDatabase, openDatabase } from "../../src/storage/db.js";
-import { gracefulShutdown, registerProcessHandlers } from "../../src/shutdown.js";
+import { gracefulShutdown, registerProcessHandlers, resetLifecycleStateForTests } from "../../src/shutdown.js";
+
+// The shuttingDown / handlersRegistered latches are process-wide and persist for
+// the life of the worker. Reset them before every test so the suite is
+// order-independent — a test that engages a latch can't silently change how a
+// later test sees gracefulShutdown() / registerProcessHandlers().
+beforeEach(() => {
+  resetLifecycleStateForTests();
+});
 
 describe("reviewQueue.cancelAll", () => {
   it("aborts every in-flight review and returns the count", () => {
@@ -55,8 +63,9 @@ describe("gracefulShutdown", () => {
     // because the latch state is what links them.
     const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
     const close = vi.fn((cb?: (err?: Error) => void) => cb?.());
+    const closeIdle = vi.fn();
     const closeAll = vi.fn();
-    const server = { close, closeIdleConnections: vi.fn(), closeAllConnections: closeAll } as unknown as Server;
+    const server = { close, closeIdleConnections: closeIdle, closeAllConnections: closeAll } as unknown as Server;
 
     const handle = reviewQueue.enqueue("o", "r", 99, "full");
 
@@ -64,6 +73,9 @@ describe("gracefulShutdown", () => {
     await gracefulShutdown("SIGTERM", server);
 
     expect(close).toHaveBeenCalledTimes(1);
+    // Both socket-draining calls fire so keep-alive + long-lived (SSE) sockets
+    // can't hold close() open past the deadline.
+    expect(closeIdle).toHaveBeenCalledTimes(1);
     expect(closeAll).toHaveBeenCalledTimes(1);
     expect(handle.signal.aborted).toBe(true);
     expect(exit).toHaveBeenCalledWith(0);

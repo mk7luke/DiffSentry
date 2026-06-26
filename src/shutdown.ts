@@ -120,6 +120,17 @@ export async function gracefulShutdown(signal: string, server: Server | null): P
 }
 
 /**
+ * Test-only: clear the module-level lifecycle latches so each unit test starts
+ * from a clean slate (the latches are process-wide and otherwise persist for the
+ * life of the worker). Production code never calls this — a real process shuts
+ * down, and registers its handlers, exactly once.
+ */
+export function resetLifecycleStateForTests(): void {
+  shuttingDown = false;
+  handlersRegistered = false;
+}
+
+/**
  * Install the crash-safety + graceful-shutdown handlers. Call once at boot after
  * the HTTP listener is created.
  */
