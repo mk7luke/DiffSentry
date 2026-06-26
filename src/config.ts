@@ -62,13 +62,13 @@ export function loadConfig(): Config {
     throw new Error("GITHUB_WEBHOOK_SECRET is required");
   }
 
-  // AI request timeout: positive integer ms; anything missing/invalid/<=0 falls
-  // back to the 60s default so every call stays bounded.
+  // AI request timeout (ms). A valid number is honored as-is — including <= 0,
+  // which withAiTimeout treats as "no bound" (an explicit escape hatch). Only a
+  // missing or non-numeric value falls back to the 60s default.
   const parsedTimeout = parseInt(process.env.AI_REQUEST_TIMEOUT_MS || "", 10);
-  const aiRequestTimeoutMs =
-    Number.isFinite(parsedTimeout) && parsedTimeout > 0
-      ? parsedTimeout
-      : DEFAULT_AI_REQUEST_TIMEOUT_MS;
+  const aiRequestTimeoutMs = Number.isFinite(parsedTimeout)
+    ? parsedTimeout
+    : DEFAULT_AI_REQUEST_TIMEOUT_MS;
 
   const ignoredPatterns = (process.env.IGNORED_PATTERNS || "")
     .split(",")

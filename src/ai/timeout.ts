@@ -34,6 +34,11 @@ export class AiTimeoutError extends Error {
 
   constructor(provider: string, operation: string, timeoutMs: number) {
     super(`AI request timed out after ${timeoutMs}ms (${provider} ${operation})`);
+    // Restore the prototype chain: when this class is down-leveled (e.g. an ES5
+    // target), `super(...)` resets the prototype to `Error.prototype`, which
+    // would break `instanceof AiTimeoutError`. Explicitly re-pin it so
+    // `isAiTimeoutError` stays reliable regardless of compile target.
+    Object.setPrototypeOf(this, new.target.prototype);
     this.name = "AiTimeoutError";
     this.provider = provider;
     this.operation = operation;
