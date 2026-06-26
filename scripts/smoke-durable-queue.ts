@@ -26,6 +26,7 @@ async function main() {
   const { openDatabase, closeDatabase } = await import("../src/storage/db.js");
   const {
     claimWebhookDelivery,
+    releaseWebhookDelivery,
     listInFlightReviewJobs,
     upsertReviewJob,
   } = await import("../src/storage/dao.js");
@@ -34,6 +35,13 @@ async function main() {
 
   const db = openDatabase();
   if (!db) throw new Error("failed to open temp db");
+
+  // Hold the event loop open for the duration of the test: runReviewJob's retry
+  // backoff uses an UNREF'd timer (by design — a pending retry must never keep a
+  // shutting-down process alive), so without a ref here Node could exit during a
+  // backoff before the timer fires. Production keeps the loop alive via the HTTP
+  // server; the smoke test stands in with this interval, cleared in finally.
+  const keepAlive = setInterval(() => {}, 1000);
 
   function ok(label: string, cond: boolean) {
     if (!cond) throw new Error(`[${label}] assertion failed`);
@@ -59,6 +67,10 @@ async function main() {
     ok("first claim of a delivery id wins", claimWebhookDelivery("gh-1") === true);
     ok("redelivery of the same id is rejected", claimWebhookDelivery("gh-1") === false);
     ok("a different delivery id is claimable", claimWebhookDelivery("gh-2") === true);
+    // Release (the compensating action when dispatch fails) re-opens the id so a
+    // redelivery is processed instead of suppressed as a phantom duplicate.
+    releaseWebhookDelivery("gh-2");
+    ok("released delivery id is claimable again", claimWebhookDelivery("gh-2") === true);
 
     // ── transient classification ────────────────────────────────────────
     ok("ETIMEDOUT is transient", isTransientError(Object.assign(new Error("x"), { code: "ETIMEDOUT" })));
@@ -154,6 +166,7 @@ async function main() {
 
     console.log("\nall durable-queue smoke checks passed ✓");
   } finally {
+    clearInterval(keepAlive);
     closeDatabase();
     try {
       fs.unlinkSync(tmpDb);

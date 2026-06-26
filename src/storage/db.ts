@@ -337,7 +337,7 @@ CREATE TABLE IF NOT EXISTS review_jobs (
   number INTEGER NOT NULL,
   mode TEXT NOT NULL,              -- 'full' | 'incremental'
   installation_id INTEGER NOT NULL,
-  state TEXT NOT NULL,             -- 'queued' | 'running' | 'failed' | 'dead_letter'
+  state TEXT NOT NULL,             -- lifecycle (ReviewJobState): 'queued' | 'running' | 'failed' | 'dead_letter'; a 'done' outcome deletes the row rather than storing it
   attempts INTEGER NOT NULL DEFAULT 0,
   last_error TEXT,
   enqueued_at TEXT NOT NULL,

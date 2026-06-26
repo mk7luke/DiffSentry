@@ -184,10 +184,28 @@ export async function runReviewJob(spec: ReviewJobSpec): Promise<void> {
 
       if (attempt >= max) break; // exhausted → dead-letter below
 
-      // Don't sleep on a retry while the process is tearing down: leave the
-      // durable row `running` so the next boot re-enqueues it.
-      if (isShuttingDown()) {
+      // Defer the pending retry to the next boot if we're tearing down rather
+      // than sleeping through the shutdown grace. The durable row is rewritten
+      // to `queued` (not left `running`): no attempt is executing, so the row
+      // must reflect "waiting to be picked up", carrying the latest error.
+      // Recovery re-enqueues `queued` rows exactly as it does `running` ones.
+      const deferToNextBoot = () => {
         logger.info({ owner, repo, pr: number }, "Shutting down — deferring review retry to next boot");
+        upsertReviewJob({
+          runId,
+          owner,
+          repo,
+          number,
+          mode,
+          installationId,
+          state: "queued",
+          attempts: attempt,
+          lastError: errorMessage(lastErr),
+        });
+      };
+
+      if (isShuttingDown()) {
+        deferToNextBoot();
         return;
       }
 
@@ -196,7 +214,10 @@ export async function runReviewJob(spec: ReviewJobSpec): Promise<void> {
       await sleep(delay);
 
       // Re-check after the backoff: shutdown may have begun while we slept.
-      if (isShuttingDown()) return;
+      if (isShuttingDown()) {
+        deferToNextBoot();
+        return;
+      }
     }
   }
 

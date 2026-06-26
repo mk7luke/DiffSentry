@@ -3,7 +3,7 @@ import path from "node:path";
 import { Config } from "./types.js";
 import { Reviewer } from "./reviewer.js";
 import { logger } from "./logger.js";
-import { recordWebhookDelivery, claimWebhookDelivery } from "./storage/dao.js";
+import { recordWebhookDelivery, claimWebhookDelivery, releaseWebhookDelivery } from "./storage/dao.js";
 import { createDashboardRouter } from "./dashboard/routes.js";
 import { createApiRouter } from "./api/router.js";
 import { createAuth, loadAuthConfigFromEnv } from "./dashboard/auth.js";
@@ -200,12 +200,22 @@ export function createServer(config: Config): CreatedServer {
       return;
     }
 
-    const { status, body: responseBody } = await dispatchWebhookEvent(
-      { reviewer, botName: config.botName },
-      event,
-      payload,
-    );
-    res.status(status).json(responseBody);
+    try {
+      const { status, body: responseBody } = await dispatchWebhookEvent(
+        { reviewer, botName: config.botName },
+        event,
+        payload,
+      );
+      res.status(status).json(responseBody);
+    } catch (err) {
+      // Dispatch threw before producing a response: the work never ran, so the
+      // idempotency claim above would otherwise permanently suppress a retry.
+      // Release it so a GitHub redelivery of this id is processed, then surface
+      // 500 so GitHub marks the delivery failed (and offers redelivery).
+      if (deliveryId) releaseWebhookDelivery(deliveryId);
+      logger.error({ err, event, deliveryId }, "Webhook dispatch failed — released delivery for redelivery");
+      res.status(500).json({ error: "Dispatch failed" });
+    }
   });
 
   // SPA client-side routing fallback. Registered LAST so it never shadows the

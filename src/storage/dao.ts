@@ -1817,6 +1817,12 @@ export function listInFlightReviewJobs(): ReviewJobRow[] {
  * it was already recorded (a redelivery — caller should skip to avoid a
  * duplicate review). INSERT OR IGNORE makes the claim atomic.
  *
+ * The claim is a forward reservation, NOT a completion marker: the caller must
+ * `releaseWebhookDelivery` it if processing fails before it produces a response,
+ * so a GitHub redelivery of the same id can be processed rather than suppressed
+ * as a phantom duplicate. (A claim that reaches a normal HTTP response — even a
+ * 4xx — is left in place: redelivery wouldn't help a malformed payload.)
+ *
  * When persistence is disabled there is nothing to dedupe against, so we return
  * true (process it) — idempotency degrades to the prior at-least-once behavior
  * rather than silently dropping every delivery.
@@ -1833,5 +1839,21 @@ export function claimWebhookDelivery(deliveryId: string): boolean {
   } catch (err) {
     logger.debug({ err }, "dao.claimWebhookDelivery failed");
     return true;
+  }
+}
+
+/**
+ * Release a previously-claimed webhook delivery — the compensating action for
+ * `claimWebhookDelivery` when dispatch throws before completing. Deleting the
+ * row re-opens the id so a redelivery is processed instead of being suppressed
+ * as a duplicate. Best-effort no-op when persistence is disabled.
+ */
+export function releaseWebhookDelivery(deliveryId: string): void {
+  const db = openDatabase();
+  if (!db || !deliveryId) return;
+  try {
+    db.prepare(`DELETE FROM processed_deliveries WHERE delivery_id = ?`).run(deliveryId);
+  } catch (err) {
+    logger.debug({ err }, "dao.releaseWebhookDelivery failed");
   }
 }
