@@ -20,25 +20,25 @@ DiffSentry posts CodeRabbit-shape walkthroughs, inline comments, and a sticky st
 
 ## DiffSentry vs CodeRabbit
 
-DiffSentry is built for teams that want to **own their review pipeline** — the model, the data, and the dashboard. The table below reflects DiffSentry's documented, verifiable capabilities; it is not a feature audit of CodeRabbit's current hosted product.
+DiffSentry is built for teams that want to **own their review pipeline** — the model, the data, and the dashboard. The comparison below focuses on the deployment and control model, where the differences are structural; it is **not** a feature-by-feature audit of CodeRabbit's hosted product.
 
 | | DiffSentry | CodeRabbit |
 |---|---|---|
 | Hosting model | **Self-hosted** — your own container/infra | Hosted SaaS |
 | License | **Open source (MIT)** | Proprietary |
 | AI provider | Anthropic, OpenAI, or **any OpenAI-compatible** endpoint | Vendor-managed |
-| Local / offline models | ✅ Ollama, LM Studio, vLLM, llama.cpp, LocalAI | ❌ |
-| Where your code goes | Stays on your infra — never leaves the network with local models | Sent to the hosted service |
+| Local / offline models | ✅ Ollama, LM Studio, vLLM, llama.cpp, LocalAI | Not part of a hosted SaaS model |
+| Where your code is processed | On your infra — never leaves the network with local models | By the hosted service |
 | Pricing | Your AI API spend — **$0 with local models** | Subscription |
-| CodeRabbit-shape comments (walkthrough, inline, summary, sticky status) | ✅ | ✅ |
-| Risk score (0–100) on every walkthrough, with sparkline history | ✅ | — |
-| Test-coverage + dependency-change signals | ✅ | — |
-| Pre-AI safety scanners (secrets, merge markers, perf/footgun heuristics) | ✅ zero LLM cost | — |
-| Socratic chat commands (`rubber-duck`, `5why`, `ship`, `tldr`, …) | ✅ | — |
-| Institutional memory | ✅ `@bot learn` + prior-discussions-on-this-file | ✅ learnings |
-| Custom rules | ✅ regex `anti_patterns` + dashboard rule authoring with a live tester | ✅ |
-| Built-in analytics dashboard | ✅ self-hosted SPA (cost, trends, leaderboard, findings & pattern analytics) | ✅ hosted |
-| Setup time | ~10 minutes (self-host) | **~1 minute (SaaS)** |
+| Setup time | ~10 minutes (self-host) | ~1 minute (SaaS) |
+
+On top of the CodeRabbit-style walkthrough, inline comments, and sticky status check, DiffSentry layers on (see [What it does](#what-it-does) for the full detail):
+
+- a **0–100 risk score** on every walkthrough, with sparkline history;
+- **test-coverage** and **dependency-change** signals;
+- **pre-AI safety scanners** — secrets, merge markers, and perf/footgun heuristics — at zero LLM cost;
+- **Socratic chat commands** (`rubber-duck`, `5why`, `ship`, `tldr`, …);
+- `@bot learn` **institutional memory** and a **self-hosted analytics dashboard** (cost, trends, leaderboard, findings & pattern analytics).
 
 **Choose CodeRabbit if a one-minute, zero-infrastructure SaaS setup matters most to you** — it's a mature hosted product and there's nothing to run or maintain. Choose DiffSentry when self-hosting, model choice (including local models), data control, and an owned analytics surface are worth ~10 minutes of setup.
 
