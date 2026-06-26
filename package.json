@@ -7,6 +7,9 @@
     "build": "npm run build:server && npm run build:web",
     "build:server": "tsc",
     "build:web": "npm --prefix web ci && npm --prefix web run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
     "start": "node dist/index.js",
     "setup": "tsx scripts/setup.ts",
     "dev": "tsx watch src/index.ts",
@@ -49,12 +52,16 @@
     "pino-pretty": "^13.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@types/better-sqlite3": "^7.6.12",
     "@types/express": "^5.0.0",
     "@types/js-yaml": "^4.0.9",
     "@types/minimatch": "^5.1.2",
     "@types/node": "^22.13.0",
+    "eslint": "^9.39.4",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.62.0",
+    "vitest": "^3.2.6"
   }
 }

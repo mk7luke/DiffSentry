@@ -283,8 +283,8 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioRun> {
     draft: scenario.draft,
   });
 
-  let prNumber = pr.number;
-  let prUrl = pr.url;
+  const prNumber = pr.number;
+  const prUrl = pr.url;
   let cleanupError: unknown = null;
 
   try {
