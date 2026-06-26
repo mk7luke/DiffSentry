@@ -22,6 +22,11 @@ export default tseslint.config(
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "none" },
       ],
       "no-empty": ["warn", { allowEmptyCatch: true }],
+      // Keep prefer-const as an error (it caught real `let`-should-be-`const`
+      // cases), but ignore the legitimate "declare uninitialized, capture in a
+      // closure, assign later" timer pattern (e.g. a fallback setTimeout handle
+      // referenced by its own clear path before it is armed).
+      "prefer-const": ["error", { ignoreReadBeforeAssign: true }],
     },
   },
 );

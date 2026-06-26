@@ -1,8 +1,11 @@
 name: CI
 
 on:
+  # Validate protected branches post-merge, and every PR (incl. forks/feature
+  # branches) via pull_request. Limiting push to `main` avoids a redundant
+  # second run on each feature-branch push that a PR already covers.
   push:
-    branches: ["**"]
+    branches: ["main"]
   pull_request:
 
 jobs:
@@ -34,7 +37,7 @@ jobs:
         run: npm run smoke:webhooks
 
   lint:
-    name: Lint (non-blocking)
+    name: Lint (advisory)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,9 +51,29 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Non-blocking on day one: step-level continue-on-error surfaces findings
-      # in the log and keeps the job green (a true non-blocking check), without
-      # gating merges. Remove this once the existing findings are burned down.
+      # Advisory on day one: lint must not gate merges yet, but its findings
+      # should be visible — not buried in raw logs. So we keep the job green
+      # (continue-on-error) and publish the full ESLint output to the job's
+      # Step Summary, with a clear pass/fail banner. Remove continue-on-error
+      # to start enforcing once the existing findings are burned down.
       - name: ESLint
-        run: npm run lint
+        id: eslint
+        run: npm run lint 2>&1 | tee lint.log
         continue-on-error: true
+
+      - name: Publish lint results to job summary
+        if: always()
+        run: |
+          {
+            echo "### ESLint — advisory (does not gate merges yet)"
+            echo ""
+            if [ "${{ steps.eslint.outcome }}" = "failure" ]; then
+              echo "⚠️ **ESLint reported errors.** Not blocking this merge, but please review."
+            else
+              echo "✅ **ESLint passed** (any warnings are listed below for burn-down)."
+            fi
+            echo ""
+            echo '```'
+            cat lint.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
