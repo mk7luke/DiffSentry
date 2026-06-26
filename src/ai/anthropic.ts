@@ -3,15 +3,30 @@ import { AIProvider, PRContext, ReviewResult, WalkthroughResult, RepoConfig, Lea
 import { buildReviewPrompt, buildWalkthroughPrompt, buildChatPrompt, buildIssueChatPrompt } from "./prompt.js";
 import { parseReviewResponse, parseWalkthroughResponse } from "./parse.js";
 import { recordAiUsage } from "./cost.js";
+import { withAiTimeout, DEFAULT_AI_REQUEST_TIMEOUT_MS } from "./timeout.js";
 import { logger } from "../logger.js";
 
 export class AnthropicProvider implements AIProvider {
   private client: Anthropic;
   private model: string;
+  private timeoutMs: number;
 
-  constructor(apiKey: string, model: string, baseURL?: string) {
+  constructor(apiKey: string, model: string, baseURL?: string, timeoutMs: number = DEFAULT_AI_REQUEST_TIMEOUT_MS) {
     this.client = new Anthropic({ apiKey, ...(baseURL && { baseURL }) });
     this.model = model;
+    this.timeoutMs = timeoutMs;
+  }
+
+  /** One model call, bounded by the configured deadline. On timeout this rejects
+   *  with AiTimeoutError *before* `track()` runs, so no cost is recorded. */
+  private create(
+    operation: string,
+    body: Anthropic.MessageCreateParamsNonStreaming,
+  ): Promise<Anthropic.Message> {
+    return withAiTimeout(
+      { provider: "anthropic", operation, timeoutMs: this.timeoutMs },
+      (signal) => this.client.messages.create(body, { signal }),
+    );
   }
 
   /** Record token usage + cost for one call (best-effort, never throws). */
@@ -31,7 +46,7 @@ export class AnthropicProvider implements AIProvider {
 
     log.info("Sending review request to Anthropic");
 
-    const response = await this.client.messages.create({
+    const response = await this.create("review", {
       model: this.model,
       max_tokens: 4096,
       system,
@@ -59,7 +74,7 @@ export class AnthropicProvider implements AIProvider {
 
     log.info("Sending walkthrough request to Anthropic");
 
-    const response = await this.client.messages.create({
+    const response = await this.create("walkthrough", {
       model: this.model,
       max_tokens: 4096,
       system,
@@ -87,7 +102,7 @@ export class AnthropicProvider implements AIProvider {
 
     log.info("Sending chat request to Anthropic");
 
-    const response = await this.client.messages.create({
+    const response = await this.create("chat", {
       model: this.model,
       max_tokens: 2048,
       system,
@@ -110,7 +125,7 @@ export class AnthropicProvider implements AIProvider {
   }
 
   async complete(system: string, user: string, opts?: { maxTokens?: number; json?: boolean }): Promise<string> {
-    const response = await this.client.messages.create({
+    const response = await this.create("complete", {
       model: this.model,
       max_tokens: opts?.maxTokens ?? 512,
       system,
@@ -126,7 +141,7 @@ export class AnthropicProvider implements AIProvider {
 
     log.info("Sending issue chat request to Anthropic");
 
-    const response = await this.client.messages.create({
+    const response = await this.create("issue_chat", {
       model: this.model,
       max_tokens: 2048,
       system,
