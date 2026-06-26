@@ -4,6 +4,9 @@ export interface Config {
   githubAppId: string;
   githubPrivateKey: string;
   githubWebhookSecret: string;
+  /** Dedicated HMAC key for the dashboard session + CSRF cookies. Required
+   * (and validated at boot) only when ENABLE_DASHBOARD=1; undefined otherwise. */
+  dashboardSessionSecret?: string;
   aiProvider: "anthropic" | "openai" | "openai-compatible";
   anthropicApiKey?: string;
   anthropicBaseUrl?: string;

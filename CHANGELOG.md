@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Require a dedicated `DASHBOARD_SESSION_SECRET` when `ENABLE_DASHBOARD=1` (fails fast at boot); session signing no longer falls back to `GITHUB_WEBHOOK_SECRET`.
 - Enforce the default-branch `.diffsentry.yaml` across all PRs (#19).
 - Switch the default DiffSentry review profile to assertive (#18).
 - Replace "no structured response from AI" with a useful summary (#15).
