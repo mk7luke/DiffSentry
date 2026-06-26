@@ -234,11 +234,12 @@ reviews:
       pattern: 'process\.exit\('
       severity: "critical"
       type: "issue"
-      message: "process.exit() in non-CLI code kills the webhook server mid-review. We have it in src/cli/backfill.ts (fine) and src/index.ts startup (fine) — anywhere else is almost certainly a bug."
-      advice: "Throw an Error and let the top-level handler in src/index.ts decide. Library code shouldn't unilaterally terminate the process."
-      # All of src except the two legit exit sites (cli/** and index.ts),
-      # including top-level files like reviewer.ts. (verified w/ minimatch)
-      path: "src/{!(index).ts,!(cli)/**}"
+      message: "process.exit() in non-CLI code kills the webhook server mid-review. We have it in src/cli/backfill.ts (fine), src/index.ts startup (fine), and src/shutdown.ts (fine — the dedicated process-lifecycle module that owns crash exits + graceful shutdown) — anywhere else is almost certainly a bug."
+      advice: "Throw an Error and let the top-level handler in src/index.ts decide. Library code shouldn't unilaterally terminate the process. (The crash/signal handlers in src/shutdown.ts ARE the top-level handlers, so process.exit is correct there.)"
+      # All of src except the legit exit sites: cli/**, index.ts, and
+      # shutdown.ts (the process-lifecycle module). Includes top-level files
+      # like reviewer.ts. (verified w/ minimatch)
+      path: "src/{!(index|shutdown).ts,!(cli)/**}"
 
     - name: "Empty catch swallow"
       # Optional `(...)` so it also catches the binding-less `catch {}` form
