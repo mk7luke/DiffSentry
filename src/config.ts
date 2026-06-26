@@ -1,5 +1,6 @@
 import fs from "fs";
 import { Config } from "./types.js";
+import { DEFAULT_AI_REQUEST_TIMEOUT_MS } from "./ai/timeout.js";
 
 // Canonical list of accepted AI providers. This is the single source of truth
 // for the AI_PROVIDER enum — the runtime loader (below), the diagnostics check,
@@ -61,6 +62,14 @@ export function loadConfig(): Config {
     throw new Error("GITHUB_WEBHOOK_SECRET is required");
   }
 
+  // AI request timeout (ms). A valid number is honored as-is — including <= 0,
+  // which withAiTimeout treats as "no bound" (an explicit escape hatch). Only a
+  // missing or non-numeric value falls back to the 60s default.
+  const parsedTimeout = parseInt(process.env.AI_REQUEST_TIMEOUT_MS || "", 10);
+  const aiRequestTimeoutMs = Number.isFinite(parsedTimeout)
+    ? parsedTimeout
+    : DEFAULT_AI_REQUEST_TIMEOUT_MS;
+
   const ignoredPatterns = (process.env.IGNORED_PATTERNS || "")
     .split(",")
     .map((p) => p.trim())
@@ -94,6 +103,7 @@ export function loadConfig(): Config {
     localAiApiKey: process.env.LOCAL_AI_API_KEY,
     localAiModel: process.env.LOCAL_AI_MODEL || "",
     localAiJsonMode: (process.env.LOCAL_AI_JSON_MODE || "true").toLowerCase() !== "false",
+    aiRequestTimeoutMs,
     maxFilesPerReview: parseInt(process.env.MAX_FILES_PER_REVIEW || "50", 10),
     ignoredPatterns: [...defaultIgnored, ...ignoredPatterns],
     botName: process.env.BOT_NAME || "diffsentry",

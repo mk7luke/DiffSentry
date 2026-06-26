@@ -3,6 +3,7 @@ import { AIProvider, PRContext, ReviewResult, WalkthroughResult, RepoConfig, Lea
 import { buildReviewPrompt, buildWalkthroughPrompt, buildChatPrompt, buildIssueChatPrompt } from "./prompt.js";
 import { parseReviewResponse, parseWalkthroughResponse } from "./parse.js";
 import { recordAiUsage } from "./cost.js";
+import { withAiTimeout, DEFAULT_AI_REQUEST_TIMEOUT_MS } from "./timeout.js";
 import { logger } from "../logger.js";
 
 export class OpenAIProvider implements AIProvider {
@@ -28,10 +29,12 @@ export class OpenAIProvider implements AIProvider {
    *  rejected request. `undefined` = use the static guess; a string =
    *  use that learned value; `null` = no value works, omit the field. */
   private learnedReasoningEffort: string | null | undefined = undefined;
+  private timeoutMs: number;
 
-  constructor(apiKey: string, model: string, baseURL?: string) {
+  constructor(apiKey: string, model: string, baseURL?: string, timeoutMs: number = DEFAULT_AI_REQUEST_TIMEOUT_MS) {
     this.client = new OpenAI({ apiKey, ...(baseURL && { baseURL }) });
     this.model = model;
+    this.timeoutMs = timeoutMs;
   }
 
   /** Record token usage + cost for one call (best-effort, never throws). */
@@ -136,39 +139,59 @@ export class OpenAIProvider implements AIProvider {
     return null;
   }
 
-  /** Wraps a chat completion so the first request that gets rejected for
-   *  an unsupported `reasoning_effort` is retried with a value the model
-   *  actually accepts (and the choice is cached for subsequent calls). */
-  private async createWithReasoningRetry(
+  /** One bounded chat completion. On timeout this rejects with AiTimeoutError
+   *  *before* the caller's `track()` runs, so no cost is recorded for the call. */
+  private create(
+    operation: string,
     params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
   ): Promise<OpenAI.Chat.ChatCompletion> {
-    try {
-      return await this.client.chat.completions.create(params);
-    } catch (err) {
-      if (!this.isUnsupportedReasoningEffortError(err)) throw err;
-      const supported = this.parseSupportedReasoningEfforts(err);
-      const replacement = this.pickLowestReasoningEffort(supported);
-      this.learnedReasoningEffort = replacement;
-      const retryParams = { ...(params as unknown as Record<string, unknown>) };
-      if (replacement === null) {
-        delete retryParams.reasoning_effort;
-      } else {
-        retryParams.reasoning_effort = replacement;
-      }
-      logger.warn(
-        {
-          provider: "openai",
-          model: this.model,
-          rejected: (params as unknown as Record<string, unknown>).reasoning_effort,
-          supported,
-          using: replacement,
-        },
-        "OpenAI rejected reasoning_effort; retrying with the lowest supported value",
-      );
-      return await this.client.chat.completions.create(
-        retryParams as unknown as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
-      );
-    }
+    return withAiTimeout(
+      { provider: "openai", operation, timeoutMs: this.timeoutMs },
+      (signal) => this.client.chat.completions.create(params, { signal }),
+    );
+  }
+
+  /** Wraps a chat completion so the first request that gets rejected for
+   *  an unsupported `reasoning_effort` is retried with a value the model
+   *  actually accepts (and the choice is cached for subsequent calls). The
+   *  whole sequence — original attempt plus any retry — shares one deadline. */
+  private async createWithReasoningRetry(
+    operation: string,
+    params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
+  ): Promise<OpenAI.Chat.ChatCompletion> {
+    return withAiTimeout(
+      { provider: "openai", operation, timeoutMs: this.timeoutMs },
+      async (signal) => {
+        try {
+          return await this.client.chat.completions.create(params, { signal });
+        } catch (err) {
+          if (!this.isUnsupportedReasoningEffortError(err)) throw err;
+          const supported = this.parseSupportedReasoningEfforts(err);
+          const replacement = this.pickLowestReasoningEffort(supported);
+          this.learnedReasoningEffort = replacement;
+          const retryParams = { ...(params as unknown as Record<string, unknown>) };
+          if (replacement === null) {
+            delete retryParams.reasoning_effort;
+          } else {
+            retryParams.reasoning_effort = replacement;
+          }
+          logger.warn(
+            {
+              provider: "openai",
+              model: this.model,
+              rejected: (params as unknown as Record<string, unknown>).reasoning_effort,
+              supported,
+              using: replacement,
+            },
+            "OpenAI rejected reasoning_effort; retrying with the lowest supported value",
+          );
+          return await this.client.chat.completions.create(
+            retryParams as unknown as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
+            { signal },
+          );
+        }
+      },
+    );
   }
 
   /** When OpenAI returns empty content with `finish_reason: "length"`, the
@@ -205,7 +228,7 @@ export class OpenAIProvider implements AIProvider {
 
     log.info("Sending review request to OpenAI");
 
-    const response = await this.createWithReasoningRetry({
+    const response = await this.createWithReasoningRetry("review", {
       model: this.model,
       [this.tokenParam]: this.tokenBudgetFor("review"),
       messages: [
@@ -238,7 +261,7 @@ export class OpenAIProvider implements AIProvider {
 
     log.info("Sending walkthrough request to OpenAI");
 
-    const response = await this.createWithReasoningRetry({
+    const response = await this.createWithReasoningRetry("walkthrough", {
       model: this.model,
       [this.tokenParam]: this.tokenBudgetFor("walkthrough"),
       messages: [
@@ -271,7 +294,7 @@ export class OpenAIProvider implements AIProvider {
 
     log.info("Sending chat request to OpenAI");
 
-    const response = await this.client.chat.completions.create({
+    const response = await this.create("chat", {
       model: this.model,
       [this.tokenParam]: this.tokenBudgetFor("chat"),
       messages: [
@@ -298,7 +321,7 @@ export class OpenAIProvider implements AIProvider {
 
   async complete(system: string, user: string, opts?: { maxTokens?: number; json?: boolean }): Promise<string> {
     const extras = opts?.json ? this.structuredOutputExtras() : {};
-    const response = await this.createWithReasoningRetry({
+    const response = await this.createWithReasoningRetry("complete", {
       model: this.model,
       [this.tokenParam]: opts?.maxTokens ?? this.tokenBudgetFor("complete"),
       messages: [
@@ -318,7 +341,7 @@ export class OpenAIProvider implements AIProvider {
 
     log.info("Sending issue chat request to OpenAI");
 
-    const response = await this.client.chat.completions.create({
+    const response = await this.create("issue_chat", {
       model: this.model,
       [this.tokenParam]: this.tokenBudgetFor("chat"),
       messages: [

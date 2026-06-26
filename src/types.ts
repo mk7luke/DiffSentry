@@ -17,6 +17,12 @@ export interface Config {
   localAiApiKey?: string;
   localAiModel: string;
   localAiJsonMode: boolean;
+  /**
+   * Per-request deadline (ms) applied to every AI provider call. Sourced from
+   * AI_REQUEST_TIMEOUT_MS (default 60s). Guarantees a hung model call surfaces
+   * as a "review failed (AI timeout)" outcome instead of stalling indefinitely.
+   */
+  aiRequestTimeoutMs: number;
   maxFilesPerReview: number;
   ignoredPatterns: string[];
   botName: string;

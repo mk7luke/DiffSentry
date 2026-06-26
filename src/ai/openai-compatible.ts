@@ -3,6 +3,7 @@ import { AIProvider, PRContext, ReviewResult, WalkthroughResult, RepoConfig, Lea
 import { buildReviewPrompt, buildWalkthroughPrompt, buildChatPrompt, buildIssueChatPrompt } from "./prompt.js";
 import { parseReviewResponse, parseWalkthroughResponse } from "./parse.js";
 import { recordAiUsage } from "./cost.js";
+import { withAiTimeout, DEFAULT_AI_REQUEST_TIMEOUT_MS } from "./timeout.js";
 import { logger } from "../logger.js";
 
 // Adapter for any OpenAI-compatible `/v1/chat/completions` endpoint:
@@ -21,6 +22,7 @@ export class OpenAICompatibleProvider implements AIProvider {
   private model: string;
   private jsonMode: boolean;
   private providerLabel: string;
+  private timeoutMs: number;
 
   constructor(opts: {
     baseURL: string;
@@ -28,6 +30,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     apiKey?: string;
     jsonMode?: boolean;
     providerLabel?: string;
+    timeoutMs?: number;
   }) {
     this.client = new OpenAI({
       apiKey: opts.apiKey && opts.apiKey.length > 0 ? opts.apiKey : "not-needed",
@@ -36,6 +39,19 @@ export class OpenAICompatibleProvider implements AIProvider {
     this.model = opts.model;
     this.jsonMode = opts.jsonMode !== false;
     this.providerLabel = opts.providerLabel || "openai-compatible";
+    this.timeoutMs = opts.timeoutMs ?? DEFAULT_AI_REQUEST_TIMEOUT_MS;
+  }
+
+  /** One bounded chat completion. On timeout this rejects with AiTimeoutError
+   *  *before* the caller's `track()` runs, so no cost is recorded for the call. */
+  private create(
+    operation: string,
+    params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
+  ): Promise<OpenAI.Chat.ChatCompletion> {
+    return withAiTimeout(
+      { provider: this.providerLabel, operation, timeoutMs: this.timeoutMs },
+      (signal) => this.client.chat.completions.create(params, { signal }),
+    );
   }
 
   /** Record token usage + cost for one call (best-effort, never throws). */
@@ -52,8 +68,8 @@ export class OpenAICompatibleProvider implements AIProvider {
     });
   }
 
-  private async jsonCall(system: string, user: string, maxTokens: number) {
-    return this.client.chat.completions.create({
+  private async jsonCall(operation: string, system: string, user: string, maxTokens: number) {
+    return this.create(operation, {
       model: this.model,
       max_tokens: maxTokens,
       messages: [
@@ -70,7 +86,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
     log.info("Sending review request to OpenAI-compatible endpoint");
 
-    const response = await this.jsonCall(system, user, 4096);
+    const response = await this.jsonCall("review", system, user, 4096);
 
     const text = response.choices[0]?.message?.content || "";
     log.info(
@@ -91,7 +107,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
     log.info("Sending walkthrough request to OpenAI-compatible endpoint");
 
-    const response = await this.jsonCall(system, user, 4096);
+    const response = await this.jsonCall("walkthrough", system, user, 4096);
 
     const text = response.choices[0]?.message?.content || "";
     log.info(
@@ -112,7 +128,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
     log.info("Sending chat request to OpenAI-compatible endpoint");
 
-    const response = await this.client.chat.completions.create({
+    const response = await this.create("chat", {
       model: this.model,
       max_tokens: 2048,
       messages: [
@@ -135,7 +151,7 @@ export class OpenAICompatibleProvider implements AIProvider {
   }
 
   async complete(system: string, user: string, opts?: { maxTokens?: number; json?: boolean }): Promise<string> {
-    const response = await this.client.chat.completions.create({
+    const response = await this.create("complete", {
       model: this.model,
       max_tokens: opts?.maxTokens ?? 512,
       messages: [
@@ -154,7 +170,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
     log.info("Sending issue chat request to OpenAI-compatible endpoint");
 
-    const response = await this.client.chat.completions.create({
+    const response = await this.create("issue_chat", {
       model: this.model,
       max_tokens: 2048,
       messages: [
