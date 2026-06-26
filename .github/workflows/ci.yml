@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: Build & test (server)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build server
+        run: npm run build:server
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Smoke — webhook signature contract
+        run: npm run smoke:signature
+
+      - name: Smoke — webhook pipeline
+        run: npm run smoke:webhooks
+
+  lint:
+    name: Lint (non-blocking)
+    runs-on: ubuntu-latest
+    # Non-blocking on day one: surfaces issues without gating merges. Flip
+    # continue-on-error off once the existing findings are burned down.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
