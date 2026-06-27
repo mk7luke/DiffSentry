@@ -287,6 +287,11 @@ export async function verifyFindings(params: {
     log.info({ skipped, verified: includedIdx.length }, "Some findings skipped from verification (no usable/in-budget diff), kept fail-open");
   }
 
+  // `included` is the COMPACTED subset actually sent to the verifier: the
+  // prompt enumerates these as Finding 0..included.length-1, so the model's
+  // verdict indices live in that compacted space. `includedIdx[v.index]` maps a
+  // compacted index back to the original `comments` index (which may be
+  // non-contiguous once budget-omitted findings have been removed).
   const included = includedIdx.map((i) => comments[i]);
   const { system, user } = buildVerificationPrompt(blocks, included);
   // Bound the call explicitly here too, independent of any provider-level

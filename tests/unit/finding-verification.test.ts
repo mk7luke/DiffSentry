@@ -199,20 +199,68 @@ describe("verifyFindings", () => {
       body: "b",
       title: `Finding ${i}.`,
     }));
-    // Verifier marks every finding it's shown unsupported.
+    // Faithful mock: the verifier only sees the compacted `included` subset, so
+    // it returns exactly one verdict per finding actually present in the prompt
+    // (indices 0..n-1 of that subset), marking each unsupported.
     let sentUser = "";
     const ai = {
       complete: async (_s: string, u: string) => {
         sentUser = u;
-        return JSON.stringify({ verdicts: cmts.map((_c, i) => ({ index: i, supported: false })) });
+        const n = (u.match(/^Finding \d+:/gm) ?? []).length;
+        return JSON.stringify({ verdicts: Array.from({ length: n }, (_x, i) => ({ index: i, supported: false })) });
       },
     };
     const out = await verifyFindings({ ai, context: { files }, comments: cmts });
-    // The omitted-file finding survives; only the in-budget ones can be dropped.
-    expect(out.comments.some((c) => c.path === "src/f4.ts")).toBe(true);
-    // It is counted as skipped and never sent to the verifier.
-    expect(out.stats.skipped).toBeGreaterThanOrEqual(1);
+    // f4 was never sent (budget-omitted) → kept fail-open; f0..f3 are dropped.
+    expect(out.comments.map((c) => c.path)).toEqual(["src/f4.ts"]);
+    expect(out.stats.dropped).toBe(4);
+    expect(out.stats.skipped).toBe(1);
+    expect(out.stats.unparseable).toBe(false);
     expect(sentUser).not.toContain("src/f4.ts");
+  });
+
+  it("maps compacted verdict indices back to non-contiguous original indices", async () => {
+    // Budget-omit a file that sits in the MIDDLE of the comments array so the
+    // surviving original indices are non-contiguous ([0,2,3,4]); the compacted
+    // verifier index space is 0..3 and must map back correctly.
+    const big = "z".repeat(8001);
+    const files = Array.from({ length: 5 }, (_v, i) => ({
+      filename: `src/g${i}.ts`,
+      status: "modified" as const,
+      patch: big,
+      additions: 1,
+      deletions: 0,
+    }));
+    // Comments ordered so the omitted file (g4, last in file order) is NOT last
+    // in the comments array → original indices of included findings = [0,2,3,4].
+    const order = ["src/g0.ts", "src/g4.ts", "src/g1.ts", "src/g2.ts", "src/g3.ts"];
+    const cmts: ReviewComment[] = order.map((path, i) => ({
+      path,
+      line: 2,
+      side: "RIGHT" as const,
+      body: "b",
+      title: `on ${path}`,
+    }));
+    let sentUser = "";
+    const ai = {
+      complete: async (_s: string, u: string) => {
+        sentUser = u;
+        const n = (u.match(/^Finding \d+:/gm) ?? []).length; // = 4 (g0,g1,g2,g3)
+        // Mark only compacted index 2 unsupported. included = [g0,g1,g2,g3];
+        // compacted 2 → g2 → original comments index 3.
+        return JSON.stringify({
+          verdicts: Array.from({ length: n }, (_x, i) => ({ index: i, supported: i !== 2 })),
+        });
+      },
+    };
+    const out = await verifyFindings({ ai, context: { files }, comments: cmts });
+    // Only the g2 finding (original index 3) is dropped; g4 (omitted) is kept.
+    expect(out.comments.map((c) => c.path).sort()).toEqual(["src/g0.ts", "src/g1.ts", "src/g3.ts", "src/g4.ts"]);
+    expect(out.comments.some((c) => c.path === "src/g2.ts")).toBe(false);
+    expect(out.stats.dropped).toBe(1);
+    expect(out.stats.skipped).toBe(1);
+    expect(out.stats.unparseable).toBe(false);
+    expect(sentUser).not.toContain("src/g4.ts");
   });
 
   it("ignores duplicate index verdicts deterministically (first verdict wins)", async () => {
