@@ -116,10 +116,21 @@ function resolveGraphDbPath(override?: string): string {
 // prefix of every indexed file and strip it. That makes every emitted path
 // repo-relative and lets us match PR paths by exact equality (with a suffix
 // fallback for safety).
+//
+// All root-detection, matching, and emitted paths are POSIX-normalised first:
+// a graph indexed on Windows stores backslash paths, but GitHub PR paths are
+// always forward-slash, so we collapse separators before comparing. (The RAW
+// path is still used for the SQLite `file_path = ?` lookups — those must match
+// the stored representation byte-for-byte.)
+
+/** Collapse OS path separators to POSIX `/`. */
+function toPosix(p: string): string {
+  return p.replace(/\\/g, "/");
+}
 
 function detectRoot(absPaths: string[]): string {
   if (absPaths.length === 0) return "";
-  const split = absPaths.map((p) => p.split("/"));
+  const split = absPaths.map((p) => toPosix(p).split("/"));
   const first = split[0];
   let i = 0;
   for (; i < first.length; i++) {
@@ -129,14 +140,18 @@ function detectRoot(absPaths: string[]): string {
   return first.slice(0, i).join("/");
 }
 
+/** Strip the detected root, returning a POSIX repo-relative path (root is
+ *  already POSIX from detectRoot). */
 function relativize(abs: string, root: string): string {
-  if (root && abs.startsWith(root + "/")) return abs.slice(root.length + 1);
-  return abs;
+  const p = toPosix(abs);
+  if (root && p.startsWith(root + "/")) return p.slice(root.length + 1);
+  return p;
 }
 
-/** Normalise a PR path (already relative) for map keys. */
+/** Normalise a path (PR-relative or post-relativize) for map keys: POSIX
+ *  separators, no leading `./` or `/`. */
 function normRel(p: string): string {
-  return p.replace(/^\.?\//, "");
+  return toPosix(p).replace(/^\.?\//, "");
 }
 
 // ─── Diff parsing ──────────────────────────────────────────────
@@ -232,7 +247,12 @@ export function queryGraph(
       const rel = normRel(f.path);
       let abs = relToAbs.get(rel);
       if (!abs) {
-        const hit = absPaths.find((a) => a.endsWith("/" + rel) || a === rel);
+        // Suffix fallback: compare POSIX-normalised forms but keep the RAW
+        // path (it's the key the SQLite queries match on).
+        const hit = absPaths.find((a) => {
+          const p = toPosix(a);
+          return p.endsWith("/" + rel) || p === rel;
+        });
         abs = hit;
       }
       resolved.set(rel, abs ?? "");
@@ -300,13 +320,15 @@ export function queryGraph(
         )
         .sort((a, b) => a.lineStart - b.lineStart);
 
-      // Dependencies: files THIS file imports from.
+      // Dependencies: files THIS file imports from. Sorted so the rendered
+      // "Imports:" list is deterministic regardless of SQLite row order.
       const depAbs = (importsOutStmt.all(abs) as { target_qualified: string }[]).map((r) => r.target_qualified);
-      const dependencies = uniq(depAbs.map((a) => normRel(relativize(a, root))).filter((d) => d !== rel));
+      const dependencies = uniq(depAbs.map((a) => normRel(relativize(a, root))).filter((d) => d !== rel)).sort();
 
-      // Dependents: files that import THIS file (fan-in via imports).
+      // Dependents: files that import THIS file (fan-in via imports). Sorted for
+      // the same determinism reason.
       const dependentAbs = (importsInStmt.all(abs) as { source_qualified: string }[]).map((r) => r.source_qualified);
-      const dependents = uniq(dependentAbs.map((a) => normRel(relativize(a, root))).filter((d) => d !== rel));
+      const dependents = uniq(dependentAbs.map((a) => normRel(relativize(a, root))).filter((d) => d !== rel)).sort();
 
       // Cross-file callers: any file with a CALLS edge into one of our symbols.
       // The caller is the source SYMBOL's file, parsed from its `<file>::<name>`

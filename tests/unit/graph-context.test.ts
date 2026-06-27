@@ -209,3 +209,63 @@ describe("buildGraphContext + rendering", () => {
     expect(res.relatedContextMarkdown.length).toBeLessThan(1600);
   });
 });
+
+// A graph indexed on Windows stores backslash absolute paths, but GitHub PR
+// paths are always forward-slash. queryGraph must still resolve them and emit
+// forward-slash repo-relative paths.
+describe("queryGraph — Windows / backslash graph paths", () => {
+  let winDbPath: string;
+  const WROOT = "C:\\proj";
+  const wabs = (p: string) => `${WROOT}\\${p.replace(/\//g, "\\")}`;
+
+  beforeAll(() => {
+    winDbPath = path.join(os.tmpdir(), `gc-win-${Date.now()}.db`);
+    const db = new Database(winDbPath);
+    db.exec(`
+      CREATE TABLE nodes (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
+        name TEXT NOT NULL, qualified_name TEXT NOT NULL UNIQUE, file_path TEXT NOT NULL,
+        line_start INTEGER, line_end INTEGER, updated_at REAL NOT NULL DEFAULT 0);
+      CREATE TABLE edges (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
+        source_qualified TEXT NOT NULL, target_qualified TEXT NOT NULL, file_path TEXT NOT NULL,
+        line INTEGER DEFAULT 0, updated_at REAL NOT NULL DEFAULT 0);
+    `);
+    const node = db.prepare(
+      "INSERT INTO nodes (kind,name,qualified_name,file_path,line_start,line_end) VALUES (?,?,?,?,?,?)",
+    );
+    for (const f of ["src/util.ts", "src/a.ts", "scripts/tool.ts"]) {
+      node.run("File", path.basename(f), wabs(f), wabs(f), null, null);
+    }
+    node.run("Function", "foo", `${wabs("src/util.ts")}::foo`, wabs("src/util.ts"), 1, 5);
+    // a.ts imports util.ts → util.ts has a dependent
+    db.prepare("INSERT INTO edges (kind,source_qualified,target_qualified,file_path) VALUES (?,?,?,?)").run(
+      "IMPORTS_FROM",
+      wabs("src/a.ts"),
+      wabs("src/util.ts"),
+      wabs("src/a.ts"),
+    );
+    db.close();
+  });
+
+  afterAll(() => {
+    try {
+      fs.unlinkSync(winDbPath);
+    } catch {
+      /* ignore */
+    }
+  });
+
+  it("resolves a forward-slash PR path against a backslash-indexed graph", () => {
+    const ctx = queryGraph(
+      [{ path: "src/util.ts", patch: "@@ -1,2 +1,3 @@\n a\n+b\n c\n" }],
+      { graphDbPath: winDbPath },
+    );
+    expect(ctx.available).toBe(true);
+    const util = ctx.files[0];
+    expect(util.indexed).toBe(true);
+    expect(util.symbols.map((s) => s.name)).toEqual(["foo"]);
+    // Emitted dependent path is forward-slash, not "C:\proj\src\a.ts".
+    expect(util.dependents).toEqual(["src/a.ts"]);
+    expect(util.fanIn).toBe(1);
+    expect(ctx.fanInByFile["src/util.ts"]).toBe(1);
+  });
+});
