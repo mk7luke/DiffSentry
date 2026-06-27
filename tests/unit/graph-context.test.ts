@@ -434,6 +434,61 @@ describe("queryGraph — ambiguous suffix resolution", () => {
   });
 });
 
+// Monorepo with a non-empty common root: distinct files under that root always
+// relativize to distinct keys, so the exact-match index never collapses two
+// files. The repo-relative PR path (pkgA/src/util.ts) binds to exactly one file.
+describe("queryGraph — monorepo / non-empty common root", () => {
+  let mDbPath: string;
+
+  beforeAll(() => {
+    mDbPath = path.join(os.tmpdir(), `gc-mono-${Date.now()}.db`);
+    const db = new Database(mDbPath);
+    db.exec(`
+      CREATE TABLE nodes (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
+        name TEXT NOT NULL, qualified_name TEXT NOT NULL UNIQUE, file_path TEXT NOT NULL,
+        line_start INTEGER, line_end INTEGER, updated_at REAL NOT NULL DEFAULT 0);
+      CREATE TABLE edges (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
+        source_qualified TEXT NOT NULL, target_qualified TEXT NOT NULL, file_path TEXT NOT NULL,
+        line INTEGER DEFAULT 0, updated_at REAL NOT NULL DEFAULT 0);
+    `);
+    const node = db.prepare(
+      "INSERT INTO nodes (kind,name,qualified_name,file_path,line_start,line_end) VALUES (?,?,?,?,?,?)",
+    );
+    // Two packages each with src/util.ts + a repo-root file → detected root /repo.
+    node.run("File", "util.ts", "/repo/pkgA/src/util.ts", "/repo/pkgA/src/util.ts", null, null);
+    node.run("File", "util.ts", "/repo/pkgB/src/util.ts", "/repo/pkgB/src/util.ts", null, null);
+    node.run("File", "root.ts", "/repo/root.ts", "/repo/root.ts", null, null);
+    node.run("Function", "fooA", "/repo/pkgA/src/util.ts::fooA", "/repo/pkgA/src/util.ts", 1, 5);
+    node.run("Function", "fooB", "/repo/pkgB/src/util.ts::fooB", "/repo/pkgB/src/util.ts", 1, 5);
+    db.close();
+  });
+
+  afterAll(() => {
+    try {
+      fs.unlinkSync(mDbPath);
+    } catch {
+      /* ignore */
+    }
+  });
+
+  it("binds each repo-relative PR path to its own file (no exact-match overwrite)", () => {
+    const a = queryGraph([{ path: "pkgA/src/util.ts" }], { graphDbPath: mDbPath });
+    expect(a.files[0].indexed).toBe(true);
+    expect(a.files[0].symbols.map((s) => s.name)).toEqual(["fooA"]);
+
+    const b = queryGraph([{ path: "pkgB/src/util.ts" }], { graphDbPath: mDbPath });
+    expect(b.files[0].indexed).toBe(true);
+    expect(b.files[0].symbols.map((s) => s.name)).toEqual(["fooB"]);
+  });
+
+  it("only a root-stripped bare suffix is ambiguous (handled by the suffix fallback)", () => {
+    // "src/util.ts" is NOT an exact key here (keys are pkgA/.. and pkgB/..), so
+    // it falls through to the suffix check, which sees two matches → unindexed.
+    const ctx = queryGraph([{ path: "src/util.ts" }], { graphDbPath: mDbPath });
+    expect(ctx.files[0].indexed).toBe(false);
+  });
+});
+
 describe("detectRoot / relativize — POSIX and Windows path shapes", () => {
   it("preserves the leading slash for a Unix-style common root and strips it cleanly", () => {
     const paths = [
