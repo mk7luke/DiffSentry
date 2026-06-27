@@ -252,6 +252,15 @@ export function pinnedLookup(
       return callback(e);
     }
     if (wantAll) return callback(null, safe);
+    // Single-address case: hand back the first allow-listed address. The all:true
+    // lookup above ran with the caller's own family/hints/verbatim, so `safe` is
+    // in Node's native selection order — making safe[0] the address
+    // dns.lookup({all:false}) would have returned, minus any blocked ones. We
+    // deliberately do NOT issue a second all:false lookup to "re-pick": that is a
+    // redundant resolution (re-opening the rebinding window the pin closes) and
+    // would fail a dual-stack host whose preferred address is private but which
+    // also has a public one. Real http/https uses Happy Eyeballs (all:true) and
+    // takes the branch above; this path is only for legacy all:false callers.
     callback(null, safe[0].address, safe[0].family);
   });
 }
