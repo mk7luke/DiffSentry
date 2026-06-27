@@ -22,7 +22,7 @@ interface DiffLineInfo {
   added: number[];
 }
 
-function getDiffLineInfo(patch: string): DiffLineInfo {
+export function getDiffLineInfo(patch: string): DiffLineInfo {
   const valid = new Set<number>();
   const added: number[] = [];
   let rightLine = 0;

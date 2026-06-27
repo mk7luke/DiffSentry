@@ -1,6 +1,7 @@
 import type { AIProvider, PRContext, ReviewComment } from "../types.js";
 import { logger } from "../logger.js";
 import { withAiTimeout, DEFAULT_AI_REQUEST_TIMEOUT_MS } from "./timeout.js";
+import { getDiffLineInfo } from "./parse.js";
 
 /**
  * Second-pass finding verification.
@@ -107,12 +108,17 @@ const MAX_TOTAL_PATCH_CHARS = 32000;
 export function selectVerifierDiffs(
   context: Pick<PRContext, "files">,
   paths: Set<string>,
-): { blocks: string[]; includedFiles: Set<string> } {
+): { blocks: string[]; includedFiles: Set<string>; shownLinesByFile: Map<string, Set<number>> } {
   // Only files referenced by a finding are worth sending — the verifier judges
   // those findings and nothing else, so unreferenced patches are pure noise.
   const relevant = context.files.filter((f) => paths.has(f.filename));
 
   const includedFiles = new Set<string>();
+  // Right-side line numbers actually visible in the embedded slice, per file.
+  // For a truncated patch this is only the prefix; the caller uses it to keep
+  // findings whose supporting line was cut away fail-open instead of letting
+  // the verifier drop them blind.
+  const shownLinesByFile = new Map<string, Set<number>>();
   let totalChars = 0;
   let truncatedFiles = 0;
   let omittedFiles = 0;
@@ -126,11 +132,27 @@ export function selectVerifierDiffs(
       continue;
     }
     const cap = Math.min(MAX_PATCH_CHARS_PER_FILE, remaining);
-    const truncated = patch.length > cap;
-    const shown = truncated ? patch.slice(0, cap) : patch;
+    let shown = patch;
+    let truncated = false;
+    if (patch.length > cap) {
+      // Cut at a line boundary so the embedded diff stays parseable and the
+      // visible-line set is exact (no half-line at the tail).
+      const nl = patch.lastIndexOf("\n", cap);
+      shown = patch.slice(0, nl > 0 ? nl : cap);
+      truncated = true;
+    }
+    const shownLines = getDiffLineInfo(shown).valid;
+    if (shownLines.size === 0) {
+      // Truncation left no usable right-side line (e.g. only a hunk header fit).
+      // Embedding a stub helps nobody; treat the file as omitted so its findings
+      // stay fail-open rather than being judged against an empty diff.
+      omittedFiles++;
+      continue;
+    }
     if (truncated) truncatedFiles++;
     totalChars += shown.length;
     includedFiles.add(f.filename);
+    shownLinesByFile.set(f.filename, shownLines);
     const note = truncated ? "\n… (patch truncated for verification)" : "";
     blocks.push(`### ${f.filename}\n\`\`\`diff\n${shown}${note}\n\`\`\``);
   }
@@ -142,7 +164,7 @@ export function selectVerifierDiffs(
     );
   }
 
-  return { blocks, includedFiles };
+  return { blocks, includedFiles, shownLinesByFile };
 }
 
 /** Assemble the verifier prompt from already-selected diff blocks and the exact
@@ -270,14 +292,25 @@ export async function verifyFindings(params: {
   }
 
   // Decide which referenced files' diffs actually fit the prompt budget, then
-  // narrow the verifiable set to findings whose diff is genuinely present. A
-  // finding whose file is budget-omitted is treated exactly like one with no
-  // usable patch: counted as skipped and kept fail-open, never sent — so the
-  // findings list handed to the model and the verdict index space stay aligned.
+  // narrow the verifiable set to findings whose supporting diff is genuinely
+  // present in what we sent. A finding is dropped from the verifiable set when
+  // its file was budget-omitted OR its line was truncated out of the embedded
+  // slice — in both cases the verifier can't see the lines that back it, so it's
+  // counted as skipped and kept fail-open, never sent. This keeps the findings
+  // list handed to the model and the verdict index space aligned, and stops a
+  // valid finding from being dropped just because its hunk was cut for budget.
   const verifiablePaths = new Set(verifiableIdx.map((i) => comments[i].path));
-  const { blocks, includedFiles } = selectVerifierDiffs(context, verifiablePaths);
-  const includedIdx = verifiableIdx.filter((i) => includedFiles.has(comments[i].path));
-  skipped += verifiableIdx.length - includedIdx.length; // budget-omitted findings
+  const { blocks, includedFiles, shownLinesByFile } = selectVerifierDiffs(context, verifiablePaths);
+  const includedIdx = verifiableIdx.filter((i) => {
+    const c = comments[i];
+    if (!includedFiles.has(c.path)) return false;
+    const shownLines = shownLinesByFile.get(c.path);
+    // shownLines is the exact set of visible right-side lines (the whole patch
+    // when untruncated, only the prefix when truncated). Verify only findings
+    // whose line we actually showed.
+    return !!shownLines && shownLines.has(c.line);
+  });
+  skipped += verifiableIdx.length - includedIdx.length; // budget-omitted or truncated-away findings
 
   if (includedIdx.length === 0) {
     log.info({ skipped }, "Verification skipped — no findings have a diff that fits the prompt; keeping all");
