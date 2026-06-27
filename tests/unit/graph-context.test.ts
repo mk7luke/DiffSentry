@@ -58,6 +58,12 @@ beforeAll(() => {
   node.run("Class", "Widget", `${abs("src/widget.ts")}::Widget`, abs("src/widget.ts"), 1, 50);
   node.run("Function", "render", `${abs("src/widget.ts")}::render`, abs("src/widget.ts"), 10, 20);
 
+  // dual.ts: a Class and a Function indexed over the EXACT same line range
+  // (1-10) — exercises equal-span tie-break dedup.
+  node.run("File", "dual.ts", abs("src/dual.ts"), abs("src/dual.ts"), null, null);
+  node.run("Class", "Dup", `${abs("src/dual.ts")}::Dup`, abs("src/dual.ts"), 1, 10);
+  node.run("Function", "dupFn", `${abs("src/dual.ts")}::dupFn`, abs("src/dual.ts"), 1, 10);
+
   const edge = db.prepare(
     "INSERT INTO edges (kind,source_qualified,target_qualified,file_path) VALUES (?,?,?,?)",
   );
@@ -174,6 +180,17 @@ describe("queryGraph", () => {
       { graphDbPath: dbPath },
     );
     expect(ctx.files[0].symbols.map((s) => s.name)).toEqual(["Widget"]);
+  });
+
+  it("dedupes two symbols sharing an identical line range, keeping the most specific kind", () => {
+    // Dup (Class) and dupFn (Function) both span lines 1-10. Neither contains
+    // the other, so only the equal-span tie-break can dedupe them — the
+    // Function (more specific) survives.
+    const ctx = queryGraph(
+      [{ path: "src/dual.ts", patch: "@@ -1,2 +1,5 @@\n a\n+b\n c\n d\n e\n" }],
+      { graphDbPath: dbPath },
+    );
+    expect(ctx.files[0].symbols.map((s) => s.name)).toEqual(["dupFn"]);
   });
 });
 

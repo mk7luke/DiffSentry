@@ -317,25 +317,35 @@ export function queryGraph(
           lineEnd: s.line_end!,
         }));
 
-      // Drop container symbols (e.g. a class) when a more specific overlapping
-      // symbol nested inside them (e.g. a changed method) is also selected — the
-      // container's source would otherwise re-print the inner body and burn
-      // prompt budget. Keep the innermost. (`qualified_name` is unique in the
-      // graph, so this can't ever see exact duplicates; it guards range nesting,
-      // which the live graph does produce — classes indexed alongside their
-      // methods.)
+      // Drop a symbol when another overlapping symbol is *more specific*: either
+      // strictly nested inside it (e.g. a changed method inside its class — the
+      // live graph indexes classes alongside their methods) or occupying the
+      // exact same line range (some indexers emit two nodes for one span).
+      // Keeping the innermost / most-specific one avoids re-printing the same
+      // body and burning prompt budget. Identical-range ties are broken
+      // deterministically by node kind, then qualified name, so exactly one
+      // survives. (`qualified_name` is unique, so this never sees true dups.)
       const symbols: ChangedSymbol[] = overlapping
         .filter(
           (s) =>
-            !overlapping.some(
-              (o) =>
-                o.qualifiedName !== s.qualifiedName &&
-                o.lineStart >= s.lineStart &&
-                o.lineEnd <= s.lineEnd &&
-                o.lineEnd - o.lineStart < s.lineEnd - s.lineStart,
-            ),
+            !overlapping.some((o) => {
+              if (o.qualifiedName === s.qualifiedName) return false;
+              // o must sit inside s (a container relationship or identical range).
+              if (o.lineStart < s.lineStart || o.lineEnd > s.lineEnd) return false;
+              const oSpan = o.lineEnd - o.lineStart;
+              const sSpan = s.lineEnd - s.lineStart;
+              if (oSpan < sSpan) return true; // o strictly more specific → drop s
+              // Identical range: keep the more specific kind, then lower qname.
+              const rank = symbolSpecificity(o.kind) - symbolSpecificity(s.kind);
+              return rank > 0 || (rank === 0 && o.qualifiedName < s.qualifiedName);
+            }),
         )
-        .sort((a, b) => a.lineStart - b.lineStart);
+        .sort(
+          (a, b) =>
+            a.lineStart - b.lineStart ||
+            a.lineEnd - b.lineEnd ||
+            a.qualifiedName.localeCompare(b.qualifiedName),
+        );
 
       // Dependencies: files THIS file imports from. Endpoints are run through
       // symbolFileOf() first — IMPORTS_FROM endpoints are bare file paths today,
@@ -405,6 +415,24 @@ function uniq(xs: string[]): string[] {
 function symbolFileOf(qualified: string): string {
   const idx = qualified.indexOf("::");
   return idx === -1 ? qualified : qualified.slice(0, idx);
+}
+
+/** Specificity ranking used to break ties between symbols that share an exact
+ *  line range: prefer the most specific node kind (a method/function over a
+ *  class that merely spans the same lines). Unknown kinds rank lowest. */
+function symbolSpecificity(kind: string): number {
+  switch (kind) {
+    case "Method":
+      return 4;
+    case "Function":
+      return 3;
+    case "Test":
+      return 2;
+    case "Class":
+      return 1;
+    default:
+      return 0;
+  }
 }
 
 // ─── Whole-function body fetching ──────────────────────────────
