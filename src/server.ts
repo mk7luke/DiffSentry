@@ -3,15 +3,38 @@ import path from "node:path";
 import { Config } from "./types.js";
 import { Reviewer } from "./reviewer.js";
 import { logger } from "./logger.js";
-import { recordWebhookDelivery } from "./storage/dao.js";
+import { recordWebhookDelivery, claimWebhookDelivery, completeWebhookDelivery, releaseWebhookDelivery } from "./storage/dao.js";
 import { createDashboardRouter } from "./dashboard/routes.js";
 import { createApiRouter } from "./api/router.js";
 import { createAuth, loadAuthConfigFromEnv } from "./dashboard/auth.js";
 import { applyPersistedSettings } from "./settings/overrides.js";
 import { dispatchWebhookEvent, extractWebhookMeta } from "./webhook/dispatch.js";
 import { verifyWebhookSignature } from "./webhook/signature.js";
+import { recoverInFlightJobs } from "./realtime/jobs.js";
 
-export function createServer(config: Config) {
+/**
+ * What `createServer` hands back. NOTE: it intentionally returns a struct, not a
+ * bare Express app — destructure it. The `recover` callback is held alongside
+ * the app because it closes over the same Reviewer the routes use, so boot can
+ * resume interrupted reviews without rebuilding one.
+ *
+ *   const { app, recover } = createServer(config);
+ *   const server = app.listen(port, () => { recover(); });
+ *
+ * The sole production caller is src/index.ts; there are no other importers.
+ */
+export interface CreatedServer {
+  /** The Express application — mount nothing else; call `.listen()` on it. */
+  app: express.Express;
+  /**
+   * Re-enqueue any review jobs that were in-flight when the process last
+   * stopped. Call once after the HTTP listener is up (persistence must already
+   * be open). No-op (returns 0) when persistence is disabled or nothing pended.
+   */
+  recover: () => number;
+}
+
+export function createServer(config: Config): CreatedServer {
   const app = express();
   const reviewer = new Reviewer(config);
 
@@ -178,12 +201,85 @@ export function createServer(config: Config) {
       return;
     }
 
-    const { status, body: responseBody } = await dispatchWebhookEvent(
-      { reviewer, botName: config.botName },
-      event,
-      payload,
-    );
-    res.status(status).json(responseBody);
+    // Idempotency: GitHub retries deliveries (and may double-send), each carrying
+    // the same X-GitHub-Delivery id. claimWebhookDelivery takes a `processing`
+    // lease; only a *completed* (or fresh in-flight) delivery is treated as a
+    // duplicate and short-circuited here. The lease is finalized below —
+    // completed on success, released on failure — so a crash mid-dispatch leaves
+    // a stale lease that a redelivery can reclaim rather than a phantom
+    // duplicate. The delivery is still recorded above for the inspection view.
+    // No-op (always claims) when persistence is disabled.
+    // Idempotency claim. The 3-way result distinguishes a true (completed)
+    // duplicate from a delivery merely in flight elsewhere, so an in-flight
+    // reclaimed lease is never acknowledged as "already processed":
+    //   - duplicate → 200, already processed to a terminal outcome; don't redispatch.
+    //   - in_flight → 202, a concurrent run holds a fresh lease; acknowledge
+    //                 receipt without re-dispatch (2xx avoids a redelivery storm;
+    //                 review_jobs' per-PR supersede prevents a duplicate review).
+    //   - claimed   → we own the lease; the handle is finalized below.
+    let claim: import("./storage/dao.js").WebhookDeliveryClaim | null = null;
+    if (deliveryId) {
+      const result = claimWebhookDelivery(deliveryId);
+      if (result.kind === "duplicate") {
+        logger.info({ deliveryId, event }, "Duplicate webhook delivery — already completed, skipping dispatch");
+        res.status(200).json({ status: "duplicate" });
+        return;
+      }
+      if (result.kind === "in_flight") {
+        logger.info({ deliveryId, event }, "Webhook delivery already in flight elsewhere — acknowledging without re-dispatch");
+        res.status(202).json({ status: "in_progress" });
+        return;
+      }
+      claim = result.claim;
+    }
+
+    try {
+      const { status, body: responseBody } = await dispatchWebhookEvent(
+        { reviewer, botName: config.botName },
+        event,
+        payload,
+      );
+      if (claim) {
+        // Redelivery should retry only TRANSIENT failures. A 5xx (or a thrown
+        // error — see catch) means we failed to process the delivery, so release
+        // the lease and let GitHub redeliver. Everything else — a 2xx success OR
+        // a 4xx — is a terminal, fully-processed application outcome: a 4xx
+        // rejection is deterministic (an identical redelivery would just
+        // re-reject, so retrying is pointless), so it's committed to `completed`
+        // alongside 2xx to dedupe future redeliveries of the same id.
+        if (status >= 500) {
+          const released = releaseWebhookDelivery(claim);
+          if (released) {
+            logger.warn({ event, deliveryId, status }, "Webhook dispatch returned a server error — released delivery for redelivery");
+          } else {
+            // The lease wasn't ours to free (reclaimed by a newer run) or a DB
+            // error: a prompt redelivery may be deduped until the lease expires.
+            logger.warn({ event, deliveryId, status }, "Webhook dispatch returned a server error but the lease release did not take effect — a prompt redelivery may be deduped until the lease TTL expires");
+          }
+        } else {
+          const completed = completeWebhookDelivery(claim);
+          if (!completed) {
+            // Our lease was reclaimed (dispatch outran the lease TTL) or the row
+            // is gone. We keep the dispatch response rather than manufacturing a
+            // 5xx: the delivery was already handled to a terminal outcome (a 2xx
+            // review is dispatched durably via review_jobs; a 4xx is a final
+            // rejection), so a redelivery would only duplicate or re-reject.
+            // review_jobs — not this lease — is the delivery-durability
+            // guarantee, so an uncommitted lease is benign (self-heals via TTL).
+            logger.warn({ event, deliveryId, status }, "Webhook delivery lease completion did not take effect (lease reclaimed?); keeping the dispatch response — delivery already handled to a terminal outcome");
+          }
+        }
+      }
+      res.status(status).json(responseBody);
+    } catch (err) {
+      // Dispatch threw before producing a response: the work never ran, so the
+      // lease above would otherwise (after it goes stale) be the only trace.
+      // Release it now so a GitHub redelivery of this id is processed promptly,
+      // then surface 500 so GitHub marks the delivery failed (and offers redelivery).
+      if (claim) releaseWebhookDelivery(claim);
+      logger.error({ err, event, deliveryId }, "Webhook dispatch failed — released delivery for redelivery");
+      res.status(500).json({ error: "Dispatch failed" });
+    }
   });
 
   // SPA client-side routing fallback. Registered LAST so it never shadows the
@@ -205,5 +301,12 @@ export function createServer(config: Config) {
     });
   }
 
-  return app;
+  return {
+    app,
+    recover: () =>
+      recoverInFlightJobs({
+        handlePullRequest: (installationId, owner, repo, number, mode) =>
+          reviewer.handlePullRequest(installationId, owner, repo, number, mode),
+      }),
+  };
 }

@@ -4123,6 +4123,15 @@ input[type="checkbox"].learn-check {
 .qcard.state-canceled {
   opacity: 0.72;
 }
+.qcard.state-dead_letter::before {
+  background: var(--sev-crit);
+  box-shadow: 0 0 8px var(--sev-crit-line);
+}
+/* Dead-letter: a given-up failure — same crit hue as failed, but a dashed
+   left edge so it reads as "abandoned after retries", not a single failure. */
+.qcard.state-dead_letter {
+  border-left: 2px dashed var(--sev-crit);
+}
 .qcard-top {
   display: flex;
   align-items: center;
@@ -4182,6 +4191,9 @@ input[type="checkbox"].learn-check {
 }
 .qdot.state-canceled {
   background: var(--text-4);
+}
+.qdot.state-dead_letter {
+  background: var(--sev-crit);
 }
 @keyframes qpulse {
   0% {

@@ -23,7 +23,7 @@ import { suggestReviewersFromBlame, renderSuggestedReviewers, combineReviewers, 
 import { loadCodeowners, ownersForFiles, renderCodeownersBlock } from "./codeowners.js";
 import { findPriorBotThreadsForPaths, renderPriorDiscussionsBlock, diffWithOtherPR, renderDiffPRReply } from "./cross-pr.js";
 import { renderStickyStatus, STICKY_MARKER } from "./sticky-status.js";
-import { recordRepo, recordPR, recordReview, recordFindings, recordPatternHits, recordIssue, recordIssueAction, getSuppressedFingerprints, listCustomRulesForRepo } from "./storage/dao.js";
+import { recordRepo, recordPR, recordReview, recordFindings, recordPatternHits, recordIssue, recordIssueAction, getSuppressedFingerprints, listCustomRulesForRepo, deleteReviewJob } from "./storage/dao.js";
 import { runSafetyScanners } from "./safety-scanner.js";
 import { runPatternChecks } from "./pattern-checks.js";
 import { scanDependencyChanges, renderDepBlock } from "./dep-scanner.js";
@@ -293,6 +293,11 @@ export class Reviewer {
     const key = prKey(owner, repo, pullNumber);
     // Aborts the in-flight review (if any) and marks the queue card canceled.
     reviewQueue.cancel(owner, repo, pullNumber);
+    // Drop the durable job too: a user-driven cancel/close is deliberate, so
+    // boot recovery must NOT resurrect this review. Unconditional (no run_id
+    // guard) — operator intent overrides whatever run currently owns the row.
+    // No-op when persistence is disabled.
+    deleteReviewJob(owner, repo, pullNumber);
     // Clean up state
     pausedPRs.delete(key);
     reviewCountByPR.delete(key);

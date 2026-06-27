@@ -912,7 +912,7 @@ export interface ImpactReport {
 
 // ─── Review queue board (mirror src/realtime/bus.ts) ─────────────────
 
-export type ReviewQueueState = "queued" | "running" | "done" | "failed" | "canceled";
+export type ReviewQueueState = "queued" | "running" | "done" | "failed" | "canceled" | "dead_letter";
 
 export interface ReviewQueueEntry {
   key: string;

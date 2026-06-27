@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Database as DB } from "better-sqlite3";
 import { openDatabase } from "./db.js";
 import type { AntiPattern, CommentSeverity, CommentType, IssueContext, PRContext, ReviewComment, ReviewResult } from "../types.js";
@@ -1659,3 +1660,318 @@ export function recordPatternHits(opts: {
     logger.debug({ err }, "dao.recordPatternHits failed");
   }
 }
+
+// ---------------------------------------------------------------------------
+// Durable review queue (schema v5). The crash-safe shadow of the in-memory
+// reviewQueue board: every queued/in-flight review is persisted so a restart can
+// re-enqueue work that was running when the process died. The job-runner
+// (src/realtime/jobs.ts) owns these rows; the live board stays in-memory. All
+// best-effort no-ops when the DB is disabled — recovery simply finds nothing.
+// ---------------------------------------------------------------------------
+
+/** Durable lifecycle states. `done` rows are deleted (recovery only cares about
+ *  unfinished work); `failed`/`dead_letter` are retained for visibility. */
+export type ReviewJobState = "queued" | "running" | "done" | "failed" | "dead_letter";
+
+/** A row of the review_jobs table, as stored. */
+export interface ReviewJobRow {
+  key: string;
+  run_id: string;
+  owner: string;
+  repo: string;
+  number: number;
+  mode: "full" | "incremental";
+  installation_id: number;
+  state: ReviewJobState;
+  attempts: number;
+  last_error: string | null;
+  enqueued_at: string;
+  updated_at: string;
+}
+
+/** Build the canonical durable-job key — must match the in-memory queue key. */
+function reviewJobKey(owner: string, repo: string, number: number): string {
+  return `${owner}/${repo}#${number}`;
+}
+
+/**
+ * Upsert the durable record for a review attempt. Overwrites any prior row for
+ * the same PR (PK = key), stamping the caller's `runId` — the token later
+ * terminal writes guard on, so a superseded attempt can't finalize the row that
+ * replaced it. Best-effort no-op when persistence is disabled.
+ */
+export function upsertReviewJob(opts: {
+  runId: string;
+  owner: string;
+  repo: string;
+  number: number;
+  mode: "full" | "incremental";
+  installationId: number;
+  state: ReviewJobState;
+  attempts: number;
+  lastError?: string | null;
+}): void {
+  const db = openDatabase();
+  if (!db) return;
+  try {
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO review_jobs
+         (key, run_id, owner, repo, number, mode, installation_id, state, attempts, last_error, enqueued_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET
+         run_id = excluded.run_id,
+         mode = excluded.mode,
+         installation_id = excluded.installation_id,
+         state = excluded.state,
+         attempts = excluded.attempts,
+         last_error = excluded.last_error,
+         updated_at = excluded.updated_at`,
+    ).run(
+      reviewJobKey(opts.owner, opts.repo, opts.number),
+      opts.runId,
+      opts.owner,
+      opts.repo,
+      opts.number,
+      opts.mode,
+      opts.installationId,
+      opts.state,
+      opts.attempts,
+      opts.lastError ?? null,
+      now,
+      now,
+    );
+  } catch (err) {
+    logger.debug({ err }, "dao.upsertReviewJob failed");
+  }
+}
+
+/**
+ * Finalize a durable review job. Guarded on `runId` so only the run that still
+ * owns the row can finalize it — a superseded attempt is a silent no-op. A
+ * `done` outcome deletes the row (recovery only re-runs unfinished work);
+ * `failed`/`dead_letter` update it in place for visibility. Returns true when a
+ * row actually transitioned.
+ */
+export function markReviewJobTerminal(opts: {
+  owner: string;
+  repo: string;
+  number: number;
+  runId: string;
+  state: "done" | "failed" | "dead_letter";
+  lastError?: string | null;
+}): boolean {
+  const db = openDatabase();
+  if (!db) return false;
+  const key = reviewJobKey(opts.owner, opts.repo, opts.number);
+  try {
+    if (opts.state === "done") {
+      const info = db.prepare(`DELETE FROM review_jobs WHERE key = ? AND run_id = ?`).run(key, opts.runId);
+      return info.changes > 0;
+    }
+    const info = db
+      .prepare(`UPDATE review_jobs SET state = ?, last_error = ?, updated_at = ? WHERE key = ? AND run_id = ?`)
+      .run(opts.state, opts.lastError ?? null, new Date().toISOString(), key, opts.runId);
+    return info.changes > 0;
+  } catch (err) {
+    logger.debug({ err }, "dao.markReviewJobTerminal failed");
+    return false;
+  }
+}
+
+/**
+ * Delete the durable job for a PR unconditionally (no run_id guard) — the
+ * user-driven cancel / PR-closed path, where operator intent overrides whatever
+ * run currently owns the row, so boot recovery won't resurrect a review the user
+ * deliberately stopped.
+ */
+export function deleteReviewJob(owner: string, repo: string, number: number): void {
+  const db = openDatabase();
+  if (!db) return;
+  try {
+    db.prepare(`DELETE FROM review_jobs WHERE key = ?`).run(reviewJobKey(owner, repo, number));
+  } catch (err) {
+    logger.debug({ err }, "dao.deleteReviewJob failed");
+  }
+}
+
+/**
+ * Every review job still unfinished (queued or running) — the set boot recovery
+ * re-enqueues. Empty when persistence is disabled.
+ */
+export function listInFlightReviewJobs(): ReviewJobRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  try {
+    return db
+      .prepare(`SELECT * FROM review_jobs WHERE state IN ('queued', 'running') ORDER BY enqueued_at ASC`)
+      .all() as ReviewJobRow[];
+  } catch (err) {
+    logger.debug({ err }, "dao.listInFlightReviewJobs failed");
+    return [];
+  }
+}
+
+/**
+ * How long a `processing` claim is honored before it's presumed abandoned (the
+ * process crashed mid-dispatch). A webhook dispatch only enqueues durable work
+ * and returns in milliseconds, so minutes is a very safe margin. Env-tunable.
+ */
+const DEFAULT_DELIVERY_LEASE_MS = 5 * 60 * 1000;
+function deliveryLeaseMs(): number {
+  const raw = Number.parseInt(process.env.WEBHOOK_DELIVERY_LEASE_MS ?? "", 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_DELIVERY_LEASE_MS;
+}
+
+/**
+ * A successful webhook-delivery claim: the delivery id plus the per-claim
+ * `token` that scopes finalization to THIS claim. Pass the whole handle to
+ * `completeWebhookDelivery` / `releaseWebhookDelivery` so a late finalizer from
+ * an older, superseded (reclaimed) attempt can't mutate the new owner's row —
+ * the same ownership discipline `markReviewJobTerminal` applies via `run_id`.
+ */
+export interface WebhookDeliveryClaim {
+  deliveryId: string;
+  token: string;
+}
+
+/**
+ * The outcome of a claim attempt — a 3-way result so the caller can tell a true
+ * duplicate apart from a delivery that is merely in flight elsewhere:
+ *   - `claimed`   → this caller owns the lease; process it, then finalize.
+ *   - `duplicate` → the row is `completed`; this delivery was already processed
+ *                   to its terminal outcome, so skip it.
+ *   - `in_flight` → a *fresh* `processing` lease is held by another run; the
+ *                   delivery is currently being handled. Acknowledge receipt but
+ *                   do NOT claim it was "already processed" — only `completed`
+ *                   rows are true duplicates.
+ */
+export type WebhookClaimResult =
+  | { kind: "claimed"; claim: WebhookDeliveryClaim }
+  | { kind: "duplicate" }
+  | { kind: "in_flight" };
+
+/**
+ * Two-phase idempotency lease for a GitHub webhook delivery, keyed by its
+ * X-GitHub-Delivery id. See `WebhookClaimResult` for the 3-way outcome.
+ *
+ * The claim writes a `processing` row stamped with a fresh per-claim `token`;
+ * the caller must finalize it with that handle:
+ *   - `completeWebhookDelivery` on a terminal outcome → marks it `completed`, so
+ *     future redeliveries return `duplicate`;
+ *   - `releaseWebhookDelivery` on a transient failure → deletes it, so a
+ *     redelivery is reprocessed.
+ *
+ * Crash safety: if the process dies mid-dispatch (neither finalizer runs), the
+ * row is stuck `processing`. A redelivery is granted the claim again once the
+ * lease has gone stale — the reclaim rotates `token`, so the crashed claim's
+ * handle no longer matches and a late finalizer from it is a no-op. Only a
+ * `completed` row is a true `duplicate`; a fresh `processing` lease is `in_flight`
+ * (bounded by the lease TTL, never permanent). The whole decision runs in one
+ * transaction so two concurrent deliveries can't both win.
+ *
+ * When persistence is disabled there is nothing to dedupe against, so we return
+ * a `claimed` tokenless handle (process it; finalizers no-op) — idempotency
+ * degrades to the prior at-least-once behavior rather than dropping deliveries.
+ */
+export function claimWebhookDelivery(deliveryId: string): WebhookClaimResult {
+  const db = openDatabase();
+  // No DB / no id → process it; the tokenless handle makes finalizers no-op.
+  if (!db || !deliveryId) return { kind: "claimed", claim: { deliveryId, token: "" } };
+  try {
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const token = randomUUID();
+    const decide = db.transaction((): "claimed" | "duplicate" | "in_flight" => {
+      // Fast path: a brand-new delivery claims a fresh `processing` lease.
+      const inserted = db
+        .prepare(`INSERT OR IGNORE INTO processed_deliveries (delivery_id, status, ts, token) VALUES (?, 'processing', ?, ?)`)
+        .run(deliveryId, nowIso, token);
+      if (inserted.changes > 0) return "claimed";
+
+      const row = db
+        .prepare(`SELECT status, ts FROM processed_deliveries WHERE delivery_id = ?`)
+        .get(deliveryId) as { status: string; ts: string } | undefined;
+      if (!row) return "claimed"; // raced a delete — treat as claimable
+      if (row.status === "completed") return "duplicate"; // a true, terminal duplicate
+
+      // status === 'processing': only reclaim if the prior lease has gone stale
+      // (the holder crashed). A fresh lease is in-flight elsewhere — NOT a
+      // completed duplicate. An unparsable stamp (a corrupt row) is treated as
+      // stale/reclaimable rather than fresh, so it can never permanently suppress.
+      const leasedAt = Date.parse(row.ts);
+      const age = nowMs - leasedAt;
+      if (!Number.isFinite(leasedAt) || age >= deliveryLeaseMs()) {
+        // Compare-and-swap on the timestamp we just read, rotating the token to
+        // this claim: re-lease only if `ts` is still the stale value, so exactly
+        // one reclaimer wins and the crashed claim's old token stops matching.
+        // (Within this synchronous single-connection runtime the transaction
+        // already serializes claims; the CAS keeps the reclaim correct regardless.)
+        const reclaimed = db
+          .prepare(`UPDATE processed_deliveries SET ts = ?, token = ? WHERE delivery_id = ? AND status = 'processing' AND ts = ?`)
+          .run(nowIso, token, deliveryId, row.ts);
+        // Lost the CAS → another run just reclaimed it → it's now in flight there.
+        return reclaimed.changes === 1 ? "claimed" : "in_flight";
+      }
+      return "in_flight"; // a fresh lease held by another run
+    });
+    const outcome = decide();
+    return outcome === "claimed" ? { kind: "claimed", claim: { deliveryId, token } } : { kind: outcome };
+  } catch (err) {
+    logger.debug({ err }, "dao.claimWebhookDelivery failed");
+    return { kind: "claimed", claim: { deliveryId, token: "" } }; // degrade to process-it
+  }
+}
+
+/**
+ * Mark a claimed delivery `completed` — the success finalizer for
+ * `claimWebhookDelivery`. Guarded on the claim's `token` so it only commits the
+ * row this run still owns (a reclaimed lease has a newer token). Only after this
+ * does a redelivery of the same id short-circuit as a duplicate.
+ *
+ * Returns true when the lease was committed (or there was nothing to finalize —
+ * persistence disabled / tokenless handle, not a failure); false when the row
+ * this run owned was NOT updated (the lease was reclaimed/removed by another run,
+ * or a DB error), so the caller can surface the divergence.
+ */
+export function completeWebhookDelivery(claim: WebhookDeliveryClaim): boolean {
+  const db = openDatabase();
+  if (!db || !claim.deliveryId || !claim.token) return true; // nothing to finalize
+  try {
+    const info = db
+      .prepare(`UPDATE processed_deliveries SET status = 'completed', ts = ? WHERE delivery_id = ? AND token = ?`)
+      .run(new Date().toISOString(), claim.deliveryId, claim.token);
+    return info.changes > 0;
+  } catch (err) {
+    logger.debug({ err }, "dao.completeWebhookDelivery failed");
+    return false;
+  }
+}
+
+/**
+ * Release a claimed-but-not-completed webhook delivery — the failure finalizer
+ * for `claimWebhookDelivery` (dispatch threw or returned a 5xx). Guarded on the
+ * claim's `token` so it can only delete the row this run still owns; a stale
+ * claim whose lease was reclaimed by a newer run leaves that newer row intact.
+ * Deleting re-opens the id so a redelivery is processed instead of suppressed as
+ * a duplicate.
+ *
+ * Returns true when the lease was freed (or there was nothing to free —
+ * persistence disabled / tokenless handle); false when the row this run owned
+ * was NOT deleted (reclaimed by another run, or a DB error), so the caller can
+ * surface that a prompt redelivery may be briefly deduped until the lease expires.
+ */
+export function releaseWebhookDelivery(claim: WebhookDeliveryClaim): boolean {
+  const db = openDatabase();
+  if (!db || !claim.deliveryId || !claim.token) return true; // nothing to free
+  try {
+    const info = db
+      .prepare(`DELETE FROM processed_deliveries WHERE delivery_id = ? AND token = ?`)
+      .run(claim.deliveryId, claim.token);
+    return info.changes > 0;
+  } catch (err) {
+    logger.debug({ err }, "dao.releaseWebhookDelivery failed");
+    return false;
+  }
+}
+

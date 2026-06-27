@@ -1,6 +1,7 @@
 import { logger } from "../logger.js";
 import { recordEvent } from "../storage/dao.js";
 import { bus } from "../realtime/bus.js";
+import { runReviewJob } from "../realtime/jobs.js";
 import { isPauseAll, isAutoReviewEnabled } from "../settings/overrides.js";
 
 /**
@@ -155,7 +156,7 @@ export async function dispatchWebhookEvent(
         return { status: 200, body: { status: blocked } };
       }
       logger.info({ owner, repo, pr: number, action }, "PR opened, queuing full review");
-      reviewer.handlePullRequest(installationId, owner, repo, number, "full").catch((err) => {
+      void runReviewJob({ reviewer, installationId, owner, repo, number, mode: "full" }).catch((err) => {
         logger.error({ err, owner, repo, pr: number }, "Background review failed");
       });
       return { status: 202, body: { status: "accepted" } };
@@ -180,7 +181,7 @@ export async function dispatchWebhookEvent(
         return { status: 202, body: { status: blocked } };
       }
 
-      reviewer.handlePullRequest(installationId, owner, repo, number, "incremental").catch((err) => {
+      void runReviewJob({ reviewer, installationId, owner, repo, number, mode: "incremental" }).catch((err) => {
         logger.error({ err, owner, repo, pr: number }, "Background review failed");
       });
       return { status: 202, body: { status: "accepted" } };
@@ -201,7 +202,7 @@ export async function dispatchWebhookEvent(
         return { status: 200, body: { status: blocked } };
       }
       logger.info({ owner, repo, pr: number, action }, "PR ready for review, queuing full review");
-      reviewer.handlePullRequest(installationId, owner, repo, number, "full").catch((err) => {
+      void runReviewJob({ reviewer, installationId, owner, repo, number, mode: "full" }).catch((err) => {
         logger.error({ err, owner, repo, pr: number }, "Background review failed");
       });
       return { status: 202, body: { status: "accepted" } };

@@ -191,8 +191,11 @@ export interface LearningChangePayload {
   role: string | null;
 }
 
-/** The state machine behind the review-pipeline board. */
-export type ReviewQueueState = "queued" | "running" | "done" | "failed" | "canceled";
+/** The state machine behind the review-pipeline board. `dead_letter` is a
+ *  terminal failed state reached only after a review exhausts its bounded
+ *  transient-error retries — surfaced distinctly so operators can tell a
+ *  give-up from an ordinary single failure. */
+export type ReviewQueueState = "queued" | "running" | "done" | "failed" | "canceled" | "dead_letter";
 
 /**
  * A single review's lifecycle as tracked by the in-memory queue registry
