@@ -123,12 +123,16 @@ function resolveGraphDbPath(override?: string): string {
 // path is still used for the SQLite `file_path = ?` lookups — those must match
 // the stored representation byte-for-byte.)
 
+// detectRoot / relativize / normRel are exported for unit testing — they are
+// the load-bearing path logic and are exercised directly across POSIX and
+// Windows path shapes.
+
 /** Collapse OS path separators to POSIX `/`. */
 function toPosix(p: string): string {
   return p.replace(/\\/g, "/");
 }
 
-function detectRoot(absPaths: string[]): string {
+export function detectRoot(absPaths: string[]): string {
   if (absPaths.length === 0) return "";
   const split = absPaths.map((p) => toPosix(p).split("/"));
   const first = split[0];
@@ -142,7 +146,7 @@ function detectRoot(absPaths: string[]): string {
 
 /** Strip the detected root, returning a POSIX repo-relative path (root is
  *  already POSIX from detectRoot). */
-function relativize(abs: string, root: string): string {
+export function relativize(abs: string, root: string): string {
   const p = toPosix(abs);
   if (root && p.startsWith(root + "/")) return p.slice(root.length + 1);
   return p;
@@ -150,7 +154,7 @@ function relativize(abs: string, root: string): string {
 
 /** Normalise a path (PR-relative or post-relativize) for map keys: POSIX
  *  separators, no leading `./` or `/`. */
-function normRel(p: string): string {
+export function normRel(p: string): string {
   return toPosix(p).replace(/^\.?\//, "");
 }
 
@@ -478,8 +482,11 @@ export function renderRelatedContext(
   );
   if (indexed.length === 0) return "";
 
-  // High-impact files first; ties broken by symbol count.
-  const ordered = [...indexed].sort((a, b) => b.fanIn - a.fanIn || b.symbols.length - a.symbols.length);
+  // High-impact files first; ties broken by symbol count, then by path so the
+  // rendered order is fully deterministic regardless of input file order.
+  const ordered = [...indexed].sort(
+    (a, b) => b.fanIn - a.fanIn || b.symbols.length - a.symbols.length || a.file.localeCompare(b.file),
+  );
 
   const header =
     "## Related context (from code graph)\n\n" +

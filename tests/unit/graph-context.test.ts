@@ -8,6 +8,9 @@ import {
   buildGraphContext,
   changedLinesFromPatch,
   renderRelatedContext,
+  detectRoot,
+  relativize,
+  normRel,
 } from "../../src/graph-context.js";
 
 // A tiny structural graph fixture mirroring the real code-review-graph schema
@@ -267,5 +270,69 @@ describe("queryGraph — Windows / backslash graph paths", () => {
     expect(util.dependents).toEqual(["src/a.ts"]);
     expect(util.fanIn).toBe(1);
     expect(ctx.fanInByFile["src/util.ts"]).toBe(1);
+  });
+});
+
+describe("detectRoot / relativize — POSIX and Windows path shapes", () => {
+  it("preserves the leading slash for a Unix-style common root and strips it cleanly", () => {
+    const paths = [
+      "/Users/luke/proj/src/a.ts",
+      "/Users/luke/proj/src/b.ts",
+      "/Users/luke/proj/scripts/t.ts",
+    ];
+    const root = detectRoot(paths);
+    expect(root).toBe("/Users/luke/proj");
+    expect(paths.map((p) => normRel(relativize(p, root)))).toEqual([
+      "src/a.ts",
+      "src/b.ts",
+      "scripts/t.ts",
+    ]);
+  });
+
+  it("detects a drive-qualified common root for Windows (backslash) paths", () => {
+    const paths = ["C:\\proj\\src\\a.ts", "C:\\proj\\src\\b.ts", "C:\\proj\\scripts\\t.ts"];
+    const root = detectRoot(paths);
+    expect(root).toBe("C:/proj");
+    expect(paths.map((p) => normRel(relativize(p, root)))).toEqual([
+      "src/a.ts",
+      "src/b.ts",
+      "scripts/t.ts",
+    ]);
+  });
+
+  it("still yields correct relative paths when files diverge at the root", () => {
+    // Common prefix is just the filesystem/drive root; relativize+normRel must
+    // still produce clean repo-relative paths.
+    const posix = ["/a/x.ts", "/b/y.ts"];
+    expect(posix.map((p) => normRel(relativize(p, detectRoot(posix))))).toEqual(["a/x.ts", "b/y.ts"]);
+    const win = ["C:\\a\\x.ts", "C:\\b\\y.ts"];
+    expect(win.map((p) => normRel(relativize(p, detectRoot(win))))).toEqual(["a/x.ts", "b/y.ts"]);
+  });
+
+  it("relativize leaves non-matching paths POSIX-normalised", () => {
+    expect(relativize("D:\\other\\f.ts", "C:/proj")).toBe("D:/other/f.ts");
+  });
+});
+
+describe("renderRelatedContext — ordering determinism", () => {
+  it("breaks fanIn/symbol-count ties by file path, independent of input order", () => {
+    const mk = (file: string) => ({
+      file,
+      indexed: true,
+      symbols: [],
+      dependencies: [],
+      dependents: ["x.ts"],
+      fanIn: 1,
+      highFanIn: false,
+    });
+    // Input deliberately out of alphabetical order with identical rank.
+    const md = renderRelatedContext({
+      available: true,
+      fanInByFile: {},
+      files: [mk("src/zebra.ts"), mk("src/alpha.ts"), mk("src/mango.ts")],
+    });
+    const order = ["src/alpha.ts", "src/mango.ts", "src/zebra.ts"].map((f) => md.indexOf(f));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b)); // appear in alpha order
   });
 });
