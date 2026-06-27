@@ -30,6 +30,25 @@ export type ReviewBodyMeta = {
 const REVIEW_BODY_MARKER = "<!-- This is an auto-generated comment by DiffSentry for review status -->";
 
 /**
+ * Honest banner for the parse-failure path. When the AI's response can't be
+ * parsed as JSON there are NO AI-generated inline comments — only built-in
+ * safety/pattern findings ran. Without this, a parse failure renders as a
+ * clean "0 actionable comments / no concerns surfaced" review, which is a
+ * silent failure: the user believes the code was reviewed and approved when it
+ * wasn't. This makes the gap explicit and promises a retry.
+ */
+function parseFailureBanner(botName: string): string {
+  return [
+    "> [!CAUTION]",
+    "> **DiffSentry could not complete this review.** The AI returned a response that couldn't be parsed, so AI-generated inline comments are missing from this pass. Built-in safety and pattern checks still ran and are reflected below.",
+    ">",
+    "> This is usually transient — most often a reasoning model exhausting its token budget on hidden reasoning before emitting any output (server logs show `finishReason: \"length\"` with a high `reasoningTokens` count).",
+    ">",
+    `> DiffSentry will retry this review automatically; you can also re-run it now with \`@${botName} review\`.`,
+  ].join("\n");
+}
+
+/**
  * Bucket logic: only critical/major bugs and security findings are
  * "actionable". Everything else (refactor suggestions, nitpicks,
  * documentation hints, minor issues) goes into the Nitpicks collapse.
@@ -275,9 +294,23 @@ export function formatReviewBody(
   const runId = randomUUID();
 
   const sections: string[] = [];
+
+  // Parse failure: lead with the honest banner so the review never reads as a
+  // clean pass. The flag is threaded straight from ReviewResult (set in
+  // parse.ts when JSON extraction fails) — see parseFailureBanner.
+  if (result.parseFailed) {
+    sections.push(parseFailureBanner(meta.botName));
+  }
+
   sections.push(`**Actionable comments posted: ${actionable.length}**`);
 
-  if (result.summary && result.summary.trim()) {
+  // Show the AI/synthesized summary — but suppress it on the parse-failure path
+  // when there are no findings at all, because the synthesized text there reads
+  // as "no actionable findings", which contradicts the banner above. When real
+  // (safety/pattern) findings exist, the synthesized summary accurately counts
+  // them, so it's still worth showing under the banner.
+  const suppressSummary = result.parseFailed && result.comments.length === 0;
+  if (!suppressSummary && result.summary && result.summary.trim()) {
     sections.push(result.summary.trim());
   }
 

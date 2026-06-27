@@ -11,12 +11,20 @@ const CONFIDENCE_TAG: Record<Confidence, string> = {
 };
 
 /**
- * Parse a unified diff patch and return the set of line numbers visible
- * on the RIGHT side (new file). These are the only lines GitHub allows
- * inline review comments on.
+ * Per-file diff line geometry on the RIGHT side (new file):
+ *   - `valid`: every right-side line number GitHub will accept an inline
+ *     comment on (added + surrounding context lines).
+ *   - `added`: just the `+` (changed) line numbers, ascending. Preferred
+ *     anchors when remapping a finding whose line drifted off the diff.
  */
-function getDiffLines(patch: string): Set<number> {
-  const lines = new Set<number>();
+interface DiffLineInfo {
+  valid: Set<number>;
+  added: number[];
+}
+
+export function getDiffLineInfo(patch: string): DiffLineInfo {
+  const valid = new Set<number>();
+  const added: number[] = [];
   let rightLine = 0;
 
   for (const line of patch.split("\n")) {
@@ -27,14 +35,47 @@ function getDiffLines(patch: string): Set<number> {
     }
     if (line.startsWith("-")) continue;
     if (line.startsWith("+")) {
-      lines.add(rightLine);
+      valid.add(rightLine);
+      added.push(rightLine); // ascending by construction
       rightLine++;
     } else {
-      lines.add(rightLine);
+      valid.add(rightLine);
       rightLine++;
     }
   }
-  return lines;
+  return { valid, added };
+}
+
+/**
+ * Models routinely report a finding against a line a few rows off from the
+ * one it actually means (a header line, a blank, the line above/below). Rather
+ * than silently discard those — losing a real finding — we snap them to the
+ * nearest valid diff line, preferring a changed (`+`) line. We only remap
+ * within {@link MAX_REMAP_DISTANCE}: a finding pointing dozens of lines away
+ * from anything in the diff is most likely a hallucinated location, and
+ * anchoring it somewhere arbitrary would just relocate the hallucination, so
+ * those are dropped instead. Returns the anchor line, or null if none is close
+ * enough.
+ */
+const MAX_REMAP_DISTANCE = 25;
+
+function nearestAnchor(line: number, info: DiffLineInfo): number | null {
+  // Prefer the changed lines; fall back to any GitHub-commentable line.
+  const candidates =
+    info.added.length > 0 ? info.added : [...info.valid].sort((a, b) => a - b);
+
+  let best: number | null = null;
+  let bestDist = Infinity;
+  for (const cand of candidates) {
+    const d = Math.abs(cand - line);
+    if (d < bestDist) {
+      bestDist = d;
+      best = cand;
+    }
+  }
+
+  if (best === null || bestDist > MAX_REMAP_DISTANCE) return null;
+  return best;
 }
 
 const VALID_TYPES: CommentType[] = [
@@ -273,6 +314,21 @@ export function synthesizeReviewSummary(
   return `${headline}${breakdown} See inline comments for details.`;
 }
 
+/** Shape of one comment as it arrives from the model: untyped JSON, so every
+ *  field is optional and validated at runtime in parseReviewResponse. */
+interface RawComment {
+  path?: string;
+  line?: number;
+  body?: string;
+  title?: string;
+  type?: string;
+  severity?: string;
+  suggestion?: string;
+  suggestionLanguage?: string;
+  aiAgentPrompt?: string;
+  confidence?: string;
+}
+
 export function parseReviewResponse(raw: string, context: PRContext): ReviewResult {
   const log = logger.child({ step: "parse" });
 
@@ -293,64 +349,99 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
     };
   }
 
-  const diffLinesByFile = new Map<string, Set<number>>();
+  const diffInfoByFile = new Map<string, DiffLineInfo>();
   for (const f of context.files) {
-    diffLinesByFile.set(f.filename, getDiffLines(f.patch));
+    diffInfoByFile.set(f.filename, getDiffLineInfo(f.patch));
   }
 
-  const comments: ReviewComment[] = (parsed.comments || [])
-    .filter((c: any) => {
-      if (!c.path || !c.line || !c.body) return false;
-      const validLines = diffLinesByFile.get(c.path);
-      if (!validLines) {
-        log.warn({ path: c.path }, "Comment references unknown file, skipping");
-        return false;
-      }
-      if (typeof c.line !== "number" || c.line < 1) return false;
-      if (!validLines.has(c.line)) {
-        log.warn({ path: c.path, line: c.line }, "Comment references line not in diff, skipping");
-        return false;
-      }
-      return true;
-    })
-    .map((c: any) => {
-      const type = VALID_TYPES.includes(c.type) ? c.type as CommentType : undefined;
-      const severity = VALID_SEVERITIES.includes(c.severity) ? c.severity as CommentSeverity : undefined;
-      const title = typeof c.title === "string" && c.title.trim() ? c.title.trim() : undefined;
-      const suggestion = typeof c.suggestion === "string" && c.suggestion.trim() ? c.suggestion : undefined;
-      const suggestionLanguage: "diff" | "suggestion" =
-        c.suggestionLanguage === "diff" ? "diff" : "suggestion";
-      const aiAgentPrompt = typeof c.aiAgentPrompt === "string" && c.aiAgentPrompt.trim()
-        ? c.aiAgentPrompt
-        : undefined;
-      const confidence = VALID_CONFIDENCE.includes(c.confidence) ? (c.confidence as Confidence) : "high";
-      const fingerprint = fingerprintFor(c.path, c.line, title || c.body.slice(0, 80));
+  // Track how many findings we couldn't anchor (dropped) vs. snapped to a
+  // nearby valid line (remapped) so the loss is visible in logs instead of
+  // silent. See nearestAnchor for the remap rationale.
+  let droppedCount = 0;
+  let remappedCount = 0;
+  const comments: ReviewComment[] = [];
 
-      return {
-        path: c.path,
-        line: c.line,
-        side: "RIGHT" as const,
-        body: formatCommentBody({
-          title,
-          body: c.body,
-          type,
-          severity,
-          suggestion,
-          suggestionLanguage,
-          aiAgentPrompt,
-          fingerprint,
-          confidence,
-        }),
+  // Model output is untrusted JSON, so we model an incoming comment as a loose
+  // record of optional primitives and validate every field at runtime below.
+  // Non-array `comments` (the model returned an object, a string, …) degrades
+  // to an empty list rather than throwing mid-parse.
+  const rawComments: RawComment[] = Array.isArray(parsed.comments) ? parsed.comments : [];
+
+  for (const c of rawComments) {
+    if (!c.path || !c.body || typeof c.line !== "number" || c.line < 1) {
+      droppedCount++;
+      continue;
+    }
+    const info = diffInfoByFile.get(c.path);
+    if (!info) {
+      log.warn({ path: c.path }, "Comment references unknown file, dropping");
+      droppedCount++;
+      continue;
+    }
+
+    // Anchor the finding to a real diff line: keep it as-is when it already
+    // lands on one, otherwise snap to the nearest changed line. Only when no
+    // line is close enough do we discard it.
+    let line = c.line;
+    if (!info.valid.has(line)) {
+      const anchor = nearestAnchor(line, info);
+      if (anchor === null) {
+        log.warn(
+          { path: c.path, line },
+          "Comment references line not in diff with no nearby anchor, dropping",
+        );
+        droppedCount++;
+        continue;
+      }
+      log.info({ path: c.path, from: line, to: anchor }, "Remapped finding to nearest valid diff line");
+      line = anchor;
+      remappedCount++;
+    }
+
+    const type = VALID_TYPES.includes(c.type as CommentType) ? (c.type as CommentType) : undefined;
+    const severity = VALID_SEVERITIES.includes(c.severity as CommentSeverity) ? (c.severity as CommentSeverity) : undefined;
+    const title = typeof c.title === "string" && c.title.trim() ? c.title.trim() : undefined;
+    const suggestion = typeof c.suggestion === "string" && c.suggestion.trim() ? c.suggestion : undefined;
+    const suggestionLanguage: "diff" | "suggestion" =
+      c.suggestionLanguage === "diff" ? "diff" : "suggestion";
+    const aiAgentPrompt = typeof c.aiAgentPrompt === "string" && c.aiAgentPrompt.trim()
+      ? c.aiAgentPrompt
+      : undefined;
+    const confidence = VALID_CONFIDENCE.includes(c.confidence as Confidence) ? (c.confidence as Confidence) : "high";
+    const fingerprint = fingerprintFor(c.path, line, title || c.body.slice(0, 80));
+
+    comments.push({
+      path: c.path,
+      line,
+      side: "RIGHT" as const,
+      body: formatCommentBody({
+        title,
+        body: c.body,
         type,
         severity,
-        title,
         suggestion,
         suggestionLanguage,
         aiAgentPrompt,
         fingerprint,
         confidence,
-      };
+      }),
+      type,
+      severity,
+      title,
+      suggestion,
+      suggestionLanguage,
+      aiAgentPrompt,
+      fingerprint,
+      confidence,
     });
+  }
+
+  if (droppedCount > 0 || remappedCount > 0) {
+    log.info(
+      { dropped: droppedCount, remapped: remappedCount, kept: comments.length },
+      "Finding line validation complete",
+    );
+  }
 
   const approval = ["APPROVE", "REQUEST_CHANGES", "COMMENT"].includes(parsed.approval)
     ? parsed.approval

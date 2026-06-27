@@ -11,6 +11,7 @@ import { parseCommand, formatHelpMessage, formatConfigMessage } from "./commands
 import { parseIssueCommand, formatIssueHelpMessage } from "./issue-commands.js";
 import { buildIssueSummaryInstruction, buildIssuePlanInstruction } from "./ai/prompt.js";
 import { synthesizeReviewSummary } from "./ai/parse.js";
+import { verifyFindings } from "./ai/verify.js";
 import { LearningsStore, synthesizeLearning, extractFindingMeta, type FindingContext } from "./learnings.js";
 import { loadGuidelines, getRelevantGuidelines, formatGuidelinesForPrompt } from "./guidelines.js";
 import { parseIssueReferences, fetchLinkedIssues, formatIssuesForPrompt, formatIssuesForWalkthrough } from "./issues.js";
@@ -679,6 +680,33 @@ export class Reviewer {
 
       if (signal.aborted) return;
 
+      // Second, cheap verification pass over the AI's OWN findings: ask the
+      // model to cite the diff line(s) that substantiate each finding and drop
+      // the ones it can't. One extra batched call; skipped entirely when the
+      // first pass produced no findings. Runs BEFORE safety/pattern findings
+      // are merged in below, so deterministic built-in findings are never
+      // subject to it. Fails open — a thrown/garbled verifier keeps the
+      // original findings rather than silently nuking the review.
+      if (reviewResult.comments.length > 0) {
+        try {
+          const { comments: verified, stats } = await verifyFindings({
+            ai: this.ai,
+            context,
+            comments: reviewResult.comments,
+            timeoutMs: this.config.aiRequestTimeoutMs,
+            signal,
+          });
+          reviewResult.comments = verified;
+          if (stats.dropped > 0 || stats.unparseable) {
+            log.info(stats, "Finding verification pass complete");
+          }
+        } catch (err) {
+          log.warn({ err }, "Finding verification pass errored; keeping unverified findings");
+        }
+      }
+
+      if (signal.aborted) return;
+
       // Find related PRs for walkthrough
       let relatedPRsSection = "";
       if (walkthroughEnabled) {
@@ -1085,20 +1113,13 @@ export class Reviewer {
       // final merged comment set so the user sees something meaningful
       // instead of "Review complete (no structured response from AI).".
       // The synthesized text now reflects safety + pattern findings too.
+      //
+      // The honest "couldn't complete this review" banner for the parseFailed
+      // path is rendered by formatReviewBody from the parseFailed flag — we no
+      // longer hand-prepend it here, so the flag is the single source of truth
+      // and the two can't drift out of sync.
       if (reviewResult.summaryIsFallback) {
-        const synthesized = synthesizeReviewSummary(reviewResult, context);
-        reviewResult.summary = reviewResult.parseFailed
-          ? [
-              `> [!NOTE]`,
-              `> **DiffSentry couldn't parse a structured response from the AI for this review**, so any AI-generated inline comments are missing from this pass. Built-in safety and pattern checks ran normally and are reflected below.`,
-              `>`,
-              `> Most common cause: a reasoning model (o-series or GPT-5+) burned its token budget on hidden chain-of-thought before emitting any visible output. Server logs will show \`finishReason: "length"\` and a high \`reasoningTokens\` count when that's the case.`,
-              `>`,
-              `> Re-run with \`@${this.config.botName} review\` to try again.`,
-              ``,
-              synthesized,
-            ].join("\n")
-          : synthesized;
+        reviewResult.summary = synthesizeReviewSummary(reviewResult, context);
       }
 
       // Compose CodeRabbit-style review body before submission
