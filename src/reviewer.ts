@@ -34,6 +34,7 @@ import { bus } from "./realtime/bus.js";
 import { runWithCostContext, getCostContext, setCostReviewId, flushCostEvents } from "./ai/cost.js";
 import { isPauseAll, resolveProfileOverride, resolveMaxFilesOverride } from "./settings/overrides.js";
 import { reviewQueue, type ReviewHandle } from "./realtime/queue.js";
+import { buildGraphContext } from "./graph-context.js";
 
 /** Map a PR chat command to the cost-attribution kind for its AI calls. */
 function costKindForCommand(type: string): string {
@@ -577,12 +578,39 @@ export class Reviewer {
       const repoFullName = `${owner}/${repo}`;
       const filenames = context.files.map((f) => f.filename);
 
-      const [allLearnings, relevantLearnings, allGuidelines, issueNumbers] = await Promise.all([
+      // Graph-backed context (whole-function bodies + cross-file impact) is
+      // built alongside the knowledge loads — it issues its own parallel head-
+      // file fetches and a fast local SQLite read, and is fully best-effort, so
+      // a missing/stale graph never blocks or slows the review meaningfully.
+      const [allLearnings, relevantLearnings, allGuidelines, issueNumbers, graphContext] = await Promise.all([
         this.learnings.getLearnings(repoFullName),
         this.learnings.getRelevantLearnings(repoFullName, filenames),
         loadGuidelines(octokit, owner, repo, context.headSha),
         Promise.resolve(parseIssueReferences(context.description)),
+        buildGraphContext({
+          files: context.files.map((f) => ({ path: f.filename, patch: f.patch })),
+          readHeadFile: (relPath) =>
+            this.github.getFileContent(installationId, owner, repo, relPath, context.headSha),
+        }).catch((err) => {
+          log.debug({ err }, "Graph context build failed");
+          return { available: false, files: [], fanInByFile: {}, relatedContextMarkdown: "" };
+        }),
       ]);
+
+      // Inject the bounded "Related context" section into the prompt context so
+      // every provider's buildReviewPrompt picks it up. Empty string ⇒ no-op,
+      // preserving the diff-only prompt when the graph adds nothing.
+      if (graphContext.relatedContextMarkdown) {
+        context.relatedContext = graphContext.relatedContextMarkdown;
+        log.info(
+          {
+            graphFiles: graphContext.files.filter((f) => f.indexed).length,
+            highFanIn: graphContext.files.filter((f) => f.highFanIn).map((f) => f.file),
+            relatedChars: graphContext.relatedContextMarkdown.length,
+          },
+          "Injected code-graph related context into review prompt",
+        );
+      }
 
       const relevantGuidelines = getRelevantGuidelines(allGuidelines, filenames);
       const linkedIssues = issueNumbers.length > 0
@@ -640,6 +668,14 @@ export class Reviewer {
           ? this.ai.generateWalkthrough(context, repoConfig)
           : Promise.resolve(null),
       ]);
+
+      // Stash per-file fan-in / impact-radius counts on the review result so
+      // downstream passes (e.g. severity calibration) can weight findings in
+      // high-blast-radius files without re-querying the graph. Best-effort:
+      // absent when the graph was unavailable.
+      if (graphContext.available && Object.keys(graphContext.fanInByFile).length > 0) {
+        reviewResult.fanInByFile = graphContext.fanInByFile;
+      }
 
       if (signal.aborted) return;
 
