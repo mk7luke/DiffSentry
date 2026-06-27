@@ -1,5 +1,6 @@
 import type { AIProvider, PRContext, ReviewComment } from "../types.js";
 import { logger } from "../logger.js";
+import { withAiTimeout, DEFAULT_AI_REQUEST_TIMEOUT_MS } from "./timeout.js";
 
 /**
  * Second-pass finding verification.
@@ -51,16 +52,36 @@ Rules:
 - Be conservative about dropping: mark "supported": false only when you are confident the diff does not back the finding. When genuinely unsure, keep it (true).
 - Do not invent new findings. Judge only the ones given.`;
 
+/** Max characters of finding body text handed to the verifier per finding.
+ *  Enough to convey the actual claim; bounded so a long-winded finding can't
+ *  blow up the batched prompt's token budget. */
+const CLAIM_BODY_MAX = 400;
+
+/** Strip the rendered body's markdown/HTML scaffolding (fingerprint + marker
+ *  comments, <details>/<summary> tags) down to plain claim prose, collapse
+ *  whitespace, and truncate. */
+function normalizeClaimBody(body: string): string {
+  const cleaned = body
+    .replace(/<!--[\s\S]*?-->/g, " ") // fingerprint + auto-generated markers
+    .replace(/<\/?[^>]+>/g, " ") // <details>, <summary>, etc.
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.length > CLAIM_BODY_MAX ? cleaned.slice(0, CLAIM_BODY_MAX) + "…" : cleaned;
+}
+
 function findingsBlock(comments: ReviewComment[]): string {
   return comments
     .map((c, i) => {
       const meta = [c.type, c.severity].filter(Boolean).join("/");
       const head = `Finding ${i}: ${c.path}:${c.line}${meta ? ` (${meta})` : ""}`;
       const title = c.title ? `\n  title: ${c.title}` : "";
-      // The rendered body carries markdown/HTML scaffolding; the raw title +
-      // a short body slice is enough signal for the verifier and keeps the
-      // prompt bounded.
-      return `${head}${title}`;
+      // Give the verifier the actual claim text — a terse title alone often
+      // isn't enough to judge whether the diff substantiates the finding. The
+      // body is normalized (scaffolding stripped) and truncated to keep the
+      // single batched prompt bounded.
+      const claim = normalizeClaimBody(c.body);
+      const claimLine = claim ? `\n  claim: ${claim}` : "";
+      return `${head}${title}${claimLine}`;
     })
     .join("\n");
 }
@@ -134,8 +155,13 @@ export async function verifyFindings(params: {
   ai: Pick<AIProvider, "complete">;
   context: Pick<PRContext, "files">;
   comments: ReviewComment[];
+  /** Deadline for the single verifier call. Defaults to the standard AI
+   *  request timeout. A timeout rejects (AiTimeoutError), which the caller's
+   *  catch turns into fail-open — the best-effort second pass can never block
+   *  the whole review longer than this. */
+  timeoutMs?: number;
 }): Promise<{ comments: ReviewComment[]; stats: VerificationStats }> {
-  const { ai, context, comments } = params;
+  const { ai, context, comments, timeoutMs = DEFAULT_AI_REQUEST_TIMEOUT_MS } = params;
   const log = logger.child({ step: "verify-findings" });
   const before = comments.length;
 
@@ -144,7 +170,14 @@ export async function verifyFindings(params: {
   }
 
   const { system, user } = buildVerificationPrompt(context, comments);
-  const raw = await ai.complete(system, user, { json: true, maxTokens: 1024 });
+  // Bound the call explicitly here too, independent of any provider-level
+  // deadline, so this best-effort pass is self-isolating. `complete` doesn't
+  // take a signal; withAiTimeout still rejects on time even when the inner
+  // call ignores the signal.
+  const raw = await withAiTimeout(
+    { provider: "verify", operation: "verify-findings", timeoutMs },
+    () => ai.complete(system, user, { json: true, maxTokens: 1024 }),
+  );
 
   const verdicts = parseVerdicts(raw, before);
   if (verdicts === null) {

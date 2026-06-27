@@ -314,6 +314,21 @@ export function synthesizeReviewSummary(
   return `${headline}${breakdown} See inline comments for details.`;
 }
 
+/** Shape of one comment as it arrives from the model: untyped JSON, so every
+ *  field is optional and validated at runtime in parseReviewResponse. */
+interface RawComment {
+  path?: string;
+  line?: number;
+  body?: string;
+  title?: string;
+  type?: string;
+  severity?: string;
+  suggestion?: string;
+  suggestionLanguage?: string;
+  aiAgentPrompt?: string;
+  confidence?: string;
+}
+
 export function parseReviewResponse(raw: string, context: PRContext): ReviewResult {
   const log = logger.child({ step: "parse" });
 
@@ -346,7 +361,13 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
   let remappedCount = 0;
   const comments: ReviewComment[] = [];
 
-  for (const c of (parsed.comments || []) as any[]) {
+  // Model output is untrusted JSON, so we model an incoming comment as a loose
+  // record of optional primitives and validate every field at runtime below.
+  // Non-array `comments` (the model returned an object, a string, …) degrades
+  // to an empty list rather than throwing mid-parse.
+  const rawComments: RawComment[] = Array.isArray(parsed.comments) ? parsed.comments : [];
+
+  for (const c of rawComments) {
     if (!c.path || !c.body || typeof c.line !== "number" || c.line < 1) {
       droppedCount++;
       continue;
@@ -361,7 +382,7 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
     // Anchor the finding to a real diff line: keep it as-is when it already
     // lands on one, otherwise snap to the nearest changed line. Only when no
     // line is close enough do we discard it.
-    let line = c.line as number;
+    let line = c.line;
     if (!info.valid.has(line)) {
       const anchor = nearestAnchor(line, info);
       if (anchor === null) {
@@ -377,8 +398,8 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
       remappedCount++;
     }
 
-    const type = VALID_TYPES.includes(c.type) ? c.type as CommentType : undefined;
-    const severity = VALID_SEVERITIES.includes(c.severity) ? c.severity as CommentSeverity : undefined;
+    const type = VALID_TYPES.includes(c.type as CommentType) ? (c.type as CommentType) : undefined;
+    const severity = VALID_SEVERITIES.includes(c.severity as CommentSeverity) ? (c.severity as CommentSeverity) : undefined;
     const title = typeof c.title === "string" && c.title.trim() ? c.title.trim() : undefined;
     const suggestion = typeof c.suggestion === "string" && c.suggestion.trim() ? c.suggestion : undefined;
     const suggestionLanguage: "diff" | "suggestion" =
@@ -386,7 +407,7 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
     const aiAgentPrompt = typeof c.aiAgentPrompt === "string" && c.aiAgentPrompt.trim()
       ? c.aiAgentPrompt
       : undefined;
-    const confidence = VALID_CONFIDENCE.includes(c.confidence) ? (c.confidence as Confidence) : "high";
+    const confidence = VALID_CONFIDENCE.includes(c.confidence as Confidence) ? (c.confidence as Confidence) : "high";
     const fingerprint = fingerprintFor(c.path, line, title || c.body.slice(0, 80));
 
     comments.push({
