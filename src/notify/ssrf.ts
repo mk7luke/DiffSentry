@@ -314,9 +314,14 @@ export function sendJsonPinned(
           }
           chunks.push(buf);
         });
-        res.on("end", () =>
-          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }),
-        );
+        res.on("end", () => {
+          // Once the cap was hit we've already torn the request down and the
+          // promise is rejecting via req's 'error' — don't also resolve with the
+          // truncated body. (Promises settle once, but this keeps the terminal
+          // outcome unambiguous and the control flow clear.)
+          if (aborted) return;
+          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") });
+        });
         res.on("error", reject);
       },
     );
