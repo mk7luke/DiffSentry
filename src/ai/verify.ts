@@ -280,6 +280,34 @@ function parseVerdicts(raw: string, count: number): Verdict[] | null {
   return verdicts;
 }
 
+/** Rejection used when the review's abort signal fires during the verifier
+ *  call — distinct from AiTimeoutError/provider errors so the caller can treat
+ *  cancellation as a clean no-op (keep all findings) rather than a failure. */
+class VerificationAbortedError extends Error {
+  constructor() {
+    super("verification aborted");
+    Object.setPrototypeOf(this, new.target.prototype);
+    this.name = "VerificationAbortedError";
+  }
+}
+
+/** Resolve/reject with `p`, but reject early with VerificationAbortedError the
+ *  moment `signal` aborts. The abort listener is removed once `p` settles so it
+ *  never leaks, and `p`'s eventual rejection stays handled (no unhandled
+ *  rejection) even after the race resolves on abort. */
+function withAbort<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return p;
+  if (signal.aborted) return Promise.reject(new VerificationAbortedError());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new VerificationAbortedError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    p.then(
+      (v) => { signal.removeEventListener("abort", onAbort); resolve(v); },
+      (e) => { signal.removeEventListener("abort", onAbort); reject(e); },
+    );
+  });
+}
+
 export async function verifyFindings(params: {
   ai: Pick<AIProvider, "complete">;
   context: Pick<PRContext, "files">;
@@ -289,13 +317,30 @@ export async function verifyFindings(params: {
    *  catch turns into fail-open — the best-effort second pass can never block
    *  the whole review longer than this. */
   timeoutMs?: number;
+  /** The review's abort signal. When it fires (e.g. the PR was closed), the
+   *  best-effort verifier round-trip is abandoned and the ORIGINAL findings are
+   *  returned immediately — an aborted review never blocks on this extra call. */
+  signal?: AbortSignal;
 }): Promise<{ comments: ReviewComment[]; stats: VerificationStats }> {
-  const { ai, context, comments, timeoutMs = DEFAULT_AI_REQUEST_TIMEOUT_MS } = params;
+  const { ai, context, comments, timeoutMs = DEFAULT_AI_REQUEST_TIMEOUT_MS, signal } = params;
   const log = logger.child({ step: "verify-findings" });
   const before = comments.length;
 
+  // Cancellation is a clean no-op: keep every finding, drop nothing, not flagged
+  // unparseable. Used both for an already-aborted review and for an abort that
+  // lands mid-call.
+  const keepAll = (): { comments: ReviewComment[]; stats: VerificationStats } => ({
+    comments,
+    stats: { before, after: before, dropped: 0, skipped: 0, unparseable: false },
+  });
+
   if (before === 0) {
     return { comments, stats: { before, after: 0, dropped: 0, skipped: 0, unparseable: false } };
+  }
+
+  if (signal?.aborted) {
+    log.info("Verification skipped — review already aborted; keeping all findings");
+    return keepAll();
   }
 
   // Partition findings by whether their file even has a usable patch. A finding
@@ -357,12 +402,27 @@ export async function verifyFindings(params: {
   // deadline, so this best-effort pass is self-isolating. `complete` doesn't
   // take a signal; withAiTimeout still rejects on time even when the inner
   // call ignores the signal.
-  const raw = await withAiTimeout(
-    { provider: "verify", operation: "verify-findings", timeoutMs },
-    // 1024 output tokens fits ~40+ small verdict objects — see the budget
-    // envelope on MAX_TOTAL_PATCH_CHARS; the input caps are sized against it.
-    () => ai.complete(system, user, { json: true, maxTokens: 1024 }),
-  );
+  let raw: string;
+  try {
+    raw = await withAbort(
+      withAiTimeout(
+        { provider: "verify", operation: "verify-findings", timeoutMs },
+        // 1024 output tokens fits ~40+ small verdict objects — see the budget
+        // envelope on MAX_TOTAL_PATCH_CHARS; the input caps are sized against it.
+        () => ai.complete(system, user, { json: true, maxTokens: 1024 }),
+      ),
+      signal,
+    );
+  } catch (err) {
+    // Cancellation: don't wait on the round-trip for a review that's going away.
+    // Other errors (AiTimeoutError, provider failures) propagate to the caller's
+    // catch, which fails open the same way.
+    if (err instanceof VerificationAbortedError) {
+      log.info("Verification aborted mid-call — keeping all findings");
+      return keepAll();
+    }
+    throw err;
+  }
 
   const verdicts = parseVerdicts(raw, included.length);
   if (verdicts === null) {

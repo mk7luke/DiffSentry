@@ -157,6 +157,30 @@ describe("verifyFindings", () => {
     expect(out.stats.unparseable).toBe(false);
   });
 
+  it("returns original findings immediately when the signal is already aborted (no AI call)", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    let called = false;
+    const ai = { complete: async () => { called = true; return "{}"; } };
+    const out = await verifyFindings({ ai, context: ctx(), comments, signal: ac.signal });
+    expect(called).toBe(false);
+    expect(out.comments).toHaveLength(2);
+    expect(out.stats.dropped).toBe(0);
+    expect(out.stats.unparseable).toBe(false);
+  });
+
+  it("stops waiting and keeps all findings when the signal aborts mid-call", async () => {
+    const ac = new AbortController();
+    // A verifier call that never resolves; only the abort unblocks verifyFindings.
+    const ai = { complete: () => new Promise<string>(() => {}) };
+    const p = verifyFindings({ ai, context: ctx(), comments, signal: ac.signal });
+    ac.abort();
+    const out = await p;
+    expect(out.comments).toHaveLength(2);
+    expect(out.stats.dropped).toBe(0);
+    expect(out.stats.unparseable).toBe(false);
+  });
+
   it("fails open (keeps all findings) when the verifier output can't be parsed", async () => {
     const ai = { complete: async () => "not json at all" };
     const out = await verifyFindings({ ai, context: ctx(), comments });

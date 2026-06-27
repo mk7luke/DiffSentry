@@ -694,6 +694,7 @@ export class Reviewer {
             context,
             comments: reviewResult.comments,
             timeoutMs: this.config.aiRequestTimeoutMs,
+            signal,
           });
           reviewResult.comments = verified;
           if (stats.dropped > 0 || stats.unparseable) {
