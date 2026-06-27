@@ -1836,54 +1836,69 @@ export interface WebhookDeliveryClaim {
 }
 
 /**
+ * The outcome of a claim attempt — a 3-way result so the caller can tell a true
+ * duplicate apart from a delivery that is merely in flight elsewhere:
+ *   - `claimed`   → this caller owns the lease; process it, then finalize.
+ *   - `duplicate` → the row is `completed`; this delivery was already processed
+ *                   to its terminal outcome, so skip it.
+ *   - `in_flight` → a *fresh* `processing` lease is held by another run; the
+ *                   delivery is currently being handled. Acknowledge receipt but
+ *                   do NOT claim it was "already processed" — only `completed`
+ *                   rows are true duplicates.
+ */
+export type WebhookClaimResult =
+  | { kind: "claimed"; claim: WebhookDeliveryClaim }
+  | { kind: "duplicate" }
+  | { kind: "in_flight" };
+
+/**
  * Two-phase idempotency lease for a GitHub webhook delivery, keyed by its
- * X-GitHub-Delivery id. Returns a claim handle when the caller should process
- * the delivery, or null when it is a duplicate to skip.
+ * X-GitHub-Delivery id. See `WebhookClaimResult` for the 3-way outcome.
  *
  * The claim writes a `processing` row stamped with a fresh per-claim `token`;
  * the caller must finalize it with that handle:
- *   - `completeWebhookDelivery` on a successful dispatch → marks it `completed`,
- *     so future redeliveries are suppressed as true duplicates;
- *   - `releaseWebhookDelivery` on a failure that produced no result → deletes it,
- *     so a redelivery is reprocessed.
+ *   - `completeWebhookDelivery` on a terminal outcome → marks it `completed`, so
+ *     future redeliveries return `duplicate`;
+ *   - `releaseWebhookDelivery` on a transient failure → deletes it, so a
+ *     redelivery is reprocessed.
  *
  * Crash safety: if the process dies mid-dispatch (neither finalizer runs), the
- * row is stuck `processing`. A redelivery is then granted the claim again once
- * the lease has gone stale — the reclaim rotates `token`, so the crashed claim's
- * handle no longer matches and a late finalizer from it is a no-op. A `completed`
- * row is always a duplicate; a *fresh* `processing` row (lease not yet expired)
- * is treated as a concurrent/rapid double-delivery and skipped. The whole
- * decision runs in one transaction so two concurrent deliveries can't both win.
+ * row is stuck `processing`. A redelivery is granted the claim again once the
+ * lease has gone stale — the reclaim rotates `token`, so the crashed claim's
+ * handle no longer matches and a late finalizer from it is a no-op. Only a
+ * `completed` row is a true `duplicate`; a fresh `processing` lease is `in_flight`
+ * (bounded by the lease TTL, never permanent). The whole decision runs in one
+ * transaction so two concurrent deliveries can't both win.
  *
  * When persistence is disabled there is nothing to dedupe against, so we return
- * a tokenless handle (process it; finalizers no-op) — idempotency degrades to
- * the prior at-least-once behavior rather than silently dropping every delivery.
+ * a `claimed` tokenless handle (process it; finalizers no-op) — idempotency
+ * degrades to the prior at-least-once behavior rather than dropping deliveries.
  */
-export function claimWebhookDelivery(deliveryId: string): WebhookDeliveryClaim | null {
+export function claimWebhookDelivery(deliveryId: string): WebhookClaimResult {
   const db = openDatabase();
   // No DB / no id → process it; the tokenless handle makes finalizers no-op.
-  if (!db || !deliveryId) return { deliveryId, token: "" };
+  if (!db || !deliveryId) return { kind: "claimed", claim: { deliveryId, token: "" } };
   try {
     const nowMs = Date.now();
     const nowIso = new Date(nowMs).toISOString();
     const token = randomUUID();
-    const decide = db.transaction((): boolean => {
+    const decide = db.transaction((): "claimed" | "duplicate" | "in_flight" => {
       // Fast path: a brand-new delivery claims a fresh `processing` lease.
       const inserted = db
         .prepare(`INSERT OR IGNORE INTO processed_deliveries (delivery_id, status, ts, token) VALUES (?, 'processing', ?, ?)`)
         .run(deliveryId, nowIso, token);
-      if (inserted.changes > 0) return true;
+      if (inserted.changes > 0) return "claimed";
 
       const row = db
         .prepare(`SELECT status, ts FROM processed_deliveries WHERE delivery_id = ?`)
         .get(deliveryId) as { status: string; ts: string } | undefined;
-      if (!row) return true; // raced a delete — treat as claimable
-      if (row.status === "completed") return false; // a genuine duplicate
+      if (!row) return "claimed"; // raced a delete — treat as claimable
+      if (row.status === "completed") return "duplicate"; // a true, terminal duplicate
 
       // status === 'processing': only reclaim if the prior lease has gone stale
-      // (the holder crashed). A fresh lease is a concurrent double-delivery. An
-      // unparsable stamp (a corrupt row) is treated as stale/reclaimable rather
-      // than fresh, so it can never permanently suppress redeliveries.
+      // (the holder crashed). A fresh lease is in-flight elsewhere — NOT a
+      // completed duplicate. An unparsable stamp (a corrupt row) is treated as
+      // stale/reclaimable rather than fresh, so it can never permanently suppress.
       const leasedAt = Date.parse(row.ts);
       const age = nowMs - leasedAt;
       if (!Number.isFinite(leasedAt) || age >= deliveryLeaseMs()) {
@@ -1895,14 +1910,16 @@ export function claimWebhookDelivery(deliveryId: string): WebhookDeliveryClaim |
         const reclaimed = db
           .prepare(`UPDATE processed_deliveries SET ts = ?, token = ? WHERE delivery_id = ? AND status = 'processing' AND ts = ?`)
           .run(nowIso, token, deliveryId, row.ts);
-        return reclaimed.changes === 1;
+        // Lost the CAS → another run just reclaimed it → it's now in flight there.
+        return reclaimed.changes === 1 ? "claimed" : "in_flight";
       }
-      return false;
+      return "in_flight"; // a fresh lease held by another run
     });
-    return decide() ? { deliveryId, token } : null;
+    const outcome = decide();
+    return outcome === "claimed" ? { kind: "claimed", claim: { deliveryId, token } } : { kind: outcome };
   } catch (err) {
     logger.debug({ err }, "dao.claimWebhookDelivery failed");
-    return { deliveryId, token: "" }; // degrade to process-it; finalizers no-op
+    return { kind: "claimed", claim: { deliveryId, token: "" } }; // degrade to process-it
   }
 }
 

@@ -69,41 +69,47 @@ async function main() {
 
     // ── idempotency ─────────────────────────────────────────────────────
     const STALE_AGE_MS = 60 * 60 * 1000; // 1h — well past the default lease TTL
-    const c1 = claimWebhookDelivery("gh-1");
-    ok("first claim of a delivery id wins (processing lease)", c1 !== null);
-    ok("a fresh in-flight redelivery is rejected", claimWebhookDelivery("gh-1") === null);
-    const c2 = claimWebhookDelivery("gh-2");
-    ok("a different delivery id is claimable", c2 !== null);
+    // claimWebhookDelivery returns a 3-way result; unwrap the owned handle.
+    const claimed = (id: string) => {
+      const r = claimWebhookDelivery(id);
+      if (r.kind !== "claimed") throw new Error(`[claim ${id}] expected 'claimed', got '${r.kind}'`);
+      return r.claim;
+    };
+    const c1 = claimed("gh-1");
+    ok("first claim of a delivery id wins (processing lease)", !!c1.token);
+    ok("a fresh in-flight redelivery is reported in_flight (not a completed duplicate)", claimWebhookDelivery("gh-1").kind === "in_flight");
+    const c2 = claimed("gh-2");
+    ok("a different delivery id is claimable", !!c2.token);
     // Release (the failure finalizer) re-opens the id so a redelivery is
-    // processed instead of suppressed as a phantom duplicate. It reports whether
-    // the owned row was actually freed.
-    ok("release of an owned lease reports success (true)", releaseWebhookDelivery(c2!) === true);
-    ok("released delivery id is claimable again", claimWebhookDelivery("gh-2") !== null);
+    // processed instead of suppressed. It reports whether the row was freed.
+    ok("release of an owned lease reports success (true)", releaseWebhookDelivery(c2) === true);
+    ok("released delivery id is claimable again", claimWebhookDelivery("gh-2").kind === "claimed");
     // Complete (the success finalizer): a completed delivery is a true duplicate.
-    ok("complete of an owned lease reports success (true)", completeWebhookDelivery(c1!) === true);
-    ok("a completed delivery rejects redelivery (true duplicate)", claimWebhookDelivery("gh-1") === null);
+    ok("complete of an owned lease reports success (true)", completeWebhookDelivery(c1) === true);
+    ok("a completed delivery is reported as a duplicate", claimWebhookDelivery("gh-1").kind === "duplicate");
     // Crash safety: a `processing` lease left behind by a crash is reclaimable
     // once stale. The dao test helper seeds a back-dated lease (no inline SQL).
     seedProcessingLeaseForTest(db, "gh-crash", STALE_AGE_MS);
-    ok("a stale processing lease (crashed mid-flight) is reclaimable", claimWebhookDelivery("gh-crash") !== null);
-    ok("the reclaimed lease is fresh, so an immediate redelivery is rejected", claimWebhookDelivery("gh-crash") === null);
+    ok("a stale processing lease (crashed mid-flight) is reclaimable", claimWebhookDelivery("gh-crash").kind === "claimed");
+    ok("the reclaimed lease is fresh, so an immediate redelivery is in_flight", claimWebhookDelivery("gh-crash").kind === "in_flight");
     // A corrupt/unparsable lease stamp must be treated as stale (reclaimable),
     // never as a fresh lease that would permanently suppress redeliveries.
     seedRawLeaseForTest(db, "gh-corrupt", "not-a-timestamp");
-    ok("an unparsable lease stamp is reclaimable (not treated as fresh)", claimWebhookDelivery("gh-corrupt") !== null);
+    ok("an unparsable lease stamp is reclaimable (not treated as fresh)", claimWebhookDelivery("gh-corrupt").kind === "claimed");
 
     // ── finalizer ownership: a reclaim rotates the token, so the crashed
     //    claim's late finalizer can't touch the new owner's row ──────────────
     const staleToken = seedProcessingLeaseForTest(db, "gh-owned", STALE_AGE_MS);
-    const reclaimed = claimWebhookDelivery("gh-owned"); // reclaims → fresh token
-    ok("stale lease reclaimed by a new owner", reclaimed !== null && reclaimed!.token !== staleToken);
+    const reclaimedResult = claimWebhookDelivery("gh-owned"); // reclaims → fresh token
+    ok("stale lease reclaimed by a new owner", reclaimedResult.kind === "claimed" && reclaimedResult.claim.token !== staleToken);
+    const reclaimedClaim = reclaimedResult.kind === "claimed" ? reclaimedResult.claim : { deliveryId: "gh-owned", token: "" };
     // The crashed (old-token) owner tries to release — must NOT delete the row,
     // and must report the no-op (false) so the handler can surface it.
     ok("old owner's release reports no-op (false)", releaseWebhookDelivery({ deliveryId: "gh-owned", token: staleToken }) === false);
-    ok("old owner's release does NOT free the new owner's lease", claimWebhookDelivery("gh-owned") === null);
+    ok("old owner's release does NOT free the new owner's lease (still in_flight)", claimWebhookDelivery("gh-owned").kind === "in_flight");
     // The new owner finalizes its own lease normally.
-    ok("new owner completes its own lease (true)", completeWebhookDelivery(reclaimed!) === true);
-    ok("new owner's completed lease rejects redelivery", claimWebhookDelivery("gh-owned") === null);
+    ok("new owner completes its own lease (true)", completeWebhookDelivery(reclaimedClaim) === true);
+    ok("new owner's completed lease is reported as a duplicate", claimWebhookDelivery("gh-owned").kind === "duplicate");
 
     // ── transient classification ────────────────────────────────────────
     ok("ETIMEDOUT is transient", isTransientError(Object.assign(new Error("x"), { code: "ETIMEDOUT" })));

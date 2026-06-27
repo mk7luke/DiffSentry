@@ -209,17 +209,28 @@ export function createServer(config: Config): CreatedServer {
     // a stale lease that a redelivery can reclaim rather than a phantom
     // duplicate. The delivery is still recorded above for the inspection view.
     // No-op (always claims) when persistence is disabled.
-    // The claim handle (id + per-claim token) is threaded to the finalizers so
-    // they only mutate the row THIS request owns. Null is returned (and stays
-    // null when there's no delivery id) only for a duplicate to skip.
-    let claim: ReturnType<typeof claimWebhookDelivery> = null;
+    // Idempotency claim. The 3-way result distinguishes a true (completed)
+    // duplicate from a delivery merely in flight elsewhere, so an in-flight
+    // reclaimed lease is never acknowledged as "already processed":
+    //   - duplicate → 200, already processed to a terminal outcome; don't redispatch.
+    //   - in_flight → 202, a concurrent run holds a fresh lease; acknowledge
+    //                 receipt without re-dispatch (2xx avoids a redelivery storm;
+    //                 review_jobs' per-PR supersede prevents a duplicate review).
+    //   - claimed   → we own the lease; the handle is finalized below.
+    let claim: import("./storage/dao.js").WebhookDeliveryClaim | null = null;
     if (deliveryId) {
-      claim = claimWebhookDelivery(deliveryId);
-      if (!claim) {
-        logger.info({ deliveryId, event }, "Duplicate webhook delivery — already processed, skipping dispatch");
+      const result = claimWebhookDelivery(deliveryId);
+      if (result.kind === "duplicate") {
+        logger.info({ deliveryId, event }, "Duplicate webhook delivery — already completed, skipping dispatch");
         res.status(200).json({ status: "duplicate" });
         return;
       }
+      if (result.kind === "in_flight") {
+        logger.info({ deliveryId, event }, "Webhook delivery already in flight elsewhere — acknowledging without re-dispatch");
+        res.status(202).json({ status: "in_progress" });
+        return;
+      }
+      claim = result.claim;
     }
 
     try {
