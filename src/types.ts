@@ -198,6 +198,11 @@ export interface ReviewResult {
    *  In this state, AI-generated inline comments are absent — only
    *  built-in safety/pattern findings ran. */
   parseFailed?: boolean;
+  /** Per-file fan-in / impact-radius counts from the code-review-graph, keyed
+   *  by repo-relative path. Populated best-effort during the review and reused
+   *  by downstream passes (e.g. severity calibration). Absent when the graph
+   *  was unavailable. */
+  fanInByFile?: Record<string, number>;
 }
 
 // ─── Walkthrough Result ────────────────────────────────────────
@@ -271,6 +276,14 @@ export interface PRContext {
   isDraft?: boolean;
   labels?: string[];
   author?: string;
+  /**
+   * Optional pre-rendered, budget-capped "Related context" section drawn from
+   * the code-review-graph (whole-function bodies + cross-file dependents/
+   * dependencies + high-fan-in flags). Injected by the review prompt builder
+   * when present; absent (or empty) preserves diff-only behaviour. See
+   * graph-context.ts.
+   */
+  relatedContext?: string;
 }
 
 // ─── AI Provider Interface ─────────────────────────────────────

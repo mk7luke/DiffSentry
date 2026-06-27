@@ -122,6 +122,14 @@ export function buildReviewPrompt(
     })
     .join("\n\n");
 
+  // Bounded graph-backed context (whole-function bodies, cross-file
+  // dependents/dependencies, high-fan-in flags). Already token-budgeted by the
+  // builder; injected only when present so diff-only behaviour is preserved.
+  const relatedSection =
+    context.relatedContext && context.relatedContext.trim().length > 0
+      ? `\n\n${context.relatedContext}`
+      : "";
+
   const user = `## Pull Request: ${context.title}
 
 **Branch:** ${context.headBranch} → ${context.baseBranch}
@@ -131,7 +139,7 @@ ${context.description || "(no description provided)"}
 
 ## Changed Files
 
-${filesSection}
+${filesSection}${relatedSection}
 
 Review this pull request and respond with JSON. Remember to obey the Repository Learnings in the system prompt — they override your default flagging heuristics.`;
 
