@@ -235,9 +235,12 @@ export function queryGraph(
   try {
     db = new Database(dbPath, { readonly: true, fileMustExist: true });
 
-    // 1. Build the abs↔rel file map from indexed File nodes.
+    // 1. Build the abs↔rel file map from indexed File nodes. Restricting to
+    //    kind='File' reads one row per file instead of scanning every symbol-
+    //    bearing node — coverage-equivalent (every symbol's file has a File
+    //    node) but far less IO on large graphs.
     const fileRows = db
-      .prepare("SELECT DISTINCT file_path FROM nodes")
+      .prepare("SELECT DISTINCT file_path FROM nodes WHERE kind = 'File'")
       .all() as { file_path: string }[];
     const absPaths = fileRows.map((r) => r.file_path);
     const root = detectRoot(absPaths);
