@@ -251,7 +251,7 @@ export function queryGraph(
       "SELECT DISTINCT source_qualified FROM edges WHERE kind = 'IMPORTS_FROM' AND target_qualified = ?",
     );
     const callsInStmt = db.prepare(
-      "SELECT DISTINCT file_path FROM edges WHERE kind = 'CALLS' AND target_qualified = ?",
+      "SELECT DISTINCT source_qualified FROM edges WHERE kind = 'CALLS' AND target_qualified = ?",
     );
 
     const out: FileGraphContext[] = [];
@@ -290,12 +290,18 @@ export function queryGraph(
       const dependents = uniq(dependentAbs.map((a) => normRel(relativize(a, root))).filter((d) => d !== rel));
 
       // Cross-file callers: any file with a CALLS edge into one of our symbols.
+      // The caller is the source SYMBOL's file, parsed from its `<file>::<name>`
+      // identity — not the edge's `file_path` column. The two coincide for CALLS
+      // edges today, but `source_qualified` is the definitive caller, so deriving
+      // from it keeps fan-in correct regardless of what `file_path` records.
       const callerFiles = new Set<string>();
       for (const s of symRows) {
-        const callRows = callsInStmt.all(s.qualified_name) as { file_path: string }[];
+        const callRows = callsInStmt.all(s.qualified_name) as { source_qualified: string }[];
         for (const cr of callRows) {
-          const crel = normRel(relativize(cr.file_path, root));
-          if (crel !== rel) callerFiles.add(crel);
+          const callerAbs = symbolFileOf(cr.source_qualified);
+          if (!callerAbs) continue;
+          const crel = normRel(relativize(callerAbs, root));
+          if (crel && crel !== rel) callerFiles.add(crel);
         }
       }
 
@@ -330,6 +336,13 @@ export function queryGraph(
 
 function uniq(xs: string[]): string[] {
   return Array.from(new Set(xs));
+}
+
+/** The file portion of a `<file>::<symbol>` qualified name. Returns the whole
+ *  string when there is no `::` separator (e.g. a File-node identity). */
+function symbolFileOf(qualified: string): string {
+  const idx = qualified.indexOf("::");
+  return idx === -1 ? qualified : qualified.slice(0, idx);
 }
 
 // ─── Whole-function body fetching ──────────────────────────────

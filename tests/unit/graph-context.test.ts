@@ -55,8 +55,12 @@ beforeAll(() => {
   for (const dep of ["src/a.ts", "src/b.ts", "src/c.ts"]) {
     edge.run("IMPORTS_FROM", abs(dep), abs("src/util.ts"), abs(dep));
   }
-  // util.ts imports nothing here; a.ts also CALLS util.foo from a 4th file d.ts
-  edge.run("CALLS", `${abs("src/d.ts")}::run`, `${abs("src/util.ts")}::foo`, abs("src/d.ts"));
+  // d.ts CALLS util.foo. The edge's file_path is deliberately set to the TARGET
+  // file (util.ts), NOT the caller — so fan-in must recover the caller from
+  // source_qualified ("<d.ts>::run"). If the query regressed to reading
+  // file_path it would resolve the caller as util.ts (self), drop it, and the
+  // fan-in below would be 3 instead of 4.
+  edge.run("CALLS", `${abs("src/d.ts")}::run`, `${abs("src/util.ts")}::foo`, abs("src/util.ts"));
   db.close();
 });
 
@@ -94,7 +98,9 @@ describe("queryGraph", () => {
     expect(util.indexed).toBe(true);
     // patch touches lines 1-3 → only foo (1-5) overlaps, not bar (10-20)
     expect(util.symbols.map((s) => s.name)).toEqual(["foo"]);
-    // imported by a, b, c (3) + called from d.ts (1) → fan-in 4
+    // imported by a, b, c (3) + called from d.ts (1) → fan-in 4. The caller
+    // d.ts is recoverable ONLY from source_qualified (the edge's file_path was
+    // set to util.ts), so 4 proves fan-in parses the caller identity correctly.
     expect(util.fanIn).toBe(4);
     expect(util.highFanIn).toBe(true);
     expect(util.dependents.sort()).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"]);
