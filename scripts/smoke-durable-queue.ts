@@ -75,11 +75,12 @@ async function main() {
     const c2 = claimWebhookDelivery("gh-2");
     ok("a different delivery id is claimable", c2 !== null);
     // Release (the failure finalizer) re-opens the id so a redelivery is
-    // processed instead of suppressed as a phantom duplicate.
-    releaseWebhookDelivery(c2!);
+    // processed instead of suppressed as a phantom duplicate. It reports whether
+    // the owned row was actually freed.
+    ok("release of an owned lease reports success (true)", releaseWebhookDelivery(c2!) === true);
     ok("released delivery id is claimable again", claimWebhookDelivery("gh-2") !== null);
     // Complete (the success finalizer): a completed delivery is a true duplicate.
-    completeWebhookDelivery(c1!);
+    ok("complete of an owned lease reports success (true)", completeWebhookDelivery(c1!) === true);
     ok("a completed delivery rejects redelivery (true duplicate)", claimWebhookDelivery("gh-1") === null);
     // Crash safety: a `processing` lease left behind by a crash is reclaimable
     // once stale. The dao test helper seeds a back-dated lease (no inline SQL).
@@ -92,12 +93,13 @@ async function main() {
     const staleToken = seedProcessingLeaseForTest("gh-owned", STALE_AGE_MS);
     const reclaimed = claimWebhookDelivery("gh-owned"); // reclaims → fresh token
     ok("stale lease reclaimed by a new owner", reclaimed !== null && reclaimed!.token !== staleToken);
-    // The crashed (old-token) owner tries to release — must NOT delete the row.
-    releaseWebhookDelivery({ deliveryId: "gh-owned", token: staleToken });
+    // The crashed (old-token) owner tries to release — must NOT delete the row,
+    // and must report the no-op (false) so the handler can surface it.
+    ok("old owner's release reports no-op (false)", releaseWebhookDelivery({ deliveryId: "gh-owned", token: staleToken }) === false);
     ok("old owner's release does NOT free the new owner's lease", claimWebhookDelivery("gh-owned") === null);
     // The new owner finalizes its own lease normally.
-    completeWebhookDelivery(reclaimed!);
-    ok("new owner completes its own lease", claimWebhookDelivery("gh-owned") === null);
+    ok("new owner completes its own lease (true)", completeWebhookDelivery(reclaimed!) === true);
+    ok("new owner's completed lease rejects redelivery", claimWebhookDelivery("gh-owned") === null);
 
     // ── transient classification ────────────────────────────────────────
     ok("ETIMEDOUT is transient", isTransientError(Object.assign(new Error("x"), { code: "ETIMEDOUT" })));

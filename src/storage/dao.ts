@@ -1907,20 +1907,24 @@ export function claimWebhookDelivery(deliveryId: string): WebhookDeliveryClaim |
  * Mark a claimed delivery `completed` — the success finalizer for
  * `claimWebhookDelivery`. Guarded on the claim's `token` so it only commits the
  * row this run still owns (a reclaimed lease has a newer token). Only after this
- * does a redelivery of the same id short-circuit as a duplicate. Best-effort
- * no-op when persistence is disabled or the handle is tokenless.
+ * does a redelivery of the same id short-circuit as a duplicate.
+ *
+ * Returns true when the lease was committed (or there was nothing to finalize —
+ * persistence disabled / tokenless handle, not a failure); false when the row
+ * this run owned was NOT updated (the lease was reclaimed/removed by another run,
+ * or a DB error), so the caller can surface the divergence.
  */
-export function completeWebhookDelivery(claim: WebhookDeliveryClaim): void {
+export function completeWebhookDelivery(claim: WebhookDeliveryClaim): boolean {
   const db = openDatabase();
-  if (!db || !claim.deliveryId || !claim.token) return;
+  if (!db || !claim.deliveryId || !claim.token) return true; // nothing to finalize
   try {
-    db.prepare(`UPDATE processed_deliveries SET status = 'completed', ts = ? WHERE delivery_id = ? AND token = ?`).run(
-      new Date().toISOString(),
-      claim.deliveryId,
-      claim.token,
-    );
+    const info = db
+      .prepare(`UPDATE processed_deliveries SET status = 'completed', ts = ? WHERE delivery_id = ? AND token = ?`)
+      .run(new Date().toISOString(), claim.deliveryId, claim.token);
+    return info.changes > 0;
   } catch (err) {
     logger.debug({ err }, "dao.completeWebhookDelivery failed");
+    return false;
   }
 }
 
@@ -1930,15 +1934,24 @@ export function completeWebhookDelivery(claim: WebhookDeliveryClaim): void {
  * claim's `token` so it can only delete the row this run still owns; a stale
  * claim whose lease was reclaimed by a newer run leaves that newer row intact.
  * Deleting re-opens the id so a redelivery is processed instead of suppressed as
- * a duplicate. Best-effort no-op when persistence is disabled or tokenless.
+ * a duplicate.
+ *
+ * Returns true when the lease was freed (or there was nothing to free —
+ * persistence disabled / tokenless handle); false when the row this run owned
+ * was NOT deleted (reclaimed by another run, or a DB error), so the caller can
+ * surface that a prompt redelivery may be briefly deduped until the lease expires.
  */
-export function releaseWebhookDelivery(claim: WebhookDeliveryClaim): void {
+export function releaseWebhookDelivery(claim: WebhookDeliveryClaim): boolean {
   const db = openDatabase();
-  if (!db || !claim.deliveryId || !claim.token) return;
+  if (!db || !claim.deliveryId || !claim.token) return true; // nothing to free
   try {
-    db.prepare(`DELETE FROM processed_deliveries WHERE delivery_id = ? AND token = ?`).run(claim.deliveryId, claim.token);
+    const info = db
+      .prepare(`DELETE FROM processed_deliveries WHERE delivery_id = ? AND token = ?`)
+      .run(claim.deliveryId, claim.token);
+    return info.changes > 0;
   } catch (err) {
     logger.debug({ err }, "dao.releaseWebhookDelivery failed");
+    return false;
   }
 }
 
