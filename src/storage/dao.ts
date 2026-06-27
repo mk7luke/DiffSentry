@@ -1881,9 +1881,12 @@ export function claimWebhookDelivery(deliveryId: string): WebhookDeliveryClaim |
       if (row.status === "completed") return false; // a genuine duplicate
 
       // status === 'processing': only reclaim if the prior lease has gone stale
-      // (the holder crashed). A fresh lease is a concurrent double-delivery.
-      const age = nowMs - Date.parse(row.ts);
-      if (Number.isFinite(age) && age >= deliveryLeaseMs()) {
+      // (the holder crashed). A fresh lease is a concurrent double-delivery. An
+      // unparsable stamp (a corrupt row) is treated as stale/reclaimable rather
+      // than fresh, so it can never permanently suppress redeliveries.
+      const leasedAt = Date.parse(row.ts);
+      const age = nowMs - leasedAt;
+      if (!Number.isFinite(leasedAt) || age >= deliveryLeaseMs()) {
         // Compare-and-swap on the timestamp we just read, rotating the token to
         // this claim: re-lease only if `ts` is still the stale value, so exactly
         // one reclaimer wins and the crashed claim's old token stops matching.

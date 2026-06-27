@@ -15,7 +15,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { seedProcessingLeaseForTest } from "./lib/durable-test-helpers.js";
+import { seedProcessingLeaseForTest, seedRawLeaseForTest } from "./lib/durable-test-helpers.js";
 
 async function main() {
   const tmpDb = path.join(os.tmpdir(), `ds-durable-smoke-${Date.now()}.db`);
@@ -87,6 +87,10 @@ async function main() {
     seedProcessingLeaseForTest(db, "gh-crash", STALE_AGE_MS);
     ok("a stale processing lease (crashed mid-flight) is reclaimable", claimWebhookDelivery("gh-crash") !== null);
     ok("the reclaimed lease is fresh, so an immediate redelivery is rejected", claimWebhookDelivery("gh-crash") === null);
+    // A corrupt/unparsable lease stamp must be treated as stale (reclaimable),
+    // never as a fresh lease that would permanently suppress redeliveries.
+    seedRawLeaseForTest(db, "gh-corrupt", "not-a-timestamp");
+    ok("an unparsable lease stamp is reclaimable (not treated as fresh)", claimWebhookDelivery("gh-corrupt") !== null);
 
     // ── finalizer ownership: a reclaim rotates the token, so the crashed
     //    claim's late finalizer can't touch the new owner's row ──────────────

@@ -12,7 +12,19 @@ import { dispatchWebhookEvent, extractWebhookMeta } from "./webhook/dispatch.js"
 import { verifyWebhookSignature } from "./webhook/signature.js";
 import { recoverInFlightJobs } from "./realtime/jobs.js";
 
+/**
+ * What `createServer` hands back. NOTE: it intentionally returns a struct, not a
+ * bare Express app — destructure it. The `recover` callback is held alongside
+ * the app because it closes over the same Reviewer the routes use, so boot can
+ * resume interrupted reviews without rebuilding one.
+ *
+ *   const { app, recover } = createServer(config);
+ *   const server = app.listen(port, () => { recover(); });
+ *
+ * The sole production caller is src/index.ts; there are no other importers.
+ */
 export interface CreatedServer {
+  /** The Express application — mount nothing else; call `.listen()` on it. */
   app: express.Express;
   /**
    * Re-enqueue any review jobs that were in-flight when the process last

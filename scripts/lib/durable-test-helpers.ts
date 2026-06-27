@@ -25,3 +25,17 @@ export function seedProcessingLeaseForTest(db: Database, deliveryId: string, age
   ).run(deliveryId, ts, token);
   return token;
 }
+
+/**
+ * Seed a `processing` lease with an arbitrary (e.g. corrupt / unparsable) `ts`
+ * string, so a smoke test can assert claimWebhookDelivery treats an unparsable
+ * lease stamp as stale/reclaimable rather than permanently fresh. Returns the
+ * seeded claim token.
+ */
+export function seedRawLeaseForTest(db: Database, deliveryId: string, ts: string): string {
+  const token = randomUUID();
+  db.prepare(
+    `INSERT OR REPLACE INTO processed_deliveries (delivery_id, status, ts, token) VALUES (?, 'processing', ?, ?)`,
+  ).run(deliveryId, ts, token);
+  return token;
+}
