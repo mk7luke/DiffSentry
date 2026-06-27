@@ -1955,27 +1955,3 @@ export function releaseWebhookDelivery(claim: WebhookDeliveryClaim): boolean {
   }
 }
 
-/**
- * TEST-ONLY: seed a `processing` lease for `deliveryId`, back-dated by `ageMs`,
- * so smoke/unit tests can exercise stale-lease reclamation (and finalizer
- * ownership) without hand-writing the processed_deliveries schema. Returns the
- * seeded claim token. Never called by production code; no-op (returns "") when
- * persistence is disabled.
- */
-export function seedProcessingLeaseForTest(deliveryId: string, ageMs: number): string {
-  const db = openDatabase();
-  if (!db || !deliveryId) return "";
-  try {
-    const token = randomUUID();
-    const ts = new Date(Date.now() - Math.max(0, ageMs)).toISOString();
-    db.prepare(`INSERT OR REPLACE INTO processed_deliveries (delivery_id, status, ts, token) VALUES (?, 'processing', ?, ?)`).run(
-      deliveryId,
-      ts,
-      token,
-    );
-    return token;
-  } catch (err) {
-    logger.debug({ err }, "dao.seedProcessingLeaseForTest failed");
-    return "";
-  }
-}

@@ -217,22 +217,10 @@ export function createServer(config: Config): CreatedServer {
         payload,
       );
       if (claim) {
-        if (status >= 500) {
-          // A server-error response means the delivery was NOT successfully
-          // processed: release the lease so GitHub can redeliver. (4xx is a
-          // terminal reject — keep it marked so redelivery of a malformed/
-          // installation-less payload isn't reprocessed.)
-          const released = releaseWebhookDelivery(claim);
-          if (released) {
-            logger.warn({ event, deliveryId, status }, "Webhook dispatch returned a server error — released delivery for redelivery");
-          } else {
-            // The lease wasn't ours to free (reclaimed by a newer run) or a DB
-            // error: a prompt redelivery may be deduped until the lease expires.
-            logger.warn({ event, deliveryId, status }, "Webhook dispatch returned a server error but the lease release did not take effect — a prompt redelivery may be deduped until the lease TTL expires");
-          }
-        } else {
-          // Success: commit the lease to `completed` so future redeliveries of
-          // this id are suppressed as true duplicates.
+        // Only a genuine 2xx success commits the lease to `completed` so future
+        // redeliveries of this id are suppressed as true duplicates. Anything
+        // else was NOT successfully processed and releases the lease.
+        if (status >= 200 && status < 300) {
           const completed = completeWebhookDelivery(claim);
           if (!completed) {
             // Our lease was reclaimed (dispatch outran the lease TTL) or the row
@@ -243,6 +231,25 @@ export function createServer(config: Config): CreatedServer {
             // so an uncommitted lease is benign (it self-heals via the TTL). Just
             // surface the contention for operators.
             logger.warn({ event, deliveryId }, "Webhook delivery lease completion did not take effect (lease reclaimed?); keeping success response — review already dispatched durably");
+          }
+        } else {
+          // Non-2xx: the delivery was NOT successfully processed — a 4xx
+          // rejection (e.g. a payload with no installation id; an identical
+          // redelivery would just re-reject) or a 5xx server error. Release the
+          // lease so only true successes are deduped and a redelivery is
+          // reprocessed rather than suppressed as a phantom duplicate.
+          const released = releaseWebhookDelivery(claim);
+          if (released) {
+            logger.warn(
+              { event, deliveryId, status },
+              status >= 500
+                ? "Webhook dispatch returned a server error — released delivery for redelivery"
+                : "Webhook dispatch returned a client error (4xx) — released lease; only successful deliveries are deduped",
+            );
+          } else {
+            // The lease wasn't ours to free (reclaimed by a newer run) or a DB
+            // error: a prompt redelivery may be deduped until the lease expires.
+            logger.warn({ event, deliveryId, status }, "Webhook dispatch was unsuccessful but the lease release did not take effect — a prompt redelivery may be deduped until the lease TTL expires");
           }
         }
       }

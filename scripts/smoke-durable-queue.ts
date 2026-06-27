@@ -15,6 +15,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { seedProcessingLeaseForTest } from "./lib/durable-test-helpers.js";
 
 async function main() {
   const tmpDb = path.join(os.tmpdir(), `ds-durable-smoke-${Date.now()}.db`);
@@ -28,7 +29,6 @@ async function main() {
     claimWebhookDelivery,
     completeWebhookDelivery,
     releaseWebhookDelivery,
-    seedProcessingLeaseForTest,
     listInFlightReviewJobs,
     upsertReviewJob,
   } = await import("../src/storage/dao.js");
@@ -84,13 +84,13 @@ async function main() {
     ok("a completed delivery rejects redelivery (true duplicate)", claimWebhookDelivery("gh-1") === null);
     // Crash safety: a `processing` lease left behind by a crash is reclaimable
     // once stale. The dao test helper seeds a back-dated lease (no inline SQL).
-    seedProcessingLeaseForTest("gh-crash", STALE_AGE_MS);
+    seedProcessingLeaseForTest(db, "gh-crash", STALE_AGE_MS);
     ok("a stale processing lease (crashed mid-flight) is reclaimable", claimWebhookDelivery("gh-crash") !== null);
     ok("the reclaimed lease is fresh, so an immediate redelivery is rejected", claimWebhookDelivery("gh-crash") === null);
 
     // ── finalizer ownership: a reclaim rotates the token, so the crashed
     //    claim's late finalizer can't touch the new owner's row ──────────────
-    const staleToken = seedProcessingLeaseForTest("gh-owned", STALE_AGE_MS);
+    const staleToken = seedProcessingLeaseForTest(db, "gh-owned", STALE_AGE_MS);
     const reclaimed = claimWebhookDelivery("gh-owned"); // reclaims → fresh token
     ok("stale lease reclaimed by a new owner", reclaimed !== null && reclaimed!.token !== staleToken);
     // The crashed (old-token) owner tries to release — must NOT delete the row,
