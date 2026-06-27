@@ -323,8 +323,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_rules_name ON custom_rules(name);
  *    that replaced it. The in-memory reviewQueue stays the live board — this is
  *    purely the durable shadow the boot-time recovery reads.
  *  - `processed_deliveries`: the idempotency ledger keyed by GitHub's
- *    X-GitHub-Delivery id, so a redelivered webhook can't trigger a duplicate
- *    review. INSERT OR IGNORE + changes() is the claim primitive.
+ *    X-GitHub-Delivery id. A claim is a two-phase lease — `processing` while the
+ *    delivery is in flight, then `completed` once it has been successfully
+ *    dispatched — so only a *completed* delivery short-circuits a redelivery. A
+ *    `processing` row whose lease has gone stale (the process crashed mid-flight)
+ *    is reclaimable on the next claim, so a crash can't permanently suppress a
+ *    redelivery. `ts` is the lease stamp.
  *
  * Strictly additive (two new tables) — same rules as every other migration.
  */
@@ -347,7 +351,8 @@ CREATE INDEX IF NOT EXISTS idx_review_jobs_state ON review_jobs(state);
 
 CREATE TABLE IF NOT EXISTS processed_deliveries (
   delivery_id TEXT PRIMARY KEY,
-  ts TEXT NOT NULL
+  status TEXT NOT NULL DEFAULT 'processing',  -- 'processing' (claimed, in flight) | 'completed' (dispatched OK)
+  ts TEXT NOT NULL                            -- lease stamp: last claim / re-lease / completion time
 );
 CREATE INDEX IF NOT EXISTS idx_processed_deliveries_ts ON processed_deliveries(ts);
 `;

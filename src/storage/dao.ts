@@ -1812,16 +1812,34 @@ export function listInFlightReviewJobs(): ReviewJobRow[] {
 }
 
 /**
- * Idempotency claim for a GitHub webhook delivery. Returns true when this
- * delivery id is seen for the first time (caller should process it), false when
- * it was already recorded (a redelivery — caller should skip to avoid a
- * duplicate review). INSERT OR IGNORE makes the claim atomic.
+ * How long a `processing` claim is honored before it's presumed abandoned (the
+ * process crashed mid-dispatch). A webhook dispatch only enqueues durable work
+ * and returns in milliseconds, so minutes is a very safe margin. Env-tunable.
+ */
+const DEFAULT_DELIVERY_LEASE_MS = 5 * 60 * 1000;
+function deliveryLeaseMs(): number {
+  const raw = Number.parseInt(process.env.WEBHOOK_DELIVERY_LEASE_MS ?? "", 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_DELIVERY_LEASE_MS;
+}
+
+/**
+ * Two-phase idempotency lease for a GitHub webhook delivery, keyed by its
+ * X-GitHub-Delivery id. Returns true when the caller should process the
+ * delivery, false when it is a duplicate to skip.
  *
- * The claim is a forward reservation, NOT a completion marker: the caller must
- * `releaseWebhookDelivery` it if processing fails before it produces a response,
- * so a GitHub redelivery of the same id can be processed rather than suppressed
- * as a phantom duplicate. (A claim that reaches a normal HTTP response — even a
- * 4xx — is left in place: redelivery wouldn't help a malformed payload.)
+ * The claim writes a `processing` row; the caller must finalize it:
+ *   - `completeWebhookDelivery` on a successful dispatch → marks it `completed`,
+ *     so future redeliveries are suppressed as true duplicates;
+ *   - `releaseWebhookDelivery` on a failure that produced no result → deletes it,
+ *     so a redelivery is reprocessed.
+ *
+ * Crash safety: if the process dies mid-dispatch (neither finalizer runs), the
+ * row is stuck `processing`. A redelivery is then granted the claim again once
+ * the lease has gone stale — so a crash can never permanently suppress a
+ * redelivery. A `completed` row is always a duplicate; a *fresh* `processing`
+ * row (lease not yet expired) is treated as a concurrent/rapid double-delivery
+ * and skipped. The whole decision runs in one transaction so two concurrent
+ * deliveries can't both win the claim.
  *
  * When persistence is disabled there is nothing to dedupe against, so we return
  * true (process it) — idempotency degrades to the prior at-least-once behavior
@@ -1832,10 +1850,34 @@ export function claimWebhookDelivery(deliveryId: string): boolean {
   if (!db) return true;
   if (!deliveryId) return true;
   try {
-    const info = db
-      .prepare(`INSERT OR IGNORE INTO processed_deliveries (delivery_id, ts) VALUES (?, ?)`)
-      .run(deliveryId, new Date().toISOString());
-    return info.changes > 0;
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const decide = db.transaction((): boolean => {
+      // Fast path: a brand-new delivery claims a fresh `processing` lease.
+      const inserted = db
+        .prepare(`INSERT OR IGNORE INTO processed_deliveries (delivery_id, status, ts) VALUES (?, 'processing', ?)`)
+        .run(deliveryId, nowIso);
+      if (inserted.changes > 0) return true;
+
+      const row = db
+        .prepare(`SELECT status, ts FROM processed_deliveries WHERE delivery_id = ?`)
+        .get(deliveryId) as { status: string; ts: string } | undefined;
+      if (!row) return true; // raced a delete — treat as claimable
+      if (row.status === "completed") return false; // a genuine duplicate
+
+      // status === 'processing': only reclaim if the prior lease has gone stale
+      // (the holder crashed). A fresh lease is a concurrent double-delivery.
+      const age = nowMs - Date.parse(row.ts);
+      if (Number.isFinite(age) && age >= deliveryLeaseMs()) {
+        db.prepare(`UPDATE processed_deliveries SET ts = ? WHERE delivery_id = ? AND status = 'processing'`).run(
+          nowIso,
+          deliveryId,
+        );
+        return true;
+      }
+      return false;
+    });
+    return decide();
   } catch (err) {
     logger.debug({ err }, "dao.claimWebhookDelivery failed");
     return true;
@@ -1843,8 +1885,26 @@ export function claimWebhookDelivery(deliveryId: string): boolean {
 }
 
 /**
- * Release a previously-claimed webhook delivery — the compensating action for
- * `claimWebhookDelivery` when dispatch throws before completing. Deleting the
+ * Mark a claimed delivery `completed` — the success finalizer for
+ * `claimWebhookDelivery`. Only after this does a redelivery of the same id
+ * short-circuit as a duplicate. Best-effort no-op when persistence is disabled.
+ */
+export function completeWebhookDelivery(deliveryId: string): void {
+  const db = openDatabase();
+  if (!db || !deliveryId) return;
+  try {
+    db.prepare(`UPDATE processed_deliveries SET status = 'completed', ts = ? WHERE delivery_id = ?`).run(
+      new Date().toISOString(),
+      deliveryId,
+    );
+  } catch (err) {
+    logger.debug({ err }, "dao.completeWebhookDelivery failed");
+  }
+}
+
+/**
+ * Release a claimed-but-not-completed webhook delivery — the failure finalizer
+ * for `claimWebhookDelivery` (dispatch threw or returned a 5xx). Deleting the
  * row re-opens the id so a redelivery is processed instead of being suppressed
  * as a duplicate. Best-effort no-op when persistence is disabled.
  */

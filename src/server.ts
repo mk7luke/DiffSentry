@@ -3,7 +3,7 @@ import path from "node:path";
 import { Config } from "./types.js";
 import { Reviewer } from "./reviewer.js";
 import { logger } from "./logger.js";
-import { recordWebhookDelivery, claimWebhookDelivery, releaseWebhookDelivery } from "./storage/dao.js";
+import { recordWebhookDelivery, claimWebhookDelivery, completeWebhookDelivery, releaseWebhookDelivery } from "./storage/dao.js";
 import { createDashboardRouter } from "./dashboard/routes.js";
 import { createApiRouter } from "./api/router.js";
 import { createAuth, loadAuthConfigFromEnv } from "./dashboard/auth.js";
@@ -190,10 +190,13 @@ export function createServer(config: Config): CreatedServer {
     }
 
     // Idempotency: GitHub retries deliveries (and may double-send), each carrying
-    // the same X-GitHub-Delivery id. Claim it once; a redelivery we've already
-    // processed is acknowledged 200 but NOT re-dispatched, so a single push can't
-    // trigger duplicate reviews. The delivery is still recorded above for the
-    // inspection view. No-op (always claims) when persistence is disabled.
+    // the same X-GitHub-Delivery id. claimWebhookDelivery takes a `processing`
+    // lease; only a *completed* (or fresh in-flight) delivery is treated as a
+    // duplicate and short-circuited here. The lease is finalized below —
+    // completed on success, released on failure — so a crash mid-dispatch leaves
+    // a stale lease that a redelivery can reclaim rather than a phantom
+    // duplicate. The delivery is still recorded above for the inspection view.
+    // No-op (always claims) when persistence is disabled.
     if (deliveryId && !claimWebhookDelivery(deliveryId)) {
       logger.info({ deliveryId, event }, "Duplicate webhook delivery — already processed, skipping dispatch");
       res.status(200).json({ status: "duplicate" });
@@ -206,22 +209,26 @@ export function createServer(config: Config): CreatedServer {
         event,
         payload,
       );
-      // A server-error response (5xx) means the delivery was NOT successfully
-      // processed, so reopen the idempotency claim — same contract as the thrown
-      // path — before responding, letting GitHub redeliver. Client 4xx responses
-      // keep the claim: redelivery wouldn't help a malformed/installation-less
-      // payload. (dispatchWebhookEvent doesn't return 5xx today; this guards the
-      // contract against a future path that does.)
-      if (deliveryId && status >= 500) {
-        releaseWebhookDelivery(deliveryId);
-        logger.warn({ event, deliveryId, status }, "Webhook dispatch returned a server error — released delivery for redelivery");
+      if (deliveryId) {
+        if (status >= 500) {
+          // A server-error response means the delivery was NOT successfully
+          // processed: release the lease so GitHub can redeliver. (4xx is a
+          // terminal reject — keep it marked so redelivery of a malformed/
+          // installation-less payload isn't reprocessed.)
+          releaseWebhookDelivery(deliveryId);
+          logger.warn({ event, deliveryId, status }, "Webhook dispatch returned a server error — released delivery for redelivery");
+        } else {
+          // Success: commit the lease to `completed` so future redeliveries of
+          // this id are suppressed as true duplicates.
+          completeWebhookDelivery(deliveryId);
+        }
       }
       res.status(status).json(responseBody);
     } catch (err) {
       // Dispatch threw before producing a response: the work never ran, so the
-      // idempotency claim above would otherwise permanently suppress a retry.
-      // Release it so a GitHub redelivery of this id is processed, then surface
-      // 500 so GitHub marks the delivery failed (and offers redelivery).
+      // lease above would otherwise (after it goes stale) be the only trace.
+      // Release it now so a GitHub redelivery of this id is processed promptly,
+      // then surface 500 so GitHub marks the delivery failed (and offers redelivery).
       if (deliveryId) releaseWebhookDelivery(deliveryId);
       logger.error({ err, event, deliveryId }, "Webhook dispatch failed — released delivery for redelivery");
       res.status(500).json({ error: "Dispatch failed" });
