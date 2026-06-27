@@ -1,26 +1,12 @@
 import type { FileChange, ReviewComment } from "./types.js";
 import { renderInlineCommentBody } from "./ai/parse.js";
 import { createHash } from "node:crypto";
+import { SECRET_PATTERNS } from "./secret-patterns.js";
 
-/**
- * Regex patterns for high-confidence secret leaks. Each entry's regex must
- * match on a single ADDED line of the diff (after stripping the leading +).
- * Keep this list tight — false positives in production code reviews are a
- * trust killer.
- */
-const SECRET_PATTERNS: Array<{ id: string; label: string; regex: RegExp }> = [
-  { id: "aws-access-key-id", label: "AWS Access Key ID", regex: /\bAKIA[0-9A-Z]{16}\b/ },
-  { id: "aws-secret-access-key", label: "AWS Secret Access Key", regex: /aws_?secret(_access)?_?key\s*[:=]\s*['"][A-Za-z0-9/+=]{40}['"]/i },
-  { id: "github-token", label: "GitHub Token", regex: /\bgh[pousr]_[A-Za-z0-9]{36,}\b/ },
-  { id: "openai-key", label: "OpenAI API Key", regex: /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/ },
-  { id: "anthropic-key", label: "Anthropic API Key", regex: /\bsk-ant-[A-Za-z0-9_-]{20,}\b/ },
-  { id: "slack-token", label: "Slack Token", regex: /\bxox[pbar]-[A-Za-z0-9-]{10,}\b/ },
-  { id: "stripe-key", label: "Stripe Secret Key", regex: /\b(sk|rk)_(test|live)_[A-Za-z0-9]{20,}\b/ },
-  { id: "google-api-key", label: "Google API Key", regex: /\bAIza[0-9A-Za-z_-]{35}\b/ },
-  { id: "private-key-pem", label: "PEM Private Key", regex: /-----BEGIN (RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/ },
-  { id: "jwt", label: "JWT", regex: /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/ },
-  { id: "generic-bearer", label: "Bearer Token", regex: /\bBearer\s+[A-Za-z0-9._-]{20,}\b/ },
-];
+// SECRET_PATTERNS now lives in ./secret-patterns.js (a leaf module) so the log
+// redactor can share the exact same shapes without creating an import cycle.
+// Each entry's regex is designed to match on a single ADDED line of the diff
+// (after stripping the leading +).
 
 const MERGE_MARKER_PATTERNS = [
   /^<{7}\s/, // <<<<<<< branch

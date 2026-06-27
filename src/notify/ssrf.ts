@@ -1,5 +1,20 @@
 import net from "node:net";
+import http from "node:http";
+import https from "node:https";
 import dns from "node:dns/promises";
+import {
+  lookup as dnsLookupCb,
+  type LookupAddress,
+  type LookupOptions,
+  type LookupOneOptions,
+  type LookupAllOptions,
+} from "node:dns";
+
+// Node's dns.lookup callbacks are inline-typed on its overloads rather than
+// exported as named types, so we mirror them locally (identical signatures) and
+// reuse them on pinnedLookup's overloads to match the contract exactly.
+type LookupOneCallback = (err: NodeJS.ErrnoException | null, address: string, family: number) => void;
+type LookupAllCallback = (err: NodeJS.ErrnoException | null, addresses: LookupAddress[]) => void;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SSRF guard for outbound webhook targets — shared by the notifications API
@@ -7,13 +22,16 @@ import dns from "node:dns/promises";
 // is re-pointed to a private address between save and delivery (DNS rebinding)
 // is still rejected when the request actually fires.
 //
-// Note: a narrow TOCTOU window remains between this resolution and the HTTP
-// client's own internal resolution. Fully closing it would require a
-// connect-time pinned dispatcher (custom undici Agent), which we avoid to keep
-// the single-container deployment dependency-free. The route is admin + CSRF
-// gated, with two independent escape hatches for self-hosted/test use:
-// NOTIFY_ALLOW_INSECURE_WEBHOOKS (permit http) and NOTIFY_ALLOW_PRIVATE_WEBHOOKS
-// (permit private/loopback egress).
+// Sends go out via sendJsonPinned(), which performs the HTTP request with a
+// custom DNS `lookup` (pinnedLookup) that resolves the host, range-checks every
+// candidate address, and hands the socket exactly the validated IP it connects
+// to. Because that lookup IS the connection's only resolution, there is no
+// second, unchecked resolve — the classic DNS-rebinding TOCTOU window between
+// the safety check and the HTTP client's own lookup is closed.
+//
+// The route is admin + CSRF gated, with two independent escape hatches for
+// self-hosted/test use: NOTIFY_ALLOW_INSECURE_WEBHOOKS (permit http) and
+// NOTIFY_ALLOW_PRIVATE_WEBHOOKS (permit private/loopback egress).
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Two independent relaxations, so enabling plain-http for an internal relay does
@@ -189,4 +207,215 @@ export async function checkWebhookUrlSafe(v: string): Promise<string | null> {
     return "Webhook host did not resolve.";
   }
   return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DNS-pinned send path
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A `dns.lookup`-compatible function (usable as the `lookup` option on an
+ * http(s) request) that resolves a hostname and only ever returns addresses
+ * that pass the private-range check. Because the socket connects to exactly the
+ * address this returns, it doubles as the connection's single resolution — there
+ * is no second, unchecked lookup, so a host that rebinds to a private IP after
+ * checkWebhookUrlSafe() ran is still rejected at connect time.
+ *
+ * Honors the NOTIFY_ALLOW_PRIVATE_WEBHOOKS opt-out: when set, private/loopback
+ * results are allowed through (self-hosted internal relays) — the pinning still
+ * holds, it just skips the range filter.
+ *
+ * Note: IP-literal targets (e.g. https://10.0.0.5/hook) never invoke `lookup`
+ * (the socket layer connects directly), so those are covered by the literal
+ * checks in checkWebhookUrlSafe() at both save and send time instead.
+ *
+ * Implements both `dns.lookup` overloads — `(hostname, callback)` and
+ * `(hostname, options, callback)` — so it is a true drop-in for direct callers,
+ * not only for the http(s) `lookup` option (which always passes options).
+ */
+// Mirror Node's dns.lookup overloads exactly, so direct callers get the precise
+// callback contract for their call form: the all:true form resolves to the
+// addresses[] shape (LookupAllCallback); every other form to the
+// (address, family) shape (LookupOneCallback). The implementation signature
+// below is the permissive union those overloads collapse to.
+export function pinnedLookup(hostname: string, callback: LookupOneCallback): void;
+export function pinnedLookup(hostname: string, family: number, callback: LookupOneCallback): void;
+export function pinnedLookup(hostname: string, options: LookupOneOptions, callback: LookupOneCallback): void;
+export function pinnedLookup(hostname: string, options: LookupAllOptions, callback: LookupAllCallback): void;
+export function pinnedLookup(
+  hostname: string,
+  options: LookupOptions,
+  callback: (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family: number) => void,
+): void;
+export function pinnedLookup(
+  hostname: string,
+  options: LookupOptions | number | LookupOneCallback | LookupAllCallback,
+  callback?: LookupOneCallback | LookupAllCallback,
+): void {
+  // Normalize the overloads: when options is omitted, the 2nd arg is the
+  // callback. (number is the legacy `family` positional form dns.lookup accepts.)
+  // Internally cb is invoked with both shapes — error/one-address/all — so it's
+  // typed permissively here; the public overloads above are the precise contract.
+  const cb = (typeof options === "function" ? options : callback) as unknown as (
+    err: NodeJS.ErrnoException | null,
+    address?: string | LookupAddress[],
+    family?: number,
+  ) => void;
+  const rawOptions = typeof options === "function" ? undefined : options;
+  const opts: LookupOptions = typeof rawOptions === "number" ? { family: rawOptions } : (rawOptions ?? {});
+  const family = opts.family ?? 0;
+  const wantAll = opts.all === true;
+  const allowPrivate = allowPrivateEgress();
+
+  // Honor the caller's lookup options (family / hints / verbatim) instead of
+  // hardcoding them away — only `all` is forced on, because we must see every
+  // candidate address to range-check it before any one is returned.
+  const lookupOptions: LookupAllOptions = { ...opts, all: true };
+  dnsLookupCb(hostname, lookupOptions, (err, addresses) => {
+    // Faithful to dns.lookup's own contract: on error it invokes the callback
+    // with just the error and no addresses — for BOTH the all:true and
+    // single-address forms (verified against Node: addresses is `undefined`, not
+    // `[]`). So a bare cb(err) is correct here; we deliberately do NOT synthesize
+    // an empty array for the all:true case (that would diverge from dns.lookup
+    // and could mask the error for a consumer that skips the err check).
+    if (err) return cb(err);
+    const safe = addresses.filter((a) => {
+      if (family === 4 && a.family !== 4) return false;
+      if (family === 6 && a.family !== 6) return false;
+      if (allowPrivate) return true;
+      const priv = a.family === 6 ? ipv6IsPrivate(a.address) : ipv4IsPrivate(a.address);
+      return !priv;
+    });
+    if (safe.length === 0) {
+      const e = new Error(
+        `SSRF guard: ${hostname} did not resolve to an allowed public address`,
+      ) as NodeJS.ErrnoException;
+      e.code = "ENOTFOUND";
+      return cb(e);
+    }
+    if (wantAll) return cb(null, safe);
+    // Single-address case: hand back the first allow-listed address. The all:true
+    // lookup above ran with the caller's own family/hints/verbatim, so `safe` is
+    // in Node's native selection order — making safe[0] the address
+    // dns.lookup({all:false}) would have returned, minus any blocked ones. We
+    // deliberately do NOT issue a second all:false lookup to "re-pick": that is a
+    // redundant resolution (re-opening the rebinding window the pin closes) and
+    // would fail a dual-stack host whose preferred address is private but which
+    // also has a public one. Real http/https uses Happy Eyeballs (all:true) and
+    // takes the branch above; this path is only for legacy all:false callers.
+    cb(null, safe[0].address, safe[0].family);
+  });
+}
+
+export interface PinnedHttpResponse {
+  status: number;
+  body: string;
+}
+
+// Cap the buffered response body. Webhook sinks (Slack/Discord/generic) reply
+// with tiny acknowledgements; we only keep the body for status reporting (a
+// short error snippet). Bounding it stops a malicious or misconfigured endpoint
+// from forcing unbounded memory growth in the notification worker.
+const MAX_RESPONSE_BYTES = 64 * 1024;
+
+// Dedicated direct-connection agents. node:http/https never consult
+// HTTP(S)_PROXY / NO_PROXY (only fetch/undici and explicit proxy-agent libraries
+// do), so webhook sends already go straight to the origin. Binding our OWN agent
+// rather than the shared globalAgent additionally ensures a process-wide
+// globalAgent replacement can't silently reroute sends through a proxy — keeping
+// `lookup: pinnedLookup` the only resolution + connection path. keepAlive is left
+// at its default (false), so sockets close after each response.
+const directHttpAgent = new http.Agent();
+const directHttpsAgent = new https.Agent();
+
+/**
+ * POST a JSON body to a webhook URL over node:http/https with DNS pinned to a
+ * validated public IP (see pinnedLookup). Validates the URL itself first via
+ * checkWebhookUrlSafe(), so the primitive is safe by default for any caller:
+ * the pinned `lookup` only fires for hostname targets, but an IP-literal target
+ * connects directly — this preflight is what blocks a private IP-literal from
+ * bypassing the pin.
+ *
+ * Transport is always direct: node:http/https ignore *_PROXY env vars and we set
+ * no `agent` override beyond our own dedicated direct agents (and no undici
+ * `dispatcher`), so there is no proxy that could resolve the host out from under
+ * the pin — `lookup: pinnedLookup` is the only path to the origin.
+ *
+ * Redirects are intentionally NOT followed — a 3xx `Location` is an SSRF
+ * re-entry vector. The response body is buffered up to MAX_RESPONSE_BYTES and
+ * the request is aborted past that. Resolves with the status + body text;
+ * rejects (message `blocked: …`) when the URL fails validation, and on transport
+ * error, timeout, or an oversized body.
+ */
+export async function sendJsonPinned(
+  url: string,
+  body: string,
+  headers: Record<string, string>,
+  timeoutMs: number,
+): Promise<PinnedHttpResponse> {
+  // Preflight before touching the network. Covers scheme, IP-literal range, and
+  // a first hostname resolution; the pinned lookup below is the authoritative
+  // connect-time check for hostname targets.
+  const blocked = await checkWebhookUrlSafe(url);
+  if (blocked) throw new Error(`blocked: ${blocked}`);
+  const parsed = new URL(url);
+  const isHttps = parsed.protocol === "https:";
+  const transport = isHttps ? https : http;
+  const agent = isHttps ? directHttpsAgent : directHttpAgent;
+  const payload = Buffer.from(body, "utf8");
+  return new Promise<PinnedHttpResponse>((resolve, reject) => {
+    const req = transport.request(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...headers,
+          "Content-Length": String(payload.byteLength),
+        },
+        // Force our dedicated direct agent (never a proxy) so the connection
+        // can't be rerouted out from under the pin.
+        agent,
+        // Pin resolution to a validated address; the socket connects to exactly
+        // this IP, so there is no second unchecked DNS lookup. This request-level
+        // option is honored for BOTH http and https — the agent's
+        // createConnection passes it through to net/tls.connect (verified: Node
+        // invokes our lookup for an https request too, it is not a no-op). Cast:
+        // our lookup intentionally handles both the all/one option shapes.
+        lookup: pinnedLookup as unknown as net.LookupFunction,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        let total = 0;
+        let aborted = false;
+        res.on("data", (chunk: Buffer | string) => {
+          if (aborted) return;
+          // Normalize: a stream with an encoding set would emit strings, which
+          // Buffer.concat can't take. We never set one, but this keeps the
+          // helper correct regardless.
+          const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8");
+          total += buf.byteLength;
+          if (total > MAX_RESPONSE_BYTES) {
+            aborted = true;
+            req.destroy(new Error(`response exceeded ${MAX_RESPONSE_BYTES} bytes`));
+            return;
+          }
+          chunks.push(buf);
+        });
+        res.on("end", () => {
+          // Once the cap was hit we've already torn the request down and the
+          // promise is rejecting via req's 'error' — don't also resolve with the
+          // truncated body. (Promises settle once, but this keeps the terminal
+          // outcome unambiguous and the control flow clear.)
+          if (aborted) return;
+          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") });
+        });
+        res.on("error", reject);
+      },
+    );
+    req.setTimeout(timeoutMs, () => req.destroy(new Error(`request timed out after ${timeoutMs}ms`)));
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
 }

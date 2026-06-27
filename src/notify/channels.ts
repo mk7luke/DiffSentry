@@ -1,6 +1,6 @@
 import { logger } from "../logger.js";
 import { sendMail, smtpConfigFromChannel } from "./smtp.js";
-import { checkWebhookUrlSafe } from "./ssrf.js";
+import { sendJsonPinned } from "./ssrf.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Channel adapters — turn a normalized ChannelMessage into a real delivery over
@@ -8,8 +8,11 @@ import { checkWebhookUrlSafe } from "./ssrf.js";
 // DeliveryResult rather than throwing, so the alert engine can record an
 // error-status delivery row instead of crashing a bus handler.
 //
-// HTTP adapters use the global fetch (Node 18+) with a hard timeout. Email uses
-// the dependency-free SMTP client in ./smtp.ts, configured from NOTIFY_SMTP_*.
+// HTTP adapters post via ssrf.sendJsonPinned — a node:http/https request with a
+// hard timeout whose DNS resolution is pinned to a validated public address, so
+// the connection can't be rebound to a private target between the safety check
+// and the socket connect. Email uses the dependency-free SMTP client in
+// ./smtp.ts, configured from NOTIFY_SMTP_*.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type ChannelType = "slack" | "discord" | "webhook" | "email";
@@ -65,21 +68,16 @@ async function postJson(
   body: unknown,
   headers: Record<string, string> = {},
 ): Promise<DeliveryResult> {
-  // Re-check SSRF safety at send time (not just at config save): a hostname can
-  // be re-pointed to a private address after the channel was created (DNS
-  // rebinding). Resolves + rejects loopback/private/link-local destinations.
-  const blocked = await checkWebhookUrlSafe(url);
-  if (blocked) return { ok: false, detail: `blocked: ${blocked}` };
+  // SSRF protection lives in sendJsonPinned: it validates the URL up front
+  // (scheme + IP-literal range + a first hostname resolve via checkWebhookUrlSafe)
+  // and then pins DNS at connect time, so a host re-pointed to a private address
+  // after config save (DNS rebinding) is still rejected — with no second
+  // unchecked resolution. A validation failure throws `blocked: …`, surfaced as
+  // the delivery detail by the catch below.
   try {
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
-    });
-    const text = await resp.text().catch(() => "");
-    if (!resp.ok) {
-      return { ok: false, detail: `HTTP ${resp.status}${text ? `: ${text.slice(0, 200)}` : ""}` };
+    const resp = await sendJsonPinned(url, JSON.stringify(body), headers, HTTP_TIMEOUT_MS);
+    if (resp.status < 200 || resp.status >= 300) {
+      return { ok: false, detail: `HTTP ${resp.status}${resp.body ? `: ${resp.body.slice(0, 200)}` : ""}` };
     }
     return { ok: true, detail: `HTTP ${resp.status}` };
   } catch (err) {

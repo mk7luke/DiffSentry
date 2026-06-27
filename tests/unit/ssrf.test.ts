@@ -1,3 +1,5 @@
+import http from "node:http";
+import https from "node:https";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   checkWebhookUrlSafe,
@@ -5,6 +7,8 @@ import {
   ipv4IsPrivate,
   ipv6IsPrivate,
   ipv6ToBytes,
+  pinnedLookup,
+  sendJsonPinned,
 } from "../../src/notify/ssrf.js";
 
 // SSRF guard for outbound webhook targets. Fails closed: only public
@@ -186,5 +190,164 @@ describe("checkWebhookUrlSafe", () => {
   it("permits private egress only when the explicit flag is set", async () => {
     process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS = "true";
     expect(await checkWebhookUrlSafe("https://127.0.0.1/hook")).toBeNull();
+  });
+});
+
+describe("pinnedLookup (DNS pinning at connect time)", () => {
+  const saved = process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS;
+  beforeEach(() => {
+    delete process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS;
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS;
+    else process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS = saved;
+  });
+
+  const lookupOnce = (host: string, options: { family?: number; all?: boolean } = {}) =>
+    new Promise<{ err: NodeJS.ErrnoException | null; address?: unknown; family?: number }>((resolve) => {
+      pinnedLookup(host, options, (err, address, family) => resolve({ err, address, family }));
+    });
+
+  it("supports the (hostname, callback) overload with options omitted", async () => {
+    // Calling pinnedLookup like dns.lookup's 2-arg form must not misread the
+    // callback as options. localhost is private, so this resolves to an error.
+    const { err, address } = await new Promise<{
+      err: NodeJS.ErrnoException | null;
+      address?: unknown;
+    }>((resolve) => {
+      (pinnedLookup as unknown as (h: string, cb: (e: NodeJS.ErrnoException | null, a?: unknown) => void) => void)(
+        "localhost",
+        (e, a) => resolve({ err: e, address: a }),
+      );
+    });
+    expect(err).toBeInstanceOf(Error);
+    expect(address).toBeUndefined();
+  });
+
+  it("rejects a host that resolves only to a private/loopback address", async () => {
+    // localhost resolves to 127.0.0.1 / ::1 — both private, so nothing is safe.
+    const { err, address } = await lookupOnce("localhost");
+    expect(err).toBeInstanceOf(Error);
+    expect(address).toBeUndefined();
+  });
+
+  it("returns the private address when private egress is explicitly allowed", async () => {
+    process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS = "true";
+    const { err, address } = await lookupOnce("localhost", { family: 4 });
+    expect(err).toBeNull();
+    expect(address).toMatch(/^127\./);
+  });
+
+  it("returns validated public addresses for a real hostname", async () => {
+    // dns.example resolves to public addresses (93.184.x / 96.7.x range).
+    const { err, address, family } = await lookupOnce("example.com", { family: 4 });
+    // Tolerate offline CI (DNS failure) — but if it resolves, it must be a v4
+    // address and must not be a private one (the whole point of the pin).
+    if (err) {
+      expect(err).toBeInstanceOf(Error);
+      return;
+    }
+    expect(typeof address).toBe("string");
+    expect(family).toBe(4);
+    expect(ipv4IsPrivate(address as string)).toBe(false);
+  });
+});
+
+describe("sendJsonPinned (bounded response buffering)", () => {
+  // sendJsonPinned now preflights the URL via checkWebhookUrlSafe, so reaching a
+  // plain-http loopback test server requires both opt-outs. Snapshot + restore.
+  const saved = {
+    insecure: process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS,
+    priv: process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS,
+  };
+  beforeEach(() => {
+    process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS = "true";
+    process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS = "true";
+  });
+  afterEach(() => {
+    if (saved.insecure === undefined) delete process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS;
+    else process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS = saved.insecure;
+    if (saved.priv === undefined) delete process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS;
+    else process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS = saved.priv;
+  });
+
+  // An IP-literal target connects directly (pinnedLookup isn't invoked for
+  // literals), so these exercise the transport + response-cap logic without DNS.
+  const withServer = async (
+    handler: http.RequestListener,
+    run: (port: number) => Promise<void>,
+  ): Promise<void> => {
+    const server = http.createServer(handler);
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    const port = (server.address() as { port: number }).port;
+    try {
+      await run(port);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  };
+
+  it("returns status + body for a small response", async () => {
+    await withServer(
+      (_req, res) => {
+        res.writeHead(200);
+        res.end("ok");
+      },
+      async (port) => {
+        const resp = await sendJsonPinned(`http://127.0.0.1:${port}/`, "{}", {}, 5000);
+        expect(resp.status).toBe(200);
+        expect(resp.body).toBe("ok");
+      },
+    );
+  });
+
+  it("self-validates the URL and rejects a disallowed target before connecting", async () => {
+    // Even though the helper is called directly (no postJson preflight), an
+    // IP-literal private target must be rejected — it never reaches the pinned
+    // lookup. Drop the private opt-out so loopback is disallowed again.
+    delete process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS;
+    await expect(sendJsonPinned("https://127.0.0.1/hook", "{}", {}, 5000)).rejects.toThrow(/^blocked:/);
+  });
+
+  it("rejects when the response body exceeds the cap", async () => {
+    await withServer(
+      (_req, res) => {
+        res.writeHead(200);
+        res.end("x".repeat(70 * 1024)); // > 64 KiB cap
+      },
+      async (port) => {
+        await expect(
+          sendJsonPinned(`http://127.0.0.1:${port}/`, "{}", {}, 5000),
+        ).rejects.toThrow(/exceeded/i);
+      },
+    );
+  });
+});
+
+describe("request-level lookup is honored on both transports", () => {
+  // sendJsonPinned passes `lookup` as a request option (not on the Agent). This
+  // confirms Node invokes that lookup for BOTH http and https — i.e. it is not a
+  // no-op on https. No network/TLS needed: the lookup aborts before connecting.
+  const lookupInvoked = (transport: typeof http | typeof https, url: string) =>
+    new Promise<boolean>((resolve) => {
+      let called = false;
+      const agent = new transport.Agent();
+      const req = transport.request(url, {
+        agent,
+        lookup: ((_host: string, _opts: unknown, cb: (e: Error) => void) => {
+          called = true;
+          cb(new Error("aborted-in-test")); // don't actually connect
+        }) as never,
+      });
+      req.on("error", () => resolve(called));
+      req.end();
+    });
+
+  it("invokes the request-level lookup for http", async () => {
+    expect(await lookupInvoked(http, "http://example.com/")).toBe(true);
+  });
+
+  it("invokes the request-level lookup for https (not a no-op)", async () => {
+    expect(await lookupInvoked(https, "https://example.com/")).toBe(true);
   });
 });
