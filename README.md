@@ -645,7 +645,7 @@ GitHub webhook
 | `DASHBOARD_ALLOWED_ORGS` | One of logins/orgs required | | Comma-separated GitHub org slugs whose members may sign in (granted `viewer`). |
 | `DASHBOARD_ADMIN_LOGINS` | No | | Comma-separated logins granted the `admin` role. |
 | `DASHBOARD_AUTHOR_LOGINS` | No | | Comma-separated logins granted the `author` role. |
-| `DASHBOARD_SESSION_SECRET` | No | `GITHUB_WEBHOOK_SECRET` | HMAC key for the dashboard session + CSRF cookies. |
+| `DASHBOARD_SESSION_SECRET` | If dashboard enabled | | Dedicated HMAC key for the dashboard session + CSRF cookies. **Required whenever `ENABLE_DASHBOARD=1`** (boot fails fast otherwise); generate with `openssl rand -hex 32`. No longer falls back to `GITHUB_WEBHOOK_SECRET`. |
 | `DASHBOARD_SSE_HEARTBEAT_MS` | No | `25000` | Heartbeat interval (ms, min 1000) for the `/api/v1/stream` SSE feed. |
 | `NOTIFY_SMTP_HOST` | If email channel | | SMTP server host for the email notification channel. Email channels are disabled until this and `NOTIFY_SMTP_FROM` are set. |
 | `NOTIFY_SMTP_PORT` | No | `587` | SMTP port. `465` implies implicit TLS; `587`/`25` use STARTTLS when offered. |
@@ -1200,7 +1200,7 @@ GITHUB_OAUTH_CLIENT_SECRET=…
 # At least one of the two allowlists. Either grants access.
 DASHBOARD_ALLOWED_LOGINS=your-gh-login
 DASHBOARD_ALLOWED_ORGS=your-org
-# DASHBOARD_SESSION_SECRET — optional, defaults to GITHUB_WEBHOOK_SECRET
+DASHBOARD_SESSION_SECRET=…  # required when ENABLE_DASHBOARD=1; generate with `openssl rand -hex 32`
 ```
 
 With `ENABLE_DASHBOARD=1` but no OAuth vars, the dashboard mounts in

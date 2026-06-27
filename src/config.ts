@@ -61,6 +61,18 @@ export function loadConfig(): Config {
   if (!process.env.GITHUB_WEBHOOK_SECRET) {
     throw new Error("GITHUB_WEBHOOK_SECRET is required");
   }
+  // The dashboard signs its session + CSRF cookies with a dedicated secret.
+  // It must be set explicitly when the dashboard is enabled: it previously fell
+  // back to GITHUB_WEBHOOK_SECRET, which coupled two unrelated trust domains
+  // (anyone able to forge a webhook signature could forge a dashboard session).
+  // Fail fast at boot rather than silently reusing the webhook secret.
+  if (process.env.ENABLE_DASHBOARD === "1" && !process.env.DASHBOARD_SESSION_SECRET) {
+    throw new Error(
+      "DASHBOARD_SESSION_SECRET is required when ENABLE_DASHBOARD=1 " +
+        "(generate one with `openssl rand -hex 32`). It signs the dashboard " +
+        "session and CSRF cookies and must be independent of GITHUB_WEBHOOK_SECRET."
+    );
+  }
 
   // AI request timeout (ms). A valid number is honored as-is — including <= 0,
   // which withAiTimeout treats as "no bound" (an explicit escape hatch). Only a
@@ -92,6 +104,7 @@ export function loadConfig(): Config {
     githubAppId: process.env.GITHUB_APP_ID,
     githubPrivateKey: privateKey,
     githubWebhookSecret: process.env.GITHUB_WEBHOOK_SECRET,
+    dashboardSessionSecret: process.env.DASHBOARD_SESSION_SECRET,
     aiProvider,
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL,

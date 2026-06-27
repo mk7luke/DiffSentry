@@ -42,7 +42,10 @@ export function loadAuthConfigFromEnv(): AuthConfig | null {
     .map((s) => s.trim())
     .filter(Boolean);
   const baseUrl = process.env.DASHBOARD_URL ?? "";
-  const sessionSecret = process.env.DASHBOARD_SESSION_SECRET || process.env.GITHUB_WEBHOOK_SECRET || "";
+  // Dedicated secret only — no fallback to GITHUB_WEBHOOK_SECRET. loadConfig()
+  // fails fast at boot if this is missing while ENABLE_DASHBOARD=1, so by the
+  // time we get here it is set in any dashboard-enabled deployment.
+  const sessionSecret = process.env.DASHBOARD_SESSION_SECRET || "";
   if (!clientId || !clientSecret || !baseUrl || !sessionSecret) return null;
   if (orgs.length === 0 && logins.length === 0) return null;
   return {
