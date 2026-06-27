@@ -257,12 +257,20 @@ export interface PinnedHttpResponse {
   body: string;
 }
 
+// Cap the buffered response body. Webhook sinks (Slack/Discord/generic) reply
+// with tiny acknowledgements; we only keep the body for status reporting (a
+// short error snippet). Bounding it stops a malicious or misconfigured endpoint
+// from forcing unbounded memory growth in the notification worker.
+const MAX_RESPONSE_BYTES = 64 * 1024;
+
 /**
  * POST a JSON body to a webhook URL over node:http/https with DNS pinned to a
  * validated public IP (see pinnedLookup). Redirects are intentionally NOT
  * followed — a 3xx `Location` is an SSRF re-entry vector that would bypass the
- * pinned lookup. Resolves with the status + body text; rejects on transport
- * error, timeout, or a host that resolves only to disallowed addresses.
+ * pinned lookup. The response body is buffered up to MAX_RESPONSE_BYTES and the
+ * request is aborted past that. Resolves with the status + body text; rejects on
+ * transport error, timeout, an oversized body, or a host that resolves only to
+ * disallowed addresses.
  */
 export function sendJsonPinned(
   url: string,
@@ -290,7 +298,22 @@ export function sendJsonPinned(
       },
       (res) => {
         const chunks: Buffer[] = [];
-        res.on("data", (c: Buffer) => chunks.push(c));
+        let total = 0;
+        let aborted = false;
+        res.on("data", (chunk: Buffer | string) => {
+          if (aborted) return;
+          // Normalize: a stream with an encoding set would emit strings, which
+          // Buffer.concat can't take. We never set one, but this keeps the
+          // helper correct regardless.
+          const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8");
+          total += buf.byteLength;
+          if (total > MAX_RESPONSE_BYTES) {
+            aborted = true;
+            req.destroy(new Error(`response exceeded ${MAX_RESPONSE_BYTES} bytes`));
+            return;
+          }
+          chunks.push(buf);
+        });
         res.on("end", () =>
           resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }),
         );

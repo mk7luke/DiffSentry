@@ -1,3 +1,4 @@
+import http from "node:http";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   checkWebhookUrlSafe,
@@ -6,6 +7,7 @@ import {
   ipv6IsPrivate,
   ipv6ToBytes,
   pinnedLookup,
+  sendJsonPinned,
 } from "../../src/notify/ssrf.js";
 
 // SSRF guard for outbound webhook targets. Fails closed: only public
@@ -231,5 +233,51 @@ describe("pinnedLookup (DNS pinning at connect time)", () => {
     expect(typeof address).toBe("string");
     expect(family).toBe(4);
     expect(ipv4IsPrivate(address as string)).toBe(false);
+  });
+});
+
+describe("sendJsonPinned (bounded response buffering)", () => {
+  // An IP-literal target connects directly (pinnedLookup isn't invoked for
+  // literals), so these exercise the transport + response-cap logic without DNS.
+  const withServer = async (
+    handler: http.RequestListener,
+    run: (port: number) => Promise<void>,
+  ): Promise<void> => {
+    const server = http.createServer(handler);
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    const port = (server.address() as { port: number }).port;
+    try {
+      await run(port);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  };
+
+  it("returns status + body for a small response", async () => {
+    await withServer(
+      (_req, res) => {
+        res.writeHead(200);
+        res.end("ok");
+      },
+      async (port) => {
+        const resp = await sendJsonPinned(`http://127.0.0.1:${port}/`, "{}", {}, 5000);
+        expect(resp.status).toBe(200);
+        expect(resp.body).toBe("ok");
+      },
+    );
+  });
+
+  it("rejects when the response body exceeds the cap", async () => {
+    await withServer(
+      (_req, res) => {
+        res.writeHead(200);
+        res.end("x".repeat(70 * 1024)); // > 64 KiB cap
+      },
+      async (port) => {
+        await expect(
+          sendJsonPinned(`http://127.0.0.1:${port}/`, "{}", {}, 5000),
+        ).rejects.toThrow(/exceeded/i);
+      },
+    );
   });
 });
