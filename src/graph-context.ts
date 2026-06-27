@@ -142,31 +142,31 @@ function normRel(p: string): string {
 // ─── Diff parsing ──────────────────────────────────────────────
 
 /**
- * New-side line numbers a unified-diff patch ADDS (the `+` lines). Used to
- * scope "changed symbols" to the functions a hunk actually overlaps, instead of
- * dumping every symbol in a touched file. Returns an empty set when the patch is
- * missing, unparseable, or deletion-only — the caller then includes all symbols.
+ * New-side line numbers a unified-diff patch touches — the FULL new-side span of
+ * every hunk (context + additions), not just the `+` lines. Used to scope
+ * "changed symbols" to the functions a hunk overlaps. Marking the whole span
+ * keeps scoping accurate for modification-only and deletion-heavy hunks (where
+ * the change is bracketed by context lines), instead of degrading to "all
+ * symbols in the file". Returns an empty set when the patch is missing or has no
+ * parseable hunk header — the caller then includes all symbols.
  */
 export function changedLinesFromPatch(patch?: string): Set<number> {
   const lines = new Set<number>();
   if (!patch) return lines;
-  let newLine = 0;
   for (const raw of patch.split("\n")) {
-    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
-    if (hunk) {
-      newLine = parseInt(hunk[1], 10);
+    // Hunk header: @@ -<oldStart>[,<oldCount>] +<newStart>[,<newCount>] @@
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(raw);
+    if (!hunk) continue;
+    const newStart = parseInt(hunk[1], 10);
+    const newCount = hunk[2] === undefined ? 1 : parseInt(hunk[2], 10);
+    if (newCount <= 0) {
+      // Pure deletion — no new-side line survives in this hunk. Attribute the
+      // change to the line at the deletion point so scoping still localizes to
+      // the affected symbol instead of falling back to the whole file.
+      if (newStart >= 1) lines.add(newStart);
       continue;
     }
-    if (newLine === 0) continue; // pre-hunk header noise
-    if (raw.startsWith("+")) {
-      lines.add(newLine);
-      newLine++;
-    } else if (raw.startsWith("-")) {
-      // deletion — no new-side line consumed
-    } else {
-      // context line
-      newLine++;
-    }
+    for (let i = 0; i < newCount; i++) lines.add(newStart + i);
   }
   return lines;
 }
@@ -269,7 +269,7 @@ export function queryGraph(
 
       // Symbols overlapping the changed lines.
       const symRows = symStmt.all(abs) as RawNode[];
-      const symbols: ChangedSymbol[] = symRows
+      const overlapping: ChangedSymbol[] = symRows
         .filter((s) => s.line_start != null && s.line_end != null && overlaps(changed, s.line_start!, s.line_end!))
         .map((s) => ({
           name: s.name,
@@ -278,7 +278,26 @@ export function queryGraph(
           file: rel,
           lineStart: s.line_start!,
           lineEnd: s.line_end!,
-        }))
+        }));
+
+      // Drop container symbols (e.g. a class) when a more specific overlapping
+      // symbol nested inside them (e.g. a changed method) is also selected — the
+      // container's source would otherwise re-print the inner body and burn
+      // prompt budget. Keep the innermost. (`qualified_name` is unique in the
+      // graph, so this can't ever see exact duplicates; it guards range nesting,
+      // which the live graph does produce — classes indexed alongside their
+      // methods.)
+      const symbols: ChangedSymbol[] = overlapping
+        .filter(
+          (s) =>
+            !overlapping.some(
+              (o) =>
+                o.qualifiedName !== s.qualifiedName &&
+                o.lineStart >= s.lineStart &&
+                o.lineEnd <= s.lineEnd &&
+                o.lineEnd - o.lineStart < s.lineEnd - s.lineStart,
+            ),
+        )
         .sort((a, b) => a.lineStart - b.lineStart);
 
       // Dependencies: files THIS file imports from.

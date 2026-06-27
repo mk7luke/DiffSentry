@@ -48,6 +48,13 @@ beforeAll(() => {
   node.run("Function", "foo", `${abs("src/util.ts")}::foo`, abs("src/util.ts"), 1, 5);
   node.run("Function", "bar", `${abs("src/util.ts")}::bar`, abs("src/util.ts"), 10, 20);
 
+  // widget.ts: a Class (1-50) that fully contains a method/Function (render,
+  // 10-20) — mirrors the live graph (classes indexed alongside their methods),
+  // used to exercise container/nesting dedup.
+  node.run("File", "widget.ts", abs("src/widget.ts"), abs("src/widget.ts"), null, null);
+  node.run("Class", "Widget", `${abs("src/widget.ts")}::Widget`, abs("src/widget.ts"), 1, 50);
+  node.run("Function", "render", `${abs("src/widget.ts")}::render`, abs("src/widget.ts"), 10, 20);
+
   const edge = db.prepare(
     "INSERT INTO edges (kind,source_qualified,target_qualified,file_path) VALUES (?,?,?,?)",
   );
@@ -73,12 +80,34 @@ afterAll(() => {
 });
 
 describe("changedLinesFromPatch", () => {
-  it("extracts new-side added line numbers from a unified diff", () => {
-    // New side starts at 12: " ctx"=12, "+added1"=13, "+added2"=14, " ctx2"=15.
-    // Only the added (+) lines are reported — they are what actually changed.
+  it("marks the full new-side hunk span (context + additions)", () => {
+    // New side: start 12, count 4 → lines 12..15 are all touched.
     const patch = "@@ -10,3 +12,4 @@\n ctx\n+added1\n+added2\n ctx2\n";
     const lines = changedLinesFromPatch(patch);
-    expect([...lines].sort((a, b) => a - b)).toEqual([13, 14]);
+    expect([...lines].sort((a, b) => a - b)).toEqual([12, 13, 14, 15]);
+  });
+
+  it("scopes deletion-only hunks to their surviving new-side context", () => {
+    // One line removed between two context lines: new side start 10, count 2.
+    // The '+'-only logic would have returned an empty set (→ whole-file
+    // fallback); the span logic localizes to lines 10-11.
+    const patch = "@@ -10,3 +10,2 @@\n ctx1\n-removed\n ctx2\n";
+    expect([...changedLinesFromPatch(patch)].sort((a, b) => a - b)).toEqual([10, 11]);
+  });
+
+  it("covers replacement hunks across the whole new span", () => {
+    const patch = "@@ -5,2 +5,2 @@\n-old\n+new\n ctx\n";
+    expect([...changedLinesFromPatch(patch)].sort((a, b) => a - b)).toEqual([5, 6]);
+  });
+
+  it("localizes a pure deletion (new count 0) to the deletion point", () => {
+    const patch = "@@ -8,3 +7,0 @@\n-a\n-b\n-c\n";
+    expect([...changedLinesFromPatch(patch)]).toEqual([7]);
+  });
+
+  it("handles a hunk header with omitted new count (implicit 1)", () => {
+    const patch = "@@ -4 +4 @@\n-old\n+new\n";
+    expect([...changedLinesFromPatch(patch)]).toEqual([4]);
   });
 
   it("returns empty set for missing/blank patch", () => {
@@ -123,6 +152,25 @@ describe("queryGraph", () => {
   it("includes all symbols when no patch scopes the change", () => {
     const ctx = queryGraph([{ path: "src/util.ts" }], { graphDbPath: dbPath });
     expect(ctx.files[0].symbols.map((s) => s.name).sort()).toEqual(["bar", "foo"]);
+  });
+
+  it("drops a container symbol when a nested symbol overlaps the change", () => {
+    // Change at lines 10-13 overlaps both Widget (1-50) and render (10-20);
+    // the enclosing class is dropped so its 50-line body doesn't re-print render.
+    const ctx = queryGraph(
+      [{ path: "src/widget.ts", patch: "@@ -10,3 +10,4 @@\n a\n+b\n c\n d\n" }],
+      { graphDbPath: dbPath },
+    );
+    expect(ctx.files[0].symbols.map((s) => s.name)).toEqual(["render"]);
+  });
+
+  it("keeps the container when only its non-nested lines change", () => {
+    // Change at lines 1-3 is outside render (10-20); only Widget overlaps.
+    const ctx = queryGraph(
+      [{ path: "src/widget.ts", patch: "@@ -1,2 +1,3 @@\n a\n+b\n c\n" }],
+      { graphDbPath: dbPath },
+    );
+    expect(ctx.files[0].symbols.map((s) => s.name)).toEqual(["Widget"]);
   });
 });
 
