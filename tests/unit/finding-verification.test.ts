@@ -117,6 +117,83 @@ describe("verifyFindings", () => {
     expect(out.comments.map((c) => c.title)).toEqual(["Finding one."]);
   });
 
+  it("skips findings whose file has no usable patch and keeps them fail-open, remapping indices", async () => {
+    // Interleave a skipped finding (empty-patch file) BEFORE a verifiable one so
+    // the verdict index must be remapped back to the original comment index.
+    const context = {
+      files: [
+        { filename: "src/empty.ts", status: "modified" as const, patch: "   ", additions: 0, deletions: 0 },
+        { filename: "src/a.ts", status: "modified" as const, patch: PATCH, additions: 2, deletions: 0 },
+      ],
+    };
+    const cmts: ReviewComment[] = [
+      { path: "src/empty.ts", line: 1, side: "RIGHT", body: "b", title: "On empty-patch file." },
+      { path: "src/a.ts", line: 2, side: "RIGHT", body: "b", title: "On real diff." },
+    ];
+    let sentUser = "";
+    const ai = {
+      complete: async (_s: string, u: string) => {
+        sentUser = u;
+        // verifiable subset has exactly one finding at index 0 (the a.ts one).
+        return JSON.stringify({ verdicts: [{ index: 0, supported: false }] });
+      },
+    };
+    const out = await verifyFindings({ ai, context, comments: cmts });
+    // The a.ts finding (real diff) was dropped; the empty-patch finding is kept.
+    expect(out.comments.map((c) => c.title)).toEqual(["On empty-patch file."]);
+    expect(out.stats.skipped).toBe(1);
+    expect(out.stats.dropped).toBe(1);
+    // The skipped finding's file must never be sent to the verifier.
+    expect(sentUser).not.toContain("src/empty.ts");
+    expect(sentUser).toContain("src/a.ts");
+  });
+
+  it("does not call the AI when no finding has a usable patch (all skipped, kept)", async () => {
+    const context = {
+      files: [{ filename: "src/empty.ts", status: "modified" as const, patch: "", additions: 0, deletions: 0 }],
+    };
+    const cmts: ReviewComment[] = [
+      { path: "src/empty.ts", line: 1, side: "RIGHT", body: "b", title: "Unverifiable." },
+    ];
+    let called = false;
+    const ai = { complete: async () => { called = true; return "{}"; } };
+    const out = await verifyFindings({ ai, context, comments: cmts });
+    expect(called).toBe(false);
+    expect(out.comments).toHaveLength(1);
+    expect(out.stats.skipped).toBe(1);
+    expect(out.stats.dropped).toBe(0);
+  });
+
+  it("keeps a verifiable finding whose diff was omitted by the prompt budget (fail-open)", async () => {
+    // 8k per file, 32k total → the 5th file's patch is omitted; a finding on it
+    // must be kept even if the verifier marks it unsupported, because the
+    // verifier never saw its diff.
+    const big = "y".repeat(8001);
+    const files = Array.from({ length: 5 }, (_v, i) => ({
+      filename: `src/f${i}.ts`,
+      status: "modified" as const,
+      patch: big,
+      additions: 1,
+      deletions: 0,
+    }));
+    const cmts: ReviewComment[] = files.map((f, i) => ({
+      path: f.filename,
+      line: 2,
+      side: "RIGHT" as const,
+      body: "b",
+      title: `Finding ${i}.`,
+    }));
+    // Verifier marks every finding unsupported.
+    const ai = {
+      complete: async () =>
+        JSON.stringify({ verdicts: cmts.map((_c, i) => ({ index: i, supported: false })) }),
+    };
+    const out = await verifyFindings({ ai, context: { files }, comments: cmts });
+    // The omitted-file finding survives; only the in-budget ones can be dropped.
+    expect(out.comments.length).toBeGreaterThanOrEqual(1);
+    expect(out.comments.some((c) => c.path === "src/f4.ts")).toBe(true);
+  });
+
   it("ignores duplicate index verdicts deterministically (first verdict wins)", async () => {
     // index 0 is first marked supported, then a conflicting unsupported dup —
     // first-wins keeps it; index 1's first (and only) verdict drops it.

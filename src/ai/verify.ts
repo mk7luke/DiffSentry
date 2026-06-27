@@ -22,6 +22,9 @@ export interface VerificationStats {
   before: number;
   after: number;
   dropped: number;
+  /** Findings excluded from the AI pass because their file had no usable patch
+   *  (or its diff didn't fit the prompt budget). Always kept — fail-open. */
+  skipped: number;
   /** Verifier output couldn't be parsed — we kept all findings (fail-open). */
   unparseable: boolean;
 }
@@ -96,28 +99,34 @@ const MAX_TOTAL_PATCH_CHARS = 32000;
 export function buildVerificationPrompt(
   context: Pick<PRContext, "files">,
   comments: ReviewComment[],
-): { system: string; user: string } {
+): { system: string; user: string; includedFiles: Set<string> } {
   // Only files referenced by a finding are worth sending — the verifier judges
   // those findings and nothing else, so unreferenced patches are pure noise.
   const referenced = new Set(comments.map((c) => c.path));
   const relevant = context.files.filter((f) => referenced.has(f.filename));
 
+  // Files whose diff actually made it into the prompt (non-empty patch that fit
+  // the budget). The caller uses this to keep findings whose diff we couldn't
+  // show fail-open, rather than letting the verifier drop them blind.
+  const includedFiles = new Set<string>();
   let totalChars = 0;
   let truncatedFiles = 0;
   let omittedFiles = 0;
   const blocks: string[] = [];
   for (const f of relevant) {
+    const patch = f.patch ?? "";
+    if (patch.trim().length === 0) continue; // no usable diff to show
     const remaining = MAX_TOTAL_PATCH_CHARS - totalChars;
     if (remaining <= 0) {
       omittedFiles++;
       continue;
     }
     const cap = Math.min(MAX_PATCH_CHARS_PER_FILE, remaining);
-    const patch = f.patch ?? "";
     const truncated = patch.length > cap;
     const shown = truncated ? patch.slice(0, cap) : patch;
     if (truncated) truncatedFiles++;
     totalChars += shown.length;
+    includedFiles.add(f.filename);
     const note = truncated ? "\n… (patch truncated for verification)" : "";
     blocks.push(`### ${f.filename}\n\`\`\`diff\n${shown}${note}\n\`\`\``);
   }
@@ -141,7 +150,7 @@ ${findingsBlock(comments)}
 
 For each finding above, decide whether the diff substantiates it and cite the supporting line number(s). Respond with the JSON object described in the system prompt.`;
 
-  return { system: VERIFY_SYSTEM, user };
+  return { system: VERIFY_SYSTEM, user, includedFiles };
 }
 
 /** Parse the verifier's JSON, tolerating fences / surrounding prose. Returns
@@ -212,10 +221,38 @@ export async function verifyFindings(params: {
   const before = comments.length;
 
   if (before === 0) {
-    return { comments, stats: { before, after: 0, dropped: 0, unparseable: false } };
+    return { comments, stats: { before, after: 0, dropped: 0, skipped: 0, unparseable: false } };
   }
 
-  const { system, user } = buildVerificationPrompt(context, comments);
+  // Partition findings by whether their file even has a usable patch. A finding
+  // whose file is missing or has an empty diff can't be substantiated through
+  // no fault of its own — sending it to the verifier would only invite a blind
+  // "unsupported" drop. Those are never sent and always kept (fail-open); we
+  // run the AI on the verifiable subset only, tracking original indices so we
+  // can map verdicts back.
+  const fileByPath = new Map(context.files.map((f) => [f.filename, f] as const));
+  const hasUsablePatch = (path: string): boolean => {
+    const f = fileByPath.get(path);
+    return !!f && !!f.patch && f.patch.trim().length > 0;
+  };
+
+  const verifiableIdx: number[] = [];
+  let skipped = 0;
+  for (let i = 0; i < comments.length; i++) {
+    if (hasUsablePatch(comments[i].path)) verifiableIdx.push(i);
+    else skipped++;
+  }
+
+  if (verifiableIdx.length === 0) {
+    log.info({ skipped }, "Verification skipped — no findings reference a file with a usable patch; keeping all");
+    return { comments, stats: { before, after: before, dropped: 0, skipped, unparseable: false } };
+  }
+  if (skipped > 0) {
+    log.info({ skipped, verifiable: verifiableIdx.length }, "Some findings skipped from verification (no usable patch), kept fail-open");
+  }
+
+  const verifiable = verifiableIdx.map((i) => comments[i]);
+  const { system, user, includedFiles } = buildVerificationPrompt(context, verifiable);
   // Bound the call explicitly here too, independent of any provider-level
   // deadline, so this best-effort pass is self-isolating. `complete` doesn't
   // take a signal; withAiTimeout still rejects on time even when the inner
@@ -225,25 +262,28 @@ export async function verifyFindings(params: {
     () => ai.complete(system, user, { json: true, maxTokens: 1024 }),
   );
 
-  const verdicts = parseVerdicts(raw, before);
+  const verdicts = parseVerdicts(raw, verifiable.length);
   if (verdicts === null) {
     log.warn("Verification response unparseable; keeping all findings (fail-open)");
-    return { comments, stats: { before, after: before, dropped: 0, unparseable: true } };
+    return { comments, stats: { before, after: before, dropped: 0, skipped, unparseable: true } };
   }
 
-  // Drop ONLY findings the verifier explicitly marked unsupported. A finding
-  // with no verdict (model omitted it) is kept — fail-open at the per-finding
-  // level too.
+  // Drop ONLY findings the verifier explicitly marked unsupported, mapping the
+  // verifiable-subset index back to the original comment index. A finding whose
+  // diff didn't actually make it into the prompt (file omitted by the budget)
+  // is kept regardless — we never drop a finding we couldn't show the verifier.
   const unsupported = new Set<number>();
   for (const v of verdicts) {
-    if (v.supported === false) unsupported.add(v.index);
+    if (v.supported !== false) continue;
+    const originalIdx = verifiableIdx[v.index];
+    if (includedFiles.has(comments[originalIdx].path)) unsupported.add(originalIdx);
   }
 
   const kept = comments.filter((_, i) => !unsupported.has(i));
   const dropped = before - kept.length;
   if (dropped > 0) {
-    log.info({ before, after: kept.length, dropped }, "Verification pass dropped unsubstantiated findings");
+    log.info({ before, after: kept.length, dropped, skipped }, "Verification pass dropped unsubstantiated findings");
   }
 
-  return { comments: kept, stats: { before, after: kept.length, dropped, unparseable: false } };
+  return { comments: kept, stats: { before, after: kept.length, dropped, skipped, unparseable: false } };
 }
