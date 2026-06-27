@@ -371,6 +371,52 @@ describe("queryGraph — symbol-qualified IMPORTS_FROM endpoints", () => {
   });
 });
 
+// When the suffix fallback is ambiguous (several indexed files share the same
+// repo-relative suffix under different roots), the file must resolve as
+// unindexed rather than binding to an arbitrary match.
+describe("queryGraph — ambiguous suffix resolution", () => {
+  let aDbPath: string;
+
+  beforeAll(() => {
+    aDbPath = path.join(os.tmpdir(), `gc-ambig-${Date.now()}.db`);
+    const db = new Database(aDbPath);
+    db.exec(`
+      CREATE TABLE nodes (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
+        name TEXT NOT NULL, qualified_name TEXT NOT NULL UNIQUE, file_path TEXT NOT NULL,
+        line_start INTEGER, line_end INTEGER, updated_at REAL NOT NULL DEFAULT 0);
+      CREATE TABLE edges (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
+        source_qualified TEXT NOT NULL, target_qualified TEXT NOT NULL, file_path TEXT NOT NULL,
+        line INTEGER DEFAULT 0, updated_at REAL NOT NULL DEFAULT 0);
+    `);
+    const node = db.prepare(
+      "INSERT INTO nodes (kind,name,qualified_name,file_path,line_start,line_end) VALUES (?,?,?,?,?,?)",
+    );
+    // Two workspaces, each with src/util.ts — they diverge at the root, so the
+    // detected root is "" and the PR path "src/util.ts" misses the exact map,
+    // hitting the suffix fallback with TWO matches.
+    node.run("File", "util.ts", "/wsA/src/util.ts", "/wsA/src/util.ts", null, null);
+    node.run("File", "util.ts", "/wsB/src/util.ts", "/wsB/src/util.ts", null, null);
+    node.run("Function", "fooA", "/wsA/src/util.ts::foo", "/wsA/src/util.ts", 1, 5);
+    node.run("Function", "fooB", "/wsB/src/util.ts::foo", "/wsB/src/util.ts", 1, 5);
+    db.close();
+  });
+
+  afterAll(() => {
+    try {
+      fs.unlinkSync(aDbPath);
+    } catch {
+      /* ignore */
+    }
+  });
+
+  it("treats an ambiguous suffix match as unindexed instead of guessing", () => {
+    const ctx = queryGraph([{ path: "src/util.ts" }], { graphDbPath: aDbPath });
+    expect(ctx.available).toBe(true);
+    expect(ctx.files[0].indexed).toBe(false);
+    expect(ctx.files[0].symbols).toHaveLength(0);
+  });
+});
+
 describe("detectRoot / relativize — POSIX and Windows path shapes", () => {
   it("preserves the leading slash for a Unix-style common root and strips it cleanly", () => {
     const paths = [

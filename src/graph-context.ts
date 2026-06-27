@@ -256,13 +256,21 @@ export function queryGraph(
       const rel = normRel(f.path);
       let abs = relToAbs.get(rel);
       if (!abs) {
-        // Suffix fallback: compare POSIX-normalised forms but keep the RAW
-        // path (it's the key the SQLite queries match on).
-        const hit = absPaths.find((a) => {
+        // Suffix fallback: compare POSIX-normalised forms but keep the RAW path
+        // (it's the key the SQLite queries match on). Accept ONLY a unique
+        // match — if several indexed files share the same repo-relative suffix
+        // (nested workspaces / monorepo roots), binding to an arbitrary one
+        // would silently mis-attribute symbols, deps, and fan-in. Best-effort
+        // means: prefer no context over wrong context, so leave it unresolved.
+        const hits = absPaths.filter((a) => {
           const p = toPosix(a);
           return p.endsWith("/" + rel) || p === rel;
         });
-        abs = hit;
+        if (hits.length === 1) {
+          abs = hits[0];
+        } else if (hits.length > 1) {
+          log.debug({ file: rel, matches: hits.length }, "ambiguous graph path suffix match; treating file as unindexed");
+        }
       }
       resolved.set(rel, abs ?? "");
     }
