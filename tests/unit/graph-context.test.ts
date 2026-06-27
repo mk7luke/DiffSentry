@@ -2,7 +2,14 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 import Database from "better-sqlite3";
+
+/** A collision-resistant temp DB path. Uses a UUID rather than Date.now() so
+ *  fixtures created in the same millisecond never share a file. */
+function tempDbPath(prefix: string): string {
+  return path.join(os.tmpdir(), `${prefix}-${crypto.randomUUID()}.db`);
+}
 import {
   queryGraph,
   buildGraphContext,
@@ -24,7 +31,7 @@ function abs(p: string) {
 }
 
 beforeAll(() => {
-  dbPath = path.join(os.tmpdir(), `gc-fixture-${Date.now()}.db`);
+  dbPath = tempDbPath("gc-fixture");
   const db = new Database(dbPath);
   db.exec(`
     CREATE TABLE nodes (
@@ -281,7 +288,7 @@ describe("queryGraph — Windows / backslash graph paths", () => {
   const wabs = (p: string) => `${WROOT}\\${p.replace(/\//g, "\\")}`;
 
   beforeAll(() => {
-    winDbPath = path.join(os.tmpdir(), `gc-win-${Date.now()}.db`);
+    winDbPath = tempDbPath("gc-win");
     const db = new Database(winDbPath);
     db.exec(`
       CREATE TABLE nodes (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
@@ -341,7 +348,7 @@ describe("queryGraph — symbol-qualified IMPORTS_FROM endpoints", () => {
   const qabs = (p: string) => `${QROOT}/${p}`;
 
   beforeAll(() => {
-    qDbPath = path.join(os.tmpdir(), `gc-q-${Date.now()}.db`);
+    qDbPath = tempDbPath("gc-q");
     const db = new Database(qDbPath);
     db.exec(`
       CREATE TABLE nodes (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
@@ -395,7 +402,7 @@ describe("queryGraph — ambiguous suffix resolution", () => {
   let aDbPath: string;
 
   beforeAll(() => {
-    aDbPath = path.join(os.tmpdir(), `gc-ambig-${Date.now()}.db`);
+    aDbPath = tempDbPath("gc-ambig");
     const db = new Database(aDbPath);
     db.exec(`
       CREATE TABLE nodes (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
@@ -441,7 +448,7 @@ describe("queryGraph — monorepo / non-empty common root", () => {
   let mDbPath: string;
 
   beforeAll(() => {
-    mDbPath = path.join(os.tmpdir(), `gc-mono-${Date.now()}.db`);
+    mDbPath = tempDbPath("gc-mono");
     const db = new Database(mDbPath);
     db.exec(`
       CREATE TABLE nodes (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
