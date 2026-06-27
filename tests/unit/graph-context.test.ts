@@ -10,6 +10,54 @@ import Database from "better-sqlite3";
 function tempDbPath(prefix: string): string {
   return path.join(os.tmpdir(), `${prefix}-${crypto.randomUUID()}.db`);
 }
+
+type FixtureDb = InstanceType<typeof Database>;
+
+/** Open a temp fixture DB with the code-review-graph schema (nodes + edges
+ *  subset). Centralised so a schema change is a single edit. Caller closes the
+ *  handle and unlinks `dbPath` in afterAll. */
+function createFixtureDb(prefix: string): { db: FixtureDb; dbPath: string } {
+  const dbPath = tempDbPath(prefix);
+  const db = new Database(dbPath);
+  db.exec(`
+    CREATE TABLE nodes (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
+      name TEXT NOT NULL, qualified_name TEXT NOT NULL UNIQUE, file_path TEXT NOT NULL,
+      line_start INTEGER, line_end INTEGER, updated_at REAL NOT NULL DEFAULT 0);
+    CREATE TABLE edges (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
+      source_qualified TEXT NOT NULL, target_qualified TEXT NOT NULL, file_path TEXT NOT NULL,
+      line INTEGER DEFAULT 0, updated_at REAL NOT NULL DEFAULT 0);
+  `);
+  return { db, dbPath };
+}
+
+function insertNode(
+  db: FixtureDb,
+  kind: string,
+  name: string,
+  qualifiedName: string,
+  filePath: string,
+  lineStart: number | null = null,
+  lineEnd: number | null = null,
+): void {
+  db.prepare(
+    "INSERT INTO nodes (kind,name,qualified_name,file_path,line_start,line_end) VALUES (?,?,?,?,?,?)",
+  ).run(kind, name, qualifiedName, filePath, lineStart, lineEnd);
+}
+
+function insertEdge(db: FixtureDb, kind: string, source: string, target: string, filePath: string): void {
+  db.prepare(
+    "INSERT INTO edges (kind,source_qualified,target_qualified,file_path) VALUES (?,?,?,?)",
+  ).run(kind, source, target, filePath);
+}
+
+/** Remove a fixture DB file, ignoring a missing file. */
+function unlinkQuietly(p: string): void {
+  try {
+    fs.unlinkSync(p);
+  } catch {
+    /* ignore */
+  }
+}
 import {
   queryGraph,
   buildGraphContext,
@@ -31,69 +79,46 @@ function abs(p: string) {
 }
 
 beforeAll(() => {
-  dbPath = tempDbPath("gc-fixture");
-  const db = new Database(dbPath);
-  db.exec(`
-    CREATE TABLE nodes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      kind TEXT NOT NULL, name TEXT NOT NULL, qualified_name TEXT NOT NULL UNIQUE,
-      file_path TEXT NOT NULL, line_start INTEGER, line_end INTEGER, updated_at REAL NOT NULL DEFAULT 0
-    );
-    CREATE TABLE edges (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      kind TEXT NOT NULL, source_qualified TEXT NOT NULL, target_qualified TEXT NOT NULL,
-      file_path TEXT NOT NULL, line INTEGER DEFAULT 0, updated_at REAL NOT NULL DEFAULT 0
-    );
-  `);
+  const fx = createFixtureDb("gc-fixture");
+  dbPath = fx.dbPath;
+  const db = fx.db;
 
-  const node = db.prepare(
-    "INSERT INTO nodes (kind,name,qualified_name,file_path,line_start,line_end) VALUES (?,?,?,?,?,?)",
-  );
   // File nodes — spanning two top-level dirs (src/, scripts/) so the detected
   // repo root is /tmp/fakeproj, exactly as a real multi-dir graph would yield.
   for (const f of ["src/util.ts", "src/a.ts", "src/b.ts", "src/c.ts", "scripts/tool.ts"]) {
-    node.run("File", path.basename(f), abs(f), abs(f), null, null);
+    insertNode(db, "File", path.basename(f), abs(f), abs(f));
   }
   // Two functions in util.ts: foo (lines 1-5), bar (lines 10-20)
-  node.run("Function", "foo", `${abs("src/util.ts")}::foo`, abs("src/util.ts"), 1, 5);
-  node.run("Function", "bar", `${abs("src/util.ts")}::bar`, abs("src/util.ts"), 10, 20);
+  insertNode(db, "Function", "foo", `${abs("src/util.ts")}::foo`, abs("src/util.ts"), 1, 5);
+  insertNode(db, "Function", "bar", `${abs("src/util.ts")}::bar`, abs("src/util.ts"), 10, 20);
 
   // widget.ts: a Class (1-50) that fully contains a method/Function (render,
   // 10-20) — mirrors the live graph (classes indexed alongside their methods),
   // used to exercise container/nesting dedup.
-  node.run("File", "widget.ts", abs("src/widget.ts"), abs("src/widget.ts"), null, null);
-  node.run("Class", "Widget", `${abs("src/widget.ts")}::Widget`, abs("src/widget.ts"), 1, 50);
-  node.run("Function", "render", `${abs("src/widget.ts")}::render`, abs("src/widget.ts"), 10, 20);
+  insertNode(db, "File", "widget.ts", abs("src/widget.ts"), abs("src/widget.ts"));
+  insertNode(db, "Class", "Widget", `${abs("src/widget.ts")}::Widget`, abs("src/widget.ts"), 1, 50);
+  insertNode(db, "Function", "render", `${abs("src/widget.ts")}::render`, abs("src/widget.ts"), 10, 20);
 
   // dual.ts: a Class and a Function indexed over the EXACT same line range
   // (1-10) — exercises equal-span tie-break dedup.
-  node.run("File", "dual.ts", abs("src/dual.ts"), abs("src/dual.ts"), null, null);
-  node.run("Class", "Dup", `${abs("src/dual.ts")}::Dup`, abs("src/dual.ts"), 1, 10);
-  node.run("Function", "dupFn", `${abs("src/dual.ts")}::dupFn`, abs("src/dual.ts"), 1, 10);
+  insertNode(db, "File", "dual.ts", abs("src/dual.ts"), abs("src/dual.ts"));
+  insertNode(db, "Class", "Dup", `${abs("src/dual.ts")}::Dup`, abs("src/dual.ts"), 1, 10);
+  insertNode(db, "Function", "dupFn", `${abs("src/dual.ts")}::dupFn`, abs("src/dual.ts"), 1, 10);
 
-  const edge = db.prepare(
-    "INSERT INTO edges (kind,source_qualified,target_qualified,file_path) VALUES (?,?,?,?)",
-  );
   // a, b, c all import util.ts  → util fan-in (imports) = 3
   for (const dep of ["src/a.ts", "src/b.ts", "src/c.ts"]) {
-    edge.run("IMPORTS_FROM", abs(dep), abs("src/util.ts"), abs(dep));
+    insertEdge(db, "IMPORTS_FROM", abs(dep), abs("src/util.ts"), abs(dep));
   }
   // d.ts CALLS util.foo. The edge's file_path is deliberately set to the TARGET
   // file (util.ts), NOT the caller — so fan-in must recover the caller from
   // source_qualified ("<d.ts>::run"). If the query regressed to reading
   // file_path it would resolve the caller as util.ts (self), drop it, and the
   // fan-in below would be 3 instead of 4.
-  edge.run("CALLS", `${abs("src/d.ts")}::run`, `${abs("src/util.ts")}::foo`, abs("src/util.ts"));
+  insertEdge(db, "CALLS", `${abs("src/d.ts")}::run`, `${abs("src/util.ts")}::foo`, abs("src/util.ts"));
   db.close();
 });
 
-afterAll(() => {
-  try {
-    fs.unlinkSync(dbPath);
-  } catch {
-    /* ignore */
-  }
-});
+afterAll(() => unlinkQuietly(dbPath));
 
 describe("changedLinesFromPatch", () => {
   it("marks the full new-side hunk span (context + additions)", () => {
@@ -288,40 +313,19 @@ describe("queryGraph — Windows / backslash graph paths", () => {
   const wabs = (p: string) => `${WROOT}\\${p.replace(/\//g, "\\")}`;
 
   beforeAll(() => {
-    winDbPath = tempDbPath("gc-win");
-    const db = new Database(winDbPath);
-    db.exec(`
-      CREATE TABLE nodes (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
-        name TEXT NOT NULL, qualified_name TEXT NOT NULL UNIQUE, file_path TEXT NOT NULL,
-        line_start INTEGER, line_end INTEGER, updated_at REAL NOT NULL DEFAULT 0);
-      CREATE TABLE edges (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
-        source_qualified TEXT NOT NULL, target_qualified TEXT NOT NULL, file_path TEXT NOT NULL,
-        line INTEGER DEFAULT 0, updated_at REAL NOT NULL DEFAULT 0);
-    `);
-    const node = db.prepare(
-      "INSERT INTO nodes (kind,name,qualified_name,file_path,line_start,line_end) VALUES (?,?,?,?,?,?)",
-    );
+    const fx = createFixtureDb("gc-win");
+    winDbPath = fx.dbPath;
+    const db = fx.db;
     for (const f of ["src/util.ts", "src/a.ts", "scripts/tool.ts"]) {
-      node.run("File", path.basename(f), wabs(f), wabs(f), null, null);
+      insertNode(db, "File", path.basename(f), wabs(f), wabs(f));
     }
-    node.run("Function", "foo", `${wabs("src/util.ts")}::foo`, wabs("src/util.ts"), 1, 5);
+    insertNode(db, "Function", "foo", `${wabs("src/util.ts")}::foo`, wabs("src/util.ts"), 1, 5);
     // a.ts imports util.ts → util.ts has a dependent
-    db.prepare("INSERT INTO edges (kind,source_qualified,target_qualified,file_path) VALUES (?,?,?,?)").run(
-      "IMPORTS_FROM",
-      wabs("src/a.ts"),
-      wabs("src/util.ts"),
-      wabs("src/a.ts"),
-    );
+    insertEdge(db, "IMPORTS_FROM", wabs("src/a.ts"), wabs("src/util.ts"), wabs("src/a.ts"));
     db.close();
   });
 
-  afterAll(() => {
-    try {
-      fs.unlinkSync(winDbPath);
-    } catch {
-      /* ignore */
-    }
-  });
+  afterAll(() => unlinkQuietly(winDbPath));
 
   it("resolves a forward-slash PR path against a backslash-indexed graph", () => {
     const ctx = queryGraph(
@@ -348,39 +352,20 @@ describe("queryGraph — symbol-qualified IMPORTS_FROM endpoints", () => {
   const qabs = (p: string) => `${QROOT}/${p}`;
 
   beforeAll(() => {
-    qDbPath = tempDbPath("gc-q");
-    const db = new Database(qDbPath);
-    db.exec(`
-      CREATE TABLE nodes (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
-        name TEXT NOT NULL, qualified_name TEXT NOT NULL UNIQUE, file_path TEXT NOT NULL,
-        line_start INTEGER, line_end INTEGER, updated_at REAL NOT NULL DEFAULT 0);
-      CREATE TABLE edges (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
-        source_qualified TEXT NOT NULL, target_qualified TEXT NOT NULL, file_path TEXT NOT NULL,
-        line INTEGER DEFAULT 0, updated_at REAL NOT NULL DEFAULT 0);
-    `);
-    const node = db.prepare(
-      "INSERT INTO nodes (kind,name,qualified_name,file_path,line_start,line_end) VALUES (?,?,?,?,?,?)",
-    );
+    const fx = createFixtureDb("gc-q");
+    qDbPath = fx.dbPath;
+    const db = fx.db;
     for (const f of ["src/util.ts", "src/a.ts", "src/b.ts", "scripts/t.ts"]) {
-      node.run("File", path.basename(f), qabs(f), qabs(f), null, null);
+      insertNode(db, "File", path.basename(f), qabs(f), qabs(f));
     }
-    const edge = db.prepare(
-      "INSERT INTO edges (kind,source_qualified,target_qualified,file_path) VALUES (?,?,?,?)",
-    );
     // Dependent: a.ts imports util.ts, but the SOURCE endpoint is symbol-qualified.
-    edge.run("IMPORTS_FROM", `${qabs("src/a.ts")}::someImport`, qabs("src/util.ts"), qabs("src/a.ts"));
+    insertEdge(db, "IMPORTS_FROM", `${qabs("src/a.ts")}::someImport`, qabs("src/util.ts"), qabs("src/a.ts"));
     // Dependency: util.ts imports b.ts, but the TARGET endpoint is symbol-qualified.
-    edge.run("IMPORTS_FROM", qabs("src/util.ts"), `${qabs("src/b.ts")}::Thing`, qabs("src/util.ts"));
+    insertEdge(db, "IMPORTS_FROM", qabs("src/util.ts"), `${qabs("src/b.ts")}::Thing`, qabs("src/util.ts"));
     db.close();
   });
 
-  afterAll(() => {
-    try {
-      fs.unlinkSync(qDbPath);
-    } catch {
-      /* ignore */
-    }
-  });
+  afterAll(() => unlinkQuietly(qDbPath));
 
   it("strips `::symbol` from both import endpoints to clean file paths", () => {
     const ctx = queryGraph([{ path: "src/util.ts" }], { graphDbPath: qDbPath });
@@ -402,36 +387,20 @@ describe("queryGraph — ambiguous suffix resolution", () => {
   let aDbPath: string;
 
   beforeAll(() => {
-    aDbPath = tempDbPath("gc-ambig");
-    const db = new Database(aDbPath);
-    db.exec(`
-      CREATE TABLE nodes (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
-        name TEXT NOT NULL, qualified_name TEXT NOT NULL UNIQUE, file_path TEXT NOT NULL,
-        line_start INTEGER, line_end INTEGER, updated_at REAL NOT NULL DEFAULT 0);
-      CREATE TABLE edges (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
-        source_qualified TEXT NOT NULL, target_qualified TEXT NOT NULL, file_path TEXT NOT NULL,
-        line INTEGER DEFAULT 0, updated_at REAL NOT NULL DEFAULT 0);
-    `);
-    const node = db.prepare(
-      "INSERT INTO nodes (kind,name,qualified_name,file_path,line_start,line_end) VALUES (?,?,?,?,?,?)",
-    );
+    const fx = createFixtureDb("gc-ambig");
+    aDbPath = fx.dbPath;
+    const db = fx.db;
     // Two workspaces, each with src/util.ts — they diverge at the root, so the
     // detected root is "" and the PR path "src/util.ts" misses the exact map,
     // hitting the suffix fallback with TWO matches.
-    node.run("File", "util.ts", "/wsA/src/util.ts", "/wsA/src/util.ts", null, null);
-    node.run("File", "util.ts", "/wsB/src/util.ts", "/wsB/src/util.ts", null, null);
-    node.run("Function", "fooA", "/wsA/src/util.ts::foo", "/wsA/src/util.ts", 1, 5);
-    node.run("Function", "fooB", "/wsB/src/util.ts::foo", "/wsB/src/util.ts", 1, 5);
+    insertNode(db, "File", "util.ts", "/wsA/src/util.ts", "/wsA/src/util.ts");
+    insertNode(db, "File", "util.ts", "/wsB/src/util.ts", "/wsB/src/util.ts");
+    insertNode(db, "Function", "fooA", "/wsA/src/util.ts::foo", "/wsA/src/util.ts", 1, 5);
+    insertNode(db, "Function", "fooB", "/wsB/src/util.ts::foo", "/wsB/src/util.ts", 1, 5);
     db.close();
   });
 
-  afterAll(() => {
-    try {
-      fs.unlinkSync(aDbPath);
-    } catch {
-      /* ignore */
-    }
-  });
+  afterAll(() => unlinkQuietly(aDbPath));
 
   it("treats an ambiguous suffix match as unindexed instead of guessing", () => {
     const ctx = queryGraph([{ path: "src/util.ts" }], { graphDbPath: aDbPath });
@@ -448,35 +417,19 @@ describe("queryGraph — monorepo / non-empty common root", () => {
   let mDbPath: string;
 
   beforeAll(() => {
-    mDbPath = tempDbPath("gc-mono");
-    const db = new Database(mDbPath);
-    db.exec(`
-      CREATE TABLE nodes (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
-        name TEXT NOT NULL, qualified_name TEXT NOT NULL UNIQUE, file_path TEXT NOT NULL,
-        line_start INTEGER, line_end INTEGER, updated_at REAL NOT NULL DEFAULT 0);
-      CREATE TABLE edges (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
-        source_qualified TEXT NOT NULL, target_qualified TEXT NOT NULL, file_path TEXT NOT NULL,
-        line INTEGER DEFAULT 0, updated_at REAL NOT NULL DEFAULT 0);
-    `);
-    const node = db.prepare(
-      "INSERT INTO nodes (kind,name,qualified_name,file_path,line_start,line_end) VALUES (?,?,?,?,?,?)",
-    );
+    const fx = createFixtureDb("gc-mono");
+    mDbPath = fx.dbPath;
+    const db = fx.db;
     // Two packages each with src/util.ts + a repo-root file → detected root /repo.
-    node.run("File", "util.ts", "/repo/pkgA/src/util.ts", "/repo/pkgA/src/util.ts", null, null);
-    node.run("File", "util.ts", "/repo/pkgB/src/util.ts", "/repo/pkgB/src/util.ts", null, null);
-    node.run("File", "root.ts", "/repo/root.ts", "/repo/root.ts", null, null);
-    node.run("Function", "fooA", "/repo/pkgA/src/util.ts::fooA", "/repo/pkgA/src/util.ts", 1, 5);
-    node.run("Function", "fooB", "/repo/pkgB/src/util.ts::fooB", "/repo/pkgB/src/util.ts", 1, 5);
+    insertNode(db, "File", "util.ts", "/repo/pkgA/src/util.ts", "/repo/pkgA/src/util.ts");
+    insertNode(db, "File", "util.ts", "/repo/pkgB/src/util.ts", "/repo/pkgB/src/util.ts");
+    insertNode(db, "File", "root.ts", "/repo/root.ts", "/repo/root.ts");
+    insertNode(db, "Function", "fooA", "/repo/pkgA/src/util.ts::fooA", "/repo/pkgA/src/util.ts", 1, 5);
+    insertNode(db, "Function", "fooB", "/repo/pkgB/src/util.ts::fooB", "/repo/pkgB/src/util.ts", 1, 5);
     db.close();
   });
 
-  afterAll(() => {
-    try {
-      fs.unlinkSync(mDbPath);
-    } catch {
-      /* ignore */
-    }
-  });
+  afterAll(() => unlinkQuietly(mDbPath));
 
   it("binds each repo-relative PR path to its own file (no exact-match overwrite)", () => {
     const a = queryGraph([{ path: "pkgA/src/util.ts" }], { graphDbPath: mDbPath });
