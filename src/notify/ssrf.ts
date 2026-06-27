@@ -272,6 +272,12 @@ export function pinnedLookup(
   // candidate address to range-check it before any one is returned.
   const lookupOptions: LookupAllOptions = { ...opts, all: true };
   dnsLookupCb(hostname, lookupOptions, (err, addresses) => {
+    // Faithful to dns.lookup's own contract: on error it invokes the callback
+    // with just the error and no addresses — for BOTH the all:true and
+    // single-address forms (verified against Node: addresses is `undefined`, not
+    // `[]`). So a bare cb(err) is correct here; we deliberately do NOT synthesize
+    // an empty array for the all:true case (that would diverge from dns.lookup
+    // and could mask the error for a consumer that skips the err check).
     if (err) return cb(err);
     const safe = addresses.filter((a) => {
       if (family === 4 && a.family !== 4) return false;
