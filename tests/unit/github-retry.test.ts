@@ -76,13 +76,57 @@ describe("requestWithRetry", () => {
 
   it("gives up after MAX_RETRIES (3) on a persistent rate-limit", async () => {
     vi.useFakeTimers();
-    const req = mockRequest([{ throw: ghError(429, { "retry-after": "0" }) }]);
+    const req = mockRequest([{ throw: ghError(429, { "retry-after": "1" }) }]);
     // Attach the rejection handler before advancing timers so the rejection
     // (which happens mid-runAllTimersAsync) is never momentarily unhandled.
     const settled = requestWithRetry(req, { method: "GET", url: "/x" }, undefined, quietLog).catch((e) => e);
     await vi.runAllTimersAsync();
     await expect(settled).resolves.toMatchObject({ status: 429 });
     expect(req.count()).toBe(4); // 1 initial attempt + 3 retries
+  });
+
+  // A malformed/zero/negative `retry-after` (from GitHub or an intermediary)
+  // must NOT cause a zero-delay hot retry — it falls through to the
+  // x-ratelimit-reset / default fallback wait instead.
+  for (const bad of ["-1", "abc", "0"]) {
+    it(`ignores a non-positive/malformed retry-after (${JSON.stringify(bad)}) and uses the fallback wait`, async () => {
+      vi.useFakeTimers();
+      const req = mockRequest([{ throw: ghError(429, { "retry-after": bad }) }, { return: { data: "ok" } }]);
+      const settled = requestWithRetry(req, { method: "GET", url: "/x" }, undefined, quietLog).then(
+        (r) => r,
+        (e) => e
+      );
+
+      // Flush microtasks only (0ms). A buggy zero-delay path would already
+      // have fired the retry here; the fallback wait (BASE_BACKOFF_MS = 1s)
+      // means the request has been attempted exactly once so far.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(req.count()).toBe(1);
+
+      // Once the ~1s fallback elapses, it retries and succeeds.
+      await vi.advanceTimersByTimeAsync(1000);
+      await expect(settled).resolves.toEqual({ data: "ok" });
+      expect(req.count()).toBe(2);
+    });
+  }
+
+  it("falls back to x-ratelimit-reset when retry-after is negative", async () => {
+    vi.useFakeTimers();
+    const reset = String(Math.floor(Date.now() / 1000) + 2);
+    const req = mockRequest([
+      { throw: ghError(429, { "retry-after": "-5", "x-ratelimit-remaining": "0", "x-ratelimit-reset": reset }) },
+      { return: { data: "ok" } },
+    ]);
+    const settled = requestWithRetry(req, { method: "GET", url: "/x" }, undefined, quietLog).then(
+      (r) => r,
+      (e) => e
+    );
+    // Negative retry-after is ignored; the reset is ~2s out, so no retry yet.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(req.count()).toBe(1);
+    await vi.runAllTimersAsync();
+    await expect(settled).resolves.toEqual({ data: "ok" });
+    expect(req.count()).toBe(2);
   });
 
   it("does not retry a plain 403 (permission denied, no rate-limit headers)", async () => {

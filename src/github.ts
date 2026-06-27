@@ -68,7 +68,10 @@ function rateLimitWaitMs(err: RetryableError): number {
   const retryAfter = h["retry-after"];
   if (retryAfter != null) {
     const secs = Number(retryAfter);
-    if (Number.isFinite(secs)) return clampWait(secs * 1000);
+    // Only honour a positive, finite value. A malformed ("abc" → NaN),
+    // zero, or negative header (from GitHub or an intermediary) must NOT
+    // produce a zero-delay hot retry — fall through to the reset/default path.
+    if (Number.isFinite(secs) && secs > 0) return clampWait(secs * 1000);
   }
   // Primary limit: wait until the window resets (epoch seconds).
   const reset = h["x-ratelimit-reset"];
