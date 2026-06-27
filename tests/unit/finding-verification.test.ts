@@ -114,7 +114,21 @@ describe("verifyFindings", () => {
       complete: async () => JSON.stringify({ verdicts: [{ index: 0, supported: false }] }),
     };
     const out = await verifyFindings({ ai, context: ctx(), comments });
-    expect(out.comments.map((c) => c.title)).toEqual(["Finding one."]);
+    // index 0 ("Finding zero.") is explicitly dropped; index 1 ("Finding one.")
+    // had no verdict and must be kept — assert both halves of the contract.
+    expect(out.comments).toHaveLength(1);
+    expect(out.comments[0].title).toBe("Finding one.");
+    expect(out.comments.map((c) => c.title)).not.toContain("Finding zero.");
+  });
+
+  it("treats an empty/unusable verdict set as unparseable and keeps all findings", async () => {
+    for (const payload of ['{"verdicts": []}', '{"verdicts": [{}]}', '{"verdicts": [{"index": 99, "supported": false}]}']) {
+      const ai = { complete: async () => payload };
+      const out = await verifyFindings({ ai, context: ctx(), comments });
+      expect(out.comments).toHaveLength(2);
+      expect(out.stats.dropped).toBe(0);
+      expect(out.stats.unparseable).toBe(true);
+    }
   });
 
   it("skips findings whose file has no usable patch and keeps them fail-open, remapping indices", async () => {

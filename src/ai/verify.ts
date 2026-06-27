@@ -217,6 +217,13 @@ function parseVerdicts(raw: string, count: number): Verdict[] | null {
       verdicts.push({ index: v.index, supported: v.supported });
     }
   }
+
+  // A structurally-valid payload that yields zero usable verdicts (`[]`,
+  // `[{}]`, all-out-of-range indices, …) didn't actually verify anything.
+  // Treat it as unparseable so the caller fails open AND flags it, rather than
+  // silently reading it as a clean "everything supported" pass.
+  if (count > 0 && verdicts.length === 0) return null;
+
   return verdicts;
 }
 
