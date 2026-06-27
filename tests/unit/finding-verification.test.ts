@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseReviewResponse } from "../../src/ai/parse.js";
-import { verifyFindings, buildVerificationPrompt } from "../../src/ai/verify.js";
+import { verifyFindings, selectVerifierDiffs } from "../../src/ai/verify.js";
 import { formatReviewBody } from "../../src/review-body.js";
 import type { PRContext, ReviewComment, ReviewResult } from "../../src/types.js";
 
@@ -183,15 +183,20 @@ describe("verifyFindings", () => {
       body: "b",
       title: `Finding ${i}.`,
     }));
-    // Verifier marks every finding unsupported.
+    // Verifier marks every finding it's shown unsupported.
+    let sentUser = "";
     const ai = {
-      complete: async () =>
-        JSON.stringify({ verdicts: cmts.map((_c, i) => ({ index: i, supported: false })) }),
+      complete: async (_s: string, u: string) => {
+        sentUser = u;
+        return JSON.stringify({ verdicts: cmts.map((_c, i) => ({ index: i, supported: false })) });
+      },
     };
     const out = await verifyFindings({ ai, context: { files }, comments: cmts });
     // The omitted-file finding survives; only the in-budget ones can be dropped.
-    expect(out.comments.length).toBeGreaterThanOrEqual(1);
     expect(out.comments.some((c) => c.path === "src/f4.ts")).toBe(true);
+    // It is counted as skipped and never sent to the verifier.
+    expect(out.stats.skipped).toBeGreaterThanOrEqual(1);
+    expect(sentUser).not.toContain("src/f4.ts");
   });
 
   it("ignores duplicate index verdicts deterministically (first verdict wins)", async () => {
@@ -212,22 +217,29 @@ describe("verifyFindings", () => {
   });
 });
 
-describe("buildVerificationPrompt: bounded prompt", () => {
-  it("embeds diffs only for files referenced by a finding", () => {
+describe("selectVerifierDiffs: bounded diff selection", () => {
+  it("includes diffs only for referenced files", () => {
     const context = {
       files: [
         { filename: "src/a.ts", status: "modified" as const, patch: "patch-AAA", additions: 1, deletions: 0 },
         { filename: "src/unref.ts", status: "modified" as const, patch: "patch-ZZZ", additions: 1, deletions: 0 },
       ],
     };
-    const comments: ReviewComment[] = [
-      { path: "src/a.ts", line: 2, side: "RIGHT", body: "b", title: "Only references a.ts." },
-    ];
-    const { user } = buildVerificationPrompt(context, comments);
-    expect(user).toContain("src/a.ts");
-    expect(user).toContain("patch-AAA");
-    expect(user).not.toContain("src/unref.ts");
-    expect(user).not.toContain("patch-ZZZ");
+    const { blocks, includedFiles } = selectVerifierDiffs(context, new Set(["src/a.ts"]));
+    const joined = blocks.join("\n");
+    expect(includedFiles.has("src/a.ts")).toBe(true);
+    expect(includedFiles.has("src/unref.ts")).toBe(false);
+    expect(joined).toContain("patch-AAA");
+    expect(joined).not.toContain("patch-ZZZ");
+  });
+
+  it("excludes a referenced file with an empty patch", () => {
+    const context = {
+      files: [{ filename: "src/empty.ts", status: "modified" as const, patch: "   ", additions: 0, deletions: 0 }],
+    };
+    const { blocks, includedFiles } = selectVerifierDiffs(context, new Set(["src/empty.ts"]));
+    expect(includedFiles.size).toBe(0);
+    expect(blocks).toHaveLength(0);
   });
 
   it("truncates an oversized patch and marks the truncation", () => {
@@ -235,13 +247,10 @@ describe("buildVerificationPrompt: bounded prompt", () => {
     const context = {
       files: [{ filename: "src/a.ts", status: "modified" as const, patch: huge, additions: 1, deletions: 0 }],
     };
-    const comments: ReviewComment[] = [
-      { path: "src/a.ts", line: 2, side: "RIGHT", body: "b", title: "Big file." },
-    ];
-    const { user } = buildVerificationPrompt(context, comments);
-    expect(user).toContain("patch truncated for verification");
-    // The embedded patch must be well under the original size.
-    expect(user.length).toBeLessThan(huge.length);
+    const { blocks, includedFiles } = selectVerifierDiffs(context, new Set(["src/a.ts"]));
+    expect(includedFiles.has("src/a.ts")).toBe(true);
+    expect(blocks[0]).toContain("patch truncated for verification");
+    expect(blocks[0].length).toBeLessThan(huge.length);
   });
 });
 

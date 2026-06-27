@@ -96,18 +96,22 @@ function findingsBlock(comments: ReviewComment[]): string {
 const MAX_PATCH_CHARS_PER_FILE = 8000;
 const MAX_TOTAL_PATCH_CHARS = 32000;
 
-export function buildVerificationPrompt(
+/**
+ * Budget-aware selection of which referenced files' diffs to embed in the
+ * verifier prompt. Only files with a usable patch that fit the per-file/total
+ * caps are included; the rest are dropped from the prompt. Returns the rendered
+ * diff blocks and the set of files actually included, so the caller can keep
+ * findings whose diff we couldn't show fail-open rather than asking the verifier
+ * to judge them blind. Logs when anything is truncated/omitted.
+ */
+export function selectVerifierDiffs(
   context: Pick<PRContext, "files">,
-  comments: ReviewComment[],
-): { system: string; user: string; includedFiles: Set<string> } {
+  paths: Set<string>,
+): { blocks: string[]; includedFiles: Set<string> } {
   // Only files referenced by a finding are worth sending — the verifier judges
   // those findings and nothing else, so unreferenced patches are pure noise.
-  const referenced = new Set(comments.map((c) => c.path));
-  const relevant = context.files.filter((f) => referenced.has(f.filename));
+  const relevant = context.files.filter((f) => paths.has(f.filename));
 
-  // Files whose diff actually made it into the prompt (non-empty patch that fit
-  // the budget). The caller uses this to keep findings whose diff we couldn't
-  // show fail-open, rather than letting the verifier drop them blind.
   const includedFiles = new Set<string>();
   let totalChars = 0;
   let truncatedFiles = 0;
@@ -138,7 +142,17 @@ export function buildVerificationPrompt(
     );
   }
 
-  const diffs = blocks.join("\n\n");
+  return { blocks, includedFiles };
+}
+
+/** Assemble the verifier prompt from already-selected diff blocks and the exact
+ *  findings being judged. Pure: the caller decides which findings/diffs go in,
+ *  so the findings list and the verdict index space stay in lockstep. */
+export function buildVerificationPrompt(
+  diffBlocks: string[],
+  comments: ReviewComment[],
+): { system: string; user: string } {
+  const diffs = diffBlocks.join("\n\n");
 
   const user = `## Diff under review
 
@@ -150,7 +164,7 @@ ${findingsBlock(comments)}
 
 For each finding above, decide whether the diff substantiates it and cite the supporting line number(s). Respond with the JSON object described in the system prompt.`;
 
-  return { system: VERIFY_SYSTEM, user, includedFiles };
+  return { system: VERIFY_SYSTEM, user };
 }
 
 /** Parse the verifier's JSON, tolerating fences / surrounding prose. Returns
@@ -240,19 +254,29 @@ export async function verifyFindings(params: {
   let skipped = 0;
   for (let i = 0; i < comments.length; i++) {
     if (hasUsablePatch(comments[i].path)) verifiableIdx.push(i);
-    else skipped++;
+    else skipped++; // no usable patch — kept fail-open, never sent
   }
 
-  if (verifiableIdx.length === 0) {
-    log.info({ skipped }, "Verification skipped — no findings reference a file with a usable patch; keeping all");
+  // Decide which referenced files' diffs actually fit the prompt budget, then
+  // narrow the verifiable set to findings whose diff is genuinely present. A
+  // finding whose file is budget-omitted is treated exactly like one with no
+  // usable patch: counted as skipped and kept fail-open, never sent — so the
+  // findings list handed to the model and the verdict index space stay aligned.
+  const verifiablePaths = new Set(verifiableIdx.map((i) => comments[i].path));
+  const { blocks, includedFiles } = selectVerifierDiffs(context, verifiablePaths);
+  const includedIdx = verifiableIdx.filter((i) => includedFiles.has(comments[i].path));
+  skipped += verifiableIdx.length - includedIdx.length; // budget-omitted findings
+
+  if (includedIdx.length === 0) {
+    log.info({ skipped }, "Verification skipped — no findings have a diff that fits the prompt; keeping all");
     return { comments, stats: { before, after: before, dropped: 0, skipped, unparseable: false } };
   }
   if (skipped > 0) {
-    log.info({ skipped, verifiable: verifiableIdx.length }, "Some findings skipped from verification (no usable patch), kept fail-open");
+    log.info({ skipped, verified: includedIdx.length }, "Some findings skipped from verification (no usable/in-budget diff), kept fail-open");
   }
 
-  const verifiable = verifiableIdx.map((i) => comments[i]);
-  const { system, user, includedFiles } = buildVerificationPrompt(context, verifiable);
+  const included = includedIdx.map((i) => comments[i]);
+  const { system, user } = buildVerificationPrompt(blocks, included);
   // Bound the call explicitly here too, independent of any provider-level
   // deadline, so this best-effort pass is self-isolating. `complete` doesn't
   // take a signal; withAiTimeout still rejects on time even when the inner
@@ -262,21 +286,17 @@ export async function verifyFindings(params: {
     () => ai.complete(system, user, { json: true, maxTokens: 1024 }),
   );
 
-  const verdicts = parseVerdicts(raw, verifiable.length);
+  const verdicts = parseVerdicts(raw, included.length);
   if (verdicts === null) {
     log.warn("Verification response unparseable; keeping all findings (fail-open)");
     return { comments, stats: { before, after: before, dropped: 0, skipped, unparseable: true } };
   }
 
   // Drop ONLY findings the verifier explicitly marked unsupported, mapping the
-  // verifiable-subset index back to the original comment index. A finding whose
-  // diff didn't actually make it into the prompt (file omitted by the budget)
-  // is kept regardless — we never drop a finding we couldn't show the verifier.
+  // included-subset index back to the original comment index.
   const unsupported = new Set<number>();
   for (const v of verdicts) {
-    if (v.supported !== false) continue;
-    const originalIdx = verifiableIdx[v.index];
-    if (includedFiles.has(comments[originalIdx].path)) unsupported.add(originalIdx);
+    if (v.supported === false) unsupported.add(includedIdx[v.index]);
   }
 
   const kept = comments.filter((_, i) => !unsupported.has(i));
