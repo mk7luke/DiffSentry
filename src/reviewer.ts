@@ -3,6 +3,7 @@ import { Config, AIProvider, PRContext, RepoConfig } from "./types.js";
 import { AnthropicProvider } from "./ai/anthropic.js";
 import { OpenAIProvider } from "./ai/openai.js";
 import { OpenAICompatibleProvider } from "./ai/openai-compatible.js";
+import { isAiTimeoutError } from "./ai/timeout.js";
 import { GitHubClient } from "./github.js";
 import { loadRepoConfig, mergeWithDefaults, shouldReviewPR, isPathIncluded } from "./repo-config.js";
 import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary, injectSummaryIntoPRBody } from "./walkthrough.js";
@@ -196,16 +197,17 @@ export class Reviewer {
     this.learnings = new LearningsStore(config.learningsDir);
 
     if (config.aiProvider === "anthropic") {
-      this.ai = new AnthropicProvider(config.anthropicApiKey!, config.anthropicModel, config.anthropicBaseUrl);
+      this.ai = new AnthropicProvider(config.anthropicApiKey!, config.anthropicModel, config.anthropicBaseUrl, config.aiRequestTimeoutMs);
     } else if (config.aiProvider === "openai-compatible") {
       this.ai = new OpenAICompatibleProvider({
         baseURL: config.localAiBaseUrl!,
         model: config.localAiModel,
         apiKey: config.localAiApiKey,
         jsonMode: config.localAiJsonMode,
+        timeoutMs: config.aiRequestTimeoutMs,
       });
     } else {
-      this.ai = new OpenAIProvider(config.openaiApiKey!, config.openaiModel, config.openaiBaseUrl);
+      this.ai = new OpenAIProvider(config.openaiApiKey!, config.openaiModel, config.openaiBaseUrl, config.aiRequestTimeoutMs);
     }
   }
 
@@ -1249,6 +1251,17 @@ export class Reviewer {
       reviewOutcome = "failed";
       reviewError = err instanceof Error ? err.message : String(err);
       log.error({ err }, "Review failed");
+      // Replace the "is reviewing..." status comment with a visible failure so a
+      // hung/timed-out AI call doesn't leave the PR looking like it's still in
+      // progress (or, worse, silently succeed with no findings). Best-effort.
+      const failedReason = isAiTimeoutError(err)
+        ? "the AI request timed out"
+        : reviewError;
+      const failedStatusBody = STATUS_MARKER + "\n" +
+        `> :warning: **DiffSentry** couldn't finish this review — ${failedReason}. Please re-trigger with \`@${this.config.botName} review\`.`;
+      await this.github
+        .upsertComment(installationId, owner, repo, pullNumber, failedStatusBody, STATUS_MARKER)
+        .catch((postErr) => log.warn({ err: postErr }, "Failed to post review-failed status comment"));
       throw err;
     } finally {
       // Flush any cost events still buffered — covers the early-return and error

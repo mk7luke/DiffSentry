@@ -632,6 +632,7 @@ GitHub webhook
 | `PORT` | No | `3005` | Server port |
 | `LOG_LEVEL` | No | `info` | Logging level (runtime-overridable from the admin Settings page) |
 | `MAX_FILES_PER_REVIEW` | No | `50` | Max files per review (runtime-overridable per-global/-repo from Settings) |
+| `AI_REQUEST_TIMEOUT_MS` | No | `60000` | Per-request timeout (ms) for every AI provider call. On timeout the call is aborted and the review fails with a visible "AI timeout" outcome instead of hanging. |
 | `IGNORED_PATTERNS` | No | | Comma-separated globs to skip |
 | `BOT_NAME` | No | `diffsentry` | Bot mention name for chat commands |
 | `LEARNINGS_DIR` | No | `./data/learnings` | Per-repo learnings storage |
