@@ -229,39 +229,33 @@ export function createServer(config: Config): CreatedServer {
         payload,
       );
       if (claim) {
-        // Only a genuine 2xx success commits the lease to `completed` so future
-        // redeliveries of this id are suppressed as true duplicates. Anything
-        // else was NOT successfully processed and releases the lease.
-        if (status >= 200 && status < 300) {
-          const completed = completeWebhookDelivery(claim);
-          if (!completed) {
-            // Our lease was reclaimed (dispatch outran the lease TTL) or the row
-            // is gone. We deliberately KEEP the success status rather than
-            // manufacturing a 5xx: the review was already enqueued into the
-            // durable review_jobs queue, so a redelivery would duplicate it.
-            // review_jobs — not this lease — is the delivery-durability guarantee,
-            // so an uncommitted lease is benign (it self-heals via the TTL). Just
-            // surface the contention for operators.
-            logger.warn({ event, deliveryId }, "Webhook delivery lease completion did not take effect (lease reclaimed?); keeping success response — review already dispatched durably");
-          }
-        } else {
-          // Non-2xx: the delivery was NOT successfully processed — a 4xx
-          // rejection (e.g. a payload with no installation id; an identical
-          // redelivery would just re-reject) or a 5xx server error. Release the
-          // lease so only true successes are deduped and a redelivery is
-          // reprocessed rather than suppressed as a phantom duplicate.
+        // Redelivery should retry only TRANSIENT failures. A 5xx (or a thrown
+        // error — see catch) means we failed to process the delivery, so release
+        // the lease and let GitHub redeliver. Everything else — a 2xx success OR
+        // a 4xx — is a terminal, fully-processed application outcome: a 4xx
+        // rejection is deterministic (an identical redelivery would just
+        // re-reject, so retrying is pointless), so it's committed to `completed`
+        // alongside 2xx to dedupe future redeliveries of the same id.
+        if (status >= 500) {
           const released = releaseWebhookDelivery(claim);
           if (released) {
-            logger.warn(
-              { event, deliveryId, status },
-              status >= 500
-                ? "Webhook dispatch returned a server error — released delivery for redelivery"
-                : "Webhook dispatch returned a client error (4xx) — released lease; only successful deliveries are deduped",
-            );
+            logger.warn({ event, deliveryId, status }, "Webhook dispatch returned a server error — released delivery for redelivery");
           } else {
             // The lease wasn't ours to free (reclaimed by a newer run) or a DB
             // error: a prompt redelivery may be deduped until the lease expires.
-            logger.warn({ event, deliveryId, status }, "Webhook dispatch was unsuccessful but the lease release did not take effect — a prompt redelivery may be deduped until the lease TTL expires");
+            logger.warn({ event, deliveryId, status }, "Webhook dispatch returned a server error but the lease release did not take effect — a prompt redelivery may be deduped until the lease TTL expires");
+          }
+        } else {
+          const completed = completeWebhookDelivery(claim);
+          if (!completed) {
+            // Our lease was reclaimed (dispatch outran the lease TTL) or the row
+            // is gone. We keep the dispatch response rather than manufacturing a
+            // 5xx: the delivery was already handled to a terminal outcome (a 2xx
+            // review is dispatched durably via review_jobs; a 4xx is a final
+            // rejection), so a redelivery would only duplicate or re-reject.
+            // review_jobs — not this lease — is the delivery-durability
+            // guarantee, so an uncommitted lease is benign (self-heals via TTL).
+            logger.warn({ event, deliveryId, status }, "Webhook delivery lease completion did not take effect (lease reclaimed?); keeping the dispatch response — delivery already handled to a terminal outcome");
           }
         }
       }
