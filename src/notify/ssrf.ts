@@ -216,17 +216,27 @@ export async function checkWebhookUrlSafe(v: string): Promise<string | null> {
  * Note: IP-literal targets (e.g. https://10.0.0.5/hook) never invoke `lookup`
  * (the socket layer connects directly), so those are covered by the literal
  * checks in checkWebhookUrlSafe() at both save and send time instead.
+ *
+ * Implements both `dns.lookup` overloads — `(hostname, callback)` and
+ * `(hostname, options, callback)` — so it is a true drop-in for direct callers,
+ * not only for the http(s) `lookup` option (which always passes options).
  */
+type PinnedLookupCallback = (
+  err: NodeJS.ErrnoException | null,
+  address?: string | LookupAddress[],
+  family?: number,
+) => void;
+
 export function pinnedLookup(
   hostname: string,
-  options: LookupOptions | number,
-  callback: (
-    err: NodeJS.ErrnoException | null,
-    address?: string | LookupAddress[],
-    family?: number,
-  ) => void,
+  options: LookupOptions | number | PinnedLookupCallback,
+  callback?: PinnedLookupCallback,
 ): void {
-  const opts: LookupOptions = typeof options === "number" ? { family: options } : (options ?? {});
+  // Normalize the two overloads: when options is omitted, the 2nd arg is the
+  // callback. (number is the legacy `family` positional form dns.lookup accepts.)
+  const cb: PinnedLookupCallback = typeof options === "function" ? options : (callback as PinnedLookupCallback);
+  const rawOptions = typeof options === "function" ? undefined : options;
+  const opts: LookupOptions = typeof rawOptions === "number" ? { family: rawOptions } : (rawOptions ?? {});
   const family = opts.family ?? 0;
   const wantAll = opts.all === true;
   const allowPrivate = allowPrivateEgress();
@@ -236,7 +246,7 @@ export function pinnedLookup(
   // candidate address to range-check it before any one is returned.
   const lookupOptions: LookupAllOptions = { ...opts, all: true };
   dnsLookupCb(hostname, lookupOptions, (err, addresses) => {
-    if (err) return callback(err);
+    if (err) return cb(err);
     const safe = addresses.filter((a) => {
       if (family === 4 && a.family !== 4) return false;
       if (family === 6 && a.family !== 6) return false;
@@ -249,9 +259,9 @@ export function pinnedLookup(
         `SSRF guard: ${hostname} did not resolve to an allowed public address`,
       ) as NodeJS.ErrnoException;
       e.code = "ENOTFOUND";
-      return callback(e);
+      return cb(e);
     }
-    if (wantAll) return callback(null, safe);
+    if (wantAll) return cb(null, safe);
     // Single-address case: hand back the first allow-listed address. The all:true
     // lookup above ran with the caller's own family/hints/verbatim, so `safe` is
     // in Node's native selection order — making safe[0] the address
@@ -261,7 +271,7 @@ export function pinnedLookup(
     // would fail a dual-stack host whose preferred address is private but which
     // also has a public one. Real http/https uses Happy Eyeballs (all:true) and
     // takes the branch above; this path is only for legacy all:false callers.
-    callback(null, safe[0].address, safe[0].family);
+    cb(null, safe[0].address, safe[0].family);
   });
 }
 

@@ -207,6 +207,22 @@ describe("pinnedLookup (DNS pinning at connect time)", () => {
       pinnedLookup(host, options, (err, address, family) => resolve({ err, address, family }));
     });
 
+  it("supports the (hostname, callback) overload with options omitted", async () => {
+    // Calling pinnedLookup like dns.lookup's 2-arg form must not misread the
+    // callback as options. localhost is private, so this resolves to an error.
+    const { err, address } = await new Promise<{
+      err: NodeJS.ErrnoException | null;
+      address?: unknown;
+    }>((resolve) => {
+      (pinnedLookup as unknown as (h: string, cb: (e: NodeJS.ErrnoException | null, a?: unknown) => void) => void)(
+        "localhost",
+        (e, a) => resolve({ err: e, address: a }),
+      );
+    });
+    expect(err).toBeInstanceOf(Error);
+    expect(address).toBeUndefined();
+  });
+
   it("rejects a host that resolves only to a private/loopback address", async () => {
     // localhost resolves to 127.0.0.1 / ::1 — both private, so nothing is safe.
     const { err, address } = await lookupOnce("localhost");
