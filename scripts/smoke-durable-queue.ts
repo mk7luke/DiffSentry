@@ -41,8 +41,10 @@ async function main() {
   // backoff uses an UNREF'd timer (by design — a pending retry must never keep a
   // shutting-down process alive), so without a ref here Node could exit during a
   // backoff before the timer fires. Production keeps the loop alive via the HTTP
-  // server; the smoke test stands in with this interval, cleared in finally.
-  const keepAlive = setInterval(() => {}, 1000);
+  // server; the smoke test stands in with one ref'd timer, cleared in finally.
+  // A single setTimeout (not an interval) is the right primitive — the test
+  // finishes well within this window and clears it on the way out.
+  const keepAlive = setTimeout(() => {}, 120_000);
 
   function ok(label: string, cond: boolean) {
     if (!cond) throw new Error(`[${label}] assertion failed`);
@@ -177,7 +179,7 @@ async function main() {
 
     console.log("\nall durable-queue smoke checks passed ✓");
   } finally {
-    clearInterval(keepAlive);
+    clearTimeout(keepAlive);
     closeDatabase();
     try {
       fs.unlinkSync(tmpDb);

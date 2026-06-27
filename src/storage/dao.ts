@@ -1869,11 +1869,14 @@ export function claimWebhookDelivery(deliveryId: string): boolean {
       // (the holder crashed). A fresh lease is a concurrent double-delivery.
       const age = nowMs - Date.parse(row.ts);
       if (Number.isFinite(age) && age >= deliveryLeaseMs()) {
-        db.prepare(`UPDATE processed_deliveries SET ts = ? WHERE delivery_id = ? AND status = 'processing'`).run(
-          nowIso,
-          deliveryId,
-        );
-        return true;
+        // Compare-and-swap on the timestamp we just read: re-lease only if `ts`
+        // is still the stale value, so exactly one reclaimer wins. (Within this
+        // synchronous single-connection runtime the transaction already
+        // serializes claims; the CAS keeps the reclaim correct regardless.)
+        const reclaimed = db
+          .prepare(`UPDATE processed_deliveries SET ts = ? WHERE delivery_id = ? AND status = 'processing' AND ts = ?`)
+          .run(nowIso, deliveryId, row.ts);
+        return reclaimed.changes === 1;
       }
       return false;
     });
