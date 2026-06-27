@@ -90,10 +90,25 @@ function findingsBlock(comments: ReviewComment[]): string {
     .join("\n");
 }
 
-/** Per-file and total caps on the diff text embedded in the verifier prompt.
- *  The verifier only needs the diffs for files that actually have findings, and
- *  even those are bounded so a single huge PR can't blow the prompt's token
- *  budget (which would itself cause the pass to fail and fall open). */
+/*
+ * Prompt-budget envelope for the single batched verification call. The caps are
+ * sized together against the output cap (`maxTokens: 1024` on the ai.complete
+ * call below) so the pass stays cheap and never truncates its own answer:
+ *
+ *   - MAX_TOTAL_PATCH_CHARS = 32000 (~8k input tokens at ~4 chars/token) bounds
+ *     the diff payload — the dominant input cost. With MAX_PATCH_CHARS_PER_FILE
+ *     = 8000 (~2k tokens) that's roughly 4 full files of diff per pass; more
+ *     files just truncate/omit (findings on the cut parts stay fail-open).
+ *   - CLAIM_BODY_MAX = 400 chars/finding (~100 tokens) keeps the findings list
+ *     small even for dozens of findings.
+ *   - Output is tiny: each verdict is `{"index","supported","citedLines":[…]}`
+ *     ≈ 15-25 tokens, so 1024 output tokens comfortably covers ~40+ findings —
+ *     well past what one PR realistically produces.
+ *
+ * So a median request is well under ~12k input tokens. When tuning one cap,
+ * keep the input total proportional to the ~1024-token output ceiling: a much
+ * larger diff budget risks more findings than the output can verdict on.
+ */
 const MAX_PATCH_CHARS_PER_FILE = 8000;
 const MAX_TOTAL_PATCH_CHARS = 32000;
 
@@ -225,12 +240,11 @@ function parseVerdicts(raw: string, count: number): Verdict[] | null {
   const arr = parsed?.verdicts;
   if (!Array.isArray(arr)) return null;
 
-  // Deterministic dedup: the first verdict for a given index wins, later
-  // duplicates are ignored. A duplicated index (especially with a conflicting
-  // `supported` value) would otherwise make the drop decision order-dependent
-  // — and since any `false` triggers a drop, a stray duplicate could discard a
-  // finding the verifier mostly backed. First-wins keeps it deterministic
-  // without voiding the whole (otherwise usable) verdict set.
+  // A duplicate index means the model broke the "exactly one verdict per
+  // finding" contract — and a contradictory duplicate (true AND false for the
+  // same finding) is genuine ambiguity where picking either is arbitrary. Treat
+  // any duplicate as a malformed response: bail to null so the caller fails open
+  // and keeps everything, consistent with the completeness check below.
   const verdicts: Verdict[] = [];
   const seen = new Set<number>();
   for (const v of arr) {
@@ -242,7 +256,7 @@ function parseVerdicts(raw: string, count: number): Verdict[] | null {
       v.index < count &&
       typeof v.supported === "boolean"
     ) {
-      if (seen.has(v.index)) continue;
+      if (seen.has(v.index)) return null;
       seen.add(v.index);
       verdicts.push({ index: v.index, supported: v.supported });
     }
@@ -340,6 +354,8 @@ export async function verifyFindings(params: {
   // call ignores the signal.
   const raw = await withAiTimeout(
     { provider: "verify", operation: "verify-findings", timeoutMs },
+    // 1024 output tokens fits ~40+ small verdict objects — see the budget
+    // envelope on MAX_TOTAL_PATCH_CHARS; the input caps are sized against it.
     () => ai.complete(system, user, { json: true, maxTokens: 1024 }),
   );
 

@@ -302,21 +302,22 @@ describe("verifyFindings", () => {
     expect(out.stats.unparseable).toBe(false);
   });
 
-  it("ignores duplicate index verdicts deterministically (first verdict wins)", async () => {
-    // index 0 is first marked supported, then a conflicting unsupported dup —
-    // first-wins keeps it; index 1's first (and only) verdict drops it.
+  it("treats duplicate index verdicts as malformed (unparseable) and keeps all", async () => {
+    // A repeated index breaks the one-verdict-per-finding contract — here index 0
+    // is contradictorily both supported and unsupported. We fail open rather than
+    // arbitrarily trusting either copy.
     const ai = {
       complete: async () =>
         JSON.stringify({ verdicts: [
           { index: 0, supported: true },
           { index: 0, supported: false },
           { index: 1, supported: false },
-          { index: 1, supported: true },
         ] }),
     };
     const out = await verifyFindings({ ai, context: ctx(), comments });
-    expect(out.comments.map((c) => c.title)).toEqual(["Finding zero."]);
-    expect(out.stats.dropped).toBe(1);
+    expect(out.comments).toHaveLength(2);
+    expect(out.stats.dropped).toBe(0);
+    expect(out.stats.unparseable).toBe(true);
   });
 });
 
