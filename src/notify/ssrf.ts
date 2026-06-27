@@ -286,17 +286,34 @@ export interface PinnedHttpResponse {
 // from forcing unbounded memory growth in the notification worker.
 const MAX_RESPONSE_BYTES = 64 * 1024;
 
+// Dedicated direct-connection agents. node:http/https never consult
+// HTTP(S)_PROXY / NO_PROXY (only fetch/undici and explicit proxy-agent libraries
+// do), so webhook sends already go straight to the origin. Binding our OWN agent
+// rather than the shared globalAgent additionally ensures a process-wide
+// globalAgent replacement can't silently reroute sends through a proxy — keeping
+// `lookup: pinnedLookup` the only resolution + connection path. keepAlive is left
+// at its default (false), so sockets close after each response.
+const directHttpAgent = new http.Agent();
+const directHttpsAgent = new https.Agent();
+
 /**
  * POST a JSON body to a webhook URL over node:http/https with DNS pinned to a
  * validated public IP (see pinnedLookup). Validates the URL itself first via
  * checkWebhookUrlSafe(), so the primitive is safe by default for any caller:
  * the pinned `lookup` only fires for hostname targets, but an IP-literal target
  * connects directly — this preflight is what blocks a private IP-literal from
- * bypassing the pin. Redirects are intentionally NOT followed — a 3xx `Location`
- * is an SSRF re-entry vector. The response body is buffered up to
- * MAX_RESPONSE_BYTES and the request is aborted past that. Resolves with the
- * status + body text; rejects (message `blocked: …`) when the URL fails
- * validation, and on transport error, timeout, or an oversized body.
+ * bypassing the pin.
+ *
+ * Transport is always direct: node:http/https ignore *_PROXY env vars and we set
+ * no `agent` override beyond our own dedicated direct agents (and no undici
+ * `dispatcher`), so there is no proxy that could resolve the host out from under
+ * the pin — `lookup: pinnedLookup` is the only path to the origin.
+ *
+ * Redirects are intentionally NOT followed — a 3xx `Location` is an SSRF
+ * re-entry vector. The response body is buffered up to MAX_RESPONSE_BYTES and
+ * the request is aborted past that. Resolves with the status + body text;
+ * rejects (message `blocked: …`) when the URL fails validation, and on transport
+ * error, timeout, or an oversized body.
  */
 export async function sendJsonPinned(
   url: string,
@@ -310,7 +327,9 @@ export async function sendJsonPinned(
   const blocked = await checkWebhookUrlSafe(url);
   if (blocked) throw new Error(`blocked: ${blocked}`);
   const parsed = new URL(url);
-  const transport = parsed.protocol === "https:" ? https : http;
+  const isHttps = parsed.protocol === "https:";
+  const transport = isHttps ? https : http;
+  const agent = isHttps ? directHttpsAgent : directHttpAgent;
   const payload = Buffer.from(body, "utf8");
   return new Promise<PinnedHttpResponse>((resolve, reject) => {
     const req = transport.request(
@@ -322,6 +341,9 @@ export async function sendJsonPinned(
           ...headers,
           "Content-Length": String(payload.byteLength),
         },
+        // Force our dedicated direct agent (never a proxy) so the connection
+        // can't be rerouted out from under the pin.
+        agent,
         // Pin resolution to a validated address; the socket connects to exactly
         // this IP, so there is no second unchecked DNS lookup. Cast: our lookup
         // intentionally handles both the all/one option shapes.
