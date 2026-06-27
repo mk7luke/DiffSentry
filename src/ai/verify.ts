@@ -168,7 +168,8 @@ For each finding above, decide whether the diff substantiates it and cite the su
 }
 
 /** Parse the verifier's JSON, tolerating fences / surrounding prose. Returns
- *  null when no usable verdict array can be recovered (caller fails open). */
+ *  null when a COMPLETE, usable verdict set can't be recovered (caller fails
+ *  open). */
 function parseVerdicts(raw: string, count: number): Verdict[] | null {
   let cleaned = raw.trim();
   if (cleaned.startsWith("```")) {
@@ -218,11 +219,15 @@ function parseVerdicts(raw: string, count: number): Verdict[] | null {
     }
   }
 
-  // A structurally-valid payload that yields zero usable verdicts (`[]`,
-  // `[{}]`, all-out-of-range indices, …) didn't actually verify anything.
-  // Treat it as unparseable so the caller fails open AND flags it, rather than
-  // silently reading it as a clean "everything supported" pass.
-  if (count > 0 && verdicts.length === 0) return null;
+  // The verifier must return exactly one usable verdict per finding. Anything
+  // short of that — an empty/`[{}]` set, missing indices, a partial/truncated
+  // response — is an incomplete verification we can't trust to delete findings
+  // from. Treat it as unparseable so the caller fails open AND flags it, rather
+  // than acting on an unreliable subset (or silently reading it as a clean
+  // "everything supported" pass). A genuinely truncated payload is usually
+  // already caught above as invalid JSON; this guards the valid-but-incomplete
+  // case where the model simply omitted verdicts.
+  if (count > 0 && verdicts.length !== count) return null;
 
   return verdicts;
 }

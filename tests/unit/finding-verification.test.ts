@@ -109,16 +109,18 @@ describe("verifyFindings", () => {
     expect(out.stats.unparseable).toBe(true);
   });
 
-  it("keeps a finding the verifier omitted a verdict for (per-finding fail-open)", async () => {
+  it("treats an incomplete verdict set (any finding unjudged) as unparseable and keeps all", async () => {
+    // The verifier must return exactly one verdict per finding. A response that
+    // judges only some of them (here index 0 of 2) is incomplete and not
+    // trustworthy enough to delete a finding — we fail open and keep everything
+    // rather than acting on a partial result.
     const ai = {
       complete: async () => JSON.stringify({ verdicts: [{ index: 0, supported: false }] }),
     };
     const out = await verifyFindings({ ai, context: ctx(), comments });
-    // index 0 ("Finding zero.") is explicitly dropped; index 1 ("Finding one.")
-    // had no verdict and must be kept — assert both halves of the contract.
-    expect(out.comments).toHaveLength(1);
-    expect(out.comments[0].title).toBe("Finding one.");
-    expect(out.comments.map((c) => c.title)).not.toContain("Finding zero.");
+    expect(out.comments.map((c) => c.title)).toEqual(["Finding zero.", "Finding one."]);
+    expect(out.stats.dropped).toBe(0);
+    expect(out.stats.unparseable).toBe(true);
   });
 
   it("treats an empty/unusable verdict set as unparseable and keeps all findings", async () => {
