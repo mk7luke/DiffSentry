@@ -86,13 +86,50 @@ function findingsBlock(comments: ReviewComment[]): string {
     .join("\n");
 }
 
+/** Per-file and total caps on the diff text embedded in the verifier prompt.
+ *  The verifier only needs the diffs for files that actually have findings, and
+ *  even those are bounded so a single huge PR can't blow the prompt's token
+ *  budget (which would itself cause the pass to fail and fall open). */
+const MAX_PATCH_CHARS_PER_FILE = 8000;
+const MAX_TOTAL_PATCH_CHARS = 32000;
+
 export function buildVerificationPrompt(
   context: Pick<PRContext, "files">,
   comments: ReviewComment[],
 ): { system: string; user: string } {
-  const diffs = context.files
-    .map((f) => `### ${f.filename}\n\`\`\`diff\n${f.patch}\n\`\`\``)
-    .join("\n\n");
+  // Only files referenced by a finding are worth sending — the verifier judges
+  // those findings and nothing else, so unreferenced patches are pure noise.
+  const referenced = new Set(comments.map((c) => c.path));
+  const relevant = context.files.filter((f) => referenced.has(f.filename));
+
+  let totalChars = 0;
+  let truncatedFiles = 0;
+  let omittedFiles = 0;
+  const blocks: string[] = [];
+  for (const f of relevant) {
+    const remaining = MAX_TOTAL_PATCH_CHARS - totalChars;
+    if (remaining <= 0) {
+      omittedFiles++;
+      continue;
+    }
+    const cap = Math.min(MAX_PATCH_CHARS_PER_FILE, remaining);
+    const patch = f.patch ?? "";
+    const truncated = patch.length > cap;
+    const shown = truncated ? patch.slice(0, cap) : patch;
+    if (truncated) truncatedFiles++;
+    totalChars += shown.length;
+    const note = truncated ? "\n… (patch truncated for verification)" : "";
+    blocks.push(`### ${f.filename}\n\`\`\`diff\n${shown}${note}\n\`\`\``);
+  }
+
+  if (truncatedFiles > 0 || omittedFiles > 0) {
+    logger.child({ step: "verify-findings" }).warn(
+      { relevantFiles: relevant.length, truncatedFiles, omittedFiles, totalChars },
+      "Verifier prompt diff bounded — some patches truncated/omitted to stay within budget",
+    );
+  }
+
+  const diffs = blocks.join("\n\n");
 
   const user = `## Diff under review
 
@@ -135,7 +172,14 @@ function parseVerdicts(raw: string, count: number): Verdict[] | null {
   const arr = parsed?.verdicts;
   if (!Array.isArray(arr)) return null;
 
+  // Deterministic dedup: the first verdict for a given index wins, later
+  // duplicates are ignored. A duplicated index (especially with a conflicting
+  // `supported` value) would otherwise make the drop decision order-dependent
+  // — and since any `false` triggers a drop, a stray duplicate could discard a
+  // finding the verifier mostly backed. First-wins keeps it deterministic
+  // without voiding the whole (otherwise usable) verdict set.
   const verdicts: Verdict[] = [];
+  const seen = new Set<number>();
   for (const v of arr) {
     if (
       v &&
@@ -145,6 +189,8 @@ function parseVerdicts(raw: string, count: number): Verdict[] | null {
       v.index < count &&
       typeof v.supported === "boolean"
     ) {
+      if (seen.has(v.index)) continue;
+      seen.add(v.index);
       verdicts.push({ index: v.index, supported: v.supported });
     }
   }

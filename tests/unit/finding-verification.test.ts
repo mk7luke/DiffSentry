@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseReviewResponse } from "../../src/ai/parse.js";
-import { verifyFindings } from "../../src/ai/verify.js";
+import { verifyFindings, buildVerificationPrompt } from "../../src/ai/verify.js";
 import { formatReviewBody } from "../../src/review-body.js";
 import type { PRContext, ReviewComment, ReviewResult } from "../../src/types.js";
 
@@ -115,6 +115,56 @@ describe("verifyFindings", () => {
     };
     const out = await verifyFindings({ ai, context: ctx(), comments });
     expect(out.comments.map((c) => c.title)).toEqual(["Finding one."]);
+  });
+
+  it("ignores duplicate index verdicts deterministically (first verdict wins)", async () => {
+    // index 0 is first marked supported, then a conflicting unsupported dup —
+    // first-wins keeps it; index 1's first (and only) verdict drops it.
+    const ai = {
+      complete: async () =>
+        JSON.stringify({ verdicts: [
+          { index: 0, supported: true },
+          { index: 0, supported: false },
+          { index: 1, supported: false },
+          { index: 1, supported: true },
+        ] }),
+    };
+    const out = await verifyFindings({ ai, context: ctx(), comments });
+    expect(out.comments.map((c) => c.title)).toEqual(["Finding zero."]);
+    expect(out.stats.dropped).toBe(1);
+  });
+});
+
+describe("buildVerificationPrompt: bounded prompt", () => {
+  it("embeds diffs only for files referenced by a finding", () => {
+    const context = {
+      files: [
+        { filename: "src/a.ts", status: "modified" as const, patch: "patch-AAA", additions: 1, deletions: 0 },
+        { filename: "src/unref.ts", status: "modified" as const, patch: "patch-ZZZ", additions: 1, deletions: 0 },
+      ],
+    };
+    const comments: ReviewComment[] = [
+      { path: "src/a.ts", line: 2, side: "RIGHT", body: "b", title: "Only references a.ts." },
+    ];
+    const { user } = buildVerificationPrompt(context, comments);
+    expect(user).toContain("src/a.ts");
+    expect(user).toContain("patch-AAA");
+    expect(user).not.toContain("src/unref.ts");
+    expect(user).not.toContain("patch-ZZZ");
+  });
+
+  it("truncates an oversized patch and marks the truncation", () => {
+    const huge = "x".repeat(20000);
+    const context = {
+      files: [{ filename: "src/a.ts", status: "modified" as const, patch: huge, additions: 1, deletions: 0 }],
+    };
+    const comments: ReviewComment[] = [
+      { path: "src/a.ts", line: 2, side: "RIGHT", body: "b", title: "Big file." },
+    ];
+    const { user } = buildVerificationPrompt(context, comments);
+    expect(user).toContain("patch truncated for verification");
+    // The embedded patch must be well under the original size.
+    expect(user.length).toBeLessThan(huge.length);
   });
 });
 
