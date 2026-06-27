@@ -225,7 +225,7 @@ function parseVerdicts(raw: string, count: number): Verdict[] | null {
     cleaned = fenced[1].trim();
   }
 
-  let parsed: any = null;
+  let parsed: unknown = null;
   try {
     parsed = JSON.parse(cleaned);
   } catch {
@@ -242,7 +242,9 @@ function parseVerdicts(raw: string, count: number): Verdict[] | null {
     }
   }
 
-  const arr = parsed?.verdicts;
+  // Narrow off `unknown` rather than `any`: a non-object payload yields
+  // undefined here and is rejected by the Array.isArray guard below.
+  const arr = (parsed as { verdicts?: unknown })?.verdicts;
   if (!Array.isArray(arr)) return null;
 
   // A duplicate index means the model broke the "exactly one verdict per
@@ -292,9 +294,11 @@ class VerificationAbortedError extends Error {
 }
 
 /** Resolve/reject with `p`, but reject early with VerificationAbortedError the
- *  moment `signal` aborts. The abort listener is removed once `p` settles so it
- *  never leaks, and `p`'s eventual rejection stays handled (no unhandled
- *  rejection) even after the race resolves on abort. */
+ *  moment `signal` aborts. The abort listener never leaks: it's registered with
+ *  `{ once: true }`, so it auto-removes when it fires (the abort-first path), and
+ *  we remove it explicitly when `p` settles first. `p`'s eventual rejection
+ *  stays handled (no unhandled rejection) even after the race resolves on abort
+ *  — and `p` here is always bounded by withAiTimeout, so it can't hang forever. */
 function withAbort<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (!signal) return p;
   if (signal.aborted) return Promise.reject(new VerificationAbortedError());
