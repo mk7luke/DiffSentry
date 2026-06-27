@@ -377,8 +377,11 @@ export async function sendJsonPinned(
         // can't be rerouted out from under the pin.
         agent,
         // Pin resolution to a validated address; the socket connects to exactly
-        // this IP, so there is no second unchecked DNS lookup. Cast: our lookup
-        // intentionally handles both the all/one option shapes.
+        // this IP, so there is no second unchecked DNS lookup. This request-level
+        // option is honored for BOTH http and https — the agent's
+        // createConnection passes it through to net/tls.connect (verified: Node
+        // invokes our lookup for an https request too, it is not a no-op). Cast:
+        // our lookup intentionally handles both the all/one option shapes.
         lookup: pinnedLookup as unknown as net.LookupFunction,
       },
       (res) => {

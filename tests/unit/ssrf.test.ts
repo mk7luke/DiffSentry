@@ -1,4 +1,5 @@
 import http from "node:http";
+import https from "node:https";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   checkWebhookUrlSafe,
@@ -320,5 +321,33 @@ describe("sendJsonPinned (bounded response buffering)", () => {
         ).rejects.toThrow(/exceeded/i);
       },
     );
+  });
+});
+
+describe("request-level lookup is honored on both transports", () => {
+  // sendJsonPinned passes `lookup` as a request option (not on the Agent). This
+  // confirms Node invokes that lookup for BOTH http and https — i.e. it is not a
+  // no-op on https. No network/TLS needed: the lookup aborts before connecting.
+  const lookupInvoked = (transport: typeof http | typeof https, url: string) =>
+    new Promise<boolean>((resolve) => {
+      let called = false;
+      const agent = new transport.Agent();
+      const req = transport.request(url, {
+        agent,
+        lookup: ((_host: string, _opts: unknown, cb: (e: Error) => void) => {
+          called = true;
+          cb(new Error("aborted-in-test")); // don't actually connect
+        }) as never,
+      });
+      req.on("error", () => resolve(called));
+      req.end();
+    });
+
+  it("invokes the request-level lookup for http", async () => {
+    expect(await lookupInvoked(http, "http://example.com/")).toBe(true);
+  });
+
+  it("invokes the request-level lookup for https (not a no-op)", async () => {
+    expect(await lookupInvoked(https, "https://example.com/")).toBe(true);
   });
 });
