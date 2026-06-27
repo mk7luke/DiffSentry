@@ -315,6 +315,62 @@ describe("queryGraph — Windows / backslash graph paths", () => {
   });
 });
 
+// IMPORTS_FROM endpoints are bare file paths in today's graph, but the module
+// normalises them through symbolFileOf() defensively. This pins that a symbol-
+// qualified endpoint (`<file>::name`) still resolves to a clean file path.
+describe("queryGraph — symbol-qualified IMPORTS_FROM endpoints", () => {
+  let qDbPath: string;
+  const QROOT = "/tmp/qproj";
+  const qabs = (p: string) => `${QROOT}/${p}`;
+
+  beforeAll(() => {
+    qDbPath = path.join(os.tmpdir(), `gc-q-${Date.now()}.db`);
+    const db = new Database(qDbPath);
+    db.exec(`
+      CREATE TABLE nodes (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
+        name TEXT NOT NULL, qualified_name TEXT NOT NULL UNIQUE, file_path TEXT NOT NULL,
+        line_start INTEGER, line_end INTEGER, updated_at REAL NOT NULL DEFAULT 0);
+      CREATE TABLE edges (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
+        source_qualified TEXT NOT NULL, target_qualified TEXT NOT NULL, file_path TEXT NOT NULL,
+        line INTEGER DEFAULT 0, updated_at REAL NOT NULL DEFAULT 0);
+    `);
+    const node = db.prepare(
+      "INSERT INTO nodes (kind,name,qualified_name,file_path,line_start,line_end) VALUES (?,?,?,?,?,?)",
+    );
+    for (const f of ["src/util.ts", "src/a.ts", "src/b.ts", "scripts/t.ts"]) {
+      node.run("File", path.basename(f), qabs(f), qabs(f), null, null);
+    }
+    const edge = db.prepare(
+      "INSERT INTO edges (kind,source_qualified,target_qualified,file_path) VALUES (?,?,?,?)",
+    );
+    // Dependent: a.ts imports util.ts, but the SOURCE endpoint is symbol-qualified.
+    edge.run("IMPORTS_FROM", `${qabs("src/a.ts")}::someImport`, qabs("src/util.ts"), qabs("src/a.ts"));
+    // Dependency: util.ts imports b.ts, but the TARGET endpoint is symbol-qualified.
+    edge.run("IMPORTS_FROM", qabs("src/util.ts"), `${qabs("src/b.ts")}::Thing`, qabs("src/util.ts"));
+    db.close();
+  });
+
+  afterAll(() => {
+    try {
+      fs.unlinkSync(qDbPath);
+    } catch {
+      /* ignore */
+    }
+  });
+
+  it("strips `::symbol` from both import endpoints to clean file paths", () => {
+    const ctx = queryGraph([{ path: "src/util.ts" }], { graphDbPath: qDbPath });
+    const util = ctx.files[0];
+    expect(util.indexed).toBe(true);
+    // No `::` leaks into emitted paths; both directions resolve to files.
+    expect(util.dependents).toEqual(["src/a.ts"]);
+    expect(util.dependencies).toEqual(["src/b.ts"]);
+    expect(util.dependents.some((d) => d.includes("::"))).toBe(false);
+    expect(util.dependencies.some((d) => d.includes("::"))).toBe(false);
+    expect(util.fanIn).toBe(1);
+  });
+});
+
 describe("detectRoot / relativize — POSIX and Windows path shapes", () => {
   it("preserves the leading slash for a Unix-style common root and strips it cleanly", () => {
     const paths = [

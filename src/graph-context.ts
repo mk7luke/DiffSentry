@@ -123,9 +123,11 @@ function resolveGraphDbPath(override?: string): string {
 // path is still used for the SQLite `file_path = ?` lookups — those must match
 // the stored representation byte-for-byte.)
 
-// detectRoot / relativize / normRel are exported for unit testing — they are
-// the load-bearing path logic and are exercised directly across POSIX and
-// Windows path shapes.
+// detectRoot / relativize / normRel are internal path-normalisation helpers,
+// exported ONLY so the unit tests can exercise them directly across POSIX and
+// Windows path shapes. They are not a stable public API — callers outside this
+// module should not depend on their exact slash/prefix behaviour, which may
+// change to suit graph-path handling.
 
 /** Collapse OS path separators to POSIX `/`. */
 function toPosix(p: string): string {
@@ -327,14 +329,18 @@ export function queryGraph(
         )
         .sort((a, b) => a.lineStart - b.lineStart);
 
-      // Dependencies: files THIS file imports from. Sorted so the rendered
-      // "Imports:" list is deterministic regardless of SQLite row order.
-      const depAbs = (importsOutStmt.all(abs) as { target_qualified: string }[]).map((r) => r.target_qualified);
+      // Dependencies: files THIS file imports from. Endpoints are run through
+      // symbolFileOf() first — IMPORTS_FROM endpoints are bare file paths today,
+      // but normalising defensively (a no-op for bare paths) keeps this correct
+      // if the graph ever emits symbol-qualified import endpoints, and matches
+      // the CALLS handling. Sorted so the rendered "Imports:" list is
+      // deterministic regardless of SQLite row order.
+      const depAbs = (importsOutStmt.all(abs) as { target_qualified: string }[]).map((r) => symbolFileOf(r.target_qualified));
       const dependencies = uniq(depAbs.map((a) => normRel(relativize(a, root))).filter((d) => d !== rel)).sort();
 
-      // Dependents: files that import THIS file (fan-in via imports). Sorted for
-      // the same determinism reason.
-      const dependentAbs = (importsInStmt.all(abs) as { source_qualified: string }[]).map((r) => r.source_qualified);
+      // Dependents: files that import THIS file (fan-in via imports). Same
+      // symbolFileOf normalisation + sort.
+      const dependentAbs = (importsInStmt.all(abs) as { source_qualified: string }[]).map((r) => symbolFileOf(r.source_qualified));
       const dependents = uniq(dependentAbs.map((a) => normRel(relativize(a, root))).filter((d) => d !== rel)).sort();
 
       // Cross-file callers: any file with a CALLS edge into one of our symbols.
