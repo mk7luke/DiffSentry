@@ -142,6 +142,21 @@ describe("verifyFindings", () => {
     expect(out.stats.unparseable).toBe(false);
   });
 
+  it("parses fenced JSON wrapped in prose (leading + trailing text)", async () => {
+    const ai = {
+      complete: async () =>
+        "Here is the result:\n```json\n" +
+        JSON.stringify({ verdicts: [{ index: 0, supported: false }, { index: 1, supported: true }] }) +
+        "\n```\nLet me know if you need anything else. :}",
+    };
+    const out = await verifyFindings({ ai, context: ctx(), comments });
+    // Despite the surrounding prose (and a stray `}` in the trailer), the fenced
+    // payload is extracted: index 0 dropped, index 1 kept.
+    expect(out.comments.map((c) => c.title)).toEqual(["Finding one."]);
+    expect(out.stats.dropped).toBe(1);
+    expect(out.stats.unparseable).toBe(false);
+  });
+
   it("fails open (keeps all findings) when the verifier output can't be parsed", async () => {
     const ai = { complete: async () => "not json at all" };
     const out = await verifyFindings({ ai, context: ctx(), comments });

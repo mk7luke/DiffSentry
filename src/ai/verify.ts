@@ -216,8 +216,13 @@ For each finding above, decide whether the diff substantiates it and cite the su
  *  open). */
 function parseVerdicts(raw: string, count: number): Verdict[] | null {
   let cleaned = raw.trim();
-  if (cleaned.startsWith("```")) {
-    cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?\s*```$/, "").trim();
+  // Pull the payload out of a ```/```json fence even when the model wrapped it
+  // in prose ("Here is the JSON:\n```json …```"). Matching the fence anywhere
+  // (not just at the start) avoids the brace-slice fallback tripping over a
+  // trailing fence or stray `}` in the surrounding text. No fence → use as-is.
+  const fenced = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/i);
+  if (fenced) {
+    cleaned = fenced[1].trim();
   }
 
   let parsed: any = null;
