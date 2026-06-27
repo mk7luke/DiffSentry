@@ -424,7 +424,11 @@ export async function fillSymbolSources(
   for (const f of filesNeedingSource) {
     const text = contents.get(f.file);
     if (!text) continue;
-    const lines = text.split("\n");
+    // Normalise CRLF / lone-CR to LF before slicing: a CRLF head file would
+    // otherwise leave a trailing \r on every line, leaking into the rendered
+    // fence and inflating the char budget. Line numbers are graph-derived, so
+    // consistent splitting matters.
+    const lines = text.replace(/\r\n?/g, "\n").split("\n");
     for (const s of f.symbols) {
       // line_start/line_end are 1-based inclusive.
       const slice = lines.slice(s.lineStart - 1, s.lineEnd).join("\n");
@@ -436,6 +440,9 @@ export async function fillSymbolSources(
 
 // ─── Rendering (token-budgeted) ────────────────────────────────
 
+/** Markdown fence language for a file extension. The graph can index many
+ *  languages, so this covers the common ones; unknown extensions intentionally
+ *  fall back to a plain (language-less) fence rather than guessing. */
 function langForFile(file: string): string {
   const ext = path.extname(file).toLowerCase();
   switch (ext) {
@@ -453,6 +460,33 @@ function langForFile(file: string): string {
       return "rust";
     case ".java":
       return "java";
+    case ".rb":
+      return "ruby";
+    case ".php":
+      return "php";
+    case ".c":
+    case ".h":
+      return "c";
+    case ".cpp":
+    case ".cc":
+    case ".hpp":
+      return "cpp";
+    case ".cs":
+      return "csharp";
+    case ".kt":
+      return "kotlin";
+    case ".swift":
+      return "swift";
+    case ".sh":
+    case ".bash":
+      return "bash";
+    case ".json":
+      return "json";
+    case ".yml":
+    case ".yaml":
+      return "yaml";
+    case ".md":
+      return "markdown";
     default:
       return "";
   }

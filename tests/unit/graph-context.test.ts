@@ -196,8 +196,50 @@ describe("buildGraphContext + rendering", () => {
     expect(res.relatedContextMarkdown).toContain("high fan-in (4)");
   });
 
+  it("normalises CRLF head files so symbol bodies carry no stray \\r", async () => {
+    const crlf = ["l1", "l2", "l3", "l4", "l5"].join("\r\n");
+    const res = await buildGraphContext({
+      files: [{ path: "src/util.ts", patch: "@@ -1,2 +1,3 @@\n a\n+b\n c\n" }],
+      readHeadFile: async () => crlf,
+      graphDbPath: dbPath,
+    });
+    const foo = res.files[0].symbols.find((s) => s.name === "foo");
+    expect(foo?.source).toBeDefined();
+    expect(foo?.source).not.toContain("\r");
+    expect(foo?.source).toBe("l1\nl2\nl3\nl4\nl5");
+  });
+
   it("renders nothing when graph is unavailable", () => {
     expect(renderRelatedContext({ available: false, files: [], fanInByFile: {} })).toBe("");
+  });
+
+  it("selects an extension-appropriate fence language", () => {
+    const md = renderRelatedContext({
+      available: true,
+      fanInByFile: {},
+      files: [
+        {
+          file: "config/app.yaml",
+          indexed: true,
+          symbols: [
+            {
+              name: "cfg",
+              kind: "Function",
+              qualifiedName: "config/app.yaml::cfg",
+              file: "config/app.yaml",
+              lineStart: 1,
+              lineEnd: 1,
+              source: "key: value",
+            },
+          ],
+          dependencies: [],
+          dependents: [],
+          fanIn: 0,
+          highFanIn: false,
+        },
+      ],
+    });
+    expect(md).toContain("```yaml");
   });
 
   it("respects the maxRelatedChars budget", async () => {
@@ -311,6 +353,16 @@ describe("detectRoot / relativize — POSIX and Windows path shapes", () => {
 
   it("relativize leaves non-matching paths POSIX-normalised", () => {
     expect(relativize("D:\\other\\f.ts", "C:/proj")).toBe("D:/other/f.ts");
+  });
+
+  it("does not strip a sibling directory that merely shares a textual prefix", () => {
+    // /a/foobar is NOT under /a/foo; the `root + "/"` check is segment-aware
+    // and must reject it (returning the full path), not slice it to "bar/x.ts".
+    expect(normRel(relativize("/a/foobar/x.ts", "/a/foo"))).toBe("a/foobar/x.ts");
+    expect(normRel(relativize("/a/foo/x.ts", "/a/foo"))).toBe("x.ts");
+    // detectRoot only returns whole shared segments, so a non-boundary prefix
+    // can't even arise: the common root of these two is /a, not /a/foo.
+    expect(detectRoot(["/a/foo/x.ts", "/a/foobar/y.ts"])).toBe("/a");
   });
 });
 
