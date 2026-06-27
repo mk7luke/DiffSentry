@@ -425,9 +425,9 @@ export class Reviewer {
 
       // Fetch PR context first so we have the repo's default branch on hand.
       log.info("Fetching PR context");
-      const octokit = await this.github.getInstallationOctokit(installationId);
+      const octokit = await this.github.getInstallationOctokit(installationId, signal);
       const context = await this.github.getPRContext(
-        installationId, owner, repo, pullNumber, maxFilesOverride ?? undefined,
+        installationId, owner, repo, pullNumber, maxFilesOverride ?? undefined, signal,
       );
 
       // Load repo config from the default branch — NOT the PR head. This makes
@@ -467,7 +467,7 @@ export class Reviewer {
           pausedPRs.add(key);
           await this.github.postComment(
             installationId, owner, repo, pullNumber,
-            pauseNotice(this.config.botName, "auto", pauseThreshold),
+            pauseNotice(this.config.botName, "auto", pauseThreshold), signal,
           );
           return;
         }
@@ -483,7 +483,7 @@ export class Reviewer {
       try {
         await this.github.upsertComment(
           installationId, owner, repo, pullNumber,
-          statusBody, STATUS_MARKER
+          statusBody, STATUS_MARKER, signal
         );
         log.info("Posted in-review status comment");
       } catch (err) {
@@ -494,7 +494,7 @@ export class Reviewer {
       if (repoConfig.reviews?.commit_status !== false) {
         await this.github.setCommitStatus(
           installationId, owner, repo, context.headSha,
-          "pending", "Review in progress...", "DiffSentry"
+          "pending", "Review in progress...", "DiffSentry", signal
         ).catch((err) => log.warn({ err }, "Failed to set pending commit status"));
       }
 
@@ -562,7 +562,7 @@ export class Reviewer {
         if (repoConfig.reviews?.commit_status !== false) {
           await this.github.setCommitStatus(
             installationId, owner, repo, context.headSha,
-            "success", "No reviewable files", "DiffSentry"
+            "success", "No reviewable files", "DiffSentry", signal
           ).catch(() => {});
         }
         return;
@@ -643,7 +643,7 @@ export class Reviewer {
       if (walkthroughEnabled) {
         try {
           const relatedPRs = await this.github.findRelatedPRs(
-            installationId, owner, repo, pullNumber, filenames
+            installationId, owner, repo, pullNumber, filenames, signal
           );
           if (relatedPRs.length > 0) {
             const bullets = relatedPRs
@@ -727,7 +727,7 @@ export class Reviewer {
       // Commit-message coach (sync, no AI)
       let commitFindings: ReturnType<typeof reviewCommitMessages> = [];
       try {
-        const commits = await this.github.listPRCommits(installationId, owner, repo, pullNumber);
+        const commits = await this.github.listPRCommits(installationId, owner, repo, pullNumber, signal);
         commitFindings = reviewCommitMessages(commits);
       } catch (err) {
         log.debug({ err }, "listPRCommits failed");
@@ -956,7 +956,7 @@ export class Reviewer {
         try {
           await this.github.upsertComment(
             installationId, owner, repo, pullNumber,
-            walkthroughBody, WALKTHROUGH_MARKER
+            walkthroughBody, WALKTHROUGH_MARKER, signal
           );
           log.info("Walkthrough comment posted");
         } catch (err) {
@@ -971,7 +971,7 @@ export class Reviewer {
           installationId, owner, repo, context.headSha,
           statusMap[preMergeStatus],
           preMergeStatus === "fail" ? "Pre-merge checks failed" : "Pre-merge checks passed",
-          "DiffSentry / Pre-Merge"
+          "DiffSentry / Pre-Merge", signal
         ).catch(() => {});
       }
 
@@ -980,7 +980,7 @@ export class Reviewer {
         try {
           const prSummary = formatPRSummary(walkthroughResult);
           const newBody = injectSummaryIntoPRBody(context.description, prSummary);
-          await this.github.updatePRDescription(installationId, owner, repo, pullNumber, newBody);
+          await this.github.updatePRDescription(installationId, owner, repo, pullNumber, newBody, signal);
           log.info("PR description updated with summary");
         } catch (err) {
           log.warn({ err }, "Failed to update PR description");
@@ -991,7 +991,7 @@ export class Reviewer {
       if (repoConfig.reviews?.auto_apply_labels && walkthroughResult?.suggestedLabels?.length) {
         await this.github.applyLabels(
           installationId, owner, repo, pullNumber,
-          walkthroughResult.suggestedLabels
+          walkthroughResult.suggestedLabels, signal
         );
       }
 
@@ -999,7 +999,7 @@ export class Reviewer {
       if (repoConfig.reviews?.auto_assign_reviewers && walkthroughResult?.suggestedReviewers?.length) {
         await this.github.assignReviewers(
           installationId, owner, repo, pullNumber,
-          walkthroughResult.suggestedReviewers
+          walkthroughResult.suggestedReviewers, signal
         );
       }
 
@@ -1159,7 +1159,7 @@ export class Reviewer {
         "Review complete, submitting to GitHub"
       );
       review.phase("posting review");
-      await this.github.submitReview(installationId, context, reviewResult);
+      await this.github.submitReview(installationId, context, reviewResult, signal);
 
       // Upsert the sticky pinned status comment (separate from the
       // walkthrough — short, scannable snapshot of current PR state).
@@ -1198,7 +1198,7 @@ export class Reviewer {
           botName: this.config.botName,
           riskHistory: (priorState?.riskHistory ?? []).concat(risk.score).slice(-20),
         });
-        await this.github.upsertComment(installationId, owner, repo, pullNumber, stickyBody, STICKY_MARKER);
+        await this.github.upsertComment(installationId, owner, repo, pullNumber, stickyBody, STICKY_MARKER, signal);
       } catch (err) {
         log.warn({ err }, "Failed to upsert sticky status comment");
       }
@@ -1214,7 +1214,7 @@ export class Reviewer {
       try {
         await this.github.upsertComment(
           installationId, owner, repo, pullNumber,
-          finalStatusBody, STATUS_MARKER
+          finalStatusBody, STATUS_MARKER, signal
         );
       } catch (err) {
         log.warn({ err }, "Failed to update status comment");
@@ -1235,7 +1235,7 @@ export class Reviewer {
             : reviewResult.approval === "REQUEST_CHANGES"
             ? "Changes requested"
             : "Review complete with comments",
-          "DiffSentry"
+          "DiffSentry", signal
         ).catch((err) => log.warn({ err }, "Failed to set commit status"));
       }
 

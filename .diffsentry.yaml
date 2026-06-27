@@ -139,6 +139,17 @@ reviews:
         new endpoint wrapper, return a typed shape — don't propagate
         `octokit.X.Y()` shapes outward.
 
+        Do NOT flag `addEventListener(event, handler, { once: true })` for a
+        "missing removeEventListener" on the fired/abort/reject path. With
+        `{ once: true }` the runtime auto-removes the listener before invoking
+        it, so manual removal there is a no-op — there is no leak or stale
+        closure. Only a path where the listener is NEVER invoked (e.g. a
+        timer/resolve path that pre-empts the event) needs manual cleanup. The
+        `abortableDelay` helper (once-listener for "abort" + manual
+        removeEventListener only in the setTimeout/resolve callback) is
+        intentional and correct — this has been ruled a false positive more
+        than once.
+
     - path: "src/ai/prompt.ts"
       instructions: |
         Prompt copy. Changes here directly change AI outputs and cost.
