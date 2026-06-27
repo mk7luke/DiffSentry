@@ -2,7 +2,7 @@ import net from "node:net";
 import http from "node:http";
 import https from "node:https";
 import dns from "node:dns/promises";
-import { lookup as dnsLookupCb, type LookupAddress } from "node:dns";
+import { lookup as dnsLookupCb, type LookupAddress, type LookupOptions, type LookupAllOptions } from "node:dns";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SSRF guard for outbound webhook targets — shared by the notifications API
@@ -219,19 +219,23 @@ export async function checkWebhookUrlSafe(v: string): Promise<string | null> {
  */
 export function pinnedLookup(
   hostname: string,
-  options: { family?: number; all?: boolean } | number,
+  options: LookupOptions | number,
   callback: (
     err: NodeJS.ErrnoException | null,
     address?: string | LookupAddress[],
     family?: number,
   ) => void,
 ): void {
-  const opts = typeof options === "number" ? { family: options } : (options ?? {});
+  const opts: LookupOptions = typeof options === "number" ? { family: options } : (options ?? {});
   const family = opts.family ?? 0;
   const wantAll = opts.all === true;
   const allowPrivate = allowPrivateEgress();
 
-  dnsLookupCb(hostname, { all: true, verbatim: true }, (err, addresses) => {
+  // Honor the caller's lookup options (family / hints / verbatim) instead of
+  // hardcoding them away — only `all` is forced on, because we must see every
+  // candidate address to range-check it before any one is returned.
+  const lookupOptions: LookupAllOptions = { ...opts, all: true };
+  dnsLookupCb(hostname, lookupOptions, (err, addresses) => {
     if (err) return callback(err);
     const safe = addresses.filter((a) => {
       if (family === 4 && a.family !== 4) return false;
@@ -265,19 +269,27 @@ const MAX_RESPONSE_BYTES = 64 * 1024;
 
 /**
  * POST a JSON body to a webhook URL over node:http/https with DNS pinned to a
- * validated public IP (see pinnedLookup). Redirects are intentionally NOT
- * followed — a 3xx `Location` is an SSRF re-entry vector that would bypass the
- * pinned lookup. The response body is buffered up to MAX_RESPONSE_BYTES and the
- * request is aborted past that. Resolves with the status + body text; rejects on
- * transport error, timeout, an oversized body, or a host that resolves only to
- * disallowed addresses.
+ * validated public IP (see pinnedLookup). Validates the URL itself first via
+ * checkWebhookUrlSafe(), so the primitive is safe by default for any caller:
+ * the pinned `lookup` only fires for hostname targets, but an IP-literal target
+ * connects directly — this preflight is what blocks a private IP-literal from
+ * bypassing the pin. Redirects are intentionally NOT followed — a 3xx `Location`
+ * is an SSRF re-entry vector. The response body is buffered up to
+ * MAX_RESPONSE_BYTES and the request is aborted past that. Resolves with the
+ * status + body text; rejects (message `blocked: …`) when the URL fails
+ * validation, and on transport error, timeout, or an oversized body.
  */
-export function sendJsonPinned(
+export async function sendJsonPinned(
   url: string,
   body: string,
   headers: Record<string, string>,
   timeoutMs: number,
 ): Promise<PinnedHttpResponse> {
+  // Preflight before touching the network. Covers scheme, IP-literal range, and
+  // a first hostname resolution; the pinned lookup below is the authoritative
+  // connect-time check for hostname targets.
+  const blocked = await checkWebhookUrlSafe(url);
+  if (blocked) throw new Error(`blocked: ${blocked}`);
   const parsed = new URL(url);
   const transport = parsed.protocol === "https:" ? https : http;
   const payload = Buffer.from(body, "utf8");

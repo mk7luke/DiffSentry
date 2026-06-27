@@ -237,6 +237,23 @@ describe("pinnedLookup (DNS pinning at connect time)", () => {
 });
 
 describe("sendJsonPinned (bounded response buffering)", () => {
+  // sendJsonPinned now preflights the URL via checkWebhookUrlSafe, so reaching a
+  // plain-http loopback test server requires both opt-outs. Snapshot + restore.
+  const saved = {
+    insecure: process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS,
+    priv: process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS,
+  };
+  beforeEach(() => {
+    process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS = "true";
+    process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS = "true";
+  });
+  afterEach(() => {
+    if (saved.insecure === undefined) delete process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS;
+    else process.env.NOTIFY_ALLOW_INSECURE_WEBHOOKS = saved.insecure;
+    if (saved.priv === undefined) delete process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS;
+    else process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS = saved.priv;
+  });
+
   // An IP-literal target connects directly (pinnedLookup isn't invoked for
   // literals), so these exercise the transport + response-cap logic without DNS.
   const withServer = async (
@@ -265,6 +282,14 @@ describe("sendJsonPinned (bounded response buffering)", () => {
         expect(resp.body).toBe("ok");
       },
     );
+  });
+
+  it("self-validates the URL and rejects a disallowed target before connecting", async () => {
+    // Even though the helper is called directly (no postJson preflight), an
+    // IP-literal private target must be rejected — it never reaches the pinned
+    // lookup. Drop the private opt-out so loopback is disallowed again.
+    delete process.env.NOTIFY_ALLOW_PRIVATE_WEBHOOKS;
+    await expect(sendJsonPinned("https://127.0.0.1/hook", "{}", {}, 5000)).rejects.toThrow(/^blocked:/);
   });
 
   it("rejects when the response body exceeds the cap", async () => {

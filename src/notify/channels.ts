@@ -1,6 +1,6 @@
 import { logger } from "../logger.js";
 import { sendMail, smtpConfigFromChannel } from "./smtp.js";
-import { checkWebhookUrlSafe, sendJsonPinned } from "./ssrf.js";
+import { sendJsonPinned } from "./ssrf.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Channel adapters — turn a normalized ChannelMessage into a real delivery over
@@ -68,13 +68,12 @@ async function postJson(
   body: unknown,
   headers: Record<string, string> = {},
 ): Promise<DeliveryResult> {
-  // First-pass SSRF gate (scheme + literal/host range check). The authoritative
-  // protection is the DNS-pinned send below: sendJsonPinned resolves the host
-  // once, range-checks the result, and connects to that exact IP — so a hostname
-  // re-pointed to a private address after config save (DNS rebinding) is still
-  // rejected at connect time, with no second unchecked resolution.
-  const blocked = await checkWebhookUrlSafe(url);
-  if (blocked) return { ok: false, detail: `blocked: ${blocked}` };
+  // SSRF protection lives in sendJsonPinned: it validates the URL up front
+  // (scheme + IP-literal range + a first hostname resolve via checkWebhookUrlSafe)
+  // and then pins DNS at connect time, so a host re-pointed to a private address
+  // after config save (DNS rebinding) is still rejected — with no second
+  // unchecked resolution. A validation failure throws `blocked: …`, surfaced as
+  // the delivery detail by the catch below.
   try {
     const resp = await sendJsonPinned(url, JSON.stringify(body), headers, HTTP_TIMEOUT_MS);
     if (resp.status < 200 || resp.status >= 300) {
