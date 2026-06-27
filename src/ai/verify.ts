@@ -136,9 +136,16 @@ export function selectVerifierDiffs(
     let truncated = false;
     if (patch.length > cap) {
       // Cut at a line boundary so the embedded diff stays parseable and the
-      // visible-line set is exact (no half-line at the tail).
+      // visible-line set is exact (no half-line at the tail). If there's no
+      // newline within the budget (a single line longer than the cap), we can't
+      // truncate safely — omit the file so its findings stay fail-open rather
+      // than verify them against a mid-line diff fragment.
       const nl = patch.lastIndexOf("\n", cap);
-      shown = patch.slice(0, nl > 0 ? nl : cap);
+      if (nl <= 0) {
+        omittedFiles++;
+        continue;
+      }
+      shown = patch.slice(0, nl);
       truncated = true;
     }
     const shownLines = getDiffLineInfo(shown).valid;

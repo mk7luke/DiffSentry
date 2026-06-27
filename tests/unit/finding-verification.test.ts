@@ -345,15 +345,29 @@ describe("selectVerifierDiffs: bounded diff selection", () => {
     expect(blocks).toHaveLength(0);
   });
 
-  it("truncates an oversized patch and marks the truncation", () => {
-    const huge = "x".repeat(20000);
+  it("truncates an oversized multi-line patch at a line boundary and marks it", () => {
+    const huge = bigDiff(300); // valid diff well over the 8k per-file cap
     const context = {
-      files: [{ filename: "src/a.ts", status: "modified" as const, patch: huge, additions: 1, deletions: 0 }],
+      files: [{ filename: "src/a.ts", status: "modified" as const, patch: huge, additions: 300, deletions: 0 }],
     };
     const { blocks, includedFiles } = selectVerifierDiffs(context, new Set(["src/a.ts"]));
     expect(includedFiles.has("src/a.ts")).toBe(true);
     expect(blocks[0]).toContain("patch truncated for verification");
     expect(blocks[0].length).toBeLessThan(huge.length);
+    // The embedded slice ends on a real line boundary (no half-line at the tail).
+    const body = blocks[0].split("```diff\n")[1].split("\n… (patch truncated")[0];
+    expect(body.endsWith("a")).toBe(true); // a complete "+L… aaaa" line
+  });
+
+  it("omits a file whose oversized first line has no safe boundary (kept fail-open)", () => {
+    // A single line longer than the cap with no newline within budget: we can't
+    // truncate without cutting mid-line, so the file is omitted entirely.
+    const context = {
+      files: [{ filename: "src/min.ts", status: "modified" as const, patch: "x".repeat(20000), additions: 1, deletions: 0 }],
+    };
+    const { blocks, includedFiles } = selectVerifierDiffs(context, new Set(["src/min.ts"]));
+    expect(includedFiles.size).toBe(0);
+    expect(blocks).toHaveLength(0);
   });
 });
 
