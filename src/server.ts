@@ -206,6 +206,16 @@ export function createServer(config: Config): CreatedServer {
         event,
         payload,
       );
+      // A server-error response (5xx) means the delivery was NOT successfully
+      // processed, so reopen the idempotency claim — same contract as the thrown
+      // path — before responding, letting GitHub redeliver. Client 4xx responses
+      // keep the claim: redelivery wouldn't help a malformed/installation-less
+      // payload. (dispatchWebhookEvent doesn't return 5xx today; this guards the
+      // contract against a future path that does.)
+      if (deliveryId && status >= 500) {
+        releaseWebhookDelivery(deliveryId);
+        logger.warn({ event, deliveryId, status }, "Webhook dispatch returned a server error — released delivery for redelivery");
+      }
       res.status(status).json(responseBody);
     } catch (err) {
       // Dispatch threw before producing a response: the work never ran, so the
