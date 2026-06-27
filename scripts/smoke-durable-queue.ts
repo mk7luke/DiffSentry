@@ -28,6 +28,7 @@ async function main() {
     claimWebhookDelivery,
     completeWebhookDelivery,
     releaseWebhookDelivery,
+    seedProcessingLeaseForTest,
     listInFlightReviewJobs,
     upsertReviewJob,
   } = await import("../src/storage/dao.js");
@@ -67,23 +68,36 @@ async function main() {
     ok("migration 5 created review_jobs + processed_deliveries", tables.has("review_jobs") && tables.has("processed_deliveries"));
 
     // ── idempotency ─────────────────────────────────────────────────────
-    ok("first claim of a delivery id wins (processing lease)", claimWebhookDelivery("gh-1") === true);
-    ok("a fresh in-flight redelivery is rejected", claimWebhookDelivery("gh-1") === false);
-    ok("a different delivery id is claimable", claimWebhookDelivery("gh-2") === true);
+    const STALE_AGE_MS = 60 * 60 * 1000; // 1h — well past the default lease TTL
+    const c1 = claimWebhookDelivery("gh-1");
+    ok("first claim of a delivery id wins (processing lease)", c1 !== null);
+    ok("a fresh in-flight redelivery is rejected", claimWebhookDelivery("gh-1") === null);
+    const c2 = claimWebhookDelivery("gh-2");
+    ok("a different delivery id is claimable", c2 !== null);
     // Release (the failure finalizer) re-opens the id so a redelivery is
     // processed instead of suppressed as a phantom duplicate.
-    releaseWebhookDelivery("gh-2");
-    ok("released delivery id is claimable again", claimWebhookDelivery("gh-2") === true);
+    releaseWebhookDelivery(c2!);
+    ok("released delivery id is claimable again", claimWebhookDelivery("gh-2") !== null);
     // Complete (the success finalizer): a completed delivery is a true duplicate.
-    completeWebhookDelivery("gh-1");
-    ok("a completed delivery rejects redelivery (true duplicate)", claimWebhookDelivery("gh-1") === false);
+    completeWebhookDelivery(c1!);
+    ok("a completed delivery rejects redelivery (true duplicate)", claimWebhookDelivery("gh-1") === null);
     // Crash safety: a `processing` lease left behind by a crash is reclaimable
-    // once stale. Simulate by back-dating the lease stamp well past the TTL.
-    db.prepare(`INSERT INTO processed_deliveries (delivery_id, status, ts) VALUES ('gh-crash', 'processing', ?)`).run(
-      new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-    );
-    ok("a stale processing lease (crashed mid-flight) is reclaimable", claimWebhookDelivery("gh-crash") === true);
-    ok("the reclaimed lease is fresh, so an immediate redelivery is rejected", claimWebhookDelivery("gh-crash") === false);
+    // once stale. The dao test helper seeds a back-dated lease (no inline SQL).
+    seedProcessingLeaseForTest("gh-crash", STALE_AGE_MS);
+    ok("a stale processing lease (crashed mid-flight) is reclaimable", claimWebhookDelivery("gh-crash") !== null);
+    ok("the reclaimed lease is fresh, so an immediate redelivery is rejected", claimWebhookDelivery("gh-crash") === null);
+
+    // ── finalizer ownership: a reclaim rotates the token, so the crashed
+    //    claim's late finalizer can't touch the new owner's row ──────────────
+    const staleToken = seedProcessingLeaseForTest("gh-owned", STALE_AGE_MS);
+    const reclaimed = claimWebhookDelivery("gh-owned"); // reclaims → fresh token
+    ok("stale lease reclaimed by a new owner", reclaimed !== null && reclaimed!.token !== staleToken);
+    // The crashed (old-token) owner tries to release — must NOT delete the row.
+    releaseWebhookDelivery({ deliveryId: "gh-owned", token: staleToken });
+    ok("old owner's release does NOT free the new owner's lease", claimWebhookDelivery("gh-owned") === null);
+    // The new owner finalizes its own lease normally.
+    completeWebhookDelivery(reclaimed!);
+    ok("new owner completes its own lease", claimWebhookDelivery("gh-owned") === null);
 
     // ── transient classification ────────────────────────────────────────
     ok("ETIMEDOUT is transient", isTransientError(Object.assign(new Error("x"), { code: "ETIMEDOUT" })));

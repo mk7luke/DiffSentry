@@ -197,10 +197,17 @@ export function createServer(config: Config): CreatedServer {
     // a stale lease that a redelivery can reclaim rather than a phantom
     // duplicate. The delivery is still recorded above for the inspection view.
     // No-op (always claims) when persistence is disabled.
-    if (deliveryId && !claimWebhookDelivery(deliveryId)) {
-      logger.info({ deliveryId, event }, "Duplicate webhook delivery — already processed, skipping dispatch");
-      res.status(200).json({ status: "duplicate" });
-      return;
+    // The claim handle (id + per-claim token) is threaded to the finalizers so
+    // they only mutate the row THIS request owns. Null is returned (and stays
+    // null when there's no delivery id) only for a duplicate to skip.
+    let claim: ReturnType<typeof claimWebhookDelivery> = null;
+    if (deliveryId) {
+      claim = claimWebhookDelivery(deliveryId);
+      if (!claim) {
+        logger.info({ deliveryId, event }, "Duplicate webhook delivery — already processed, skipping dispatch");
+        res.status(200).json({ status: "duplicate" });
+        return;
+      }
     }
 
     try {
@@ -209,18 +216,18 @@ export function createServer(config: Config): CreatedServer {
         event,
         payload,
       );
-      if (deliveryId) {
+      if (claim) {
         if (status >= 500) {
           // A server-error response means the delivery was NOT successfully
           // processed: release the lease so GitHub can redeliver. (4xx is a
           // terminal reject — keep it marked so redelivery of a malformed/
           // installation-less payload isn't reprocessed.)
-          releaseWebhookDelivery(deliveryId);
+          releaseWebhookDelivery(claim);
           logger.warn({ event, deliveryId, status }, "Webhook dispatch returned a server error — released delivery for redelivery");
         } else {
           // Success: commit the lease to `completed` so future redeliveries of
           // this id are suppressed as true duplicates.
-          completeWebhookDelivery(deliveryId);
+          completeWebhookDelivery(claim);
         }
       }
       res.status(status).json(responseBody);
@@ -229,7 +236,7 @@ export function createServer(config: Config): CreatedServer {
       // lease above would otherwise (after it goes stale) be the only trace.
       // Release it now so a GitHub redelivery of this id is processed promptly,
       // then surface 500 so GitHub marks the delivery failed (and offers redelivery).
-      if (deliveryId) releaseWebhookDelivery(deliveryId);
+      if (claim) releaseWebhookDelivery(claim);
       logger.error({ err, event, deliveryId }, "Webhook dispatch failed — released delivery for redelivery");
       res.status(500).json({ error: "Dispatch failed" });
     }

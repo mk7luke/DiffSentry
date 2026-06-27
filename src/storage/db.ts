@@ -328,7 +328,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_rules_name ON custom_rules(name);
  *    dispatched — so only a *completed* delivery short-circuits a redelivery. A
  *    `processing` row whose lease has gone stale (the process crashed mid-flight)
  *    is reclaimable on the next claim, so a crash can't permanently suppress a
- *    redelivery. `ts` is the lease stamp.
+ *    redelivery. `ts` is the lease stamp; `token` is the per-claim ownership
+ *    handle that scopes finalization, so a late finalizer from a superseded
+ *    (reclaimed) claim can't mutate the new owner's row.
  *
  * Strictly additive (two new tables) — same rules as every other migration.
  */
@@ -352,7 +354,8 @@ CREATE INDEX IF NOT EXISTS idx_review_jobs_state ON review_jobs(state);
 CREATE TABLE IF NOT EXISTS processed_deliveries (
   delivery_id TEXT PRIMARY KEY,
   status TEXT NOT NULL DEFAULT 'processing',  -- 'processing' (claimed, in flight) | 'completed' (dispatched OK)
-  ts TEXT NOT NULL                            -- lease stamp: last claim / re-lease / completion time
+  ts TEXT NOT NULL,                           -- lease stamp: last claim / re-lease / completion time
+  token TEXT                                  -- per-claim ownership handle; finalizers guard on it
 );
 CREATE INDEX IF NOT EXISTS idx_processed_deliveries_ts ON processed_deliveries(ts);
 `;
