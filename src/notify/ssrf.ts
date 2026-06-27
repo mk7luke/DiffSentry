@@ -2,7 +2,19 @@ import net from "node:net";
 import http from "node:http";
 import https from "node:https";
 import dns from "node:dns/promises";
-import { lookup as dnsLookupCb, type LookupAddress, type LookupOptions, type LookupAllOptions } from "node:dns";
+import {
+  lookup as dnsLookupCb,
+  type LookupAddress,
+  type LookupOptions,
+  type LookupOneOptions,
+  type LookupAllOptions,
+} from "node:dns";
+
+// Node's dns.lookup callbacks are inline-typed on its overloads rather than
+// exported as named types, so we mirror them locally (identical signatures) and
+// reuse them on pinnedLookup's overloads to match the contract exactly.
+type LookupOneCallback = (err: NodeJS.ErrnoException | null, address: string, family: number) => void;
+type LookupAllCallback = (err: NodeJS.ErrnoException | null, addresses: LookupAddress[]) => void;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SSRF guard for outbound webhook targets — shared by the notifications API
@@ -221,20 +233,34 @@ export async function checkWebhookUrlSafe(v: string): Promise<string | null> {
  * `(hostname, options, callback)` — so it is a true drop-in for direct callers,
  * not only for the http(s) `lookup` option (which always passes options).
  */
-type PinnedLookupCallback = (
-  err: NodeJS.ErrnoException | null,
-  address?: string | LookupAddress[],
-  family?: number,
-) => void;
-
+// Mirror Node's dns.lookup overloads exactly, so direct callers get the precise
+// callback contract for their call form: the all:true form resolves to the
+// addresses[] shape (LookupAllCallback); every other form to the
+// (address, family) shape (LookupOneCallback). The implementation signature
+// below is the permissive union those overloads collapse to.
+export function pinnedLookup(hostname: string, callback: LookupOneCallback): void;
+export function pinnedLookup(hostname: string, family: number, callback: LookupOneCallback): void;
+export function pinnedLookup(hostname: string, options: LookupOneOptions, callback: LookupOneCallback): void;
+export function pinnedLookup(hostname: string, options: LookupAllOptions, callback: LookupAllCallback): void;
 export function pinnedLookup(
   hostname: string,
-  options: LookupOptions | number | PinnedLookupCallback,
-  callback?: PinnedLookupCallback,
+  options: LookupOptions,
+  callback: (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family: number) => void,
+): void;
+export function pinnedLookup(
+  hostname: string,
+  options: LookupOptions | number | LookupOneCallback | LookupAllCallback,
+  callback?: LookupOneCallback | LookupAllCallback,
 ): void {
-  // Normalize the two overloads: when options is omitted, the 2nd arg is the
+  // Normalize the overloads: when options is omitted, the 2nd arg is the
   // callback. (number is the legacy `family` positional form dns.lookup accepts.)
-  const cb: PinnedLookupCallback = typeof options === "function" ? options : (callback as PinnedLookupCallback);
+  // Internally cb is invoked with both shapes — error/one-address/all — so it's
+  // typed permissively here; the public overloads above are the precise contract.
+  const cb = (typeof options === "function" ? options : callback) as unknown as (
+    err: NodeJS.ErrnoException | null,
+    address?: string | LookupAddress[],
+    family?: number,
+  ) => void;
   const rawOptions = typeof options === "function" ? undefined : options;
   const opts: LookupOptions = typeof rawOptions === "number" ? { family: rawOptions } : (rawOptions ?? {});
   const family = opts.family ?? 0;
