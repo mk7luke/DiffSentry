@@ -5098,3 +5098,217 @@ button.diffv-dot:focus-visible {
     max-width: 160px;
   }
 }
+
+/* ── Triage mode ─────────────────────────────────────────────────────────── */
+.triage-head-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.triage-stage {
+  max-width: 820px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.triage-bar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+.triage-progress {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.triage-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  overflow: hidden;
+}
+.triage-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+  transition: width 0.2s ease;
+}
+.triage-session {
+  margin: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.triage-card {
+  padding: 20px 22px;
+  gap: 14px;
+  scroll-margin-top: 16px;
+}
+.triage-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.triage-card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.triage-card-when {
+  margin-left: auto;
+}
+.triage-card-title {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.3;
+  color: var(--text-1);
+}
+.triage-card-body {
+  font-size: 13.5px;
+}
+.triage-snippet {
+  margin: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md, 8px);
+  overflow: auto;
+}
+.triage-snippet-head {
+  padding: 6px 10px;
+  font-size: 11.5px;
+  background: var(--bg-elev-2);
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text-2);
+}
+.triage-snippet .diffv-code {
+  margin: 0;
+}
+.triage-snippet-missing {
+  font-size: 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line-soft);
+  border-radius: var(--r-md, 8px);
+}
+.triage-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.triage-note {
+  width: 100%;
+}
+.triage-note input {
+  width: 100%;
+}
+.triage-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.triage-act {
+  flex: 1 1 auto;
+  min-width: 110px;
+  justify-content: center;
+  font-size: 14px;
+  padding: 11px 14px;
+}
+.triage-snooze {
+  flex: 2 1 auto;
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  min-width: 220px;
+}
+.triage-snooze .triage-act {
+  flex: 0 0 auto;
+  min-width: 110px;
+}
+.triage-snooze input[type="date"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.triage-act kbd,
+.triage-legend kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-elev-2);
+  color: var(--text-2);
+  margin-left: 6px;
+}
+.triage-legend {
+  margin: 0;
+  font-size: 12px;
+  text-align: center;
+}
+.triage-legend kbd {
+  margin: 0 2px;
+}
+.triage-readonly {
+  padding: 12px 16px;
+}
+.triage-readonly p {
+  margin: 0;
+  font-size: 13px;
+}
+.triage-done {
+  max-width: 520px;
+  margin: 24px auto 0;
+  padding: 28px;
+  text-align: center;
+}
+.triage-done h2 {
+  margin: 0 0 6px;
+}
+.triage-tally {
+  display: flex;
+  justify-content: center;
+  gap: 28px;
+  margin: 20px 0;
+}
+.triage-tally dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+.triage-tally dd {
+  margin: 4px 0 0;
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.triage-tally dd.good {
+  color: var(--good);
+}
+.triage-tally dd.warn {
+  color: var(--warn, var(--sev-major));
+}
+.triage-done-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+@media (max-width: 820px) {
+  .triage-bar {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .triage-card-title {
+    font-size: 19px;
+  }
+  .triage-buttons .triage-act,
+  .triage-snooze {
+    flex-basis: 100%;
+  }
+  .triage-legend {
+    display: none;
+  }
+}
