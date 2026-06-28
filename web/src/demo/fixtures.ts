@@ -401,6 +401,7 @@ const EXPLORER_ROWS: FindingExplorerRow[] = [
     source: f.source,
     fingerprint: f.fingerprint,
     type: f.type,
+    author: "jordan-lee",
     ...UNDECIDED,
   })),
   {
@@ -416,6 +417,7 @@ const EXPLORER_ROWS: FindingExplorerRow[] = [
     source: "ai",
     fingerprint: "retry-unbounded",
     type: "issue",
+    author: "sam-rivera",
     ...UNDECIDED,
   },
 ];

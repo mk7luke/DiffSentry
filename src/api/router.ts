@@ -163,6 +163,7 @@ function parseFindingFilters(q: Record<string, unknown>): FindingFilters {
     repo: str("repo"),
     q: str("q"),
     fingerprint: str("fingerprint"),
+    author: str("author"),
     triage: str("triage"),
     ageDays: num("age") ?? undefined,
     limit: num("limit") ?? 100,

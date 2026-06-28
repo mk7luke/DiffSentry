@@ -169,6 +169,8 @@ export interface FindingExplorerRow extends TriageColumns {
   source: string | null;
   fingerprint: string | null;
   type: string | null;
+  /** PR author, joined from the prs table (null when the PR isn't stored). */
+  author: string | null;
 }
 
 export interface FindingFilters {

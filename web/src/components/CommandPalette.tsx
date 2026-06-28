@@ -19,6 +19,7 @@ import type { Capabilities, SearchResult, SearchResultType } from "../api/types"
 import {
   AuditIcon,
   CheckIcon,
+  FeedIcon,
   FindingsIcon,
   LearningIcon,
   OpsIcon,
@@ -75,6 +76,7 @@ interface Item {
 const NAV: Array<{ to: string; label: string; Icon: Icon; cap?: keyof Capabilities }> = [
   { to: "/ops", label: "Ops Console", Icon: OpsIcon },
   { to: "/overview", label: "Overview", Icon: OverviewIcon },
+  { to: "/feed", label: "Feed", Icon: FeedIcon, cap: "viewDashboard" },
   { to: "/findings", label: "Findings", Icon: FindingsIcon },
   { to: "/patterns", label: "Patterns", Icon: PatternsIcon },
   { to: "/audit", label: "Audit log", Icon: AuditIcon, cap: "viewAudit" },

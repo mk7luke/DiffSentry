@@ -112,6 +112,7 @@ export interface FindingsQuery {
   repo?: string;
   q?: string;
   fingerprint?: string;
+  author?: string;
   triage?: string;
   age?: string;
   limit?: number;
@@ -128,6 +129,7 @@ export function useFindings(query: FindingsQuery) {
         repo: query.repo,
         q: query.q,
         fingerprint: query.fingerprint,
+        author: query.author,
         triage: query.triage,
         age: query.age,
         limit: query.limit,
