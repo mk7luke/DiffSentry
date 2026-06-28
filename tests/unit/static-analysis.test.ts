@@ -7,6 +7,7 @@ import {
   toRepoRelative,
   parseTscDiagnostics,
   resolveSpawn,
+  semgrepLevel,
 } from "../../src/static-analysis.js";
 import type { ReviewComment } from "../../src/types.js";
 
@@ -76,6 +77,22 @@ describe("computeAddedLines", () => {
       "+b",
     ].join("\n");
     expect([...computeAddedLines(patch)].sort((x, y) => x - y)).toEqual([1, 11]);
+  });
+});
+
+describe("semgrepLevel", () => {
+  it("maps explicit ERROR/WARNING/INFO", () => {
+    expect(semgrepLevel("ERROR")).toBe("error");
+    expect(semgrepLevel("WARNING")).toBe("warning");
+    expect(semgrepLevel("INFO")).toBe("info");
+    expect(semgrepLevel("error")).toBe("error"); // case-insensitive
+  });
+
+  it("falls back to info for unknown/missing severities (no inflation to warning)", () => {
+    expect(semgrepLevel(undefined)).toBe("info");
+    expect(semgrepLevel("")).toBe("info");
+    expect(semgrepLevel("CRITICAL")).toBe("info"); // future/unknown label
+    expect(semgrepLevel("inventory")).toBe("info");
   });
 });
 
@@ -190,6 +207,15 @@ describe("parseTscDiagnostics", () => {
     expect(out[0].file).toBe("C:\\repo\\foo.ts");
     expect(out[0].line).toBe(7);
     expect(out[0].level).toBe("warning");
+  });
+
+  it("parses a colon-form POSIX path that itself contains a colon", () => {
+    // The `:(\d+):(\d+)` requirement means a `:bar` segment (non-digit) can't be
+    // mistaken for the line:col — greedy backtrack lands on the real `:12:5 - `.
+    const out = parseTscDiagnostics("src/foo:bar.ts:12:5 - error TS2322: Type 'x' is not assignable.");
+    expect(out).toEqual([
+      { file: "src/foo:bar.ts", line: 12, ruleId: "TS2322", message: "Type 'x' is not assignable.", level: "error" },
+    ]);
   });
 
   it("does not let the colon-form drive colon shift file/line (greedy backtrack)", () => {

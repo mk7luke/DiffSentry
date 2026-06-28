@@ -387,16 +387,30 @@ async function runSemgrep(ctx: RunCtx): Promise<RawFinding[]> {
   for (const r of results) {
     const line = r.start?.line;
     if (typeof line !== "number") continue;
-    const sev = (r.extra?.severity || "").toUpperCase();
     out.push({
       file: r.path,
       line,
       ruleId: r.check_id || "semgrep",
       message: r.extra?.message || "Semgrep matched a rule.",
-      level: sev === "ERROR" ? "error" : sev === "INFO" ? "info" : "warning",
+      level: semgrepLevel(r.extra?.severity),
     });
   }
   return out;
+}
+
+/** Map a Semgrep severity string to a raw finding level. Only explicit ERROR /
+ *  WARNING are promoted; anything unknown or absent falls back to `info` (the
+ *  lowest tier) so missing/future severity labels never inflate review noise.
+ *  Exported for tests. */
+export function semgrepLevel(severity: string | undefined): RawFinding["level"] {
+  switch ((severity || "").toUpperCase()) {
+    case "ERROR":
+      return "error";
+    case "WARNING":
+      return "warning";
+    default:
+      return "info";
+  }
 }
 
 interface SemgrepResult {
