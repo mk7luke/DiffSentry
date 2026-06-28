@@ -241,6 +241,50 @@ describe("calibrateSeverities — guards", () => {
   });
 });
 
+describe("calibrateSeverities — mutation contract", () => {
+  it("only changes severity/confidence and preserves the rest of the payload", () => {
+    const c: ReviewComment = {
+      path: "src/foo.ts",
+      line: 123,
+      side: "RIGHT",
+      body: "distinctive body text",
+      type: "issue",
+      severity: "minor",
+      title: "A distinctive title",
+      suggestion: "do the thing",
+      suggestionLanguage: "diff",
+      aiAgentPrompt: "prompt",
+      fingerprint: "fp-distinctive",
+      confidence: "high",
+      patternSource: undefined,
+      customRuleId: undefined,
+    };
+    const before = { ...c };
+    calibrateSeverities({
+      comments: [c],
+      files: [file("src/foo.ts")],
+      fanInByFile: { "src/foo.ts": 9 }, // high fan-in → escalate minor→major
+    });
+    // intended mutations
+    expect(c.severity).toBe<CommentSeverity>("major");
+    // confidence unchanged (escalation, not softening)
+    expect(c.confidence).toBe("high");
+    // everything else preserved
+    expect(c.path).toBe(before.path);
+    expect(c.line).toBe(before.line);
+    expect(c.side).toBe(before.side);
+    expect(c.body).toBe(before.body);
+    expect(c.type).toBe(before.type);
+    expect(c.title).toBe(before.title);
+    expect(c.suggestion).toBe(before.suggestion);
+    expect(c.suggestionLanguage).toBe(before.suggestionLanguage);
+    expect(c.aiAgentPrompt).toBe(before.aiAgentPrompt);
+    expect(c.fingerprint).toBe(before.fingerprint);
+    expect(c.patternSource).toBe(before.patternSource);
+    expect(c.customRuleId).toBe(before.customRuleId);
+  });
+});
+
 describe("renderSeverityCalibrationBlock", () => {
   it("returns empty string when nothing changed", () => {
     expect(renderSeverityCalibrationBlock({ adjustments: [], confidenceLowered: 0 })).toBe("");
