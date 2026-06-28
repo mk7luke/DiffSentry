@@ -86,8 +86,11 @@ function DiffViewerBody({
 }) {
   const files = useMemo(() => (diff ? parseUnifiedDiff(diff) : []), [diff]);
 
-  // Collapse findings that repeat across reviews onto a single anchor, keeping
-  // the first (most severe / most recent — the API sorts that way) per location.
+  // Group findings by { path, line }. First drop exact repeats across reviews
+  // (same fingerprint, or id when absent, at the same location); the surviving
+  // findings for a line are kept as a list and all rendered in that line's panel.
+  // navList later uses only the first of each line as the anchor for nav/refs;
+  // the API's severity-desc / recency sort makes that first the most salient.
   const anchored = useMemo(() => {
     const byPathLine = new Map<string, PRFindingRow[]>();
     const seen = new Set<string>();
