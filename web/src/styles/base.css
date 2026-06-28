@@ -1894,11 +1894,109 @@ a.dot-marker:hover,
   color: var(--text-3);
   font-size: 13px;
 }
+.empty.has-art {
+  padding: 30px 20px 34px;
+}
 .empty .title {
   color: var(--text-1);
   font-size: 14px;
   font-weight: 500;
   margin-bottom: 6px;
+}
+/* Light line-art: a muted base stroke (--text-4) with a single accent-keyed
+   highlight (.art-accent). Decorative — the EmptyState text carries meaning. */
+.empty-art {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 15px;
+  color: var(--text-4);
+}
+.empty-art svg {
+  width: 84px;
+  height: 84px;
+}
+.empty-art .art-accent {
+  stroke: var(--accent);
+  opacity: 0.9;
+}
+.empty-hint {
+  max-width: 48ch;
+  margin: 0 auto;
+  line-height: 1.5;
+}
+.empty-cta {
+  margin-top: 18px;
+}
+.empty-code {
+  color: var(--text-3);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  margin-bottom: 8px;
+}
+
+/* ── Full-page error / 404 boundary ────────────────────────────── */
+.error-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  background: radial-gradient(ellipse 1200px 500px at 50% -10%, var(--page-glow), transparent 60%), var(--bg);
+}
+/* On short / phone viewports (or with large text / zoom) the recovery content
+   can exceed the screen; top-align so the actions are never centered partly
+   off-screen and the page scrolls naturally. */
+@media (max-width: 640px) {
+  .error-page {
+    align-items: flex-start;
+  }
+}
+.error-page-inner {
+  text-align: center;
+  max-width: 460px;
+}
+.error-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 22px;
+  color: var(--accent-bright);
+}
+.error-brand .logo {
+  filter: drop-shadow(0 0 8px var(--accent-glow));
+}
+.error-wordmark {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 17px;
+  color: var(--text);
+  letter-spacing: -0.015em;
+}
+.error-art {
+  margin-bottom: 18px;
+}
+.error-art svg {
+  width: 96px;
+  height: 96px;
+}
+.error-title {
+  font-size: 22px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  margin-bottom: 8px;
+}
+.error-detail {
+  color: var(--text-2);
+  font-size: 13.5px;
+  line-height: 1.55;
+  margin-bottom: 22px;
+}
+.error-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
 }
 
 /* ── Markdown body ─────────────────────────────────────────────── */
@@ -2767,6 +2865,62 @@ a.dot-marker:hover,
   }
   .filterbar .wide {
     grid-column: auto;
+  }
+}
+
+/* Tap-target wrapper around bulk-select checkboxes. Tight on desktop; the
+   touch-target block below expands it to a 44px hit area on phones while the
+   checkbox itself stays visually 20px. The wrapping <label> also toggles the
+   checkbox natively, so the whole area is clickable. */
+.check-tap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+/* ── Touch targets (phones) ─────────────────────────────────────────
+   WCAG 2.5.5 / platform HIG: interactive controls get a comfortable ≥44px
+   hit area on touch-sized viewports. Tables are already in card mode here, so
+   each row-card and its inline actions are easy to tap. */
+@media (max-width: 640px) {
+  .btn {
+    min-height: 44px;
+  }
+  .btn-link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  /* Window / segmented pickers + PR tabs become full-height tap targets. */
+  .seg-btn,
+  .prtab {
+    min-height: 44px;
+  }
+  /* Sidebar/drawer nav rows. */
+  .snav {
+    min-height: 44px;
+  }
+  /* Bulk-select: keep the checkbox visually 20px, but expand its label wrapper
+     to a full 44px tap target (the input alone wouldn't enlarge the hit area). */
+  .tbl input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+  }
+  .tbl td[data-label="Select"] {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .tbl th .check-tap,
+  .tbl td[data-label="Select"] .check-tap {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  /* Drill-in author button gets a full-height tap target. */
+  .tbl tbody tr .row-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
   }
 }
 /* ─── Theme / density controls (W1 theming) ────────────────────────── */
@@ -4874,28 +5028,79 @@ input[type="checkbox"].learn-check {
 
 /* ── Analytics: sortable + clickable tables, sparkline, drill-down ── */
 .tbl thead th.sortable {
-  cursor: pointer;
   user-select: none;
   white-space: nowrap;
 }
-.tbl thead th.sortable:hover {
+/* The interactive control is a real <button> filling the header cell, so
+   sorting keeps native keyboard/focus semantics; aria-sort lives on the th. */
+.tbl thead th.sortable .th-sort {
+  /* Full native-button reset so the control adopts the header cell's own
+     presentation (no default chrome / padding in Safari & Firefox) and the
+     clickable area fills the cell. */
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+/* Numeric / right-aligned headers keep their label flush right. */
+.tbl thead th.num .th-sort,
+.tbl thead th.right .th-sort {
+  justify-content: flex-end;
+}
+/* The reset strips native chrome, so give keyboard focus an explicit ring.
+   Inset (negative offset) so it can't be clipped by the card's overflow:hidden
+   at the header edge; --accent-bright carries in both themes. */
+.tbl thead th.sortable .th-sort:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: -2px;
+  border-radius: var(--r-xs);
+}
+.tbl thead th.sortable:hover .th-sort {
   color: var(--text-1);
 }
-.tbl thead th.sortable.sorted {
+.tbl thead th.sortable.sorted .th-sort {
   color: var(--accent-bright);
 }
 .tbl thead th.sortable .sort-caret {
   color: var(--accent);
   font-size: 10px;
 }
-.tbl tbody tr.clickable {
+/* Author drill-in: a real button in the first cell carries the interaction;
+   the row only reflects the selected state visually. */
+.tbl tbody tr .row-link {
+  font: inherit;
+  color: var(--text);
+  font-weight: 600;
+  text-align: left;
   cursor: pointer;
 }
-.tbl tbody tr.clickable.selected {
+.tbl tbody tr .row-link:hover {
+  color: var(--accent-bright);
+}
+.tbl tbody tr.row-selected {
   background: var(--accent-soft);
 }
-.tbl tbody tr.clickable.selected td:first-child {
+.tbl tbody tr.row-selected td:first-child {
   box-shadow: inset 2px 0 0 var(--accent);
+}
+/* Desktop width for the inline trend/sparkline column. Scoped above the 640px
+   card-reflow breakpoint (not an inline style) so it never fights the mobile
+   `.tbl td { width: 100% }` rule when rows collapse into stacked cards. */
+@media (min-width: 641px) {
+  .tbl td.trend-col {
+    width: 130px;
+  }
 }
 
 /* Compact SVG line sparkline */

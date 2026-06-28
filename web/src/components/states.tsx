@@ -1,17 +1,88 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { Link, isRouteErrorResponse, useRouteError } from "react-router-dom";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { ApiError } from "../api/client";
-import { AlertIcon } from "./icons";
+import { AlertIcon, LogoIcon } from "./icons";
 
 // Shared loading / error / empty states so every screen handles the three
 // non-happy paths consistently.
 
-export function EmptyState({ title, hint }: { title: ReactNode; hint?: ReactNode }) {
+export function EmptyState({
+  title,
+  hint,
+  illustration,
+  action,
+}: {
+  title: ReactNode;
+  hint?: ReactNode;
+  /** A light, on-brand line illustration (see Empty*Art below). Optional so the
+   *  compact empty states embedded in cards/donuts can stay illustration-free. */
+  illustration?: ReactNode;
+  /** A next-step CTA (a link or button) that points the user somewhere useful. */
+  action?: ReactNode;
+}) {
   return (
-    <div className="empty">
+    <div className={`empty${illustration ? " has-art" : ""}`}>
+      {illustration ? (
+        <div className="empty-art" aria-hidden="true">
+          {illustration}
+        </div>
+      ) : null}
       <div className="title">{title}</div>
-      {hint ? <div>{hint}</div> : null}
+      {hint ? <div className="empty-hint">{hint}</div> : null}
+      {action ? <div className="empty-cta">{action}</div> : null}
     </div>
+  );
+}
+
+// ── Branded empty-state illustrations ────────────────────────────────
+// Light line-art, drawn with currentColor so the .empty-art rule can tint them
+// (a muted base stroke with a single accent-keyed highlight). Decorative only —
+// the surrounding EmptyState already carries the text, so these are aria-hidden.
+
+/** Magnifier over a document — "nothing matched your search/filters". */
+export function EmptySearchArt() {
+  return (
+    <svg viewBox="0 0 96 96" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="20" y="14" width="42" height="54" rx="4" className="art-soft" />
+      <path d="M30 28h22M30 38h22M30 48h12" className="art-soft" />
+      <circle cx="58" cy="58" r="15" className="art-accent" />
+      <path d="m69 69 9 9" className="art-accent" />
+    </svg>
+  );
+}
+
+/** Shield with a check — "all clear, nothing flagged". */
+export function EmptyShieldArt() {
+  return (
+    <svg viewBox="0 0 96 96" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M48 14 26 22v20c0 16 10 26 22 30 12-4 22-14 22-30V22z" className="art-soft" />
+      <path d="m39 46 6 6 13-13" className="art-accent" />
+    </svg>
+  );
+}
+
+/** Stacked bars / podium — "no activity to rank yet". */
+export function EmptyChartArt() {
+  return (
+    <svg viewBox="0 0 96 96" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 78h64" className="art-soft" />
+      <rect x="24" y="50" width="14" height="24" rx="2" className="art-soft" />
+      <rect x="41" y="34" width="14" height="40" rx="2" className="art-accent" />
+      <rect x="58" y="58" width="14" height="16" rx="2" className="art-soft" />
+    </svg>
+  );
+}
+
+/** Empty open box — generic "nothing here". */
+export function EmptyBoxArt() {
+  return (
+    <svg viewBox="0 0 96 96" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 36 48 22l32 14-32 14z" className="art-soft" />
+      <path d="M16 36v26l32 14 32-14V36" className="art-soft" />
+      <path d="M48 50v26" className="art-accent" />
+      <path d="M32 43v9" className="art-accent" />
+    </svg>
   );
 }
 
@@ -191,16 +262,60 @@ export function ErrorState({ error }: { error: unknown }) {
   );
 }
 
-export function NotFoundState({ message }: { message: string }) {
+export function NotFoundState({ message, action }: { message: string; action?: ReactNode }) {
   return (
     <section className="card">
-      <div className="empty">
-        <div className="mono" style={{ color: "var(--text-3)", fontSize: 11, letterSpacing: "0.12em", marginBottom: 8 }}>
-          404 · NOT FOUND
+      <div className="empty has-art">
+        <div className="empty-art" aria-hidden="true">
+          <EmptyBoxArt />
         </div>
+        <div className="mono empty-code">404 · NOT FOUND</div>
         <div className="title">{message}</div>
+        {action ? <div className="empty-cta">{action}</div> : null}
       </div>
     </section>
+  );
+}
+
+// Full-page error boundary wired as the router's errorElement. Catches render
+// and loader errors thrown anywhere under the Shell and shows a friendly,
+// on-brand recovery page instead of a blank screen or React's dev overlay.
+export function RouteErrorBoundary() {
+  const error = useRouteError();
+  const routeResp = isRouteErrorResponse(error) ? error : null;
+  const is404 = routeResp?.status === 404;
+
+  const title = is404 ? "We couldn't find that page" : "Something went wrong";
+  const detail = is404
+    ? "The page may have moved, or the link might be out of date."
+    : routeResp
+      ? `${routeResp.status} ${routeResp.statusText}`.trim()
+      : error instanceof Error
+        ? error.message
+        : "An unexpected error interrupted this page.";
+
+  return (
+    <div className="error-page" role="alert">
+      <div className="error-page-inner">
+        <div className="error-brand">
+          <LogoIcon style={{ width: 30, height: 30 }} />
+          <span className="error-wordmark">DiffSentry</span>
+        </div>
+        <div className="empty-art error-art" aria-hidden="true">
+          {is404 ? <EmptyBoxArt /> : <EmptyShieldArt />}
+        </div>
+        <h1 className="error-title">{title}</h1>
+        <p className="error-detail">{detail}</p>
+        <div className="error-actions">
+          <Link className="btn btn-primary" to="/overview">
+            Back to overview
+          </Link>
+          <button type="button" className="btn btn-ghost" onClick={() => window.location.reload()}>
+            Reload page
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

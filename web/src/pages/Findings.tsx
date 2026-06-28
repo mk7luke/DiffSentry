@@ -6,7 +6,7 @@ import { Card, PageHeader } from "../components/primitives";
 import { SeverityBadge, TriageBadge } from "../components/badges";
 import { TriageMenu } from "../components/TriageControls";
 import { useAuth } from "../auth/useAuth";
-import { EmptyState, QueryBoundary, SkeletonTable } from "../components/states";
+import { EmptySearchArt, EmptyState, QueryBoundary, SkeletonTable } from "../components/states";
 import { pluralize, relativeTime } from "../lib/format";
 import type { FindingExplorerRow } from "../api/types";
 
@@ -259,7 +259,16 @@ export function FindingsPage() {
                 bodyClass="flush"
               >
                 {data.rows.length === 0 ? (
-                  <EmptyState title="No findings match" hint="Try widening the filters above." />
+                  <EmptyState
+                    illustration={<EmptySearchArt />}
+                    title="No findings match"
+                    hint="No findings line up with these filters. Try widening the severity, source, or age, or clear everything to start fresh."
+                    action={
+                      <button type="button" className="btn btn-primary" onClick={reset}>
+                        Clear filters
+                      </button>
+                    }
+                  />
                 ) : (
                   <>
                     <table className="tbl rail">
@@ -267,12 +276,14 @@ export function FindingsPage() {
                         <tr>
                           {capabilities.triageFindings ? (
                             <th style={{ width: 28 }}>
-                              <input
-                                type="checkbox"
-                                aria-label="Select all on this page"
-                                checked={data.rows.length > 0 && data.rows.every((r) => selected.has(r.id))}
-                                onChange={() => toggleAll(data.rows)}
-                              />
+                              <label className="check-tap">
+                                <input
+                                  type="checkbox"
+                                  aria-label="Select all on this page"
+                                  checked={data.rows.length > 0 && data.rows.every((r) => selected.has(r.id))}
+                                  onChange={() => toggleAll(data.rows)}
+                                />
+                              </label>
                             </th>
                           ) : null}
                           <th>Severity</th>
@@ -290,12 +301,14 @@ export function FindingsPage() {
                           <tr key={f.id} data-sev={(f.severity ?? "").toLowerCase()}>
                             {capabilities.triageFindings ? (
                               <td data-label="Select">
-                                <input
-                                  type="checkbox"
-                                  aria-label={`Select finding ${f.id}`}
-                                  checked={selected.has(f.id)}
-                                  onChange={() => toggleOne(f.id)}
-                                />
+                                <label className="check-tap">
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`Select finding ${f.id}`}
+                                    checked={selected.has(f.id)}
+                                    onChange={() => toggleOne(f.id)}
+                                  />
+                                </label>
                               </td>
                             ) : null}
                             <td data-label="Severity">

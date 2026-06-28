@@ -7,7 +7,7 @@ import { Card, PageHeader } from "../components/primitives";
 import { ActionBar } from "../components/ActionBar";
 import { ApprovalBadge, RiskBadge, SeverityBadge, TriageBadge } from "../components/badges";
 import { TriageMenu } from "../components/TriageControls";
-import { EmptyState, QueryBoundary } from "../components/states";
+import { EmptyShieldArt, EmptyState, QueryBoundary } from "../components/states";
 import { Markdown } from "../components/Markdown";
 import { DiffViewer } from "../components/DiffViewer";
 import { useEventStream, type StreamEnvelope } from "../realtime/useEventStream";
@@ -172,7 +172,11 @@ export function PRDetailPage() {
                   bodyClass="flush"
                 >
                   {a.findings.length === 0 ? (
-                    <EmptyState title="No findings" hint="Nothing flagged across any review of this PR." />
+                    <EmptyState
+                      illustration={<EmptyShieldArt />}
+                      title="No findings — all clear"
+                      hint="Nothing was flagged across any review of this PR."
+                    />
                   ) : (
                     <table className="tbl rail">
                       <thead>
@@ -198,7 +202,7 @@ export function PRDetailPage() {
                                 {f.path ?? ""}
                                 {f.line ? <span className="line-num">:{f.line}</span> : null}
                               </td>
-                              <td>
+                              <td className="cell-primary">
                                 <div className="strong">{f.title ?? "—"}</div>
                                 {f.body ? (
                                   <details style={{ marginTop: 4 }}>

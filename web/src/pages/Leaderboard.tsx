@@ -5,7 +5,7 @@ import { Breadcrumbs } from "../components/Shell";
 import { Card, Metric, PageHeader } from "../components/primitives";
 import { ApprovalBadge, RiskBadge } from "../components/badges";
 import { Donut, Hbar, LineSpark } from "../components/charts";
-import { EmptyState, QueryBoundary } from "../components/states";
+import { EmptyChartArt, EmptyState, QueryBoundary } from "../components/states";
 import { buildDaySeries, relativeTime, type DayBin } from "../lib/format";
 import type { AuthorDayRow, AuthorStatRow } from "../api/types";
 
@@ -121,11 +121,27 @@ export function LeaderboardPage() {
           const Th = ({ k, label, cls }: { k: SortKey; label: string; cls?: string }) => (
             <th
               className={`sortable${cls ? " " + cls : ""}${sort.key === k ? " sorted" : ""}`}
-              onClick={() => toggleSort(k)}
               aria-sort={sort.key === k ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
             >
-              {label}
-              <span className="sort-caret">{sort.key === k ? (sort.dir === "desc" ? " ▾" : " ▴") : ""}</span>
+              {/* A real <button> carries the interaction so sorting uses native
+                  keyboard/focus semantics; aria-sort stays on the <th>. The
+                  button's accessible name also spells out the current sort state
+                  and next action, since a tabbing screen-reader user hears the
+                  button name rather than the th's aria-sort, and the caret glyph
+                  is decorative (aria-hidden). */}
+              <button
+                type="button"
+                className="th-sort"
+                onClick={() => toggleSort(k)}
+                aria-label={
+                  sort.key === k
+                    ? `${label}, sorted ${sort.dir === "asc" ? "ascending" : "descending"}. Activate to sort ${sort.dir === "asc" ? "descending" : "ascending"}.`
+                    : `${label}, not sorted. Activate to sort ascending.`
+                }
+              >
+                {label}
+                <span className="sort-caret" aria-hidden="true">{sort.key === k ? (sort.dir === "desc" ? " ▾" : " ▴") : ""}</span>
+              </button>
             </th>
           );
 
@@ -143,11 +159,20 @@ export function LeaderboardPage() {
 
               <Card
                 title="By author"
-                subtitle={`${data.authors.length} author${data.authors.length === 1 ? "" : "s"} · click a row to drill in · click a column to sort`}
+                subtitle={`${data.authors.length} author${data.authors.length === 1 ? "" : "s"} · click an author to drill in · click a column to sort`}
                 bodyClass="flush"
               >
                 {data.authors.length === 0 ? (
-                  <EmptyState title="No review activity yet" hint="Author stats appear once PRs are reviewed in this window." />
+                  <EmptyState
+                    illustration={<EmptyChartArt />}
+                    title="No review activity yet"
+                    hint="Author stats appear once DiffSentry reviews PRs in this window. Try a wider window, or open a PR to kick off the first review."
+                    action={
+                      <Link className="btn btn-primary" to="/overview">
+                        View repositories
+                      </Link>
+                    }
+                  />
                 ) : (
                   <table className="tbl">
                     <thead>
@@ -164,21 +189,31 @@ export function LeaderboardPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((a) => (
-                        <tr
-                          key={a.author}
-                          className={`clickable${a.author === selected ? " selected" : ""}`}
-                          onClick={() => selectAuthor(a.author === selected ? null : a.author)}
-                        >
-                          <td className="strong">{a.author}</td>
-                          <td className="num">{a.prs_reviewed}</td>
-                          <td className="num muted">{a.reviews}</td>
-                          <td className="num">{a.avg_risk == null ? "—" : Math.round(a.avg_risk)}</td>
-                          <td className="num">{a.findings}</td>
-                          <td className="num muted">{a.findings_per_pr.toFixed(1)}</td>
-                          <td className={`num ${a.critical > 0 ? "crit" : "zero"}`}>{a.critical}</td>
-                          <td className="num">{a.acceptance == null ? "—" : `${Math.round(a.acceptance * 100)}%`}</td>
-                          <td className="right" style={{ width: 130 }}>
+                      {rows.map((a) => {
+                        const isSel = a.author === selected;
+                        return (
+                        <tr key={a.author} className={isSel ? "row-selected" : undefined}>
+                          <td className="strong cell-primary" data-label="Author">
+                            {/* Selection rides on a real button (keyboard/focus +
+                                aria-pressed) rather than a faux-button row. */}
+                            <button
+                              type="button"
+                              className="row-link"
+                              aria-pressed={isSel}
+                              aria-label={`${isSel ? "Hide" : "Show"} details for ${a.author}`}
+                              onClick={() => selectAuthor(isSel ? null : a.author)}
+                            >
+                              {a.author}
+                            </button>
+                          </td>
+                          <td className="num" data-label="PRs">{a.prs_reviewed}</td>
+                          <td className="num muted" data-label="Reviews">{a.reviews}</td>
+                          <td className="num" data-label="Avg risk">{a.avg_risk == null ? "—" : Math.round(a.avg_risk)}</td>
+                          <td className="num" data-label="Findings">{a.findings}</td>
+                          <td className="num muted" data-label="Per PR">{a.findings_per_pr.toFixed(1)}</td>
+                          <td className={`num ${a.critical > 0 ? "crit" : "zero"}`} data-label="Critical">{a.critical}</td>
+                          <td className="num" data-label="Accepted">{a.acceptance == null ? "—" : `${Math.round(a.acceptance * 100)}%`}</td>
+                          <td className="right trend-col" data-label="Trend">
                             <LineSpark
                               values={authorVolume(data.series, a.author, days)}
                               title={`${a.author} · reviews/day`}
@@ -187,7 +222,8 @@ export function LeaderboardPage() {
                             />
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}
@@ -293,24 +329,24 @@ function AuthorDrilldown({ author, days, onClose }: { author: string; days: numb
                       <tbody>
                         {data.prs.map((pr) => (
                           <tr key={`${pr.owner}/${pr.repo}#${pr.number}`}>
-                            <td className="mono">
+                            <td className="mono cell-primary" data-label="PR">
                               <Link className="link" to={`/repos/${encodeURIComponent(pr.owner)}/${encodeURIComponent(pr.repo)}/pr/${pr.number}`}>
                                 #{pr.number}
                               </Link>
                             </td>
-                            <td className="mono muted">
+                            <td className="mono muted" data-label="Repo">
                               <Link className="link" to={`/repos/${encodeURIComponent(pr.owner)}/${encodeURIComponent(pr.repo)}`}>
                                 {pr.owner}/{pr.repo}
                               </Link>
                             </td>
-                            <td>
+                            <td data-label="Risk">
                               <RiskBadge level={pr.latest_risk_level} score={pr.latest_risk_score} />
                             </td>
-                            <td>
+                            <td data-label="Outcome">
                               <ApprovalBadge approval={pr.latest_approval} />
                             </td>
-                            <td className="num">{pr.total_findings}</td>
-                            <td className="right muted">{relativeTime(pr.latest_at)}</td>
+                            <td className="num" data-label="Findings">{pr.total_findings}</td>
+                            <td className="right muted" data-label="Latest">{relativeTime(pr.latest_at)}</td>
                           </tr>
                         ))}
                       </tbody>
