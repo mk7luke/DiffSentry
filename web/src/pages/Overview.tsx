@@ -4,8 +4,10 @@ import { useRepos } from "../api/hooks";
 import { Breadcrumbs } from "../components/Shell";
 import { Card, Chip, Metric, PageHeader } from "../components/primitives";
 import { MiniSparkbar, StackedSeverityBar } from "../components/charts";
+import { GradeBadge } from "../components/badges";
 import { EmptyState, QueryBoundary } from "../components/states";
 import { buildDaySeries, groupActivityByRepo, relativeTime, repoHealth } from "../lib/format";
+import { computeHealth } from "../lib/health";
 import type { RepoOverviewRow } from "../api/types";
 
 type SortKey = "last_review" | "critical_7d" | "findings_7d" | "prs_reviewed" | "repo";
@@ -145,6 +147,14 @@ export function OverviewPage() {
                 <div className="grid two">
                   {visibleRows.map((r) => {
                     const health = repoHealth(r.prs_reviewed, r.findings_7d, r.critical_7d);
+                    const grade = computeHealth({
+                      prsReviewed: r.prs_reviewed,
+                      approved: r.approved,
+                      changesRequested: r.changes_requested,
+                      pending: r.commented,
+                      findings: r.findings_7d,
+                      critical: r.critical_7d,
+                    });
                     const series = buildDaySeries(activityByRepo.get(`${r.owner}/${r.repo}`) ?? [], 14);
                     const idleCls = r.prs_reviewed === 0 ? " idle" : "";
                     return (
@@ -171,6 +181,7 @@ export function OverviewPage() {
                           </div>
                         </div>
                         <div className="right">
+                          <GradeBadge health={grade} />
                           <div className="when">{relativeTime(r.last_review) || "never"}</div>
                         </div>
                         <MiniSparkbar series={series} />

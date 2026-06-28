@@ -2,6 +2,7 @@
 // src/dashboard/layout.ts.
 
 import type { TriageColumns, TriageState } from "../api/types";
+import type { HealthScore } from "../lib/health";
 
 /**
  * Derive the effective triage state from a finding's triage columns. An active
@@ -113,4 +114,48 @@ export function RoleBadge({ role }: { role: string | null | undefined }) {
   const k = (role ?? "").toLowerCase();
   const label = k || "—";
   return <span className={`rolechip role-${k || "none"}`}>{label}</span>;
+}
+
+/**
+ * Prominent, color-coded repo-health grade. Shows the letter at a glance; on
+ * hover it expands a card with the score and the approved / changes-requested /
+ * pending split. Used on the overview cards and the RepoDetail header — both
+ * pass a `HealthScore` from the shared `computeHealth` helper so the verdict is
+ * identical everywhere.
+ */
+export function GradeBadge({ health, size = "md" }: { health: HealthScore; size?: "sm" | "md" | "lg" }) {
+  const { grade, tone, score, label, hasData, breakdown } = health;
+  const aria = hasData ? `Health grade ${grade}, ${score} percent clean — ${label}` : "Health grade not available — no reviews yet";
+  return (
+    <span className={`grade-badge grade-${tone} grade-${size}`} aria-label={aria}>
+      <span className="grade-letter">{grade}</span>
+      <span className="grade-pop" role="tooltip">
+        <span className="gp-head">
+          <span className={`gp-grade grade-${tone}`}>{grade}</span>
+          <span className="gp-meta">
+            <span className="gp-score">{hasData ? `${score}% clean` : "No reviews yet"}</span>
+            <span className="gp-label">{label}</span>
+          </span>
+        </span>
+        {breakdown.total > 0 ? (
+          <span className="gp-split">
+            <span className="gp-row good">
+              <span className="k">Approved</span>
+              <span className="v">{breakdown.approved}</span>
+            </span>
+            <span className="gp-row danger">
+              <span className="k">Changes requested</span>
+              <span className="v">{breakdown.changesRequested}</span>
+            </span>
+            <span className="gp-row muted">
+              <span className="k">Pending</span>
+              <span className="v">{breakdown.pending}</span>
+            </span>
+          </span>
+        ) : (
+          <span className="gp-empty">No review outcomes recorded yet.</span>
+        )}
+      </span>
+    </span>
+  );
 }

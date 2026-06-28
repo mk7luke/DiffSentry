@@ -8,6 +8,10 @@ export interface RepoOverviewRow {
   findings_7d: number;
   critical_7d: number;
   last_review: string | null;
+  /** All-time review outcomes — feeds the card health grade + breakdown. */
+  approved: number;
+  changes_requested: number;
+  commented: number;
 }
 
 /** Repos + activity stats for the overview table. */
@@ -27,7 +31,11 @@ export function getRepoOverview(): RepoOverviewRow[] {
          (SELECT COUNT(*) FROM findings f
             JOIN reviews rv ON rv.id = f.review_id
             WHERE rv.owner = r.owner AND rv.repo = r.repo AND rv.created_at >= ? AND f.severity = 'critical') AS critical_7d,
-         (SELECT MAX(created_at) FROM reviews rv WHERE rv.owner = r.owner AND rv.repo = r.repo) AS last_review
+         (SELECT MAX(created_at) FROM reviews rv WHERE rv.owner = r.owner AND rv.repo = r.repo) AS last_review,
+         (SELECT COUNT(*) FROM reviews rv WHERE rv.owner = r.owner AND rv.repo = r.repo AND rv.approval = 'approve') AS approved,
+         (SELECT COUNT(*) FROM reviews rv WHERE rv.owner = r.owner AND rv.repo = r.repo AND rv.approval = 'request_changes') AS changes_requested,
+         (SELECT COUNT(*) FROM reviews rv WHERE rv.owner = r.owner AND rv.repo = r.repo
+            AND (rv.approval IS NULL OR rv.approval NOT IN ('approve', 'request_changes'))) AS commented
        FROM repos r
        ORDER BY (last_review IS NULL), last_review DESC`,
     )

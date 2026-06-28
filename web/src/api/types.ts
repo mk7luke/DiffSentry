@@ -25,6 +25,10 @@ export interface RepoOverviewRow {
   findings_7d: number;
   critical_7d: number;
   last_review: string | null;
+  /** All-time review outcomes — feeds the card health grade + breakdown. */
+  approved: number;
+  changes_requested: number;
+  commented: number;
 }
 
 export interface DailyActivityRow {
