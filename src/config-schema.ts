@@ -157,6 +157,21 @@ export const REPO_CONFIG_SCHEMA: JsonSchema = {
           },
         },
 
+        static_analysis: {
+          type: "object",
+          additionalProperties: false,
+          description: "Deterministic static analysis (lint / typecheck / SAST). Opt-in; needs a checked-out PR head.",
+          properties: {
+            enabled: { type: "boolean", description: "Master switch (default false)." },
+            analyzers: {
+              type: "array",
+              description: "Restrict to a subset of analyzers (default: every detected one).",
+              items: { type: "string", enum: ["eslint", "tsc", "semgrep"] },
+            },
+            timeout_ms: { type: "integer", minimum: 0, description: "Per-analyzer wall-clock budget in ms (default 60000)." },
+          },
+        },
+
         pre_merge_checks: {
           type: "object",
           additionalProperties: false,
