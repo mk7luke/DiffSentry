@@ -5013,10 +5013,24 @@ button.diffv-dot[aria-expanded="true"] {
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   padding: 10px 12px;
-  cursor: pointer;
 }
 .diffv-fallback li.active {
   border-color: var(--accent);
+}
+.diffv-fallback-select {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  border-radius: 6px;
+}
+.diffv-fallback-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* Lightweight syntax highlight tokens (see lib/highlight.tsx). */

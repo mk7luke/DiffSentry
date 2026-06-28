@@ -120,14 +120,16 @@ function DiffViewerBody({
   const navList = useMemo<NavEntry[]>(() => {
     const out: NavEntry[] = [];
     for (const file of files) {
-      const lines: number[] = [];
+      // A Set so a malformed diff (e.g. a repeated hunk) that surfaces the same
+      // new-side line twice still yields exactly one nav stop — otherwise j/k
+      // would advance the index while appearing to sit on the same finding.
+      const lines = new Set<number>();
       for (const hunk of file.hunks) {
         for (const ln of hunk.lines) {
-          if (ln.newLine != null && anchored.has(`${file.path}:${ln.newLine}`)) lines.push(ln.newLine);
+          if (ln.newLine != null && anchored.has(`${file.path}:${ln.newLine}`)) lines.add(ln.newLine);
         }
       }
-      lines.sort((a, b) => a - b);
-      for (const line of lines) {
+      for (const line of [...lines].sort((a, b) => a - b)) {
         // One nav stop per anchored line, keyed by the line's anchor finding
         // (its first) — the same id rowRefs/panelRefs use, so scroll + the `t`
         // shortcut resolve even when a line carries several findings.
@@ -530,18 +532,24 @@ function FindingFallbackList({
   return (
     <ul className="diffv-fallback">
       {findings.map((f) => (
-        <li
-          key={f.id}
-          className={f.id === activeId ? "active" : undefined}
-          onClick={() => setActiveId(f.id)}
-        >
+        <li key={f.id} className={f.id === activeId ? "active" : undefined}>
           <div className="diffv-finding-head">
-            <SeverityBadge severity={f.severity} />
-            <span className="mono muted">
-              {f.path ?? ""}
-              {f.line ? `:${f.line}` : ""}
-            </span>
-            <span className="strong">{f.title ?? "—"}</span>
+            {/* Selection target is a real button (keyboard-focusable, Enter/Space
+                activation). It wraps only non-interactive label content — the
+                triage control is a sibling so we never nest buttons. */}
+            <button
+              type="button"
+              className="diffv-fallback-select btn-reset"
+              onClick={() => setActiveId(f.id)}
+              aria-pressed={f.id === activeId}
+            >
+              <SeverityBadge severity={f.severity} />
+              <span className="mono muted">
+                {f.path ?? ""}
+                {f.line ? `:${f.line}` : ""}
+              </span>
+              <span className="strong">{f.title ?? "—"}</span>
+            </button>
             <span className="diffv-finding-actions">
               <TriageBadge row={f} />
               <TriageMenu target={{ kind: "single", id: f.id }} compact />
