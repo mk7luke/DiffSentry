@@ -473,20 +473,27 @@ export function computeAddedLines(patch: string): Set<number> {
   // Any body lines before that (malformed/nonstandard patch text) are ignored
   // so we never emit an invalid line 0 position.
   let rightLine: number | null = null;
+  // RIGHT-side lines the current hunk header declares (`+start,count`). Context
+  // and added lines consume it; once exhausted we stop attributing lines, so a
+  // zero-length (`+N,0`) hunk or trailing junk can't mint bogus line numbers.
+  let rightRemaining = 0;
   for (const raw of patch.split("\n")) {
-    const hunk = raw.match(/^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/);
+    const hunk = raw.match(/^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@/);
     if (hunk) {
       rightLine = parseInt(hunk[1], 10);
+      rightRemaining = hunk[2] !== undefined ? parseInt(hunk[2], 10) : 1; // omitted count ⇒ 1
       continue;
     }
     if (rightLine === null) continue; // pre-hunk noise — no line numbering yet
     if (raw.startsWith("---") || raw.startsWith("+++")) continue;
     if (raw.startsWith("\\ ")) continue; // "\ No newline at end of file" — diff metadata, not a line
-    if (raw.startsWith("-")) continue;
+    if (raw.startsWith("-")) continue; // deletions don't consume RIGHT-side span
+    if (rightRemaining <= 0) continue; // past the hunk's declared right-side range
     if (raw.startsWith("+")) {
       added.add(rightLine);
     }
     rightLine++;
+    rightRemaining--;
   }
   return added;
 }
@@ -572,11 +579,48 @@ function exec(cmd: string, args: string[], ctx: RunCtx): Promise<ExecResult> {
     let child: ReturnType<typeof spawn>;
     try {
       const { command, args: spawnArgs } = resolveSpawn(cmd, args);
-      child = spawn(command, spawnArgs, { cwd: ctx.cwd, env: process.env, windowsHide: true });
+      child = spawn(command, spawnArgs, {
+        cwd: ctx.cwd,
+        env: process.env,
+        windowsHide: true,
+        // POSIX: own process group so we can signal the whole tree (analyzers
+        // like semgrep fork workers). Not on Windows (no POSIX groups there).
+        detached: process.platform !== "win32",
+      });
     } catch (err) {
       finish({ stdout: "", stderr: "", timedOut: false, spawnError: err as Error });
       return;
     }
+
+    // Terminate the entire analyzer process TREE, not just the immediate child —
+    // the cmd.exe wrapper (Windows) and analyzer worker subprocesses would
+    // otherwise keep running after a timeout/abort/oversize kill, defeating the
+    // per-analyzer resource bound. Falls back to a plain child kill.
+    const killTree = () => {
+      const pid = child.pid;
+      try {
+        if (process.platform === "win32" && pid) {
+          const killer = spawn("taskkill", ["/pid", String(pid), "/t", "/f"], { windowsHide: true });
+          killer.on("error", () => {
+            try {
+              child.kill("SIGKILL");
+            } catch {
+              // already gone
+            }
+          });
+        } else if (pid) {
+          process.kill(-pid, "SIGKILL"); // negative pid ⇒ the process group
+        } else {
+          child.kill("SIGKILL");
+        }
+      } catch {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // already gone
+        }
+      }
+    };
 
     let stdout = "";
     let stderr = "";
@@ -591,11 +635,7 @@ function exec(cmd: string, args: string[], ctx: RunCtx): Promise<ExecResult> {
       bytes += chunk.length;
       if (bytes > MAX_OUTPUT_BYTES) {
         outputTooLarge = true;
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          // already gone
-        }
+        killTree();
         return;
       }
       if (which === "out") stdout += chunk.toString("utf8");
@@ -608,21 +648,11 @@ function exec(cmd: string, args: string[], ctx: RunCtx): Promise<ExecResult> {
     if (ctx.timeoutMs > 0) {
       timer = setTimeout(() => {
         timedOut = true;
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          // already gone
-        }
+        killTree();
       }, ctx.timeoutMs);
     }
 
-    onAbort = () => {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // already gone
-      }
-    };
+    onAbort = () => killTree();
     ctx.signal?.addEventListener("abort", onAbort, { once: true });
 
     child.on("error", (err) => finish({ stdout, stderr, timedOut, outputTooLarge, spawnError: err }));

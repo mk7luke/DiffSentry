@@ -52,6 +52,19 @@ describe("computeAddedLines", () => {
     expect([...added]).toEqual([1]);
   });
 
+  it("does not attribute lines in a zero-length (+N,0) addition hunk", () => {
+    // Pure deletion hunk: right-side count is 0, so nothing is added even if a
+    // stray "+" line follows (malformed/tool-generated).
+    const patch = ["@@ -10,2 +9,0 @@", "-a", "-b", "+stray"].join("\n");
+    expect([...computeAddedLines(patch)]).toEqual([]);
+  });
+
+  it("stops attributing once a hunk's declared right-side span is exhausted", () => {
+    // Header declares 1 right-side line; the second "+" is beyond the span.
+    const patch = ["@@ -1,1 +1,1 @@", "+only", "+overflow"].join("\n");
+    expect([...computeAddedLines(patch)]).toEqual([1]);
+  });
+
   it("keeps later-hunk line numbers correct after a no-newline sentinel", () => {
     const patch = [
       "@@ -1,1 +1,1 @@",
