@@ -79,6 +79,11 @@ describe("wellTestedPaths", () => {
     expect(
       wellTestedPaths([file("packages/api/src/foo.ts"), file("tests/foo.test.ts")]).has("packages/api/src/foo.ts"),
     ).toBe(false);
+    // …nor a shallower mirrored path: tests/api/… mirrors api/… (or src/api/…),
+    // NOT the deeper packages/api/src/… — the package prefix must be preserved.
+    expect(
+      wellTestedPaths([file("packages/api/src/foo.ts"), file("tests/api/foo.test.ts")]).has("packages/api/src/foo.ts"),
+    ).toBe(false);
   });
 
   it("does NOT pair same-stem files in unrelated directories (directory scoping)", () => {
