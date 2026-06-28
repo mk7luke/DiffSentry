@@ -369,10 +369,10 @@ CREATE INDEX IF NOT EXISTS idx_processed_deliveries_ts ON processed_deliveries(t
  * silently lose state and force a full re-review.
  *
  * This table is the authoritative store, keyed by repo+PR. The walkthrough
- * comment keeps a small reference plus a compact fallback copy for backward
- * compatibility (PRs created before this migration, and degraded runs with
- * persistence disabled). `state_json` is the serialized WalkthroughState; a
- * single row per PR is upserted on every review.
+ * comment keeps a small reference plus a full fallback copy for lossless
+ * recovery (PRs created before this migration, runs with persistence disabled,
+ * and any later DB read miss). `state_json` is the serialized WalkthroughState;
+ * a single row per PR is upserted on every review.
  *
  * Strictly additive (one new table) — same rules as every other migration.
  */

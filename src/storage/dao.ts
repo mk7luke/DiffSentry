@@ -261,9 +261,9 @@ export function recordIssueAction(opts: {
 // ---------------------------------------------------------------------------
 // Walkthrough / incremental-review state (schema v6). The authoritative store
 // for per-PR incremental state, keyed by (owner, repo, number). The walkthrough
-// comment keeps only a small reference + a compact fallback copy; this table is
-// the source of truth so a failed comment upsert (or a hand-edited comment) can
-// no longer silently drop the state and force a full re-review.
+// comment keeps a small reference + a full fallback copy; this table is the
+// source of truth so a failed comment upsert (or a hand-edited comment) can no
+// longer silently drop the state and force a full re-review.
 //
 // Best-effort no-ops when persistence is disabled (DB_PATH=""), so the reviewer
 // transparently degrades to the embedded comment blob.
