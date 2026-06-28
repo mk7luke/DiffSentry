@@ -107,16 +107,28 @@ describe("dedupeStaticFindings", () => {
     expect(out).toHaveLength(0);
   });
 
-  it("keeps non-colliding findings and dedupes static-vs-static by location", () => {
+  it("preserves distinct static findings on the same line (different fingerprints)", () => {
+    // ESLint + tsc can both flag the same line for different reasons — keep both.
     const out = dedupeStaticFindings(
       [
-        comment({ path: "a.ts", line: 9, fingerprint: "y" }),
-        comment({ path: "a.ts", line: 9, fingerprint: "z" }), // dup location
+        comment({ path: "a.ts", line: 9, fingerprint: "y", title: "ESLint: x" }),
+        comment({ path: "a.ts", line: 9, fingerprint: "z", title: "TypeScript: TS1" }),
         comment({ path: "b.ts", line: 1, fingerprint: "w" }),
       ],
       [],
     );
-    expect(out.map((c) => `${c.path}:${c.line}`)).toEqual(["a.ts:9", "b.ts:1"]);
+    expect(out.map((c) => c.fingerprint)).toEqual(["y", "z", "w"]);
+  });
+
+  it("still collapses exact-duplicate static findings (same fingerprint)", () => {
+    const out = dedupeStaticFindings(
+      [
+        comment({ path: "a.ts", line: 9, fingerprint: "y" }),
+        comment({ path: "a.ts", line: 9, fingerprint: "y" }), // exact dup
+      ],
+      [],
+    );
+    expect(out).toHaveLength(1);
   });
 });
 

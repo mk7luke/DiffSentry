@@ -158,9 +158,15 @@ export function dedupeStaticFindings(
   const out: ReviewComment[] = [];
   for (const c of staticFindings) {
     const loc = `${c.path}:${c.line}`;
+    // Suppress against EXISTING findings (AI/safety/pattern) by location — those
+    // are richer, so a static note on the same line is redundant.
     if (occupied.has(loc)) continue;
-    if (seen.has(loc)) continue;
-    seen.add(loc);
+    // But preserve distinct static findings on the same line (e.g. ESLint + tsc
+    // each flagging it for a different reason). Only collapse exact duplicates,
+    // keyed on the per-finding fingerprint.
+    const key = c.fingerprint ?? `${loc}:${c.title ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     out.push(c);
   }
   return out;
@@ -407,6 +413,8 @@ function normalize(
   addedLines: Map<string, Set<number>>,
 ): ReviewComment[] {
   const changed = new Set(changedFiles);
+  // Constant for the whole batch (source is fixed) — compute the label once.
+  const label = labelFor(source);
   const out: ReviewComment[] = [];
   for (const r of raw) {
     const rel = toRepoRelative(r.file, cwd);
@@ -416,13 +424,13 @@ function normalize(
 
     const severity = severityFor(r.level);
     const type = "issue" as const;
-    const title = `${labelFor(source)}: ${r.ruleId}`;
+    const title = `${label}: ${r.ruleId}`;
     const body =
       `${r.message}\n\n` +
-      `_Reported by **${labelFor(source)}** (rule \`${r.ruleId}\`) — DiffSentry static analysis. ` +
+      `_Reported by **${label}** (rule \`${r.ruleId}\`) — DiffSentry static analysis. ` +
       `Disable with \`reviews.static_analysis.enabled: false\` in \`.diffsentry.yaml\`._`;
     const aiAgentPrompt =
-      `In ${rel} at line ${r.line}, resolve the ${labelFor(source)} finding (rule ${r.ruleId}): ${r.message}`;
+      `In ${rel} at line ${r.line}, resolve the ${label} finding (rule ${r.ruleId}): ${r.message}`;
     const fingerprint = fpFor(rel, r.line, source, r.ruleId);
     out.push({
       path: rel,
