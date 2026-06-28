@@ -1486,6 +1486,127 @@ export function touchApiTokenLastUsed(id: number): void {
 }
 
 // ---------------------------------------------------------------------------
+// Impact shares — tokenized, revocable links that serve the read-only,
+// aggregate Impact report without a login. Like api_tokens we persist only the
+// SHA-256 of the share token; the plaintext is returned once at creation and
+// never reconstructable from storage. `repo` fixes the report scope so a public
+// link can't be widened to other repositories.
+// ---------------------------------------------------------------------------
+
+export interface ImpactShareRow {
+  id: number;
+  share_hash: string;
+  label: string | null;
+  repo: string | null;
+  default_range: string | null;
+  created_by: string | null;
+  created_at: string | null;
+  last_viewed_at: string | null;
+  revoked_at: string | null;
+}
+
+/** Insert an impact share (its token hash + scope). Returns the new id, or null
+ *  when persistence is disabled. The caller passes the already-computed hash so
+ *  the plaintext share token never reaches storage. */
+export function createImpactShare(opts: {
+  shareHash: string;
+  label?: string | null;
+  repo?: string | null;
+  defaultRange?: string | null;
+  createdBy?: string | null;
+}): number | null {
+  const db = openDatabase();
+  if (!db) return null;
+  if (!ensureCommandCenterSchema(db, ["impact_shares"])) return null;
+  try {
+    const info = db.prepare(
+      `INSERT INTO impact_shares (share_hash, label, repo, default_range, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      opts.shareHash,
+      opts.label ?? null,
+      opts.repo ?? null,
+      opts.defaultRange ?? null,
+      opts.createdBy ?? null,
+      new Date().toISOString(),
+    );
+    return Number(info.lastInsertRowid);
+  } catch (err) {
+    logger.debug({ err }, "dao.createImpactShare failed");
+    return null;
+  }
+}
+
+/** List impact shares (metadata only — never the hash). Newest first. */
+export function listImpactShares(): ImpactShareRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  if (!ensureCommandCenterSchema(db, ["impact_shares"])) return [];
+  try {
+    return db.prepare(
+      `SELECT id, share_hash, label, repo, default_range, created_by, created_at, last_viewed_at, revoked_at
+       FROM impact_shares ORDER BY id DESC`,
+    ).all() as ImpactShareRow[];
+  } catch (err) {
+    logger.debug({ err }, "dao.listImpactShares failed");
+    return [];
+  }
+}
+
+/**
+ * Revoke a share by id. Idempotent: only stamps revoked_at when it is still
+ * NULL, so re-revoking is a harmless no-op. Returns true when a row actually
+ * transitioned from active to revoked.
+ */
+export function revokeImpactShare(id: number): boolean {
+  const db = openDatabase();
+  if (!db) return false;
+  if (!ensureCommandCenterSchema(db, ["impact_shares"])) return false;
+  try {
+    const info = db.prepare(
+      `UPDATE impact_shares SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
+    ).run(new Date().toISOString(), id);
+    return info.changes > 0;
+  } catch (err) {
+    logger.debug({ err }, "dao.revokeImpactShare failed");
+    return false;
+  }
+}
+
+/**
+ * Look up an ACTIVE (non-revoked) share by its token hash — the public-view hot
+ * path. Returns undefined when the share is unknown, revoked, or persistence is
+ * off (the public endpoint then answers 404).
+ */
+export function findActiveImpactShareByHash(shareHash: string): ImpactShareRow | undefined {
+  const db = openDatabase();
+  if (!db) return undefined;
+  if (!ensureCommandCenterSchema(db, ["impact_shares"])) return undefined;
+  try {
+    const row = db.prepare(
+      `SELECT id, share_hash, label, repo, default_range, created_by, created_at, last_viewed_at, revoked_at
+       FROM impact_shares WHERE share_hash = ? AND revoked_at IS NULL`,
+    ).get(shareHash) as ImpactShareRow | undefined;
+    return row ?? undefined;
+  } catch (err) {
+    logger.debug({ err }, "dao.findActiveImpactShareByHash failed");
+    return undefined;
+  }
+}
+
+/** Best-effort bump of a share's last_viewed_at on a successful public view. */
+export function touchImpactShareViewed(id: number): void {
+  const db = openDatabase();
+  if (!db) return;
+  if (!ensureCommandCenterSchema(db, ["impact_shares"])) return;
+  try {
+    db.prepare(`UPDATE impact_shares SET last_viewed_at = ? WHERE id = ?`).run(new Date().toISOString(), id);
+  } catch (err) {
+    logger.debug({ err }, "dao.touchImpactShareViewed failed");
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Notifications — channel + alert-rule config and the delivery log. Channels
 // and rules live in the v2 schema (notification_channels / alert_rules);
 // deliveries in the v4 notification_deliveries table. All best-effort no-ops

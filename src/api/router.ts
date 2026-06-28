@@ -39,6 +39,8 @@ import { registerNotificationRoutes } from "./notifications.js";
 import { registerCostRoutes } from "./cost.js";
 import { registerSettingsRoutes } from "./settings.js";
 import { registerTokenRoutes } from "./tokens.js";
+import { registerShareRoutes, registerPublicShareReadRoute } from "./shares.js";
+import { parseImpactRange, impactMinutesPerFinding } from "./impact-range.js";
 import { authenticateBearer, extractBearer, requiredScopeForMethod } from "./token-auth.js";
 import { buildOpenApiSpec } from "./openapi.js";
 import { renderDocsPage } from "./docs.js";
@@ -254,38 +256,8 @@ function recordTriage(
   }
 }
 
-// Supported impact ranges. Bare numbers (e.g. "30") are also accepted and
-// clamped to [1, 365]; "all" / "max" means all-time (no lower bound).
-const IMPACT_RANGES: Record<string, { days: number | null; label: string }> = {
-  "7d": { days: 7, label: "Last 7 days" },
-  "14d": { days: 14, label: "Last 14 days" },
-  "30d": { days: 30, label: "Last 30 days" },
-  "90d": { days: 90, label: "Last 90 days" },
-  "180d": { days: 180, label: "Last 180 days" },
-  "365d": { days: 365, label: "Last 12 months" },
-  all: { days: null, label: "All time" },
-  max: { days: null, label: "All time" },
-};
-
-function parseImpactRange(raw: unknown): { days: number | null; label: string } {
-  if (typeof raw !== "string" || raw.length === 0) return IMPACT_RANGES["30d"];
-  const key = raw.toLowerCase();
-  if (key in IMPACT_RANGES) return IMPACT_RANGES[key];
-  const n = Number.parseInt(key, 10);
-  if (Number.isFinite(n) && n > 0) {
-    const days = Math.min(Math.max(n, 1), 365);
-    return { days, label: `Last ${days} days` };
-  }
-  return IMPACT_RANGES["30d"];
-}
-
-/** Reviewer-minutes saved per finding heuristic, from env (default 15). */
-function impactMinutesPerFinding(): number {
-  const raw = process.env.IMPACT_MINUTES_PER_FINDING;
-  if (!raw) return 15;
-  const n = Number.parseFloat(raw);
-  return Number.isFinite(n) && n > 0 ? n : 15;
-}
+// Impact range parsing + the time-saved heuristic now live in ./impact-range.ts
+// so the authed `/impact` endpoint and the public share endpoint stay in lockstep.
 
 // ─── Search ranking ─────────────────────────────────────────────────────────
 // The DB returns candidate rows per entity; we score each match in one place so
@@ -364,6 +336,14 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   router.get("/docs", (_req, res) => {
     res.type("html").send(renderDocsPage());
   });
+
+  // ─── Public shared Impact report (no auth) ─────────────────────────
+  // A tokenized share link resolves the AGGREGATE Impact report for its fixed
+  // repo scope — no login, revocable, and exposing only counts/severities/time
+  // bins (never source code or per-finding detail). Sits BEFORE the auth gate.
+  // The same handler is also mounted standalone in server.ts so the link works
+  // even when the dashboard/API is otherwise gated off.
+  registerPublicShareReadRoute(router);
 
   // Auth gate — JSON 401 instead of the HTML-redirect the dashboard uses.
   // Accepts EITHER a bearer API token OR a cookie session, attaching the
@@ -469,6 +449,13 @@ export function createApiRouter(deps: ApiDeps): express.Router {
   // create/list/revoke. requireRole('admin') keeps tokens out (a token
   // principal resolves to ≤ author), so these are operator-only.
   registerTokenRoutes(router, { requireRole, csrf: writeCsrf });
+
+  // ─── Shareable Impact links (admin, cookie-only) ───────────────────
+  // Mint / list / revoke tokenized public links to the aggregate Impact
+  // report. Same write contract as tokens (requireRole('admin') + CSRF +
+  // audit_log); the matching PUBLIC, no-auth read endpoint is registered above
+  // the auth gate (see "Public API surface") and again standalone in server.ts.
+  registerShareRoutes(router, { requireRole, csrf: writeCsrf });
 
   // ─── Custom anti-pattern rules (admin) ─────────────────────────────
   // CRUD + a no-persist tester. Independent of the reviewer surface, so it is

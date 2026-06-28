@@ -388,6 +388,35 @@ CREATE TABLE IF NOT EXISTS walkthrough_state (
 CREATE INDEX IF NOT EXISTS idx_walkthrough_state_updated ON walkthrough_state(updated_at);
 `;
 
+/**
+ * Migration 7 — shareable Impact reports. A row mints a non-guessable, tokenized
+ * link that serves the read-only, aggregate Impact report WITHOUT a login. Only
+ * the SHA-256 of the share token is persisted (the plaintext is shown once at
+ * creation, like api_tokens), so a DB read can't reconstruct a working link.
+ *
+ * `repo` fixes the report's scope ("owner/repo", or NULL for all repositories)
+ * so a public viewer can never widen a single-repo share to others; the viewer
+ * may still pick a date range. `revoked_at` makes a link revocable — the public
+ * lookup ignores revoked rows. No findings, code, or per-PR detail is stored or
+ * served: the share only ever yields the aggregate ImpactReport.
+ *
+ * Strictly additive (one new table) — same rules as every other migration.
+ */
+const SCHEMA_V7 = `
+CREATE TABLE IF NOT EXISTS impact_shares (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  share_hash TEXT NOT NULL,
+  label TEXT,
+  repo TEXT,                       -- 'owner/repo' scope, or NULL for all repositories
+  default_range TEXT,              -- preferred initial range (e.g. '30d'); viewer can change it
+  created_by TEXT,
+  created_at TEXT,
+  last_viewed_at TEXT,
+  revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_impact_shares_hash ON impact_shares(share_hash);
+`;
+
 export interface Migration {
   version: number;
   name: string;
@@ -473,6 +502,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 4, name: "notification_deliveries", sql: SCHEMA_V4 },
   { version: 5, name: "durable_queue", sql: SCHEMA_V5 },
   { version: 6, name: "walkthrough_state", sql: SCHEMA_V6 },
+  { version: 7, name: "impact_shares", sql: SCHEMA_V7 },
 ];
 
 /** Highest version this binary knows how to migrate to. */

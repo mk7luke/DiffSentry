@@ -6,6 +6,7 @@ import { logger } from "./logger.js";
 import { recordWebhookDelivery, claimWebhookDelivery, completeWebhookDelivery, releaseWebhookDelivery } from "./storage/dao.js";
 import { createDashboardRouter } from "./dashboard/routes.js";
 import { createApiRouter } from "./api/router.js";
+import { createPublicShareRouter } from "./api/shares.js";
 import { createAuth, loadAuthConfigFromEnv } from "./dashboard/auth.js";
 import { applyPersistedSettings } from "./settings/overrides.js";
 import { dispatchWebhookEvent, extractWebhookMeta } from "./webhook/dispatch.js";
@@ -68,6 +69,33 @@ export function createServer(config: Config): CreatedServer {
     app.get(["/demo", "/demo/*"], (_req, res) => {
       res.status(404).type("text/plain").send("Demo mode is disabled on this instance.");
     });
+  }
+
+  // Public shareable Impact report. Enabled by default; operators can turn it
+  // off entirely with DISABLE_PUBLIC_SHARE=1. A tokenized share link serves the
+  // read-only, AGGREGATE Impact report with NO login (revocable from the authed
+  // dashboard). It is mounted independently of ENABLE_DASHBOARD so a shared link
+  // keeps resolving even on a webhook-only instance:
+  //   • the no-auth JSON read API at /api/v1/public/impact/:id
+  //   • the SPA shell at /share/impact/:id (React renders the chrome-less view)
+  // The public router is registered BEFORE the full /api/v1 router below, so it
+  // takes precedence for /api/v1/public/* (and is the sole handler when the
+  // dashboard is off). The /share/impact SPA fallback is registered last,
+  // alongside the other SPA fallbacks.
+  const shareEnabled = process.env.DISABLE_PUBLIC_SHARE !== "1";
+  if (shareEnabled) {
+    app.use("/api/v1/public", createPublicShareRouter());
+    // Serve SPA assets (/assets/*) so the share page can boot even when neither
+    // the dashboard nor the demo mounts express.static. `index: false` so this
+    // never auto-serves index.html at `/` — only the explicit /share/impact
+    // fallback below renders the SPA shell, leaving `/` untouched in this mode.
+    // Harmless if assets are also mounted below: static only matches files that
+    // exist and otherwise falls through, never shadowing /webhook, /health, or
+    // the API routers.
+    app.use(express.static(webDist, { index: false }));
+    logger.info(
+      "Public Impact sharing mounted: read API at /api/v1/public/impact/:id, viewer at /share/impact/:id. Set DISABLE_PUBLIC_SHARE=1 to disable.",
+    );
   }
 
   if (process.env.ENABLE_DASHBOARD === "1") {
@@ -307,6 +335,19 @@ export function createServer(config: Config): CreatedServer {
       res.status(500).json({ error: "Dispatch failed" });
     }
   });
+
+  // Public Impact-share SPA fallback. Registered before the dashboard/demo
+  // fallbacks so the chrome-less share viewer boots in EVERY server mode — the
+  // dashboard catch-all below would also serve it when ENABLE_DASHBOARD=1, but
+  // this guarantees the link works on a webhook-only or demo-only instance too.
+  // React Router renders the public view; the no-auth read API supplies data.
+  if (shareEnabled) {
+    app.get(["/share/impact", "/share/impact/*"], (_req, res, next) => {
+      res.sendFile(path.join(webDist, "index.html"), (err) => {
+        if (err) next();
+      });
+    });
+  }
 
   // SPA client-side routing fallback. Registered LAST so it never shadows the
   // webhook, health check, API, legacy dashboard, or static assets. Any other

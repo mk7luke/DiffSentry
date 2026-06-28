@@ -6,6 +6,7 @@ import { useAuth } from "./auth/useAuth";
 import { OpsConsolePage } from "./pages/OpsConsole";
 import { OverviewPage } from "./pages/Overview";
 import { ImpactPage } from "./pages/Impact";
+import { PublicImpactPage } from "./pages/PublicImpact";
 import { QueuePage } from "./pages/Queue";
 import { RepoDetailPage } from "./pages/RepoDetail";
 import { PRDetailPage } from "./pages/PRDetail";
@@ -55,6 +56,10 @@ function RootLanding() {
 
 export const router = createBrowserRouter(
   [
+  // Public, chrome-less Impact share view — deliberately OUTSIDE the <Shell />
+  // layout so it renders with no sidebar/nav/search. Reached via a tokenized,
+  // no-auth link; the more specific path outranks the Shell layout's catch-all.
+  { path: "/share/impact/:id", element: <PublicImpactPage /> },
   {
     element: <Shell />,
     children: [
