@@ -171,6 +171,10 @@ export function dedupeStaticFindings(
 function detectAnalyzers(cwd: string): StaticSource[] {
   const out: StaticSource[] = [];
   if (resolveBin(cwd, "eslint") && hasEslintConfig(cwd)) out.push("eslint");
+  // Require the default `tsconfig.json`: runTsc invokes `tsc --noEmit` with
+  // default project discovery, which only loads `tsconfig.json`. Enabling on
+  // alternate names (tsconfig.build.json, …) without passing `-p` would run tsc
+  // against the wrong/no project and yield misleading or empty output.
   if (resolveBin(cwd, "tsc") && fileExists(path.join(cwd, "tsconfig.json"))) out.push("tsc");
   if (semgrepOnPath() && hasSemgrepConfig(cwd)) out.push("semgrep");
   return out;
@@ -492,9 +496,15 @@ export function computeAddedLines(patch: string): Set<number> {
  *  all of those to the same canonical relative path before the escape check.
  *  Exported for tests (path mapping is the highest-risk step in this module). */
 export function toRepoRelative(file: string, cwd: string): string | null {
-  const abs = path.isAbsolute(file) ? path.normalize(file) : path.resolve(cwd, file);
-  const rel = path.relative(cwd, abs);
-  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return null;
+  const root = path.resolve(cwd);
+  const abs = path.isAbsolute(file) ? path.normalize(file) : path.resolve(root, file);
+  // The checkout directory itself is not a file a finding can attach to. This is
+  // the ONLY case that yields an empty relative path — repo-root *files* like
+  // `eslint.config.js` resolve to their basename, never to "".
+  if (abs === root) return null;
+  const rel = path.relative(root, abs);
+  // Anything that climbs out of the checkout (or stays absolute) escapes it.
+  if (rel.startsWith("..") || path.isAbsolute(rel)) return null;
   return rel.split(path.sep).join("/");
 }
 
