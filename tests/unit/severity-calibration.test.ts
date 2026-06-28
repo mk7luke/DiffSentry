@@ -5,7 +5,6 @@ import {
   wellTestedPaths,
   renderSeverityCalibrationBlock,
   DEFAULT_SEVERITY_CALIBRATION,
-  assessCoverage,
 } from "../../src/insights.js";
 import type { CommentSeverity, FileChange, ReviewComment } from "../../src/types.js";
 
@@ -25,9 +24,6 @@ function comment(over: Partial<ReviewComment>): ReviewComment {
     ...over,
   };
 }
-
-const noTests = assessCoverage([file("src/foo.ts")]); // testAdditions === 0
-const withTests = assessCoverage([file("src/foo.ts"), file("src/__tests__/foo.ts")]);
 
 describe("resolveSeverityCalibration", () => {
   it("returns defaults when no config given", () => {
@@ -57,9 +53,27 @@ describe("wellTestedPaths", () => {
     expect(paths.has("src/untested.ts")).toBe(false);
   });
 
-  it("matches __tests__/, test_*.py and *_test.go layouts", () => {
+  it("matches same-directory test_*.py and *_test.go layouts", () => {
     expect(wellTestedPaths([file("pkg/auth.go"), file("pkg/auth_test.go")]).has("pkg/auth.go")).toBe(true);
-    expect(wellTestedPaths([file("svc/api.py"), file("tests/test_api.py")]).has("svc/api.py")).toBe(true);
+    expect(wellTestedPaths([file("svc/api.py"), file("svc/test_api.py")]).has("svc/api.py")).toBe(true);
+  });
+
+  it("matches __tests__/ subfolders and mirrored tests/ trees", () => {
+    expect(
+      wellTestedPaths([file("src/components/Btn.ts"), file("src/components/__tests__/Btn.test.ts")]).has(
+        "src/components/Btn.ts",
+      ),
+    ).toBe(true);
+    // mirrored tree: tests/api/… covers src/api/…
+    expect(wellTestedPaths([file("src/api/foo.ts"), file("tests/api/foo.test.ts")]).has("src/api/foo.ts")).toBe(true);
+  });
+
+  it("does NOT pair same-stem files in unrelated directories (directory scoping)", () => {
+    // Regression: a global basename index would wrongly pair these. They share
+    // the stem `foo` but live in sibling packages, so neither is well-tested.
+    const paths = wellTestedPaths([file("packages/api/foo.ts"), file("packages/web/foo.test.ts")]);
+    expect(paths.has("packages/api/foo.ts")).toBe(false);
+    expect(paths.size).toBe(0);
   });
 });
 
@@ -70,7 +84,6 @@ describe("calibrateSeverities — escalation", () => {
       comments: [c],
       files: [file("src/foo.ts")],
       fanInByFile: { "src/foo.ts": 9 },
-      coverage: noTests,
       weights: DEFAULT_SEVERITY_CALIBRATION,
     });
     expect(c.severity).toBe<CommentSeverity>("major");
@@ -82,7 +95,6 @@ describe("calibrateSeverities — escalation", () => {
     calibrateSeverities({
       comments: [c],
       files: [file("src/auth/session.ts")],
-      coverage: noTests,
       weights: DEFAULT_SEVERITY_CALIBRATION,
     });
     expect(c.severity).toBe<CommentSeverity>("major");
@@ -94,7 +106,6 @@ describe("calibrateSeverities — escalation", () => {
       comments: [c],
       files: [file("payment/charge.ts")],
       fanInByFile: { "payment/charge.ts": 12 },
-      coverage: noTests,
       weights: { ...DEFAULT_SEVERITY_CALIBRATION, maxEscalation: 2 },
     });
     // minor(1) + 2 steps → critical(3)
@@ -107,7 +118,6 @@ describe("calibrateSeverities — escalation", () => {
       comments: [c],
       files: [file("src/auth/x.ts")],
       fanInByFile: { "src/auth/x.ts": 50 },
-      coverage: noTests,
     });
     expect(c.severity).toBe<CommentSeverity>("critical");
   });
@@ -119,7 +129,6 @@ describe("calibrateSeverities — de-escalation", () => {
     const res = calibrateSeverities({
       comments: [c],
       files: [file("src/foo.ts"), file("src/foo.test.ts")],
-      coverage: withTests,
       weights: DEFAULT_SEVERITY_CALIBRATION,
     });
     expect(c.severity).toBe<CommentSeverity>("minor");
@@ -127,13 +136,20 @@ describe("calibrateSeverities — de-escalation", () => {
     expect(res.confidenceLowered).toBe(1);
   });
 
-  it("does NOT de-escalate when the PR added no tests (coverage gate)", () => {
-    // Even if a same-stem file exists, gate on coverage.testAdditions > 0.
+  it("does NOT de-escalate when no sibling test changed for the path", () => {
     const c = comment({ path: "src/foo.ts", severity: "major" });
     calibrateSeverities({
       comments: [c],
       files: [file("src/foo.ts")],
-      coverage: noTests,
+    });
+    expect(c.severity).toBe<CommentSeverity>("major");
+  });
+
+  it("does NOT de-escalate a finding whose only same-stem test is in an unrelated dir", () => {
+    const c = comment({ path: "packages/api/foo.ts", severity: "major", type: "issue" });
+    calibrateSeverities({
+      comments: [c],
+      files: [file("packages/api/foo.ts"), file("packages/web/foo.test.ts")],
     });
     expect(c.severity).toBe<CommentSeverity>("major");
   });
@@ -143,7 +159,6 @@ describe("calibrateSeverities — de-escalation", () => {
     calibrateSeverities({
       comments: [c],
       files: [file("src/foo.ts"), file("src/foo.test.ts")],
-      coverage: withTests,
     });
     expect(c.severity).toBe<CommentSeverity>("critical");
   });
@@ -153,7 +168,6 @@ describe("calibrateSeverities — de-escalation", () => {
     calibrateSeverities({
       comments: [c],
       files: [file("src/foo.ts"), file("src/foo.test.ts")],
-      coverage: withTests,
     });
     expect(c.severity).toBe<CommentSeverity>("major");
   });
@@ -164,7 +178,6 @@ describe("calibrateSeverities — de-escalation", () => {
     calibrateSeverities({
       comments: [c],
       files: [file("src/auth/foo.ts"), file("src/auth/foo.test.ts")],
-      coverage: assessCoverage([file("src/auth/foo.ts"), file("src/auth/foo.test.ts")]),
     });
     expect(c.severity).toBe<CommentSeverity>("minor");
   });
@@ -177,7 +190,6 @@ describe("calibrateSeverities — guards", () => {
       comments: [c],
       files: [file("src/auth/x.ts")],
       fanInByFile: { "src/auth/x.ts": 99 },
-      coverage: noTests,
       weights: { ...DEFAULT_SEVERITY_CALIBRATION, enabled: false },
     });
     expect(c.severity).toBe<CommentSeverity>("minor");
@@ -190,7 +202,6 @@ describe("calibrateSeverities — guards", () => {
       comments: [c],
       files: [file("src/foo.ts")],
       fanInByFile: { "./src/foo.ts": 8 },
-      coverage: noTests,
     });
     expect(c.severity).toBe<CommentSeverity>("major");
   });

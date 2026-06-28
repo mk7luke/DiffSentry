@@ -793,18 +793,18 @@ export class Reviewer {
       // Context-aware severity calibration: nudge each finding's severity to
       // reflect real risk — escalate in high-fan-in (blast-radius) files and in
       // recognized high-risk paths (auth/payment/migrations); de-escalate (and
-      // lower confidence) in well-tested paths. Reuses the fan-in counts the
-      // code-review-graph persisted on the review result and the coverage signal
-      // just computed. Runs over the FULL merged finding set (AI + safety +
-      // pattern) and BEFORE risk assessment so the risk score sees calibrated
-      // severities. Mutates reviewResult.comments in place.
+      // lower confidence) for findings whose source file has a directory-scoped
+      // sibling/mirrored test changed in this PR. Reuses the fan-in counts the
+      // code-review-graph persisted on the review result. Runs over the FULL
+      // merged finding set (AI + safety + pattern) and BEFORE risk assessment so
+      // the risk score sees calibrated severities. Mutates reviewResult.comments
+      // in place.
       let calibration: CalibrationResult = { adjustments: [], confidenceLowered: 0 };
       try {
         calibration = calibrateSeverities({
           comments: reviewResult.comments,
           files: context.files,
           fanInByFile: reviewResult.fanInByFile,
-          coverage,
           weights: resolveSeverityCalibration(repoConfig.reviews?.severity_calibration),
         });
         if (calibration.adjustments.length > 0 || calibration.confidenceLowered > 0) {
