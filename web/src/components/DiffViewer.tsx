@@ -229,16 +229,21 @@ function DiffViewerBody({
   useEffect(() => {
     if (navList.length === 0) return;
     function onKey(e: KeyboardEvent) {
+      // Only j/k/t are shortcuts — bail before any DOM work so the common case
+      // (every other keypress while the diff view is mounted) costs nothing.
+      if (e.key !== "j" && e.key !== "k" && e.key !== "t") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) {
         return;
       }
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
       // Suppress shortcuts only while an actually-visible dialog is open (the
       // triage popover or the command palette), not merely because a dialog node
-      // exists in the DOM. getClientRects() is used rather than offsetParent so
-      // the check stays correct for position:fixed dialogs (offsetParent is null
-      // for those even when visible).
+      // exists in the DOM. Both render outside .diffv (fixed-positioned at the
+      // body), so this must be a document scan, not a viewer-scoped one.
+      // getClientRects() is used rather than offsetParent so the check stays
+      // correct for position:fixed dialogs (offsetParent is null for those even
+      // when visible). getClientRects only runs when a dialog node exists.
       const dialogOpen = Array.from(
         document.querySelectorAll<HTMLElement>('[role="dialog"]'),
       ).some(
@@ -248,18 +253,25 @@ function DiffViewerBody({
           el.getClientRects().length > 0,
       );
       if (dialogOpen) return;
-      if (e.key === "j" || e.key === "k") {
-        e.preventDefault();
-        const idx = activeId == null ? -1 : navList.findIndex((n) => n.id === activeId);
-        let nextIdx: number;
-        if (e.key === "j") nextIdx = idx < 0 ? 0 : Math.min(idx + 1, navList.length - 1);
-        else nextIdx = idx < 0 ? 0 : Math.max(idx - 1, 0);
-        focusFinding(navList[nextIdx]);
-      } else if (e.key === "t" && activeId != null) {
+      if (e.key === "t") {
+        if (activeId == null) return;
         e.preventDefault();
         setOpenPanels((prev) => new Set(prev).add(activeId));
         setTriageRequest(activeId);
+        return;
       }
+      // j / k
+      e.preventDefault();
+      const idx = activeId == null ? -1 : navList.findIndex((n) => n.id === activeId);
+      const nextIdx =
+        e.key === "j"
+          ? idx < 0
+            ? 0
+            : Math.min(idx + 1, navList.length - 1)
+          : idx < 0
+            ? 0
+            : Math.max(idx - 1, 0);
+      focusFinding(navList[nextIdx]);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -477,6 +489,8 @@ function Row({
   const hasFindings = !!findings && findings.length > 0;
   const isOpen = hasFindings && findings!.some((f) => openPanels.has(f.id));
   const isActive = anchorId != null && anchorId === activeId;
+  // Stable id linking the marker (aria-controls) to the panel row it discloses.
+  const panelId = anchorId != null ? `diffv-panel-${anchorId}` : undefined;
 
   return (
     <>
@@ -498,6 +512,7 @@ function Row({
               className={`diffv-dot btn-reset ${sevClass(worstSev(findings!))}`}
               onClick={() => onToggle(findings![0].id)}
               aria-expanded={isOpen}
+              aria-controls={isOpen ? panelId : undefined}
               aria-label={`${findings!.length} finding(s) on this line`}
               title={`${findings!.length} finding(s) — click to ${isOpen ? "hide" : "view"}`}
             />
@@ -514,6 +529,7 @@ function Row({
         <tr className="diffv-panel-row">
           <td />
           <td
+            id={panelId}
             colSpan={3}
             className="diffv-panel"
             ref={(el) => {
