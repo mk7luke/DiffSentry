@@ -172,14 +172,30 @@ describe("calibrateSeverities — de-escalation", () => {
     expect(c.severity).toBe<CommentSeverity>("major");
   });
 
-  it("net-zero (escalate + de-escalate cancel) leaves severity unchanged", () => {
-    // high-risk path (+1) AND well-tested (−1) → net 0.
-    const c = comment({ path: "src/auth/foo.ts", severity: "minor", type: "issue" });
-    calibrateSeverities({
+  it("net-zero (escalate + de-escalate cancel) leaves severity AND confidence unchanged", () => {
+    // high-risk path (+1) AND well-tested (−1) → net 0: nothing was softened, so
+    // confidence must NOT drop just because a sibling test exists.
+    const c = comment({ path: "src/auth/foo.ts", severity: "minor", type: "issue", confidence: "high" });
+    const res = calibrateSeverities({
       comments: [c],
       files: [file("src/auth/foo.ts"), file("src/auth/foo.test.ts")],
     });
     expect(c.severity).toBe<CommentSeverity>("minor");
+    expect(c.confidence).toBe("high");
+    expect(res.confidenceLowered).toBe(0);
+  });
+
+  it("does not lower confidence when escalation outweighs well-tested softening", () => {
+    // high fan-in (+1) and high-risk (+1) capped vs well-tested (−1) → net up.
+    const c = comment({ path: "payment/foo.ts", severity: "minor", type: "issue", confidence: "high" });
+    const res = calibrateSeverities({
+      comments: [c],
+      files: [file("payment/foo.ts"), file("payment/foo.test.ts")],
+      fanInByFile: { "payment/foo.ts": 10 },
+    });
+    expect(c.severity).toBe<CommentSeverity>("major");
+    expect(c.confidence).toBe("high");
+    expect(res.confidenceLowered).toBe(0);
   });
 });
 
@@ -220,5 +236,12 @@ describe("renderSeverityCalibrationBlock", () => {
     expect(md).toContain("Severity calibration");
     expect(md).toContain("⬆️");
     expect(md).toContain("minor → major");
+  });
+
+  it("renders a confidence-only summary when no severity changed", () => {
+    const md = renderSeverityCalibrationBlock({ adjustments: [], confidenceLowered: 2 });
+    expect(md).toContain("Severity calibration");
+    expect(md).toContain("Confidence was lowered for 2 well-tested findings");
+    expect(md).not.toContain("| Finding |");
   });
 });

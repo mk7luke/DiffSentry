@@ -436,22 +436,26 @@ export function calibrateSeverities(opts: {
     let down = 0;
     const deterministic = !!c.patternSource;
     const isSecurity = c.type === "security";
-    const wellTested = tested.has(key);
-    if (wellTested && !deterministic && !isSecurity) {
-      if (w.deescalateWellTested > 0) {
-        down += w.deescalateWellTested;
-        reasons.push("well-tested path");
-      }
-      if (w.lowerConfidenceWellTested) {
-        const lowered = lowerConfidence(c.confidence ?? "high");
-        if (lowered !== (c.confidence ?? "high")) {
-          c.confidence = lowered;
-          confidenceLowered++;
-        }
-      }
+    const wellTested = tested.has(key) && !deterministic && !isSecurity;
+    if (wellTested && w.deescalateWellTested > 0) {
+      down += w.deescalateWellTested;
+      reasons.push("well-tested path");
     }
 
     const net = up - down;
+
+    // Lower confidence ONLY when test coverage actually softened the finding
+    // (net < 0) — not merely because a sibling test exists. A finding whose
+    // escalation cancels or outweighs the well-tested adjustment keeps its
+    // confidence, matching the documented "softened by coverage" intent.
+    if (wellTested && net < 0 && w.lowerConfidenceWellTested) {
+      const lowered = lowerConfidence(c.confidence ?? "high");
+      if (lowered !== (c.confidence ?? "high")) {
+        c.confidence = lowered;
+        confidenceLowered++;
+      }
+    }
+
     if (net === 0) continue;
     const to = shiftSeverity(c.severity, net);
     if (to === c.severity) continue;
@@ -463,7 +467,10 @@ export function calibrateSeverities(opts: {
 }
 
 export function renderSeverityCalibrationBlock(result: CalibrationResult): string {
-  if (result.adjustments.length === 0) return "";
+  // Render whenever calibration mutated anything — severity adjustments OR a
+  // confidence-only downgrade — so the walkthrough always explains changes the
+  // pass made (matching the logging path in reviewer.ts).
+  if (result.adjustments.length === 0 && result.confidenceLowered === 0) return "";
   const arrow = (a: SeverityAdjustment) => (SEVERITY_ORDER.indexOf(a.to) > SEVERITY_ORDER.indexOf(a.from) ? "⬆️" : "⬇️");
   const lines: string[] = [];
   lines.push("## ⚖️ Severity calibration");
@@ -472,11 +479,19 @@ export function renderSeverityCalibrationBlock(result: CalibrationResult): strin
     "Some findings were re-weighted by **blast radius** (fan-in) and **test coverage** so severity reflects real risk, not just finding type:",
   );
   lines.push("");
-  lines.push("| Finding | Change | Why |");
-  lines.push("|---|---|---|");
-  for (const a of result.adjustments) {
-    const label = a.title ? a.title : `\`${a.path}\`:${a.line}`;
-    lines.push(`| ${label} | ${arrow(a)} ${a.from} → ${a.to} | ${a.reasons.join(", ")} |`);
+  if (result.adjustments.length > 0) {
+    lines.push("| Finding | Change | Why |");
+    lines.push("|---|---|---|");
+    for (const a of result.adjustments) {
+      const label = a.title ? a.title : `\`${a.path}\`:${a.line}`;
+      lines.push(`| ${label} | ${arrow(a)} ${a.from} → ${a.to} | ${a.reasons.join(", ")} |`);
+    }
+  }
+  if (result.confidenceLowered > 0) {
+    if (result.adjustments.length > 0) lines.push("");
+    lines.push(
+      `Confidence was lowered for ${result.confidenceLowered} well-tested finding${result.confidenceLowered === 1 ? "" : "s"}.`,
+    );
   }
   return lines.join("\n");
 }
