@@ -45,6 +45,7 @@ import { renderDocsPage } from "./docs.js";
 import { registerRuleRoutes } from "./rules.js";
 import { registerDiagnosticsRoutes, type DiagnosticsProvider } from "./diagnostics.js";
 import { registerConfigRoutes, loadRepoConfigYaml } from "./config.js";
+import { registerPrDiffRoutes } from "./pr-diff.js";
 import { registerLearningRoutes } from "./learnings.js";
 import { reviewQueue } from "../realtime/queue.js";
 import { registerWebhookRoutes, type ReplayWebhook } from "./webhooks.js";
@@ -487,6 +488,15 @@ export function createApiRouter(deps: ApiDeps): express.Router {
     getInstallationOctokit: deps.getInstallationOctokit,
     requireRole,
     csrf,
+  });
+
+  // ─── PR diff (read viewer+) ────────────────────────────────────────
+  // The PR's live unified diff + stored findings anchored to {path, line},
+  // for the in-app inline diff viewer. GET-only; degrades to findings-without-
+  // diff when no octokit/installation is available (see registerPrDiffRoutes).
+  registerPrDiffRoutes(router, {
+    getInstallationOctokit: deps.getInstallationOctokit,
+    requireRole,
   });
 
   // ─── Learnings management (read: any role; write: author+ with CSRF) ─
