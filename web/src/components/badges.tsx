@@ -1,6 +1,7 @@
 // Severity / risk / approval badges — React ports of the badge helpers in
 // src/dashboard/layout.ts.
 
+import { useId } from "react";
 import type { TriageColumns, TriageState } from "../api/types";
 import type { HealthScore } from "../lib/health";
 
@@ -126,10 +127,20 @@ export function RoleBadge({ role }: { role: string | null | undefined }) {
 export function GradeBadge({ health, size = "md" }: { health: HealthScore; size?: "sm" | "md" | "lg" }) {
   const { grade, tone, score, label, hasData, breakdown } = health;
   const aria = hasData ? `Health grade ${grade}, ${score} percent clean — ${label}` : "Health grade not available — no reviews yet";
+  // useId() gives a collision-free id even when several badges share a grade
+  // (e.g. multiple "A" repos on the overview grid). tabIndex makes the root
+  // focusable so the existing :focus-within CSS reveals the breakdown for
+  // keyboard users; aria-describedby points AT to the popover content.
+  const tooltipId = useId();
   return (
-    <span className={`grade-badge grade-${tone} grade-${size}`} aria-label={aria}>
+    <span
+      className={`grade-badge grade-${tone} grade-${size}`}
+      tabIndex={0}
+      aria-label={aria}
+      aria-describedby={tooltipId}
+    >
       <span className="grade-letter">{grade}</span>
-      <span className="grade-pop" role="tooltip">
+      <span className="grade-pop" id={tooltipId} role="tooltip">
         <span className="gp-head">
           <span className={`gp-grade grade-${tone}`}>{grade}</span>
           <span className="gp-meta">
