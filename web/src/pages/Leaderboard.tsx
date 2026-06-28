@@ -186,7 +186,8 @@ export function LeaderboardPage() {
                             <button
                               type="button"
                               className="row-link"
-                              aria-pressed={isSel}
+                              aria-expanded={isSel}
+                              aria-label={`${isSel ? "Hide" : "Show"} details for ${a.author}`}
                               onClick={() => selectAuthor(isSel ? null : a.author)}
                             >
                               {a.author}

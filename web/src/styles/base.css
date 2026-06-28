@@ -5009,14 +5009,29 @@ input[type="checkbox"].learn-check {
 /* The interactive control is a real <button> filling the header cell, so
    sorting keeps native keyboard/focus semantics; aria-sort lives on the th. */
 .tbl thead th.sortable .th-sort {
+  /* Full native-button reset so the control adopts the header cell's own
+     presentation (no default chrome / padding in Safari & Firefox) and the
+     clickable area fills the cell. */
+  appearance: none;
+  -webkit-appearance: none;
   display: inline-flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 2px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
   font: inherit;
   color: inherit;
   letter-spacing: inherit;
   text-transform: inherit;
   cursor: pointer;
+}
+/* Numeric / right-aligned headers keep their label flush right. */
+.tbl thead th.num .th-sort,
+.tbl thead th.right .th-sort {
+  justify-content: flex-end;
 }
 .tbl thead th.sortable:hover .th-sort {
   color: var(--text-1);
