@@ -403,8 +403,13 @@ export function ImpactReportBody({
  */
 function CopyShareLinkButton({ report }: { report: ImpactReport }) {
   const create = useCreateImpactShare();
-  const [url, setUrl] = useState<string | null>(null);
+  // Cache the minted link keyed to the report scope it was minted for, so the
+  // copied link always matches the visible report. If the user re-windows the
+  // range (or the repo scope differs), mint a fresh share rather than copying a
+  // stale link that opens at a different default.
+  const [cached, setCached] = useState<{ repo: string | null; range: string; url: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const rangeKey = report.range.days == null ? "all" : `${report.range.days}d`;
 
   async function copyToClipboard(value: string) {
     try {
@@ -419,12 +424,12 @@ function CopyShareLinkButton({ report }: { report: ImpactReport }) {
   }
 
   async function onClick() {
-    if (url) {
-      await copyToClipboard(url);
+    if (cached && cached.repo === report.repo && cached.range === rangeKey) {
+      await copyToClipboard(cached.url);
       return;
     }
-    const res = await create.mutateAsync({ repo: report.repo, range: report.range.days == null ? "all" : `${report.range.days}d` });
-    setUrl(res.url);
+    const res = await create.mutateAsync({ repo: report.repo, range: rangeKey });
+    setCached({ repo: report.repo, range: rangeKey, url: res.url });
     await copyToClipboard(res.url);
   }
 
