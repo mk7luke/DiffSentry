@@ -133,11 +133,15 @@ export function parseUnifiedDiff(diff: string): DiffFile[] {
       hunk.lines.push({ type: "del", oldLine: oldNo, newLine: null, content });
       oldNo += 1;
       file.deletions += 1;
-    } else {
-      // Context line (leading space) — or an empty trailing split artifact.
+    } else if (marker === " ") {
+      // A genuine context line (leading space).
       hunk.lines.push({ type: "context", oldLine: oldNo, newLine: newNo, content });
       oldNo += 1;
       newNo += 1;
+    } else {
+      // Anything else inside a hunk — the trailing "" split artifact or stray
+      // metadata — is not a real line: skip it so the counters don't drift.
+      continue;
     }
   }
   pushFile();

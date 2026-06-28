@@ -153,6 +153,17 @@ function DiffViewerBody({
 
   const selectedFile = files.find((f) => f.path === selectedPath) ?? files[0] ?? null;
 
+  // Reconcile the selected file against async `files` updates: when the current
+  // selection is empty or no longer present (e.g. a degraded diff:null first
+  // load that later refetches with real content), fall back to the first file
+  // with findings, else the first file — so the pane + active highlight follow.
+  useEffect(() => {
+    if (files.length === 0) return;
+    if (!selectedPath || !files.some((f) => f.path === selectedPath)) {
+      setSelectedPath((firstWithFindings ?? files[0]).path);
+    }
+  }, [files, firstWithFindings, selectedPath]);
+
   const togglePanel = useCallback((id: number) => {
     setOpenPanels((prev) => {
       const next = new Set(prev);
