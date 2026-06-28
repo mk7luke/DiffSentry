@@ -119,6 +119,39 @@ function DiffViewerBody({
     return m;
   }, [anchored]);
 
+  // Finding ids that actually anchor to a rendered diff line.
+  const matchedIds = useMemo(() => {
+    const s = new Set<number>();
+    for (const file of files) {
+      for (const hunk of file.hunks) {
+        for (const ln of hunk.lines) {
+          if (ln.newLine == null) continue;
+          const list = anchored.get(`${file.path}:${ln.newLine}`);
+          if (list) for (const f of list) s.add(f.id);
+        }
+      }
+    }
+    return s;
+  }, [files, anchored]);
+
+  // Findings the backend returned that don't anchor anywhere in the rendered
+  // diff — the PR drifted since they were stored, or a truncated/omitted hunk
+  // dropped their line. Surfaced in a fallback section so they stay inspectable
+  // and triageable instead of silently vanishing. (Same fingerprint/id dedup as
+  // `anchored`; also catches findings with no path/line, which never anchor.)
+  const unmatchedFindings = useMemo(() => {
+    const seen = new Set<string>();
+    const out: PRFindingRow[] = [];
+    for (const f of findings) {
+      if (matchedIds.has(f.id)) continue;
+      const dedup = `${f.path}:${f.line}:${f.fingerprint ?? f.id}`;
+      if (seen.has(dedup)) continue;
+      seen.add(dedup);
+      out.push(f);
+    }
+    return out;
+  }, [findings, matchedIds]);
+
   // Ordered nav list: files in diff order, findings by line within each.
   const navList = useMemo<NavEntry[]>(() => {
     const out: NavEntry[] = [];
@@ -303,6 +336,7 @@ function DiffViewerBody({
   }
 
   return (
+    <>
     <div className="diffv">
       <nav className="diffv-files" aria-label="Changed files">
         {truncated ? (
@@ -357,6 +391,17 @@ function DiffViewerBody({
         ) : null}
       </div>
     </div>
+    {unmatchedFindings.length > 0 ? (
+      <section className="diffv-unmatched">
+        <header className="diffv-unmatched-head">
+          {unmatchedFindings.length} finding{unmatchedFindings.length === 1 ? "" : "s"} not anchored to the
+          current diff
+          <span className="muted"> — the PR changed since they were recorded, or their lines fall outside the shown diff.</span>
+        </header>
+        <FindingFallbackList findings={unmatchedFindings} activeId={activeId} setActiveId={setActiveId} />
+      </section>
+    ) : null}
+    </>
   );
 }
 

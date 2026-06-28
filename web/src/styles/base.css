@@ -5013,6 +5013,17 @@ button.diffv-dot:focus-visible {
   margin-top: 8px;
   font-size: 12.5px;
 }
+.diffv-unmatched {
+  margin-top: 16px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 12px;
+}
+.diffv-unmatched-head {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 4px;
+}
 .diffv-fallback {
   list-style: none;
   margin: 14px 0 0;
