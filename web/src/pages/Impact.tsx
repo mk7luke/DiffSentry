@@ -141,6 +141,7 @@ function RangeToggle({ range, onRange }: { range: string; onRange: (r: string) =
       {IMPACT_RANGES.map((r) => (
         <button
           key={r.key}
+          type="button"
           role="tab"
           aria-selected={r.key === range}
           className={`seg-btn${r.key === range ? " active" : ""}`}
