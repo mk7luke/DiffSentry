@@ -1,7 +1,7 @@
 // Inline-SVG / CSS charts — React ports of stackedSeverityBar(), miniSparkbar(),
 // riskLine(), hbar(), and donut() from src/dashboard/layout.ts.
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Link } from "react-router-dom";
 import type { DayBin } from "../lib/format";
 import type { Severity, SparklinePoint } from "../api/types";
@@ -206,6 +206,9 @@ export function RiskLine({
   const tooltip = useChartTooltip();
   const midIdx = Math.floor((n - 1) / 2);
   const ticks = [0, midIdx, n - 1].filter((v, i, a) => a.indexOf(v) === i);
+  // Per-instance gradient id so multiple RiskLine charts on one page don't
+  // collide on a shared SVG id (colons from useId stripped for funcIRI safety).
+  const gradId = `riskGrad-${useId().replace(/:/g, "")}`;
 
   return (
     <div className="risk-chart-wrap">
@@ -229,12 +232,12 @@ export function RiskLine({
             <defs>
               {/* Gradient stops read the theme accent via inline style — CSS
                  custom properties don't resolve in bare SVG presentation attrs. */}
-              <linearGradient id="riskGrad" x1="0" x2="0" y1="0" y2="1">
+              <linearGradient id={gradId} x1="0" x2="0" y1="0" y2="1">
                 <stop offset="0%" style={{ stopColor: "var(--accent)", stopOpacity: 0.35 }} />
                 <stop offset="100%" style={{ stopColor: "var(--accent)", stopOpacity: 0 }} />
               </linearGradient>
             </defs>
-            <polygon points={areaPath} className="area" />
+            <polygon points={areaPath} className="area" fill={`url(#${gradId})`} />
             <polyline points={path} className="line" />
           </svg>
         </div>
@@ -517,9 +520,30 @@ export function Donut({ slices, size = 120 }: { slices: DonutSlice[]; size?: num
   const r = size / 2 - 6;
   const c = 2 * Math.PI * r;
   const tooltip = useChartTooltip();
-  // Hovering a segment or its legend row highlights the pair and dims the rest.
+  // Hovering/focusing a segment or its legend row highlights the pair and dims
+  // the rest. Both sides share one tooltip-content builder so the arc and its
+  // legend entry show the identical popover.
   const [active, setActive] = useState<number | null>(null);
   const fmtPct = (v: number) => (total === 0 ? 0 : (v / total) * 100);
+  const tipFor = (s: DonutSlice) => {
+    const pct = fmtPct(s.value);
+    return (
+      <>
+        <div className="tip-title">
+          <span className="sw" style={{ background: s.color }} />
+          {s.label}
+        </div>
+        <div className="tip-row">
+          <span className="k">Count</span>
+          <span className="v">{s.value}</span>
+        </div>
+        <div className="tip-row">
+          <span className="k">Share</span>
+          <span className="v">{pct.toFixed(pct >= 10 ? 0 : 1)}%</span>
+        </div>
+      </>
+    );
+  };
 
   let offset = 0;
   return (
@@ -532,22 +556,7 @@ export function Donut({ slices, size = 120 }: { slices: DonutSlice[]; size?: num
             const frac = s.value / total;
             const dash = frac * c;
             const pct = fmtPct(s.value);
-            const tip = (
-              <>
-                <div className="tip-title">
-                  <span className="sw" style={{ background: s.color }} />
-                  {s.label}
-                </div>
-                <div className="tip-row">
-                  <span className="k">Count</span>
-                  <span className="v">{s.value}</span>
-                </div>
-                <div className="tip-row">
-                  <span className="k">Share</span>
-                  <span className="v">{pct.toFixed(pct >= 10 ? 0 : 1)}%</span>
-                </div>
-              </>
-            );
+            const tip = tipFor(s);
             const cls = active === null ? "" : active === i ? "active" : "dim";
             const seg = (
               <circle
@@ -580,12 +589,29 @@ export function Donut({ slices, size = 120 }: { slices: DonutSlice[]; size?: num
       <div className="donut-legend">
         {slices.map((s, i) => {
           const pct = fmtPct(s.value);
+          const tip = tipFor(s);
+          const handlers = tooltip.bind(tip);
+          const enter = () => setActive(i);
+          const leave = () => {
+            setActive(null);
+            tooltip.hide();
+          };
           return (
             <div
               className={`it${active === i ? " active" : ""}`}
               key={i}
-              onMouseEnter={() => setActive(i)}
-              onMouseLeave={() => setActive(null)}
+              tabIndex={0}
+              onMouseEnter={(e) => {
+                enter();
+                handlers.onMouseEnter(e);
+              }}
+              onMouseMove={handlers.onMouseMove}
+              onMouseLeave={leave}
+              onFocus={(e) => {
+                enter();
+                handlers.onFocus(e);
+              }}
+              onBlur={leave}
             >
               <span className="sw" style={{ background: s.color }} />
               <span className="label">{s.label}</span>

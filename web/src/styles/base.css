@@ -1193,6 +1193,11 @@ label.field {
 .donut-legend .it.active .label {
   color: var(--accent-bright);
 }
+.donut-legend .it:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
 .donut-legend {
   display: flex;
   flex-direction: column;
@@ -1274,7 +1279,7 @@ label.field {
   overflow: visible;
 }
 .risk-chart .area {
-  fill: url(#riskGrad);
+  /* fill is set inline with a per-instance gradient id (see RiskLine). */
   opacity: 0.75;
 }
 .risk-chart .line {
