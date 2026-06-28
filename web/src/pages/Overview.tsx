@@ -84,7 +84,7 @@ export function OverviewPage() {
 
               <div className="grid hero" style={{ marginBottom: 20 }}>
                 <Card title="Activity · last 14 days" subtitle={`${aggTotal} findings across all repos`} bodyClass="chart">
-                  <StackedSeverityBar series={aggregate} />
+                  <StackedSeverityBar series={aggregate} hrefForSeverity={(s) => `/findings?severity=${s}`} />
                 </Card>
                 <div className="grid stack">
                   <Metric

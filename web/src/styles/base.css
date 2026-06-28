@@ -974,10 +974,22 @@ label.field {
   justify-content: flex-start;
 }
 .chart-bar .col .seg {
+  display: block;
   width: 100%;
   background: var(--text-4);
   border-radius: 1px;
   transition: filter 0.15s;
+}
+/* Drill-through segments (severity → filtered Findings). */
+.chart-bar .col a.seg {
+  cursor: pointer;
+}
+.chart-bar .col a.seg:hover {
+  filter: brightness(1.3);
+}
+.chart-bar .col a.seg:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 1px;
 }
 .chart-bar .col .seg.crit {
   background: var(--sev-crit);
@@ -1016,6 +1028,20 @@ label.field {
   align-items: center;
   gap: 6px;
   font-variant-numeric: tabular-nums;
+}
+/* Drill-through legend entries (severity → filtered Findings). */
+.chart-legend a.it {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  border-radius: var(--r-xs);
+}
+.chart-legend a.it:hover {
+  text-decoration: underline;
+}
+.chart-legend a.it:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 2px;
 }
 .chart-legend .it .sw {
   width: 9px;
@@ -1149,9 +1175,23 @@ label.field {
 .donut circle {
   fill: none;
   stroke-width: 10;
+  transition: stroke-width 0.12s, opacity 0.12s;
 }
 .donut .bg {
   stroke: var(--line);
+}
+/* Hoverable / labelled segments: the hovered arc thickens, the rest dim. */
+.donut circle:not(.bg) {
+  cursor: pointer;
+}
+.donut circle.active {
+  stroke-width: 13;
+}
+.donut circle.dim {
+  opacity: 0.4;
+}
+.donut-legend .it.active .label {
+  color: var(--accent-bright);
 }
 .donut-legend {
   display: flex;
@@ -1211,9 +1251,18 @@ label.field {
   width: 100%;
   flex: 1;
   min-height: 140px;
+  display: flex;
+  flex-direction: column;
+}
+/* The plotting region: y-axis gutter + line + dots. Sits above the dated
+   x-axis row so the date ticks never overlap the curve. */
+.risk-area {
+  position: relative;
+  flex: 1;
+  min-height: 0;
   padding-left: 28px;
 }
-.risk-chart-wrap .plot {
+.risk-area .plot {
   position: relative;
   width: 100%;
   height: 100%;
@@ -1234,19 +1283,19 @@ label.field {
   fill: none;
   vector-effect: non-scaling-stroke;
 }
-.risk-chart-wrap .axis {
+.risk-area .axis {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
-.risk-chart-wrap .axis .gridline {
+.risk-area .axis .gridline {
   position: absolute;
   left: 28px;
   right: 0;
   border-top: 1px dashed var(--line-soft);
   height: 0;
 }
-.risk-chart-wrap .axis .ylabel {
+.risk-area .axis .ylabel {
   position: absolute;
   left: 0;
   width: 24px;
@@ -1257,12 +1306,12 @@ label.field {
   transform: translateY(-50%);
   font-variant-numeric: tabular-nums;
 }
-.risk-chart-wrap .dots {
+.risk-area .dots {
   position: absolute;
   inset: 0 0 0 28px;
   pointer-events: none;
 }
-.risk-chart-wrap .dot-marker {
+.risk-area .dot-marker {
   position: absolute;
   width: 6px;
   height: 6px;
@@ -1270,6 +1319,101 @@ label.field {
   transform: translate(-50%, -50%);
   border: 1.3px solid var(--bg-deep);
   pointer-events: auto;
+  transition: width 0.12s, height 0.12s;
+}
+/* Drill-through points read as links — enlarge on hover/focus and show a ring. */
+a.dot-marker {
+  cursor: pointer;
+}
+a.dot-marker:hover,
+.risk-area .dot-marker:focus-visible {
+  width: 10px;
+  height: 10px;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.risk-xaxis {
+  display: flex;
+  justify-content: space-between;
+  padding-left: 28px;
+  margin-top: 6px;
+  font-size: 9.5px;
+  font-family: var(--font-mono);
+  color: var(--text-4);
+  letter-spacing: 0.02em;
+}
+.risk-xaxis .mid {
+  flex: 1;
+  text-align: center;
+}
+
+/* ── Chart hover tooltip (portal to <body>, fixed-positioned) ───── */
+.chart-tip {
+  position: fixed;
+  z-index: 60;
+  transform: translate(-50%, calc(-100% - 12px));
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-hover);
+  padding: 7px 9px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-1);
+  pointer-events: none;
+  white-space: nowrap;
+  max-width: 240px;
+}
+.chart-tip.below {
+  transform: translate(-50%, 14px);
+}
+.chart-tip .tip-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.chart-tip .tip-sub {
+  color: var(--text-3);
+  margin-bottom: 3px;
+}
+.chart-tip .tip-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.chart-tip .tip-row .k {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-3);
+}
+.chart-tip .tip-row .v {
+  color: var(--text-1);
+  font-weight: 600;
+}
+.chart-tip .sw {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--text-4);
+  flex-shrink: 0;
+}
+.chart-tip .sw.crit {
+  background: var(--sev-crit);
+}
+.chart-tip .sw.major {
+  background: var(--sev-major);
+}
+.chart-tip .sw.minor {
+  background: var(--sev-minor);
+}
+.chart-tip .sw.nit {
+  background: var(--sev-nit);
 }
 
 /* ── Timeline list (events, reviews) ───────────────────────────── */

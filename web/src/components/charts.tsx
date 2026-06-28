@@ -1,11 +1,37 @@
 // Inline-SVG / CSS charts — React ports of stackedSeverityBar(), miniSparkbar(),
 // riskLine(), hbar(), and donut() from src/dashboard/layout.ts.
 
+import { useState } from "react";
+import { Link } from "react-router-dom";
 import type { DayBin } from "../lib/format";
-import type { SparklinePoint } from "../api/types";
+import type { Severity, SparklinePoint } from "../api/types";
 import { EmptyState } from "./states";
+import { ChartTooltip, useChartTooltip } from "./ChartTooltip";
 
-export function StackedSeverityBar({ series }: { series: DayBin[] }) {
+// Severity rows in stacking order (bottom → top) with their legend metadata.
+// `cls` matches the existing .seg / .chart-legend color classes in base.css.
+const SEVERITIES: Array<{ key: Severity; cls: string; label: string }> = [
+  { key: "nit", cls: "nit", label: "Nit" },
+  { key: "minor", cls: "minor", label: "Minor" },
+  { key: "major", cls: "major", label: "Major" },
+  { key: "critical", cls: "crit", label: "Critical" },
+];
+
+/**
+ * Stacked per-day severity bar. Each column shows a hover/focus tooltip with the
+ * date and full breakdown. When `hrefForSeverity` is supplied the colored
+ * segments and legend swatches become drill-through links into a filtered
+ * Findings view (segment = severity), giving "click a segment → see those
+ * findings". Day-level drill-through isn't offered because the Findings API has
+ * no exact-date filter — severity is the meaningful axis to slice on.
+ */
+export function StackedSeverityBar({
+  series,
+  hrefForSeverity,
+}: {
+  series: DayBin[];
+  hrefForSeverity?: (severity: Severity) => string;
+}) {
   const max = Math.max(1, ...series.map((d) => d.critical + d.major + d.minor + d.nit));
   const totals = series.reduce(
     (acc, d) => {
@@ -19,28 +45,76 @@ export function StackedSeverityBar({ series }: { series: DayBin[] }) {
   );
   const pct = (n: number) => (n === 0 ? 0 : (n / max) * 100);
   const midIdx = Math.floor(series.length / 2);
+  const tooltip = useChartTooltip();
+
+  // Legend is shown critical → nit (top of the stack first).
+  const legend = [...SEVERITIES].reverse();
+
   return (
     <>
       <div className="chart-bar">
         {series.map((d, i) => {
           const total = d.critical + d.major + d.minor + d.nit;
-          if (total === 0) {
-            return (
-              <div className="col" key={i} title={`${d.day} · no reviews`}>
-                <div className="empty-dot" />
-              </div>
-            );
-          }
-          const title = `${d.day} · ${total} finding${total === 1 ? "" : "s"} (crit ${d.critical} · maj ${d.major} · min ${d.minor} · nit ${d.nit})`;
+          const summary =
+            total === 0
+              ? `${d.day} · no reviews`
+              : `${d.day} · ${total} finding${total === 1 ? "" : "s"} (crit ${d.critical} · maj ${d.major} · min ${d.minor} · nit ${d.nit})`;
+          const tip = (
+            <>
+              <div className="tip-title">{d.day}</div>
+              {total === 0 ? (
+                <div className="tip-sub">no reviews</div>
+              ) : (
+                <>
+                  <div className="tip-sub">
+                    {total} finding{total === 1 ? "" : "s"}
+                  </div>
+                  {legend.map((s) => (
+                    <div className="tip-row" key={s.key}>
+                      <span className="k">
+                        <span className={`sw ${s.cls}`} />
+                        {s.label}
+                      </span>
+                      <span className="v">{d[s.key]}</span>
+                    </div>
+                  ))}
+                </>
+              )}
+            </>
+          );
+          // Interactive columns expose each segment as its own link, so the
+          // column is a plain hover target; non-interactive ones announce the
+          // whole-day summary as a single image node.
+          const colProps = hrefForSeverity
+            ? { className: "col", ...tooltip.bind(tip) }
+            : { className: "col", role: "img", "aria-label": summary, ...tooltip.bind(tip) };
           return (
-            <div className="col" key={i} title={title}>
-              {d.nit > 0 && <div className="seg nit" style={{ height: `${pct(d.nit).toFixed(1)}%` }} />}
-              {d.minor > 0 && <div className="seg minor" style={{ height: `${pct(d.minor).toFixed(1)}%` }} />}
-              {d.major > 0 && <div className="seg major" style={{ height: `${pct(d.major).toFixed(1)}%` }} />}
-              {d.critical > 0 && <div className="seg crit" style={{ height: `${pct(d.critical).toFixed(1)}%` }} />}
+            <div key={i} {...colProps}>
+              {total === 0 ? (
+                <div className="empty-dot" />
+              ) : (
+                SEVERITIES.map((s) => {
+                  const v = d[s.key];
+                  if (v <= 0) return null;
+                  const style = { height: `${pct(v).toFixed(1)}%` };
+                  if (hrefForSeverity) {
+                    return (
+                      <Link
+                        key={s.key}
+                        className={`seg ${s.cls}`}
+                        style={style}
+                        to={hrefForSeverity(s.key)}
+                        aria-label={`${v} ${s.label.toLowerCase()} ${v === 1 ? "finding" : "findings"} on ${d.day} — view in Findings`}
+                      />
+                    );
+                  }
+                  return <div key={s.key} className={`seg ${s.cls}`} style={style} aria-hidden="true" />;
+                })
+              )}
             </div>
           );
         })}
+        <ChartTooltip tip={tooltip.tip} />
       </div>
       <div className="chart-xaxis">
         {series.map((d, i) => {
@@ -49,22 +123,29 @@ export function StackedSeverityBar({ series }: { series: DayBin[] }) {
         })}
       </div>
       <div className="chart-legend">
-        <span className="it crit">
-          <span className="sw" />
-          Critical<span className="count">{totals.critical}</span>
-        </span>
-        <span className="it major">
-          <span className="sw" />
-          Major<span className="count">{totals.major}</span>
-        </span>
-        <span className="it minor">
-          <span className="sw" />
-          Minor<span className="count">{totals.minor}</span>
-        </span>
-        <span className="it nit">
-          <span className="sw" />
-          Nit<span className="count">{totals.nit}</span>
-        </span>
+        {legend.map((s) => {
+          const inner = (
+            <>
+              <span className="sw" />
+              {s.label}
+              <span className="count">{totals[s.key]}</span>
+            </>
+          );
+          return hrefForSeverity ? (
+            <Link
+              key={s.key}
+              className={`it ${s.cls}`}
+              to={hrefForSeverity(s.key)}
+              aria-label={`View ${totals[s.key]} ${s.label.toLowerCase()} ${totals[s.key] === 1 ? "finding" : "findings"} in Findings`}
+            >
+              {inner}
+            </Link>
+          ) : (
+            <span className={`it ${s.cls}`} key={s.key}>
+              {inner}
+            </span>
+          );
+        })}
       </div>
     </>
   );
@@ -72,23 +153,39 @@ export function StackedSeverityBar({ series }: { series: DayBin[] }) {
 
 export function MiniSparkbar({ series }: { series: DayBin[] }) {
   const max = Math.max(1, ...series.map((d) => d.critical + d.major + d.minor + d.nit));
+  // Decorative inside the repo-card link (the card itself is the labelled
+  // target), so it stays aria-hidden — but each bar keeps a native title with
+  // the date + severity breakdown for a quick hover read.
   return (
     <div className="spark-14" aria-hidden="true">
       {series.map((d, i) => {
         const total = d.critical + d.major + d.minor + d.nit;
-        if (total === 0) return <div className="col" key={i} title={`${d.day} · 0`} />;
+        if (total === 0) return <div className="col" key={i} title={`${d.day} · no findings`} />;
         const h = Math.max(4, (total / max) * 100);
         let cls = "has";
         if (d.critical > 0) cls = "has-crit";
         else if (d.major > 0) cls = "has-major";
         else if (d.minor > 0) cls = "has-minor";
-        return <div className={`col ${cls}`} key={i} style={{ height: `${h.toFixed(0)}%` }} title={`${d.day} · ${total}`} />;
+        const title = `${d.day} · ${total} finding${total === 1 ? "" : "s"} (crit ${d.critical} · maj ${d.major} · min ${d.minor} · nit ${d.nit})`;
+        return <div className={`col ${cls}`} key={i} style={{ height: `${h.toFixed(0)}%` }} title={title} />;
       })}
     </div>
   );
 }
 
-export function RiskLine({ points }: { points: SparklinePoint[] }) {
+/**
+ * Risk-score line over time. Adds dated x-axis ticks (first / mid / last review),
+ * hover+focus tooltips on each point (PR #, risk, date), and — when
+ * `hrefForPoint` is supplied — turns each point into a drill-through link to
+ * that PR.
+ */
+export function RiskLine({
+  points,
+  hrefForPoint,
+}: {
+  points: SparklinePoint[];
+  hrefForPoint?: (point: SparklinePoint) => string;
+}) {
   if (points.length < 2) {
     return <EmptyState title="Not enough data yet" hint="Need at least two reviews to trace risk over time." />;
   }
@@ -106,60 +203,91 @@ export function RiskLine({ points }: { points: SparklinePoint[] }) {
   });
   const path = coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(" ");
   const areaPath = `0,${padT + innerH} ${path} ${w},${padT + innerH}`;
+  const tooltip = useChartTooltip();
+  const midIdx = Math.floor((n - 1) / 2);
+  const ticks = [0, midIdx, n - 1].filter((v, i, a) => a.indexOf(v) === i);
+
   return (
     <div className="risk-chart-wrap">
-      <div className="axis">
-        {[0, 25, 50, 75, 100].map((p) => {
-          const yPx = padT + innerH - (p / 100) * innerH;
-          const topPct = (yPx / h) * 100;
-          return (
-            <div key={p}>
-              <div className="gridline" style={{ top: `${topPct.toFixed(2)}%` }} />
-              <div className="ylabel" style={{ top: `${topPct.toFixed(2)}%` }}>
-                {p}
+      <div className="risk-area">
+        <div className="axis">
+          {[0, 25, 50, 75, 100].map((p) => {
+            const yPx = padT + innerH - (p / 100) * innerH;
+            const topPct = (yPx / h) * 100;
+            return (
+              <div key={p}>
+                <div className="gridline" style={{ top: `${topPct.toFixed(2)}%` }} />
+                <div className="ylabel" style={{ top: `${topPct.toFixed(2)}%` }}>
+                  {p}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
+        <div className="plot">
+          <svg viewBox={`0 0 ${w} ${h}`} className="risk-chart" preserveAspectRatio="none">
+            <defs>
+              {/* Gradient stops read the theme accent via inline style — CSS
+                 custom properties don't resolve in bare SVG presentation attrs. */}
+              <linearGradient id="riskGrad" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" style={{ stopColor: "var(--accent)", stopOpacity: 0.35 }} />
+                <stop offset="100%" style={{ stopColor: "var(--accent)", stopOpacity: 0 }} />
+              </linearGradient>
+            </defs>
+            <polygon points={areaPath} className="area" />
+            <polyline points={path} className="line" />
+          </svg>
+        </div>
+        <div className="dots">
+          {coords.map((c, i) => {
+            const color =
+              c.score >= 75
+                ? "var(--sev-crit)"
+                : c.score >= 55
+                  ? "var(--sev-major)"
+                  : c.score >= 35
+                    ? "var(--sev-minor)"
+                    : c.score >= 15
+                      ? "var(--warn)"
+                      : "var(--good)";
+            const leftPct = n === 1 ? 0 : (c.x / w) * 100;
+            const topPct = (c.y / h) * 100;
+            const date = c.p.created_at.slice(0, 10);
+            const label = `PR #${c.p.number} · risk ${c.score} · ${date}`;
+            const tip = (
+              <>
+                <div className="tip-title">PR #{c.p.number}</div>
+                <div className="tip-row">
+                  <span className="k">Risk</span>
+                  <span className="v">{c.score}</span>
+                </div>
+                <div className="tip-sub">{date}</div>
+              </>
+            );
+            const style = { left: `${leftPct.toFixed(2)}%`, top: `${topPct.toFixed(2)}%`, background: color };
+            return hrefForPoint ? (
+              <Link
+                key={i}
+                className="dot-marker"
+                style={style}
+                to={hrefForPoint(c.p)}
+                aria-label={`${label} — open PR`}
+                {...tooltip.bind(tip)}
+              />
+            ) : (
+              <div key={i} className="dot-marker" style={style} role="img" aria-label={label} {...tooltip.bind(tip)} />
+            );
+          })}
+        </div>
       </div>
-      <div className="plot">
-        <svg viewBox={`0 0 ${w} ${h}`} className="risk-chart" preserveAspectRatio="none">
-          <defs>
-            {/* Gradient stops read the theme accent via inline style — CSS
-               custom properties don't resolve in bare SVG presentation attrs. */}
-            <linearGradient id="riskGrad" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" style={{ stopColor: "var(--accent)", stopOpacity: 0.35 }} />
-              <stop offset="100%" style={{ stopColor: "var(--accent)", stopOpacity: 0 }} />
-            </linearGradient>
-          </defs>
-          <polygon points={areaPath} className="area" />
-          <polyline points={path} className="line" />
-        </svg>
+      <div className="risk-xaxis" aria-hidden="true">
+        {ticks.map((idx, j) => (
+          <span key={idx} className={ticks.length === 3 && j === 1 ? "mid" : undefined}>
+            {points[idx].created_at.slice(5, 10)}
+          </span>
+        ))}
       </div>
-      <div className="dots">
-        {coords.map((c, i) => {
-          const color =
-            c.score >= 75
-              ? "var(--sev-crit)"
-              : c.score >= 55
-                ? "var(--sev-major)"
-                : c.score >= 35
-                  ? "var(--sev-minor)"
-                  : c.score >= 15
-                    ? "var(--warn)"
-                    : "var(--good)";
-          const leftPct = n === 1 ? 0 : (c.x / w) * 100;
-          const topPct = (c.y / h) * 100;
-          return (
-            <div
-              key={i}
-              className="dot-marker"
-              style={{ left: `${leftPct.toFixed(2)}%`, top: `${topPct.toFixed(2)}%`, background: color }}
-              title={`#${c.p.number} · risk ${c.score} · ${c.p.created_at.slice(0, 10)}`}
-            />
-          );
-        })}
-      </div>
+      <ChartTooltip tip={tooltip.tip} />
     </div>
   );
 }
@@ -388,6 +516,11 @@ export function Donut({ slices, size = 120 }: { slices: DonutSlice[]; size?: num
   const total = slices.reduce((n, s) => n + s.value, 0);
   const r = size / 2 - 6;
   const c = 2 * Math.PI * r;
+  const tooltip = useChartTooltip();
+  // Hovering a segment or its legend row highlights the pair and dims the rest.
+  const [active, setActive] = useState<number | null>(null);
+  const fmtPct = (v: number) => (total === 0 ? 0 : (v / total) * 100);
+
   let offset = 0;
   return (
     <div className="donut-wrap">
@@ -398,9 +531,28 @@ export function Donut({ slices, size = 120 }: { slices: DonutSlice[]; size?: num
             if (s.value === 0) return null;
             const frac = s.value / total;
             const dash = frac * c;
+            const pct = fmtPct(s.value);
+            const tip = (
+              <>
+                <div className="tip-title">
+                  <span className="sw" style={{ background: s.color }} />
+                  {s.label}
+                </div>
+                <div className="tip-row">
+                  <span className="k">Count</span>
+                  <span className="v">{s.value}</span>
+                </div>
+                <div className="tip-row">
+                  <span className="k">Share</span>
+                  <span className="v">{pct.toFixed(pct >= 10 ? 0 : 1)}%</span>
+                </div>
+              </>
+            );
+            const cls = active === null ? "" : active === i ? "active" : "dim";
             const seg = (
               <circle
                 key={i}
+                className={cls}
                 cx={size / 2}
                 cy={size / 2}
                 r={r}
@@ -408,7 +560,18 @@ export function Donut({ slices, size = 120 }: { slices: DonutSlice[]; size?: num
                 style={{ stroke: s.color }}
                 strokeDasharray={`${dash.toFixed(1)} ${(c - dash).toFixed(1)}`}
                 strokeDashoffset={(-offset).toFixed(1)}
-              />
+                onMouseEnter={(e) => {
+                  setActive(i);
+                  tooltip.bind(tip).onMouseEnter(e);
+                }}
+                onMouseMove={tooltip.bind(tip).onMouseMove}
+                onMouseLeave={() => {
+                  setActive(null);
+                  tooltip.hide();
+                }}
+              >
+                <title>{`${s.label}: ${s.value} (${pct.toFixed(pct >= 10 ? 0 : 1)}%)`}</title>
+              </circle>
             );
             offset += dash;
             return seg;
@@ -416,9 +579,14 @@ export function Donut({ slices, size = 120 }: { slices: DonutSlice[]; size?: num
       </svg>
       <div className="donut-legend">
         {slices.map((s, i) => {
-          const pct = total === 0 ? 0 : (s.value / total) * 100;
+          const pct = fmtPct(s.value);
           return (
-            <div className="it" key={i}>
+            <div
+              className={`it${active === i ? " active" : ""}`}
+              key={i}
+              onMouseEnter={() => setActive(i)}
+              onMouseLeave={() => setActive(null)}
+            >
               <span className="sw" style={{ background: s.color }} />
               <span className="label">{s.label}</span>
               <span className="num mono">{s.value}</span>
@@ -430,6 +598,7 @@ export function Donut({ slices, size = 120 }: { slices: DonutSlice[]; size?: num
           );
         })}
       </div>
+      <ChartTooltip tip={tooltip.tip} />
     </div>
   );
 }
