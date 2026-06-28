@@ -1180,10 +1180,10 @@ label.field {
 .donut .bg {
   stroke: var(--line);
 }
-/* Hoverable / labelled segments: the hovered arc thickens, the rest dim. */
-.donut circle:not(.bg) {
-  cursor: pointer;
-}
+/* Hoverable / labelled segments: the hovered arc thickens, the rest dim. The
+   arc is a mouse-hover enhancement only (no navigation) — the legend rows are
+   the keyboard/AT-accessible target — so it keeps the default cursor rather
+   than implying it's a clickable/focusable control. */
 .donut circle.active {
   stroke-width: 13;
 }

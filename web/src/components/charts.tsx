@@ -82,14 +82,14 @@ export function StackedSeverityBar({
               )}
             </>
           );
-          // Interactive columns expose each segment as its own link, so the
-          // column is a plain hover target; non-interactive ones announce the
-          // whole-day summary as a single image node.
-          const colProps = hrefForSeverity
-            ? { className: "col", ...tooltip.bind(tip) }
-            : { className: "col", role: "img", "aria-label": summary, ...tooltip.bind(tip) };
+          // The column announces the whole-day summary as a single image node.
+          // When drill-through is on, segments stay mouse-clickable but are kept
+          // out of the tab order (tabIndex=-1) and hidden from AT — every
+          // segment links to the same per-severity URL as the legend, so the
+          // four legend entries are the clean keyboard/screen-reader drill
+          // targets instead of dozens of redundant per-bar tab stops.
           return (
-            <div key={i} {...colProps}>
+            <div key={i} className="col" role="img" aria-label={summary} {...tooltip.bind(tip)}>
               {total === 0 ? (
                 <div className="empty-dot" />
               ) : (
@@ -104,7 +104,8 @@ export function StackedSeverityBar({
                         className={`seg ${s.cls}`}
                         style={style}
                         to={hrefForSeverity(s.key)}
-                        aria-label={`${v} ${s.label.toLowerCase()} ${v === 1 ? "finding" : "findings"} on ${d.day} — view in Findings`}
+                        tabIndex={-1}
+                        aria-hidden="true"
                       />
                     );
                   }
