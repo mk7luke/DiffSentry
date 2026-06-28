@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Config, AIProvider, PRContext, RepoConfig } from "./types.js";
+import { Config, AIProvider, PRContext, RepoConfig, ReviewComment } from "./types.js";
 import { AnthropicProvider } from "./ai/anthropic.js";
 import { OpenAIProvider } from "./ai/openai.js";
 import { OpenAICompatibleProvider } from "./ai/openai-compatible.js";
@@ -27,6 +27,7 @@ import { renderStickyStatus, STICKY_MARKER } from "./sticky-status.js";
 import { recordRepo, recordPR, recordReview, recordFindings, recordPatternHits, recordIssue, recordIssueAction, getSuppressedFingerprints, listCustomRulesForRepo, deleteReviewJob } from "./storage/dao.js";
 import { runSafetyScanners } from "./safety-scanner.js";
 import { runPatternChecks } from "./pattern-checks.js";
+import { runStaticAnalysis, resolveCheckoutDir, dedupeStaticFindings } from "./static-analysis.js";
 import { scanDependencyChanges, renderDepBlock } from "./dep-scanner.js";
 import { detectDescriptionDrift, renderDriftBlock, reviewCommitMessages, renderCommitCoachBlock, reviewPRTitle, renderTitleCoachBlock, scanLicenseHeaders, renderLicenseHeaderBlock } from "./drift.js";
 import { createHash } from "node:crypto";
@@ -657,6 +658,24 @@ export class Reviewer {
         );
       }
 
+      // Kick off deterministic static analysis (lint / typecheck / SAST) NOW so
+      // it runs concurrently with the AI review below — its latency stacks on
+      // top of the model call otherwise. Fully best-effort: resolves to [] when
+      // disabled, no checkout is available, no analyzer is installed, or any
+      // analyzer errors/times out (each tool is independently bounded inside).
+      const staticAnalysisPromise = runStaticAnalysis({
+        files: context.files.map((f) => ({ filename: f.filename, patch: f.patch })),
+        checkoutDir: resolveCheckoutDir(),
+        config: repoConfig.reviews?.static_analysis,
+        signal,
+        logger: log,
+      }).catch((err) => {
+        // runStaticAnalysis is already non-throwing; this is belt-and-suspenders
+        // so a static-analysis failure can never fail the whole review.
+        log.warn({ err }, "Static analysis rejected unexpectedly; continuing AI-only");
+        return [] as ReviewComment[];
+      });
+
       // Run walkthrough and review in parallel
       log.info({ fileCount: context.files.length }, "Starting AI review");
 
@@ -782,6 +801,28 @@ export class Reviewer {
         } else if (
           reviewResult.approval === "APPROVE" &&
           patternFindings.some((c) => c.severity === "major")
+        ) {
+          reviewResult.approval = "COMMENT";
+        }
+      }
+
+      // Fold in deterministic static-analysis findings (kicked off in parallel
+      // above). Dedupe against the already-merged AI + safety + pattern findings
+      // using the same path:line fingerprint locality the other producers share,
+      // so a line already flagged by a richer finding isn't double-reported.
+      const staticFindingsRaw = await staticAnalysisPromise;
+      const staticFindings = dedupeStaticFindings(staticFindingsRaw, reviewResult.comments);
+      if (staticFindings.length > 0) {
+        log.info(
+          { produced: staticFindingsRaw.length, merged: staticFindings.length },
+          "Static analysis produced findings",
+        );
+        reviewResult.comments = [...staticFindings, ...reviewResult.comments];
+        if (staticFindings.some((c) => c.severity === "critical")) {
+          reviewResult.approval = "REQUEST_CHANGES";
+        } else if (
+          reviewResult.approval === "APPROVE" &&
+          staticFindings.some((c) => c.severity === "major")
         ) {
           reviewResult.approval = "COMMENT";
         }
@@ -1213,6 +1254,9 @@ export class Reviewer {
           // and have a fingerprint shape we already use; pattern-checks produce
           // anti-pattern findings. Map heuristically — close enough for the
           // dashboard's source filter.
+          // Static-analysis findings carry an explicit analyzer tag — record the
+          // producing tool ("eslint" / "tsc" / "semgrep") verbatim.
+          if (c.staticSource) return c.staticSource;
           if (c.fingerprint && c.body?.includes("DiffSentry's safety scanner")) return "safety";
           // Pattern-engine findings carry an explicit origin tag; fall back to
           // body-sniffing only for anything that predates it.

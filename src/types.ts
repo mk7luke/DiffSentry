@@ -82,6 +82,22 @@ export interface ReviewsConfig {
   license_header?: LicenseHeaderConfig;
   /** Context-aware severity calibration (blast radius + coverage). */
   severity_calibration?: SeverityCalibrationConfig;
+  /** Deterministic static analysis (lint / typecheck / SAST). Opt-in. */
+  static_analysis?: StaticAnalysisConfig;
+}
+
+// ─── Static analysis ──────────────────────────────────────────────
+// Folds deterministic analyzer output (ESLint / tsc / Semgrep) into the review.
+// Opt-in and best-effort: needs a checked-out PR head (DIFFSENTRY_REPO_CHECKOUT_DIR)
+// and the analyzer installed/configured in the target repo, else it no-ops and
+// the review proceeds AI-only. See src/static-analysis.ts.
+export interface StaticAnalysisConfig {
+  /** Master switch. Default false — the whole feature is opt-in. */
+  enabled?: boolean;
+  /** Restrict to a subset of analyzers. Default: every detected analyzer. */
+  analyzers?: ("eslint" | "tsc" | "semgrep")[];
+  /** Per-analyzer wall-clock budget (ms). Default 60000. <=0 disables the bound. */
+  timeout_ms?: number;
 }
 
 // ─── Severity calibration ─────────────────────────────────────
@@ -208,6 +224,9 @@ export interface ReviewComment {
    *  rules; absent for built-ins and `.diffsentry.yaml` anti_patterns). The stable
    *  key analytics use so a hit is never matched to a rule by name. */
   customRuleId?: number;
+  /** Set by the static-analysis integration so callers can record the producing
+   *  analyzer ("eslint" / "tsc" / "semgrep") without sniffing the rendered body. */
+  staticSource?: "eslint" | "tsc" | "semgrep";
 }
 
 // ─── Review Result ─────────────────────────────────────────────

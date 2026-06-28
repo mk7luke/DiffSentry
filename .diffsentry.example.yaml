@@ -148,6 +148,24 @@ reviews:
   #   lower_confidence_well_tested: true
   #   max_escalation: 2              # cap on net escalation per finding
 
+  # Deterministic static analysis (lint / typecheck / SAST). DiffSentry runs the
+  # analyzers already installed/configured in your repo (ESLint, tsc, Semgrep),
+  # normalizes their output into review findings, and merges them alongside the
+  # AI + pattern findings (deduped against them). Analyzers run in parallel with
+  # the AI review, each bounded by its own timeout.
+  #
+  # OPT-IN and best-effort: it needs the PR head checked out on disk. Point
+  # DiffSentry at it with the DIFFSENTRY_REPO_CHECKOUT_DIR environment variable
+  # (operator-level, e.g. when running inside CI with a working tree). When no
+  # checkout is available, or an analyzer isn't installed/configured, or one
+  # errors/times out, that analyzer is skipped and the review proceeds AI-only —
+  # a failing analyzer never fails the review. Only findings on changed (added)
+  # lines are reported, matching the built-in scanners.
+  # static_analysis:
+  #   enabled: true
+  #   analyzers: [eslint, tsc, semgrep]  # optional; default = every detected one
+  #   timeout_ms: 60000                  # per-analyzer budget (default 60s)
+
 chat:
   auto_reply: true  # Respond to @mentions automatically
 

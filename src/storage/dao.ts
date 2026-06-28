@@ -101,7 +101,7 @@ export function recordReview(opts: {
 }
 
 /** Bulk insert findings for a review. */
-export function recordFindings(reviewId: number, comments: ReviewComment[], sourceFor: (c: ReviewComment) => "ai" | "safety" | "builtin" | "custom" = () => "ai"): void {
+export function recordFindings(reviewId: number, comments: ReviewComment[], sourceFor: (c: ReviewComment) => "ai" | "safety" | "builtin" | "custom" | "eslint" | "tsc" | "semgrep" = () => "ai"): void {
   const db = openDatabase();
   if (!db || comments.length === 0) return;
   try {
