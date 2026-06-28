@@ -104,6 +104,17 @@ describe("parseTscDiagnostics", () => {
     expect(out[0].message).not.toContain("Found 1 error");
   });
 
+  it("maps suggestion/message categories to the info level", () => {
+    const out = parseTscDiagnostics(
+      [
+        "src/a.ts(1,1): suggestion TS80001: File is a CommonJS module; it may be converted to an ES module.",
+        "src/b.ts(2,2): message TS6133: 'x' is declared but its value is never read.",
+      ].join("\n"),
+    );
+    expect(out.map((f) => f.level)).toEqual(["info", "info"]);
+    expect(out[0].ruleId).toBe("TS80001");
+  });
+
   it("keeps consecutive diagnostics separate", () => {
     const text = [
       "a.ts(1,1): error TS1: first.",

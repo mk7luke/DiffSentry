@@ -299,7 +299,7 @@ async function runTsc(ctx: RunCtx): Promise<RawFinding[]> {
 // A greedy filename capture (`.*` rather than `.+?`) anchored by the trailing
 // `(line,col):` segment lets it backtrack to the *last* coordinate group, so
 // drive-letter colons and parentheses inside the path don't truncate the match.
-const TSC_DIAGNOSTIC_RE = /^(.*)\((\d+),(\d+)\):\s+(error|warning)\s+(TS\d+):\s+(.*)$/;
+const TSC_DIAGNOSTIC_RE = /^(.*)\((\d+),(\d+)\):\s+(error|warning|suggestion|message)\s+(TS\d+):\s+(.*)$/;
 
 /** Parse `tsc --pretty false` text diagnostics into raw findings. Exported for
  *  tests — the spawn path is exercised separately. */
@@ -319,7 +319,9 @@ export function parseTscDiagnostics(text: string): RawFinding[] {
         line: parseInt(m[2], 10),
         ruleId: m[5],
         message: m[6],
-        level: m[4] === "warning" ? "warning" : "error",
+        // tsc's lower-severity categories (suggestion/message) normalize to the
+        // info tier → trivial review comments, per the severity contract.
+        level: m[4] === "warning" ? "warning" : m[4] === "error" ? "error" : "info",
       };
       continue;
     }
@@ -532,6 +534,13 @@ function exec(cmd: string, args: string[], ctx: RunCtx): Promise<ExecResult> {
       if (onAbort) ctx.signal?.removeEventListener("abort", onAbort);
       resolve(r);
     };
+
+    // Already cancelled: don't spawn, and don't register an `onAbort` listener
+    // that can never fire (an already-aborted signal won't re-dispatch "abort").
+    if (ctx.signal?.aborted) {
+      finish({ stdout: "", stderr: "", timedOut: false, spawnError: new Error("aborted before spawn") });
+      return;
+    }
 
     let child: ReturnType<typeof spawn>;
     try {
