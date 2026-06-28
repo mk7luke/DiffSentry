@@ -28,6 +28,13 @@ describe("computeAddedLines", () => {
   it("returns an empty set for an empty patch", () => {
     expect(computeAddedLines("").size).toBe(0);
   });
+
+  it("ignores added lines that appear before the first hunk header (no line 0)", () => {
+    const malformed = ["+stray pre-hunk line", "@@ -1,1 +1,2 @@", " ctx", "+real"].join("\n");
+    const added = computeAddedLines(malformed);
+    expect([...added]).toEqual([2]);
+    expect(added.has(0)).toBe(false);
+  });
 });
 
 describe("dedupeStaticFindings", () => {

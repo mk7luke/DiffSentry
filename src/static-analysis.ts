@@ -435,13 +435,17 @@ function dedupeByFingerprint(findings: ReviewComment[]): ReviewComment[] {
  *  per-line walk used by the safety + pattern scanners. */
 export function computeAddedLines(patch: string): Set<number> {
   const added = new Set<number>();
-  let rightLine = 0;
+  // null until the first `@@ ... @@` header gives us a real RIGHT-side start.
+  // Any body lines before that (malformed/nonstandard patch text) are ignored
+  // so we never emit an invalid line 0 position.
+  let rightLine: number | null = null;
   for (const raw of patch.split("\n")) {
     const hunk = raw.match(/^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/);
     if (hunk) {
       rightLine = parseInt(hunk[1], 10);
       continue;
     }
+    if (rightLine === null) continue; // pre-hunk noise — no line numbering yet
     if (raw.startsWith("---") || raw.startsWith("+++")) continue;
     if (raw.startsWith("-")) continue;
     if (raw.startsWith("+")) {
@@ -483,11 +487,16 @@ interface ExecResult {
 function exec(cmd: string, args: string[], ctx: RunCtx): Promise<ExecResult> {
   return new Promise<ExecResult>((resolve) => {
     let settled = false;
+    // Hoisted so the single cleanup path below can tear them down regardless of
+    // which exit mode fires — including the synchronous spawn() failure, before
+    // either is assigned. Both are optional and cleared defensively.
+    let timer: NodeJS.Timeout | undefined;
+    let onAbort: (() => void) | undefined;
     const finish = (r: ExecResult) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      ctx.signal?.removeEventListener("abort", onAbort);
+      if (timer) clearTimeout(timer);
+      if (onAbort) ctx.signal?.removeEventListener("abort", onAbort);
       resolve(r);
     };
 
@@ -495,7 +504,7 @@ function exec(cmd: string, args: string[], ctx: RunCtx): Promise<ExecResult> {
     try {
       child = spawn(cmd, args, { cwd: ctx.cwd, env: process.env, windowsHide: true });
     } catch (err) {
-      resolve({ code: null, stdout: "", stderr: "", timedOut: false, spawnError: err as Error });
+      finish({ code: null, stdout: "", stderr: "", timedOut: false, spawnError: err as Error });
       return;
     }
 
@@ -521,19 +530,18 @@ function exec(cmd: string, args: string[], ctx: RunCtx): Promise<ExecResult> {
     child.stdout?.on("data", onData("out"));
     child.stderr?.on("data", onData("err"));
 
-    const timer =
-      ctx.timeoutMs > 0
-        ? setTimeout(() => {
-            timedOut = true;
-            try {
-              child.kill("SIGKILL");
-            } catch {
-              // already gone
-            }
-          }, ctx.timeoutMs)
-        : (undefined as unknown as NodeJS.Timeout);
+    if (ctx.timeoutMs > 0) {
+      timer = setTimeout(() => {
+        timedOut = true;
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // already gone
+        }
+      }, ctx.timeoutMs);
+    }
 
-    const onAbort = () => {
+    onAbort = () => {
       try {
         child.kill("SIGKILL");
       } catch {
