@@ -1944,6 +1944,14 @@ a.dot-marker:hover,
   padding: 40px 20px;
   background: radial-gradient(ellipse 1200px 500px at 50% -10%, var(--page-glow), transparent 60%), var(--bg);
 }
+/* On short / phone viewports (or with large text / zoom) the recovery content
+   can exceed the screen; top-align so the actions are never centered partly
+   off-screen and the page scrolls naturally. */
+@media (max-width: 640px) {
+  .error-page {
+    align-items: flex-start;
+  }
+}
 .error-page-inner {
   text-align: center;
   max-width: 460px;
@@ -2903,6 +2911,7 @@ a.dot-marker:hover,
     padding-top: 8px;
     padding-bottom: 8px;
   }
+  .tbl th .check-tap,
   .tbl td[data-label="Select"] .check-tap {
     min-width: 44px;
     min-height: 44px;
