@@ -16,6 +16,13 @@ function useCountUp(target: number, durationMs = 950): number {
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
+    // Single-owner: kill any frame still in flight before (maybe) starting a
+    // new loop, so rapid target changes can't leave two loops racing setDisplay.
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+
     const reduce =
       typeof window !== "undefined" &&
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -39,11 +46,15 @@ function useCountUp(target: number, durationMs = 950): number {
       const t = Math.min(1, (now - start) / durationMs);
       const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic
       setDisplay(Math.round(from + (target - from) * eased));
-      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+      // Null the ref once we land so a later cleanup never cancels a stale id.
+      rafRef.current = t < 1 ? requestAnimationFrame(tick) : null;
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
     };
   }, [target, durationMs]);
 
