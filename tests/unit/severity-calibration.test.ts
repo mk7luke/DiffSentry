@@ -68,6 +68,19 @@ describe("wellTestedPaths", () => {
     expect(wellTestedPaths([file("src/api/foo.ts"), file("tests/api/foo.test.ts")]).has("src/api/foo.ts")).toBe(true);
   });
 
+  it("matches a nested mirrored tree where the source root sits below a package dir", () => {
+    // packages/api/src/foo.ts ↔ tests/packages/api/foo.test.ts (src nested at end)
+    expect(
+      wellTestedPaths([file("packages/api/src/foo.ts"), file("tests/packages/api/foo.test.ts")]).has(
+        "packages/api/src/foo.ts",
+      ),
+    ).toBe(true);
+    // …but a flat top-level test must NOT pair with a nested source.
+    expect(
+      wellTestedPaths([file("packages/api/src/foo.ts"), file("tests/foo.test.ts")]).has("packages/api/src/foo.ts"),
+    ).toBe(false);
+  });
+
   it("does NOT pair same-stem files in unrelated directories (directory scoping)", () => {
     // Regression: a global basename index would wrongly pair these. They share
     // the stem `foo` but live in sibling packages, so neither is well-tested.

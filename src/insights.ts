@@ -320,7 +320,8 @@ function stripTestFolderSegments(dir: string): string {
  * tested. Supported layouts:
  *   (a) same directory          — `src/foo.ts` ↔ `src/foo.test.ts`
  *   (b) `__tests__/` subfolder  — `src/foo.ts` ↔ `src/__tests__/foo.test.ts`
- *   (c) mirrored test tree      — `src/a/foo.ts` ↔ `tests/a/foo.test.ts`
+ *   (c) mirrored test tree      — `src/a/foo.ts` ↔ `tests/a/foo.test.ts`, and
+ *       nested layouts like `packages/api/src/foo.ts` ↔ `tests/packages/api/foo.test.ts`
  */
 function isSiblingTestForSource(srcPath: string, testPath: string): boolean {
   if (prodStem(srcPath) !== testTargetStem(testPath)) return false;
@@ -331,11 +332,20 @@ function isSiblingTestForSource(srcPath: string, testPath: string): boolean {
   // (b) a `__tests__` / `__test__` subfolder of the source dir (at any depth)
   if (stripTestFolderSegments(testDir) === srcDir) return true;
   // (c) mirrored tree: a leading test root over a sub-path that matches the
-  //     source's sub-path (after its own leading source root, if any).
+  //     source's sub-path. The source root may sit at the start (`src/a` →
+  //     `a`) OR nested at the end (`packages/api/src` → `packages/api`), so we
+  //     match the stripped test sub-path against both forms plus the raw dir.
+  //     Candidates are derived only from THIS source path, so broadening can't
+  //     pull in unrelated directories.
   const [testSub, didStripTest] = stripLeadingRoot(testDir, TEST_TREE_ROOTS);
   if (didStripTest) {
-    const [srcSub] = stripLeadingRoot(srcDir, SRC_TREE_ROOTS);
-    if (testSub === srcSub) return true;
+    const candidates = new Set<string>([srcDir]);
+    candidates.add(stripLeadingRoot(srcDir, SRC_TREE_ROOTS)[0]);
+    const parts = srcDir.split("/");
+    if (parts.length > 0 && SRC_TREE_ROOTS.has(parts[parts.length - 1].toLowerCase())) {
+      candidates.add(parts.slice(0, -1).join("/"));
+    }
+    if (candidates.has(testSub)) return true;
   }
   return false;
 }
