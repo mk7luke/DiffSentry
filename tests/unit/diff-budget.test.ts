@@ -34,7 +34,14 @@ describe("truncatePatch", () => {
     const patch = patchWithLines(50_000);
     const out = truncatePatch(patch, { perFileChars: 500, keepHeadLines: 10_000, keepTailLines: 10_000 });
     expect(out.truncated).toBe(true);
-    expect(out.text.length).toBeLessThanOrEqual(500 + 60); // budget + the hard-truncation marker
+    expect(out.text.length).toBeLessThanOrEqual(500); // invariant: never exceeds perFileChars
+  });
+
+  it("never exceeds perFileChars even for a budget smaller than the marker", () => {
+    const patch = patchWithLines(500);
+    const out = truncatePatch(patch, { perFileChars: 10, keepHeadLines: 5, keepTailLines: 5 });
+    expect(out.truncated).toBe(true);
+    expect(out.text.length).toBeLessThanOrEqual(10);
   });
 
   it("drops whole later hunks when per-hunk trimming isn't enough", () => {
@@ -44,7 +51,7 @@ describe("truncatePatch", () => {
     const patch = hunks.join("\n");
     const out = truncatePatch(patch, { perFileChars: 120, keepHeadLines: 40, keepTailLines: 20 });
     expect(out.truncated).toBe(true);
-    expect(out.text.length).toBeLessThanOrEqual(120 + 80);
+    expect(out.text.length).toBeLessThanOrEqual(120);
     expect(out.text).toMatch(/later hunk\(s\) omitted entirely/);
   });
 });
@@ -80,7 +87,7 @@ describe("applyDiffBudget", () => {
     const res = applyDiffBudget(files, { per_file_chars: 1_000, per_review_chars: 1_000_000 });
     expect(res.filesTruncated).toEqual(["a.ts"]);
     expect(res.filesOmitted).toEqual([]);
-    expect(res.byFile["a.ts"].sentChars).toBeLessThanOrEqual(1_000 + 60);
+    expect(res.byFile["a.ts"].sentChars).toBeLessThanOrEqual(1_000);
   });
 
   it("omits lower-priority files when the per-review budget is exceeded, keeping high-risk first", () => {

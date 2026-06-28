@@ -59,7 +59,9 @@ export function resolveDiffBudget(cfg?: DiffBudgetConfig): ResolvedDiffBudget {
  * hunks), drop whole hunks from the end. A final hard slice guarantees the
  * result never exceeds the budget even for a single pathological hunk.
  *
- * Returns the original patch untouched when it already fits.
+ * Returns the original patch untouched when it already fits. Invariant: the
+ * returned text is always `<= perFileChars` (applyDiffBudget relies on this to
+ * size the per-review budget).
  */
 export function truncatePatch(
   patch: string,
@@ -117,9 +119,17 @@ export function truncatePatch(
     text += markerFor(droppedHunks);
   }
 
-  // Final safety: a single giant hunk (or preamble) can still overflow.
+  // Final safety: a single giant hunk (or preamble) can still overflow. Reserve
+  // room for the marker BEFORE slicing so the result never exceeds perFileChars —
+  // applyDiffBudget relies on `text.length <= perFileChars` to size the per-review
+  // budget. For a pathologically tiny budget that can't even hold the marker,
+  // truncate the marker itself rather than overshoot.
   if (text.length > perFileChars) {
-    text = text.slice(0, perFileChars) + "\n… patch hard-truncated at the per-file size budget …";
+    const marker = "\n… patch hard-truncated at the per-file size budget …";
+    text =
+      perFileChars <= marker.length
+        ? marker.slice(0, perFileChars)
+        : text.slice(0, perFileChars - marker.length) + marker;
   }
 
   return { text, truncated: true };

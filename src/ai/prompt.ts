@@ -239,6 +239,15 @@ export function buildWalkthroughPrompt(
     })
     .join("\n\n");
 
+  // Mirror buildReviewPrompt: when files were dropped from the diff for size,
+  // name them and tell the model to summarize only from the patches it can see.
+  const omittedNote =
+    budget && budget.filesOmitted.length > 0
+      ? `\n\n> ⚠️ **${budget.filesOmitted.length} file(s) had their diffs omitted to stay within the size budget** (they appear in the file list above but not in the diffs below): ${budget.filesOmitted
+          .map((p) => `\`${p}\``)
+          .join(", ")}. Base your summary and sequence diagrams only on the patches shown below; note these files as changed but not detailed.`
+      : "";
+
   const user = `## Pull Request: ${context.title}
 
 **Branch:** ${context.headBranch} → ${context.baseBranch}
@@ -247,7 +256,7 @@ export function buildWalkthroughPrompt(
 ${context.description || "(no description provided)"}
 
 ## Changed Files
-${filesSection}
+${filesSection}${omittedNote}
 
 ## Diffs
 ${patchSection}
