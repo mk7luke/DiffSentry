@@ -33,6 +33,7 @@ import {
 } from "./icons";
 import { CommandPalette, openCommandPalette } from "./CommandPalette";
 import { SetupWizard } from "./SetupWizard";
+import { DemoBanner } from "../demo/DemoBanner";
 
 // Page shell: a left sidebar (brand + primary nav + signed-in user) and the
 // main content column. On phones the sidebar collapses into an off-canvas
@@ -330,6 +331,7 @@ export function Shell() {
       />
 
       <main ref={mainRef} className="main">
+        <DemoBanner />
         <SetupWizard />
         <Outlet />
       </main>
