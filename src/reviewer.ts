@@ -18,13 +18,13 @@ import { parseIssueReferences, fetchLinkedIssues, formatIssuesForPrompt, formatI
 import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-merge.js";
 import { generateDocstrings, generateTests, simplifyCode, autofix } from "./finishing-touches.js";
 import { formatReviewBody } from "./review-body.js";
-import { encodeState, extractState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
+import { encodeState, encodeStateRef, extractState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
 import { assessRisk, renderRiskBlock, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion, renderConfidenceAggregate, computeReviewerDeltas, renderReviewerDeltaBlock, calibrateSeverities, resolveSeverityCalibration, renderSeverityCalibrationBlock, type CalibrationResult } from "./insights.js";
 import { suggestReviewersFromBlame, renderSuggestedReviewers, combineReviewers, renderCombinedReviewers } from "./blame-reviewers.js";
 import { loadCodeowners, ownersForFiles, renderCodeownersBlock } from "./codeowners.js";
 import { findPriorBotThreadsForPaths, renderPriorDiscussionsBlock, diffWithOtherPR, renderDiffPRReply } from "./cross-pr.js";
 import { renderStickyStatus, STICKY_MARKER } from "./sticky-status.js";
-import { recordRepo, recordPR, recordReview, recordFindings, recordPatternHits, recordIssue, recordIssueAction, getSuppressedFingerprints, listCustomRulesForRepo, deleteReviewJob } from "./storage/dao.js";
+import { recordRepo, recordPR, recordReview, recordFindings, recordPatternHits, recordIssue, recordIssueAction, getSuppressedFingerprints, listCustomRulesForRepo, deleteReviewJob, getWalkthroughState, saveWalkthroughState } from "./storage/dao.js";
 import { runSafetyScanners } from "./safety-scanner.js";
 import { runPatternChecks } from "./pattern-checks.js";
 import { runStaticAnalysis, resolveCheckoutDir, dedupeStaticFindings } from "./static-analysis.js";
@@ -549,7 +549,14 @@ export class Reviewer {
       const priorComment = await this.github
         .findCommentByMarker(installationId, owner, repo, pullNumber, WALKTHROUGH_MARKER)
         .catch(() => null);
-      const priorState = priorComment ? extractState(priorComment.body) : null;
+      // Prefer the durable DB copy. Fall back to the embedded comment blob,
+      // which always carries the full state — so recovery is lossless whether
+      // the PR predates this change, DB_PATH="" disables persistence, or the DB
+      // row is ever lost/unreadable (getWalkthroughState returns null in each
+      // case and we read the equivalent state straight from the comment).
+      const priorState =
+        getWalkthroughState(owner, repo, pullNumber) ??
+        (priorComment ? extractState(priorComment.body) : null);
       const priorFingerprints = new Set(priorState?.postedFingerprints ?? []);
 
       // Classify each file against prior state
@@ -1130,8 +1137,25 @@ export class Reviewer {
           updatedAt: new Date().toISOString(),
           riskHistory,
         };
-        walkthroughBody +=
-          "\n\n<!-- internal_state_start -->\n" + encodeState(newState) + "\n<!-- internal_state_end -->";
+        // Persist to the durable store FIRST so the state survives even if the
+        // walkthrough comment upsert below fails — the DB is the authoritative
+        // copy, not the comment.
+        const persisted = saveWalkthroughState(owner, repo, pullNumber, newState);
+
+        // Always embed the FULL state blob in the comment as a complete
+        // fallback, so incremental-review semantics survive every recovery path
+        // losslessly: a pre-migration PR, a disabled DB (DB_PATH=""), or a
+        // lost/unreadable DB row. The comment then carries the same fileShas and
+        // postedFingerprints the DB does (re-review skip + cross-review dedup
+        // both keep working). When persistence succeeded we additionally embed a
+        // small reference recording that the authoritative copy lives in the DB.
+        let stateBlock = "\n\n<!-- internal_state_start -->\n";
+        if (persisted) {
+          stateBlock +=
+            encodeStateRef({ v: 1, db: true, owner, repo, number: pullNumber, updatedAt: newState.updatedAt }) + "\n";
+        }
+        stateBlock += encodeState(newState) + "\n<!-- internal_state_end -->";
+        walkthroughBody += stateBlock;
 
         try {
           await this.github.upsertComment(
@@ -1140,7 +1164,9 @@ export class Reviewer {
           );
           log.info("Walkthrough comment posted");
         } catch (err) {
-          log.warn({ err }, "Failed to post walkthrough comment");
+          // State is already durable in the DB (when enabled), so a failed
+          // comment upsert no longer loses incremental-review progress.
+          log.warn({ err, statePersisted: persisted }, "Failed to post walkthrough comment");
         }
       }
 
