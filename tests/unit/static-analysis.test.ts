@@ -87,6 +87,34 @@ describe("parseTscDiagnostics", () => {
     const out = parseTscDiagnostics("Found 2 errors in 1 file.\n\n   src/ok.ts:not-a-diagnostic");
     expect(out).toEqual([]);
   });
+
+  it("folds indented message-chain continuation lines into the message", () => {
+    const text = [
+      "src/foo.ts(1,1): error TS2322: Type 'A' is not assignable to type 'B'.",
+      "  Types of property 'x' are incompatible.",
+      "    Type 'string' is not assignable to type 'number'.",
+      "Found 1 error.",
+    ].join("\n");
+    const out = parseTscDiagnostics(text);
+    expect(out).toHaveLength(1);
+    expect(out[0].message).toBe(
+      "Type 'A' is not assignable to type 'B'. Types of property 'x' are incompatible. Type 'string' is not assignable to type 'number'.",
+    );
+    // The non-indented "Found 1 error." summary must not be absorbed.
+    expect(out[0].message).not.toContain("Found 1 error");
+  });
+
+  it("keeps consecutive diagnostics separate", () => {
+    const text = [
+      "a.ts(1,1): error TS1: first.",
+      "  detail for first.",
+      "b.ts(2,2): warning TS2: second.",
+    ].join("\n");
+    const out = parseTscDiagnostics(text);
+    expect(out.map((f) => f.ruleId)).toEqual(["TS1", "TS2"]);
+    expect(out[0].message).toBe("first. detail for first.");
+    expect(out[1].message).toBe("second.");
+  });
 });
 
 describe("toRepoRelative", () => {
@@ -102,6 +130,14 @@ describe("toRepoRelative", () => {
 
   it("maps an absolute path inside the checkout", () => {
     expect(toRepoRelative("/repo/checkout/src/foo.ts", cwd)).toBe("src/foo.ts");
+  });
+
+  it("maps repo-root files (not just nested ones)", () => {
+    // A file at the checkout root resolves to its basename, NOT an empty string,
+    // so it is correctly kept (it does not look like the directory itself).
+    expect(toRepoRelative("eslint.config.js", cwd)).toBe("eslint.config.js");
+    expect(toRepoRelative("./index.ts", cwd)).toBe("index.ts");
+    expect(toRepoRelative("/repo/checkout/index.ts", cwd)).toBe("index.ts");
   });
 
   it("folds . and .. segments that stay inside the checkout", () => {

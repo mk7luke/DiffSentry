@@ -305,17 +305,33 @@ const TSC_DIAGNOSTIC_RE = /^(.*)\((\d+),(\d+)\):\s+(error|warning)\s+(TS\d+):\s+
  *  tests — the spawn path is exercised separately. */
 export function parseTscDiagnostics(text: string): RawFinding[] {
   const out: RawFinding[] = [];
+  let current: RawFinding | null = null;
+  const flush = () => {
+    if (current) out.push(current);
+    current = null;
+  };
   for (const raw of text.split("\n")) {
     const m = raw.trimEnd().match(TSC_DIAGNOSTIC_RE);
-    if (!m) continue;
-    out.push({
-      file: m[1],
-      line: parseInt(m[2], 10),
-      ruleId: m[5],
-      message: m[6],
-      level: m[4] === "warning" ? "warning" : "error",
-    });
+    if (m) {
+      flush();
+      current = {
+        file: m[1],
+        line: parseInt(m[2], 10),
+        ruleId: m[5],
+        message: m[6],
+        level: m[4] === "warning" ? "warning" : "error",
+      };
+      continue;
+    }
+    // tsc flattens message chains onto INDENTED continuation lines (even with
+    // --pretty false), e.g. "  Types of property 'x' are incompatible.". Fold
+    // those into the active diagnostic's message. Only indented lines qualify,
+    // so banners/summaries ("Found 2 errors.") and blanks are never absorbed.
+    if (current && /^\s+\S/.test(raw)) {
+      current.message += ` ${raw.trim()}`;
+    }
   }
+  flush();
   return out;
 }
 
@@ -487,7 +503,6 @@ function fpFor(p: string, line: number, source: StaticSource, ruleId: string): s
 // ─── Process / fs primitives ──────────────────────────────────────────────────
 
 interface ExecResult {
-  code: number | null;
   stdout: string;
   stderr: string;
   timedOut: boolean;
@@ -522,7 +537,7 @@ function exec(cmd: string, args: string[], ctx: RunCtx): Promise<ExecResult> {
     try {
       child = spawn(cmd, args, { cwd: ctx.cwd, env: process.env, windowsHide: true });
     } catch (err) {
-      finish({ code: null, stdout: "", stderr: "", timedOut: false, spawnError: err as Error });
+      finish({ stdout: "", stderr: "", timedOut: false, spawnError: err as Error });
       return;
     }
 
@@ -573,8 +588,8 @@ function exec(cmd: string, args: string[], ctx: RunCtx): Promise<ExecResult> {
     };
     ctx.signal?.addEventListener("abort", onAbort, { once: true });
 
-    child.on("error", (err) => finish({ code: null, stdout, stderr, timedOut, outputTooLarge, spawnError: err }));
-    child.on("close", (code) => finish({ code, stdout, stderr, timedOut, outputTooLarge }));
+    child.on("error", (err) => finish({ stdout, stderr, timedOut, outputTooLarge, spawnError: err }));
+    child.on("close", () => finish({ stdout, stderr, timedOut, outputTooLarge }));
   });
 }
 
