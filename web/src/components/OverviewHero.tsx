@@ -73,13 +73,17 @@ export function OverviewHero() {
 
   const onEvent = useCallback(
     (env: StreamEnvelope) => {
+      // Only the hero's own 7-day window — don't refetch whatever range the
+      // Impact page happens to be showing. Prefix-matches useImpact("7d")'s
+      // ["impact", "7d", null] cache entry.
+      const refetch7d = () => void qc.invalidateQueries({ queryKey: ["impact", "7d"] });
       if (env.topic === "finding.surfaced") {
         const sev = (env.payload as { severity?: string } | null)?.severity;
         if (sev === "critical" || sev === "major") setBonus((b) => b + 1);
-        void qc.invalidateQueries({ queryKey: ["impact"] });
+        refetch7d();
       } else if (env.topic === "review.finished") {
         // A finished review may have caught new issues — pull the real numbers.
-        void qc.invalidateQueries({ queryKey: ["impact"] });
+        refetch7d();
       }
     },
     [qc],
@@ -91,7 +95,14 @@ export function OverviewHero() {
   // First paint with no cached data — render a sized skeleton so the page
   // doesn't jump when the real hero arrives.
   if (query.isLoading && !query.data) {
-    return <section className="ov-hero ov-hero-skeleton" aria-hidden />;
+    return (
+      <section
+        className="ov-hero ov-hero-skeleton"
+        role="status"
+        aria-busy="true"
+        aria-label="Loading impact summary…"
+      />
+    );
   }
 
   // If impact ever errors, stay quiet rather than showing a broken hero; the
