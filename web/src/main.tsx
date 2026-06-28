@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "react-router-dom";
 import { router } from "./router";
+import { DEMO, DEMO_BASENAME, demoPathActive } from "./demo/mode";
 import { AuthProvider } from "./auth/useAuth";
 import { EventStreamProvider } from "./realtime/useEventStream";
 import { ToastProvider } from "./realtime/toast";
@@ -32,7 +33,17 @@ const queryClient = new QueryClient({
 // lib/persist.ts), so one user's cached data is never shown to another — and
 // authed data is never rendered offline without a verified session.
 async function bootstrap() {
-  await initPersistence(queryClient);
+  // Demo via ?demo=true on some other path → bounce to the canonical /demo
+  // route so React Router's basename stays consistent. Abort this render; the
+  // redirect reloads the app under /demo.
+  if (DEMO && !demoPathActive()) {
+    window.location.replace(DEMO_BASENAME);
+    return;
+  }
+
+  // The offline persisted cache is owner-scoped, real-session data — never
+  // hydrate or write it in demo mode, where the only data is fixtures.
+  if (!DEMO) await initPersistence(queryClient);
 
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

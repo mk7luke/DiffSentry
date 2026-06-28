@@ -75,9 +75,9 @@ On top of the CodeRabbit-style walkthrough, inline comments, and sticky status c
       <b>🎬 Demo GIF — coming soon</b>
       <br /><sub>A short capture of a real PR review will live here.</sub>
       <br /><br />
-      <b>🚀 Live sandbox demo — coming soon</b>
-      <br /><sub>A hosted instance you can click through, no install required.</sub>
-      <!-- TODO(A4/D2): replace the two placeholders above with (1) docs/demo.gif showing an end-to-end PR review and (2) the hosted/sandbox demo URL. -->
+      <b>🚀 Live sandbox demo</b>
+      <br /><sub>Open <code>/demo</code> on any hosted instance (or <code>?demo=true</code>) for a no-auth, read-only walkthrough of the real UI with sample data — no install required. See <a href="#public-demo--sandbox-mode">Public demo / sandbox mode</a>.</sub>
+      <!-- TODO(D2): replace the demo GIF placeholder above with docs/demo.gif showing an end-to-end PR review. -->
     </td>
   </tr>
 </table>
@@ -89,6 +89,7 @@ On top of the CodeRabbit-style walkthrough, inline comments, and sticky status c
 Everything below documents DiffSentry in full. Jump to a section:
 
 - [What it does](#what-it-does)
+- [Public demo / sandbox mode](#public-demo--sandbox-mode)
 - [Setup](#setup)
 - [Per-repo configuration](#per-repo-configuration)
 - [End-to-end test harness](#end-to-end-test-harness)
@@ -289,6 +290,26 @@ cost surprises).
 - **Config from PR head** — `.diffsentry.yaml` is loaded from the PR's HEAD,
   not the default branch. Config edits take effect on the PR that introduces
   them.
+
+## Public demo / sandbox mode
+
+Want to see the dashboard before installing? DiffSentry ships a **no-auth,
+read-only demo** of the real UI backed by bundled sample data.
+
+- **Open it** at **`/demo`** on any hosted instance (e.g. `https://your-instance/demo`),
+  or append **`?demo=true`** to any URL — that redirects to `/demo`.
+- **What you get** — the actual Overview, a RepoDetail, and a PRDetail with
+  findings anchored onto a real unified diff, all driven by fixtures.
+- **It's safe by construction** — in demo mode the SPA answers every read from
+  in-memory fixtures and refuses every write, making **zero** network requests.
+  It cannot read or mutate real data. The server mounts **no data API** for the
+  demo; it only serves the static SPA shell, so `/demo` works even when the
+  dashboard (`ENABLE_DASHBOARD`) is off.
+- **A removable banner** sits at the top with **Install on your repo** and
+  **View Quick Start** calls to action.
+
+**Disabling it.** Security-conscious operators can turn the demo off entirely
+with **`DISABLE_DEMO=1`**, after which `/demo` returns `404`.
 
 ## Setup
 
