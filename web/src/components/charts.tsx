@@ -521,9 +521,9 @@ export function Donut({ slices, size = 120 }: { slices: DonutSlice[]; size?: num
   const r = size / 2 - 6;
   const c = 2 * Math.PI * r;
   const tooltip = useChartTooltip();
-  // Hovering/focusing a segment or its legend row highlights the pair and dims
-  // the rest. Both sides share one tooltip-content builder so the arc and its
-  // legend entry show the identical popover.
+  // Hovering an arc highlights it (and dims the rest) and shows the tooltip —
+  // a pointer-only decorative emphasis of data that's also printed in full in
+  // the static legend below, so no information is mouse-gated.
   const [active, setActive] = useState<number | null>(null);
   const fmtPct = (v: number) => (total === 0 ? 0 : (v / total) * 100);
   const tipFor = (s: DonutSlice) => {
@@ -587,33 +587,15 @@ export function Donut({ slices, size = 120 }: { slices: DonutSlice[]; size?: num
             return seg;
           })}
       </svg>
+      {/* Static, non-interactive legend: it prints every slice's label, count
+          and share as visible text, so it's the accessible representation of the
+          donut. It isn't a focusable control (no action to perform), which keeps
+          it out of the tab order and avoids focusable-without-semantics rows. */}
       <div className="donut-legend">
         {slices.map((s, i) => {
           const pct = fmtPct(s.value);
-          const tip = tipFor(s);
-          const handlers = tooltip.bind(tip);
-          const enter = () => setActive(i);
-          const leave = () => {
-            setActive(null);
-            tooltip.hide();
-          };
           return (
-            <div
-              className={`it${active === i ? " active" : ""}`}
-              key={i}
-              tabIndex={0}
-              onMouseEnter={(e) => {
-                enter();
-                handlers.onMouseEnter(e);
-              }}
-              onMouseMove={handlers.onMouseMove}
-              onMouseLeave={leave}
-              onFocus={(e) => {
-                enter();
-                handlers.onFocus(e);
-              }}
-              onBlur={leave}
-            >
+            <div className="it" key={i}>
               <span className="sw" style={{ background: s.color }} />
               <span className="label">{s.label}</span>
               <span className="num mono">{s.value}</span>

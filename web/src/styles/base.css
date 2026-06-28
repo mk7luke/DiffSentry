@@ -1187,14 +1187,6 @@ label.field {
 .donut circle.dim {
   opacity: 0.4;
 }
-.donut-legend .it.active .label {
-  color: var(--accent-bright);
-}
-.donut-legend .it:focus-visible {
-  outline: 2px solid var(--accent-bright);
-  outline-offset: 2px;
-  border-radius: var(--r-xs);
-}
 .donut-legend {
   display: flex;
   flex-direction: column;
