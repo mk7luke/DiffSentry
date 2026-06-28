@@ -173,6 +173,23 @@ async function main() {
         pr.json.data.events.some((e: any) => e.kind === "pull_request.opened"),
     );
 
+    // PR diff (inline viewer feed). This harness wires no installation Octokit,
+    // so the diff degrades to null with an explanatory diffError while findings
+    // (anchored to {path, line}) still return — the contract the SPA relies on.
+    const prDiff = await get("/api/v1/repos/mk7luke/diffsentry-sandbox/prs/42/diff");
+    ok(
+      "pr diff → findings anchored, diff degrades cleanly",
+      prDiff.status === 200 &&
+        prDiff.json.data.diff === null &&
+        typeof prDiff.json.data.diffError === "string" &&
+        prDiff.json.data.findings.some(
+          (f: any) => f.title === "Race condition" && f.path === "src/limiter.ts" && typeof f.line === "number",
+        ),
+    );
+
+    const prDiffBad = await get("/api/v1/repos/mk7luke/diffsentry-sandbox/prs/abc/diff");
+    ok("pr diff → bad PR number 400", prDiffBad.status === 400 && prDiffBad.json.error.code === "bad_request");
+
     const findings = await get("/api/v1/findings");
     ok("findings → rows + total", findings.status === 200 && findings.json.data.total >= 3);
 

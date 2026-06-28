@@ -337,6 +337,22 @@ export interface FindingsResponse {
   filters: FindingFilters;
 }
 
+/** GET /repos/:owner/:repo/prs/:number/diff — the inline diff viewer payload. */
+export interface PRDiffResponse {
+  owner: string;
+  repo: string;
+  number: number;
+  pr: PRRow | null;
+  /** Raw unified diff, or null when it couldn't be fetched (see diffError). */
+  diff: string | null;
+  /** True when the diff was clipped to a size limit before sending. */
+  truncated: boolean;
+  /** Why the diff is null/clipped, when applicable. */
+  diffError: string | null;
+  /** Stored findings for the PR, each carrying { path, line } for anchoring. */
+  findings: PRFindingRow[];
+}
+
 export interface PatternsResponse {
   rules: PatternRuleRow[];
 }

@@ -30,6 +30,7 @@ import type {
   NotificationsResponse,
   PatternsResponse,
   PRDetailResponse,
+  PRDiffResponse,
   RecurringResponse,
   QueueResponse,
   RepoConfigResponse,
@@ -86,6 +87,22 @@ export function usePRDetail(owner: string, repo: string, number: number) {
         `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/prs/${number}`,
       ),
     enabled: !!owner && !!repo && Number.isFinite(number),
+  });
+}
+
+/**
+ * The PR's unified diff + anchored findings for the inline diff viewer. The key
+ * is nested under ["pr", …] so the triage invalidator and the PR-detail SSE
+ * handler (both of which invalidate ["pr", owner, repo, number]) refresh it too.
+ */
+export function usePRDiff(owner: string, repo: string, number: number, enabled = true) {
+  return useQuery({
+    queryKey: ["pr", owner, repo, number, "diff"],
+    queryFn: () =>
+      apiGet<PRDiffResponse>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/prs/${number}/diff`,
+      ),
+    enabled: enabled && !!owner && !!repo && Number.isFinite(number),
   });
 }
 

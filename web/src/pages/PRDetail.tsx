@@ -9,6 +9,7 @@ import { ApprovalBadge, RiskBadge, SeverityBadge, TriageBadge } from "../compone
 import { TriageMenu } from "../components/TriageControls";
 import { EmptyState, QueryBoundary } from "../components/states";
 import { Markdown } from "../components/Markdown";
+import { DiffViewer } from "../components/DiffViewer";
 import { useEventStream, type StreamEnvelope } from "../realtime/useEventStream";
 import { pluralize, relativeTime } from "../lib/format";
 import type { PRReviewRow } from "../api/types";
@@ -71,6 +72,7 @@ export function PRDetailPage() {
   const number = Number.parseInt(params.number ?? "", 10);
   const query = usePRDetail(owner, repo, number);
   const qc = useQueryClient();
+  const [view, setView] = useState<"overview" | "diff">("overview");
 
   // Live updates: when a review for *this* PR finishes/fails or an action is
   // performed, refetch the detail so findings/events reflect it without a
@@ -124,7 +126,32 @@ export function PRDetailPage() {
 
               <ActionBar owner={owner} repo={repo} number={a.number} variant="pr" />
 
-              <div className="grid stack">
+              <div className="prtabs" role="tablist" aria-label="PR views">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={view === "overview"}
+                  className={`prtab${view === "overview" ? " active" : ""}`}
+                  onClick={() => setView("overview")}
+                >
+                  Overview
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={view === "diff"}
+                  className={`prtab${view === "diff" ? " active" : ""}`}
+                  onClick={() => setView("diff")}
+                >
+                  Diff
+                  {a.findings.length > 0 ? <span className="prtab-count">{a.findings.length}</span> : null}
+                </button>
+              </div>
+
+              {view === "diff" ? (
+                <DiffViewer owner={owner} repo={repo} number={a.number} />
+              ) : (
+                <div className="grid stack">
                 {a.latest ? (
                   <Card title="Latest review" subtitle={`${(a.latest.sha ?? "").slice(0, 7)} · ${relativeTime(a.latest.created_at)}`}>
                     <LatestReview latest={a.latest} />
@@ -274,7 +301,8 @@ export function PRDetailPage() {
                     </ul>
                   )}
                 </Card>
-              </div>
+                </div>
+              )}
             </>
           );
         }}

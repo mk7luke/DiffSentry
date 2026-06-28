@@ -4711,3 +4711,390 @@ a.cb-name:hover {
   font-size: 10px;
   letter-spacing: 0.06em;
 }
+
+/* ─── PR view tabs (Overview / Diff) ───────────────────────────────── */
+.prtabs {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.prtab {
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.prtab:hover {
+  color: var(--text-1);
+}
+.prtab.active {
+  color: var(--accent-bright);
+  border-bottom-color: var(--accent);
+}
+.prtab-count {
+  font-size: 10.5px;
+  background: var(--bg-elev-2);
+  color: var(--text-2);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+/* ─── Inline diff viewer ───────────────────────────────────────────── */
+.diffv {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) 1fr;
+  gap: 12px;
+  align-items: start;
+}
+.diffv-files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  padding: 6px;
+  background: var(--bg-elev);
+}
+.diffv-truncated {
+  font-size: 11px;
+  color: var(--sev-major-text);
+  background: var(--sev-major-soft);
+  border: 1px solid var(--sev-major-line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+}
+.diffv-file {
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  width: 100%;
+  color: var(--text-2);
+}
+.diffv-file:hover {
+  background: var(--bg-hover);
+}
+.diffv-file.active {
+  background: var(--accent-soft);
+  color: var(--text-1);
+}
+.diffv-status {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  font-size: 9.5px;
+}
+.diffv-file-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  display: flex;
+  align-items: baseline;
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* Natural LTR order: the directory ellipsizes from its end while the basename
+   (the part that matters in a file picker) stays fully visible and pinned. */
+.diffv-file-dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-4);
+}
+.diffv-file-base {
+  flex: 0 0 auto;
+}
+.diffv-file-meta {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.diffv-adds {
+  color: var(--good);
+}
+.diffv-dels {
+  color: var(--danger);
+}
+.diffv-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-4);
+}
+.diffv-dot.sev-crit {
+  background: var(--sev-crit);
+}
+.diffv-dot.sev-major {
+  background: var(--sev-major);
+}
+.diffv-dot.sev-minor {
+  background: var(--sev-minor);
+}
+.diffv-dot.sev-nit {
+  background: var(--sev-nit);
+}
+button.diffv-dot {
+  cursor: pointer;
+  border: none;
+  padding: 0;
+  box-shadow: 0 0 0 3px transparent;
+  transition: box-shadow 0.12s ease;
+}
+button.diffv-dot:hover,
+button.diffv-dot[aria-expanded="true"],
+button.diffv-dot:focus-visible {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+button.diffv-dot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.btn-reset {
+  appearance: none;
+  background: none;
+  font: inherit;
+}
+
+.diffv-main {
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg-elev);
+}
+.diffv-filehead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg-elev-2);
+  font-size: 12px;
+}
+.diffv-filehead .mono {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.diffv-filehead-meta {
+  display: inline-flex;
+  gap: 8px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.diffv-binary {
+  padding: 16px;
+  font-size: 12px;
+}
+.diffv-code {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.diffv-line td {
+  padding: 0;
+  vertical-align: top;
+}
+.diffv-line.add {
+  background: color-mix(in srgb, var(--good) 12%, transparent);
+}
+.diffv-line.del {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.diffv-line.active {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.diffv-marker {
+  width: 22px;
+  text-align: center;
+  user-select: none;
+  vertical-align: middle !important;
+}
+.diffv-gutter {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+  padding: 0 8px !important;
+  color: var(--text-4);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+  border-right: 1px solid var(--line-soft);
+}
+.diffv-content {
+  width: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 0 8px 0 4px !important;
+}
+.diffv-content code {
+  font-family: inherit;
+  color: var(--text-1);
+  background: transparent;
+  padding: 0;
+}
+.diffv-sign {
+  display: inline-block;
+  width: 1ch;
+  color: var(--text-3);
+}
+.diffv-line.add .diffv-sign {
+  color: var(--good);
+}
+.diffv-line.del .diffv-sign {
+  color: var(--danger);
+}
+.diffv-hunk-head td {
+  padding: 2px 8px;
+  background: var(--bg-elev-2);
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+.diffv-hunk-text {
+  color: var(--accent-2);
+  font-size: 11px;
+}
+.diffv-panel td {
+  padding: 0;
+}
+.diffv-panel {
+  background: var(--bg-elev-2);
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+  padding: 10px 12px !important;
+}
+.diffv-finding + .diffv-finding {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+.diffv-finding-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+.diffv-finding-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.diffv-finding-body {
+  margin-top: 8px;
+  font-size: 12.5px;
+}
+.diffv-unmatched {
+  margin-top: 16px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 12px;
+}
+.diffv-unmatched-head {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 4px;
+}
+.diffv-fallback {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.diffv-fallback li {
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.diffv-fallback li.active {
+  border-color: var(--accent);
+}
+.diffv-fallback-select {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  border-radius: 6px;
+}
+.diffv-fallback-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Lightweight syntax highlight tokens (see lib/highlight.tsx). */
+.hl-com {
+  color: var(--text-4);
+  font-style: italic;
+}
+.hl-str {
+  color: var(--good);
+}
+.hl-num {
+  color: var(--sev-major);
+}
+.hl-kw {
+  color: var(--accent-bright);
+  font-weight: 600;
+}
+.hl-lit {
+  color: var(--accent-2);
+}
+.hl-fn {
+  color: var(--sev-minor-text);
+}
+.hl-type {
+  color: var(--accent-2);
+}
+
+@media (max-width: 820px) {
+  .diffv {
+    grid-template-columns: 1fr;
+  }
+  .diffv-files {
+    position: static;
+    max-height: 220px;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .diffv-file {
+    width: auto;
+  }
+  .diffv-file-name {
+    max-width: 160px;
+  }
+}
