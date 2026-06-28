@@ -2,7 +2,7 @@
 // riskLine(), hbar(), and donut() from src/dashboard/layout.ts.
 
 import { useId, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type { DayBin } from "../lib/format";
 import type { Severity, SparklinePoint } from "../api/types";
 import { EmptyState } from "./states";
@@ -32,6 +32,7 @@ export function StackedSeverityBar({
   series: DayBin[];
   hrefForSeverity?: (severity: Severity) => string;
 }) {
+  const navigate = useNavigate();
   const max = Math.max(1, ...series.map((d) => d.critical + d.major + d.minor + d.nit));
   const totals = series.reduce(
     (acc, d) => {
@@ -82,12 +83,13 @@ export function StackedSeverityBar({
               )}
             </>
           );
-          // The column announces the whole-day summary as a single image node.
-          // When drill-through is on, segments stay mouse-clickable but are kept
-          // out of the tab order (tabIndex=-1) and hidden from AT — every
-          // segment links to the same per-severity URL as the legend, so the
-          // four legend entries are the clean keyboard/screen-reader drill
-          // targets instead of dozens of redundant per-bar tab stops.
+          // The column is the single image node that announces the whole-day
+          // summary; its segments are non-semantic boxes (no nested links). When
+          // drill-through is on a segment is a mouse-only click target that
+          // navigates programmatically — it stays out of the a11y tree and tab
+          // order (the column's role="img" makes the subtree presentational), so
+          // the four legend entries remain the clean keyboard/SR drill targets
+          // instead of dozens of redundant per-bar tab stops.
           return (
             <div key={i} className="col" role="img" aria-label={summary} {...tooltip.bind(tip)}>
               {total === 0 ? (
@@ -99,17 +101,15 @@ export function StackedSeverityBar({
                   const style = { height: `${pct(v).toFixed(1)}%` };
                   if (hrefForSeverity) {
                     return (
-                      <Link
+                      <div
                         key={s.key}
-                        className={`seg ${s.cls}`}
+                        className={`seg ${s.cls} clickable`}
                         style={style}
-                        to={hrefForSeverity(s.key)}
-                        tabIndex={-1}
-                        aria-hidden="true"
+                        onClick={() => navigate(hrefForSeverity(s.key))}
                       />
                     );
                   }
-                  return <div key={s.key} className={`seg ${s.cls}`} style={style} aria-hidden="true" />;
+                  return <div key={s.key} className={`seg ${s.cls}`} style={style} />;
                 })
               )}
             </div>

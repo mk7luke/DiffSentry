@@ -980,16 +980,13 @@ label.field {
   border-radius: 1px;
   transition: filter 0.15s;
 }
-/* Drill-through segments (severity → filtered Findings). */
-.chart-bar .col a.seg {
+/* Drill-through segments — mouse-only click targets (severity → filtered
+   Findings); the legend entries are the keyboard/SR-accessible drill targets. */
+.chart-bar .col .seg.clickable {
   cursor: pointer;
 }
-.chart-bar .col a.seg:hover {
+.chart-bar .col .seg.clickable:hover {
   filter: brightness(1.3);
-}
-.chart-bar .col a.seg:focus-visible {
-  outline: 2px solid var(--accent-bright);
-  outline-offset: 1px;
 }
 .chart-bar .col .seg.crit {
   background: var(--sev-crit);
