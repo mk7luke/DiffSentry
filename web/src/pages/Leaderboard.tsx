@@ -121,18 +121,14 @@ export function LeaderboardPage() {
           const Th = ({ k, label, cls }: { k: SortKey; label: string; cls?: string }) => (
             <th
               className={`sortable${cls ? " " + cls : ""}${sort.key === k ? " sorted" : ""}`}
-              onClick={() => toggleSort(k)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  toggleSort(k);
-                }
-              }}
-              tabIndex={0}
               aria-sort={sort.key === k ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
             >
-              {label}
-              <span className="sort-caret">{sort.key === k ? (sort.dir === "desc" ? " ▾" : " ▴") : ""}</span>
+              {/* A real <button> carries the interaction so sorting uses native
+                  keyboard/focus semantics; aria-sort stays on the <th>. */}
+              <button type="button" className="th-sort" onClick={() => toggleSort(k)}>
+                {label}
+                <span className="sort-caret">{sort.key === k ? (sort.dir === "desc" ? " ▾" : " ▴") : ""}</span>
+              </button>
             </th>
           );
 
@@ -150,7 +146,7 @@ export function LeaderboardPage() {
 
               <Card
                 title="By author"
-                subtitle={`${data.authors.length} author${data.authors.length === 1 ? "" : "s"} · click a row to drill in · click a column to sort`}
+                subtitle={`${data.authors.length} author${data.authors.length === 1 ? "" : "s"} · click an author to drill in · click a column to sort`}
                 bodyClass="flush"
               >
                 {data.authors.length === 0 ? (
@@ -180,23 +176,22 @@ export function LeaderboardPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((a) => (
-                        <tr
-                          key={a.author}
-                          className={`clickable${a.author === selected ? " selected" : ""}`}
-                          tabIndex={0}
-                          role="button"
-                          aria-pressed={a.author === selected}
-                          aria-label={`${a.author} — view details`}
-                          onClick={() => selectAuthor(a.author === selected ? null : a.author)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              selectAuthor(a.author === selected ? null : a.author);
-                            }
-                          }}
-                        >
-                          <td className="strong cell-primary" data-label="Author">{a.author}</td>
+                      {rows.map((a) => {
+                        const isSel = a.author === selected;
+                        return (
+                        <tr key={a.author} className={isSel ? "row-selected" : undefined}>
+                          <td className="strong cell-primary" data-label="Author">
+                            {/* Selection rides on a real button (keyboard/focus +
+                                aria-pressed) rather than a faux-button row. */}
+                            <button
+                              type="button"
+                              className="row-link"
+                              aria-pressed={isSel}
+                              onClick={() => selectAuthor(isSel ? null : a.author)}
+                            >
+                              {a.author}
+                            </button>
+                          </td>
                           <td className="num" data-label="PRs">{a.prs_reviewed}</td>
                           <td className="num muted" data-label="Reviews">{a.reviews}</td>
                           <td className="num" data-label="Avg risk">{a.avg_risk == null ? "—" : Math.round(a.avg_risk)}</td>
@@ -213,7 +208,8 @@ export function LeaderboardPage() {
                             />
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}

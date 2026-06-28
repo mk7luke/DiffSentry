@@ -2891,7 +2891,10 @@ a.dot-marker:hover,
     padding-top: 12px;
     padding-bottom: 12px;
   }
-  .tbl tbody tr.clickable {
+  /* Drill-in author button gets a full-height tap target. */
+  .tbl tbody tr .row-link {
+    display: inline-flex;
+    align-items: center;
     min-height: 44px;
   }
 }
@@ -5000,27 +5003,47 @@ input[type="checkbox"].learn-check {
 
 /* ── Analytics: sortable + clickable tables, sparkline, drill-down ── */
 .tbl thead th.sortable {
-  cursor: pointer;
   user-select: none;
   white-space: nowrap;
 }
-.tbl thead th.sortable:hover {
+/* The interactive control is a real <button> filling the header cell, so
+   sorting keeps native keyboard/focus semantics; aria-sort lives on the th. */
+.tbl thead th.sortable .th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.tbl thead th.sortable:hover .th-sort {
   color: var(--text-1);
 }
-.tbl thead th.sortable.sorted {
+.tbl thead th.sortable.sorted .th-sort {
   color: var(--accent-bright);
 }
 .tbl thead th.sortable .sort-caret {
   color: var(--accent);
   font-size: 10px;
 }
-.tbl tbody tr.clickable {
+/* Author drill-in: a real button in the first cell carries the interaction;
+   the row only reflects the selected state visually. */
+.tbl tbody tr .row-link {
+  font: inherit;
+  color: var(--text);
+  font-weight: 600;
+  text-align: left;
   cursor: pointer;
 }
-.tbl tbody tr.clickable.selected {
+.tbl tbody tr .row-link:hover {
+  color: var(--accent-bright);
+}
+.tbl tbody tr.row-selected {
   background: var(--accent-soft);
 }
-.tbl tbody tr.clickable.selected td:first-child {
+.tbl tbody tr.row-selected td:first-child {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
