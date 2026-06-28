@@ -309,10 +309,18 @@ async function runTsc(ctx: RunCtx): Promise<RawFinding[]> {
 // A greedy filename capture (`.*` rather than `.+?`) anchored by the trailing
 // `(line,col):` segment lets it backtrack to the *last* coordinate group, so
 // drive-letter colons and parentheses inside the path don't truncate the match.
-const TSC_DIAGNOSTIC_RE = /^(.*)\((\d+),(\d+)\):\s+(error|warning|suggestion|message)\s+(TS\d+):\s+(.*)$/;
+// runTsc passes `--pretty false`, whose output is the parenthesized form. We
+// also accept the colon/hyphen form (`file:line:col - error TSxxxx: msg`) tsc
+// emits in pretty mode, so this exported parser is robust to flag changes and
+// reuse. Both share the same capture-group order: file, line, col, severity,
+// TS code, message.
+const TSC_DIAGNOSTIC_RES = [
+  /^(.*)\((\d+),(\d+)\):\s+(error|warning|suggestion|message)\s+(TS\d+):\s+(.*)$/,
+  /^(.*):(\d+):(\d+)\s+-\s+(error|warning|suggestion|message)\s+(TS\d+):\s+(.*)$/,
+];
 
-/** Parse `tsc --pretty false` text diagnostics into raw findings. Exported for
- *  tests — the spawn path is exercised separately. */
+/** Parse tsc text diagnostics into raw findings. Exported for tests — the spawn
+ *  path is exercised separately. */
 export function parseTscDiagnostics(text: string): RawFinding[] {
   const out: RawFinding[] = [];
   let current: RawFinding | null = null;
@@ -321,7 +329,12 @@ export function parseTscDiagnostics(text: string): RawFinding[] {
     current = null;
   };
   for (const raw of text.split("\n")) {
-    const m = raw.trimEnd().match(TSC_DIAGNOSTIC_RE);
+    const line = raw.trimEnd();
+    let m: RegExpMatchArray | null = null;
+    for (const re of TSC_DIAGNOSTIC_RES) {
+      m = line.match(re);
+      if (m) break;
+    }
     if (m) {
       flush();
       current = {

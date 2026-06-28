@@ -177,6 +177,21 @@ describe("parseTscDiagnostics", () => {
     expect(out[0].message).not.toContain("Found 1 error");
   });
 
+  it("parses the colon/hyphen (pretty) diagnostic format too", () => {
+    const out = parseTscDiagnostics("src/foo.ts:12:5 - error TS2322: Type 'x' is not assignable to 'y'.");
+    expect(out).toEqual([
+      { file: "src/foo.ts", line: 12, ruleId: "TS2322", message: "Type 'x' is not assignable to 'y'.", level: "error" },
+    ]);
+  });
+
+  it("parses a colon-style diagnostic with a Windows drive path", () => {
+    const out = parseTscDiagnostics("C:\\repo\\foo.ts:7:1 - warning TS6133: 'x' is declared but never used.");
+    expect(out).toHaveLength(1);
+    expect(out[0].file).toBe("C:\\repo\\foo.ts");
+    expect(out[0].line).toBe(7);
+    expect(out[0].level).toBe("warning");
+  });
+
   it("maps suggestion/message categories to the info level", () => {
     const out = parseTscDiagnostics(
       [
