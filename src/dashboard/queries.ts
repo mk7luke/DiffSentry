@@ -454,6 +454,8 @@ export interface FindingExplorerRow extends TriageColumns {
   source: string | null;
   fingerprint: string | null;
   type: string | null;
+  /** PR author, joined from the prs table (null when the PR isn't stored). */
+  author: string | null;
 }
 
 export interface FindingFilters {
@@ -462,6 +464,8 @@ export interface FindingFilters {
   repo?: string; // "owner/repo"
   q?: string; // substring on path + title
   fingerprint?: string;
+  /** PR author login (exact match). */
+  author?: string;
   /** accepted | dismissed | snoozed | untriaged */
   triage?: string;
   ageDays?: number; // only findings from reviews created within N days
@@ -522,23 +526,36 @@ export function queryFindings(filters: FindingFilters): FindingExplorerResult {
   const db = openDatabase();
   if (!db) return { rows: [], total: 0 };
   const { clause, params } = buildFindingsWhere(filters);
+  // Author lives on the PR, not the finding/review. Join prs here and apply the
+  // author filter locally rather than in buildFindingsWhere — the fingerprint /
+  // recurring queries share that helper but don't join prs, so keeping the join
+  // scoped to this query leaves them untouched.
+  const joinPr = "LEFT JOIN prs pr ON pr.owner = rv.owner AND pr.repo = rv.repo AND pr.number = rv.number";
+  let where = clause;
+  const whereParams = [...params];
+  if (filters.author) {
+    where = where ? `${where} AND pr.author = ?` : "WHERE pr.author = ?";
+    whereParams.push(filters.author);
+  }
   const limit = Math.min(Math.max(filters.limit ?? 100, 1), 500);
   const offset = Math.max(filters.offset ?? 0, 0);
   const total = (db
-    .prepare(`SELECT COUNT(*) AS n FROM findings fi JOIN reviews rv ON rv.id = fi.review_id ${clause}`)
-    .get(...params) as { n: number }).n;
+    .prepare(`SELECT COUNT(*) AS n FROM findings fi JOIN reviews rv ON rv.id = fi.review_id ${joinPr} ${where}`)
+    .get(...whereParams) as { n: number }).n;
   const rows = db
     .prepare(
       `SELECT fi.id, rv.owner, rv.repo, rv.number, rv.created_at,
               fi.path, fi.line, fi.severity, fi.title, fi.source, fi.fingerprint, fi.type,
-              fi.accepted, fi.snoozed_until, fi.triaged_by, fi.triaged_at, fi.triage_note
+              fi.accepted, fi.snoozed_until, fi.triaged_by, fi.triaged_at, fi.triage_note,
+              pr.author AS author
        FROM findings fi
        JOIN reviews rv ON rv.id = fi.review_id
-       ${clause}
+       ${joinPr}
+       ${where}
        ORDER BY rv.created_at DESC, fi.id DESC
        LIMIT ? OFFSET ?`,
     )
-    .all(...params, limit, offset) as FindingExplorerRow[];
+    .all(...whereParams, limit, offset) as FindingExplorerRow[];
   return { rows, total };
 }
 

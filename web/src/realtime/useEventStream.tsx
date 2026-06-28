@@ -69,6 +69,24 @@ export interface ActionPayload {
   detail?: string;
 }
 
+/** Payload of a `finding.surfaced` event — one review produced findings, with a
+ * per-severity breakdown. Mirrors FindingSurfacedPayload in src/realtime/bus.ts. */
+export interface FindingSurfacedPayload {
+  owner: string;
+  repo: string;
+  number: number;
+  /** Total findings across this review. */
+  total: number;
+  critical: number;
+  major: number;
+  minor: number;
+  nit: number;
+  /** Highest severity present, or null when none. */
+  worst: "critical" | "major" | "minor" | "nit" | null;
+  /** Title of a representative (highest-severity) finding, for the headline. */
+  sample?: string | null;
+}
+
 export interface SettingsUpdatedPayload {
   instanceName: string;
   accentColor: string;
