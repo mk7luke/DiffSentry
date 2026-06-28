@@ -213,7 +213,7 @@ export function LeaderboardPage() {
                           <td className="num muted" data-label="Per PR">{a.findings_per_pr.toFixed(1)}</td>
                           <td className={`num ${a.critical > 0 ? "crit" : "zero"}`} data-label="Critical">{a.critical}</td>
                           <td className="num" data-label="Accepted">{a.acceptance == null ? "—" : `${Math.round(a.acceptance * 100)}%`}</td>
-                          <td className="right" data-label="Trend" style={{ width: 130 }}>
+                          <td className="right trend-col" data-label="Trend">
                             <LineSpark
                               values={authorVolume(data.series, a.author, days)}
                               title={`${a.author} · reviews/day`}

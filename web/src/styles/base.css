@@ -5061,6 +5061,14 @@ input[type="checkbox"].learn-check {
 .tbl tbody tr.row-selected td:first-child {
   box-shadow: inset 2px 0 0 var(--accent);
 }
+/* Desktop width for the inline trend/sparkline column. Scoped above the 640px
+   card-reflow breakpoint (not an inline style) so it never fights the mobile
+   `.tbl td { width: 100% }` rule when rows collapse into stacked cards. */
+@media (min-width: 641px) {
+  .tbl td.trend-col {
+    width: 130px;
+  }
+}
 
 /* Compact SVG line sparkline */
 .line-spark {
