@@ -56,20 +56,28 @@ function costKindForCommand(type: string): string {
   }
 }
 
-function normalizePatchForHash(patch: string): string {
-  // Strip metadata lines + leading +/- markers, collapse all whitespace,
-  // drop blanks. Patch hash now survives re-indenting and trivial reflows.
-  return patch
+export function normalizePatchForHash(filename: string, patch: string): string {
+  // Strip metadata lines, collapse all whitespace, drop blanks so the patch
+  // hash survives re-indenting and trivial reflows. Unlike a naive normalize,
+  // this is collision-resistant: it preserves each line's add/remove direction
+  // (a normalized +/- marker) and folds the filename into the input, so the
+  // same text added vs removed — or identical edits in different files — no
+  // longer hash to the same value.
+  const body = patch
     .split("\n")
     .filter((l) => !l.startsWith("@@") && !l.startsWith("---") && !l.startsWith("+++"))
-    .map((l) => l.replace(/^[+-]/, ""))
-    .map((l) => l.replace(/\s+/g, " ").trim())
+    .map((l) => {
+      const marker = l[0] === "+" ? "+" : l[0] === "-" ? "-" : " ";
+      const content = l.replace(/^[+-]/, "").replace(/\s+/g, " ").trim();
+      return content.length > 0 ? `${marker}${content}` : "";
+    })
     .filter((l) => l.length > 0)
     .join("\n");
+  return `${filename}\n${body}`;
 }
 
-function patchHash(patch: string): string {
-  return createHash("sha256").update(normalizePatchForHash(patch)).digest("hex").slice(0, 16);
+function patchHash(filename: string, patch: string): string {
+  return createHash("sha256").update(normalizePatchForHash(filename, patch)).digest("hex").slice(0, 16);
 }
 
 const WALKTHROUGH_MARKER = "<!-- DiffSentry Walkthrough -->";
@@ -549,7 +557,7 @@ export class Reviewer {
       const filesSkippedTrivial: string[] = [];
       const filesToReview: typeof context.files = [];
       for (const f of context.files) {
-        const ph = patchHash(f.patch);
+        const ph = patchHash(f.filename, f.patch);
         currentFileShas[f.filename] = ph;
         if (isTrivialPatch(f.patch)) {
           filesSkippedTrivial.push(f.filename);
