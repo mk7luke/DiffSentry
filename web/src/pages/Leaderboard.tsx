@@ -124,10 +124,23 @@ export function LeaderboardPage() {
               aria-sort={sort.key === k ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
             >
               {/* A real <button> carries the interaction so sorting uses native
-                  keyboard/focus semantics; aria-sort stays on the <th>. */}
-              <button type="button" className="th-sort" onClick={() => toggleSort(k)}>
+                  keyboard/focus semantics; aria-sort stays on the <th>. The
+                  button's accessible name also spells out the current sort state
+                  and next action, since a tabbing screen-reader user hears the
+                  button name rather than the th's aria-sort, and the caret glyph
+                  is decorative (aria-hidden). */}
+              <button
+                type="button"
+                className="th-sort"
+                onClick={() => toggleSort(k)}
+                aria-label={
+                  sort.key === k
+                    ? `${label}, sorted ${sort.dir === "asc" ? "ascending" : "descending"}. Activate to sort ${sort.dir === "asc" ? "descending" : "ascending"}.`
+                    : `${label}, not sorted. Activate to sort ascending.`
+                }
+              >
                 {label}
-                <span className="sort-caret">{sort.key === k ? (sort.dir === "desc" ? " ▾" : " ▴") : ""}</span>
+                <span className="sort-caret" aria-hidden="true">{sort.key === k ? (sort.dir === "desc" ? " ▾" : " ▴") : ""}</span>
               </button>
             </th>
           );
