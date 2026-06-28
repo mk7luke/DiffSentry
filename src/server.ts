@@ -53,6 +53,23 @@ export function createServer(config: Config): CreatedServer {
   // locally after `npm run build` and in the Docker runtime image).
   const webDist = path.join(__dirname, "..", "web", "dist");
 
+  // Public demo / sandbox mode. Enabled by default; security-conscious operators
+  // can turn it off entirely with DISABLE_DEMO=1. The demo is a no-auth,
+  // read-only showcase of the dashboard UI backed ENTIRELY by client-side
+  // fixtures (web/src/demo). No data API is mounted for it, so the demo can
+  // neither read nor mutate real data — we only serve the static SPA shell,
+  // which is why it works even when ENABLE_DASHBOARD is off.
+  const demoEnabled = process.env.DISABLE_DEMO !== "1";
+
+  // Hard kill switch: when the demo is disabled, refuse /demo* outright — even
+  // when the dashboard is mounted and its catch-all would otherwise serve the
+  // SPA shell there. Registered first so it precedes every SPA fallback below.
+  if (!demoEnabled) {
+    app.get(["/demo", "/demo/*"], (_req, res) => {
+      res.status(404).type("text/plain").send("Demo mode is disabled on this instance.");
+    });
+  }
+
   if (process.env.ENABLE_DASHBOARD === "1") {
     const authCfg = loadAuthConfigFromEnv();
     const auth = createAuth(authCfg);
@@ -132,6 +149,15 @@ export function createServer(config: Config): CreatedServer {
         "Dashboard is mounted WITHOUT OAuth. Set GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET, DASHBOARD_ALLOWED_ORGS, DASHBOARD_URL to enable auth.",
       );
     }
+  } else if (demoEnabled) {
+    // Dashboard off, demo on: mount only the static SPA assets so /demo can
+    // boot. No API, no dashboard, no SPA catch-all — the only entry point is the
+    // /demo fallback registered at the end of createServer. express.static only
+    // matches files that exist, so it never shadows /webhook or /health.
+    app.use(express.static(webDist));
+    logger.info(
+      "Public demo mounted: SPA shell at /demo (ENABLE_DASHBOARD off). Client-side fixtures only — no data API. Set DISABLE_DEMO=1 to disable.",
+    );
   }
 
   // Health check
@@ -295,6 +321,16 @@ export function createServer(config: Config): CreatedServer {
       ) {
         return next();
       }
+      res.sendFile(path.join(webDist, "index.html"), (err) => {
+        if (err) next();
+      });
+    });
+  } else if (demoEnabled) {
+    // Demo SPA client-routing fallback for the dashboard-off case (when the full
+    // catch-all above isn't mounted). Serves the SPA shell for /demo and its
+    // sub-routes so a deep link like /demo/repos/acme/checkout-api/pr/142 boots
+    // the app; React Router + the demo data layer take over from there.
+    app.get(["/demo", "/demo/*"], (_req, res, next) => {
       res.sendFile(path.join(webDist, "index.html"), (err) => {
         if (err) next();
       });

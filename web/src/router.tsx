@@ -1,5 +1,6 @@
 import { lazy, Suspense } from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
+import { DEMO, DEMO_BASENAME } from "./demo/mode";
 import { Shell } from "./components/Shell";
 import { useAuth } from "./auth/useAuth";
 import { OpsConsolePage } from "./pages/OpsConsole";
@@ -51,7 +52,8 @@ function RootLanding() {
   return <Navigate to={role === "admin" ? "/ops" : "/overview"} replace />;
 }
 
-export const router = createBrowserRouter([
+export const router = createBrowserRouter(
+  [
   {
     element: <Shell />,
     children: [
@@ -88,4 +90,8 @@ export const router = createBrowserRouter([
       { path: "*", element: <NotFoundPage /> },
     ],
   },
-]);
+  ],
+  // In demo mode the SPA is served under /demo; basename keeps every in-app
+  // link and navigation scoped to that prefix.
+  DEMO ? { basename: DEMO_BASENAME } : undefined,
+);

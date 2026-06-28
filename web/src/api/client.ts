@@ -3,6 +3,13 @@
 // Every endpoint answers { data } on success or { error: { code, message } }
 // on failure. `apiGet` unwraps the envelope and throws a typed ApiError so
 // TanStack Query's error state carries a useful code + message.
+//
+// Demo mode (see ../demo): when DEMO is true, reads resolve from bundled
+// fixtures and writes are refused — NO network request is made, so the demo can
+// neither read nor mutate real data.
+
+import { DEMO } from "../demo/mode";
+import { resolveDemoGet } from "../demo/fixtures";
 
 export interface ApiErrorBody {
   code: string;
@@ -33,6 +40,11 @@ export async function apiGet<T>(path: string, params?: Record<string, string | n
       if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
     }
   }
+
+  // Demo mode: resolve from bundled fixtures, never touching the network. Pass
+  // the same relative path + serialized query the live request would use, so the
+  // resolver can route on filters too (not just the base path).
+  if (DEMO) return resolveDemoGet<T>(path + url.search);
 
   let resp: Response;
   try {
@@ -91,6 +103,16 @@ export async function apiSend<T>(
   path: string,
   opts: { method?: "POST" | "PUT" | "DELETE"; body?: unknown } = {},
 ): Promise<T> {
+  // Demo mode is strictly read-only: refuse every write without a network call,
+  // so it can never mutate real data. The viewer UI hides write controls, so
+  // this is a defensive backstop surfaced as a clean, friendly error.
+  if (DEMO) {
+    throw new ApiError(403, {
+      code: "demo_readonly",
+      message: "This is a read-only demo. Install DiffSentry on your own repo to make changes.",
+    });
+  }
+
   const url = new URL(BASE + path, window.location.origin);
   let resp: Response;
   try {

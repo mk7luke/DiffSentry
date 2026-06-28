@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ReviewQueueEntry } from "../api/types";
+import { DEMO } from "../demo/mode";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // useEventStream — a single shared EventSource over /api/v1/stream.
@@ -186,6 +187,9 @@ export function EventStreamProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<StreamStatus>("connecting");
 
   useEffect(() => {
+    // Demo mode has no backend stream — never open a connection (it would 404
+    // and retry forever). Fixtures are static, so there's nothing to live-tail.
+    if (DEMO) return;
     // same-origin; cookies (ds_session) flow automatically.
     const es = new EventSource("/api/v1/stream");
     const handlers: Array<[StreamTopic, (e: MessageEvent) => void]> = [];
