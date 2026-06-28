@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useCreateImpactShare, useImpact } from "../api/hooks";
 import { useAuth } from "../auth/useAuth";
@@ -414,12 +414,33 @@ function CopyShareLinkButton({ report }: { report: ImpactReport }) {
   const [cached, setCached] = useState<{ repo: string | null; range: string; url: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const rangeKey = report.range.days == null ? "all" : `${report.range.days}d`;
+  const scopeKey = `${report.repo ?? ""}|${rangeKey}`;
+
+  // Dedupe concurrent mints for the same scope: the `disabled` guard isn't
+  // synchronous, so a fast double-click/keyboard-repeat could enter the mint
+  // branch twice before React re-renders. Holding the in-flight promise (keyed
+  // by scope) makes back-to-back activations reuse it instead of minting
+  // duplicate links.
+  const inflight = useRef<{ key: string; promise: Promise<string> } | null>(null);
+  // The copied-state reset timer, so we can clear it on re-fire and on unmount.
+  const copyTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimer.current != null) window.clearTimeout(copyTimer.current);
+    };
+  }, []);
+
+  function markCopied() {
+    setCopied(true);
+    if (copyTimer.current != null) window.clearTimeout(copyTimer.current);
+    copyTimer.current = window.setTimeout(() => setCopied(false), 2000);
+  }
 
   async function copyToClipboard(value: string) {
     try {
       await navigator.clipboard.writeText(value);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
+      markCopied();
     } catch {
       // Clipboard blocked (e.g. insecure context) — fall back to a prompt so the
       // operator can still grab the link.
@@ -427,14 +448,29 @@ function CopyShareLinkButton({ report }: { report: ImpactReport }) {
     }
   }
 
+  function mintForScope(): Promise<string> {
+    // Reuse an in-flight mint for the same scope; otherwise start a fresh one.
+    if (inflight.current && inflight.current.key === scopeKey) return inflight.current.promise;
+    const repo = report.repo;
+    const promise = create
+      .mutateAsync({ repo, range: rangeKey })
+      .then((res) => {
+        setCached({ repo, range: rangeKey, url: res.url });
+        return res.url;
+      })
+      .finally(() => {
+        if (inflight.current?.key === scopeKey) inflight.current = null;
+      });
+    inflight.current = { key: scopeKey, promise };
+    return promise;
+  }
+
   async function onClick() {
     if (cached && cached.repo === report.repo && cached.range === rangeKey) {
       await copyToClipboard(cached.url);
       return;
     }
-    const res = await create.mutateAsync({ repo: report.repo, range: rangeKey });
-    setCached({ repo: report.repo, range: rangeKey, url: res.url });
-    await copyToClipboard(res.url);
+    await copyToClipboard(await mintForScope());
   }
 
   return (
