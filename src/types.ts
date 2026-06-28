@@ -80,6 +80,31 @@ export interface ReviewsConfig {
   anti_patterns?: AntiPattern[];
   /** License header check. */
   license_header?: LicenseHeaderConfig;
+  /** Context-aware severity calibration (blast radius + coverage). */
+  severity_calibration?: SeverityCalibrationConfig;
+}
+
+// ─── Severity calibration ─────────────────────────────────────
+// Post-processing weights that nudge a finding's severity to reflect real risk:
+// escalate in high-blast-radius (fan-in) files and recognized high-risk paths
+// (auth/, payment/, migrations/, …); de-escalate (and optionally lower
+// confidence) in well-tested paths. All fields optional — omitted ones fall back
+// to the sane defaults in src/insights.ts (DEFAULT_SEVERITY_CALIBRATION).
+export interface SeverityCalibrationConfig {
+  /** Master switch. Default true. */
+  enabled?: boolean;
+  /** fan-in ≥ this marks a file high-blast-radius. Default 5 (matches the graph). */
+  high_fan_in_threshold?: number;
+  /** Severity steps to escalate for findings in high-fan-in files. Default 1. */
+  escalate_high_fan_in?: number;
+  /** Severity steps to escalate for findings in high-risk paths. Default 1. */
+  escalate_risk_path?: number;
+  /** Severity steps to de-escalate for findings in well-tested paths. Default 1. */
+  deescalate_well_tested?: number;
+  /** Also drop confidence one notch for findings in well-tested paths. Default true. */
+  lower_confidence_well_tested?: boolean;
+  /** Hard cap on the net escalation any single finding can receive. Default 2. */
+  max_escalation?: number;
 }
 
 export interface LicenseHeaderConfig {

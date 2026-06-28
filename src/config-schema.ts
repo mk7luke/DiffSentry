@@ -142,6 +142,21 @@ export const REPO_CONFIG_SCHEMA: JsonSchema = {
           },
         },
 
+        severity_calibration: {
+          type: "object",
+          additionalProperties: false,
+          description: "Context-aware severity calibration (blast radius + coverage).",
+          properties: {
+            enabled: { type: "boolean", description: "Master switch (default true)." },
+            high_fan_in_threshold: { type: "integer", minimum: 0, description: "fan-in ≥ this marks a file high-blast-radius (default 5)." },
+            escalate_high_fan_in: { type: "integer", minimum: 0, description: "Severity steps to escalate in high-fan-in files (default 1)." },
+            escalate_risk_path: { type: "integer", minimum: 0, description: "Severity steps to escalate in high-risk paths like auth/payment/migrations (default 1)." },
+            deescalate_well_tested: { type: "integer", minimum: 0, description: "Severity steps to de-escalate in well-tested paths (default 1)." },
+            lower_confidence_well_tested: { type: "boolean", description: "Also drop confidence one notch in well-tested paths (default true)." },
+            max_escalation: { type: "integer", minimum: 0, description: "Cap on net escalation per finding (default 2)." },
+          },
+        },
+
         pre_merge_checks: {
           type: "object",
           additionalProperties: false,

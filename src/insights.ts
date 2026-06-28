@@ -1,4 +1,11 @@
-import type { Confidence, FileChange, ReviewResult } from "./types.js";
+import type {
+  CommentSeverity,
+  Confidence,
+  FileChange,
+  ReviewComment,
+  ReviewResult,
+  SeverityCalibrationConfig,
+} from "./types.js";
 
 // ─── Risk score ─────────────────────────────────────────────────
 
@@ -181,6 +188,234 @@ export function renderCoverageBlock(c: CoverageSignal): string {
   lines.push(`| Source files changed | Test files changed | Source lines + | Test lines + |`);
   lines.push(`|---|---|---|---|`);
   lines.push(`| ${c.productionFiles} | ${c.testFiles} | ${c.productionAdditions} | ${c.testAdditions} |`);
+  return lines.join("\n");
+}
+
+// ─── Severity calibration (blast radius + coverage) ─────────────
+//
+// Severity as the model (or a deterministic rule) first reports it tracks the
+// *kind* of finding, not where it lives. This pass nudges severity to reflect
+// real risk using signals already computed during the review:
+//   • escalate findings in high-fan-in files (blast radius — many files depend
+//     on this one, so a bug here is more dangerous), using the per-file fan-in
+//     counts the code-review-graph persisted on the review result;
+//   • escalate findings in already-recognized high-risk paths (auth/, payment/,
+//     migrations/, …) via the same isHighRiskFile() the risk score uses;
+//   • de-escalate (and optionally lower confidence) for findings in well-tested
+//     paths, reusing the test-coverage signal — a bug shipped alongside tests
+//     that exercise it is lower risk and more likely already understood.
+//
+// Deterministic findings are protected from softening: a hardcoded-secret
+// "critical" must not drop to "major" just because the file has tests. We
+// therefore never de-escalate security-typed findings or pattern/safety-engine
+// findings (those carrying a patternSource) — we only ever escalate those.
+
+/** Severity, weakest → strongest. The index is the calibration "level". */
+export const SEVERITY_ORDER: readonly CommentSeverity[] = ["trivial", "minor", "major", "critical"] as const;
+
+/** Fully-resolved calibration weights (every field present). */
+export interface ResolvedSeverityCalibration {
+  enabled: boolean;
+  highFanInThreshold: number;
+  escalateHighFanIn: number;
+  escalateRiskPath: number;
+  deescalateWellTested: number;
+  lowerConfidenceWellTested: boolean;
+  maxEscalation: number;
+}
+
+/** Sane defaults — a finding in a high-risk OR high-blast-radius location is
+ *  bumped one severity level, two when both apply; a well-tested finding is
+ *  eased one level and dropped a confidence notch. */
+export const DEFAULT_SEVERITY_CALIBRATION: ResolvedSeverityCalibration = {
+  enabled: true,
+  highFanInThreshold: 5,
+  escalateHighFanIn: 1,
+  escalateRiskPath: 1,
+  deescalateWellTested: 1,
+  lowerConfidenceWellTested: true,
+  maxEscalation: 2,
+};
+
+/** Merge a partial `.diffsentry.yaml` `severity_calibration` block over the
+ *  defaults. Non-finite / negative numerics fall back to the default for that
+ *  field so a malformed config can't invert the calibration. */
+export function resolveSeverityCalibration(cfg?: SeverityCalibrationConfig): ResolvedSeverityCalibration {
+  const d = DEFAULT_SEVERITY_CALIBRATION;
+  const num = (v: unknown, fallback: number): number =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : fallback;
+  return {
+    enabled: cfg?.enabled ?? d.enabled,
+    highFanInThreshold: num(cfg?.high_fan_in_threshold, d.highFanInThreshold),
+    escalateHighFanIn: num(cfg?.escalate_high_fan_in, d.escalateHighFanIn),
+    escalateRiskPath: num(cfg?.escalate_risk_path, d.escalateRiskPath),
+    deescalateWellTested: num(cfg?.deescalate_well_tested, d.deescalateWellTested),
+    lowerConfidenceWellTested: cfg?.lower_confidence_well_tested ?? d.lowerConfidenceWellTested,
+    maxEscalation: num(cfg?.max_escalation, d.maxEscalation),
+  };
+}
+
+/** Normalise a path for cross-source key matching: POSIX separators, no
+ *  leading `./` or `/`. Mirrors graph-context's normRel so fan-in keys (stored
+ *  by the graph) and GitHub PR paths compare equal. */
+function normPath(p: string): string {
+  return p.replace(/\\/g, "/").replace(/^\.?\//, "");
+}
+
+/** The lower-cased stem (basename without extension) of a production path. */
+function prodStem(filePath: string): string {
+  const base = filePath.split("/").pop() ?? filePath;
+  return base.replace(/\.[a-z0-9]+$/i, "").toLowerCase();
+}
+
+/** The production stem a test file most likely covers, e.g.
+ *  `foo.test.ts`→`foo`, `__tests__/foo.ts`→`foo`, `test_foo.py`→`foo`,
+ *  `foo_test.go`→`foo`. Best-effort; used only to pair tests with sources. */
+function testTargetStem(testPath: string): string {
+  const base = testPath.split("/").pop() ?? testPath;
+  let stem = base
+    .replace(/\.(test|spec)\.[a-z0-9]+$/i, "")
+    .replace(/_test\.[a-z0-9]+$/i, "")
+    .replace(/\.[a-z0-9]+$/i, "");
+  stem = stem.replace(/^test_/i, "");
+  return stem.toLowerCase();
+}
+
+/** Repo-relative production paths in this change set that have a sibling test
+ *  file (matched by stem) also changed in the same PR — our per-path
+ *  "well-tested" signal, derived from the same file set assessCoverage uses. */
+export function wellTestedPaths(files: FileChange[]): Set<string> {
+  const testStems = new Set<string>();
+  for (const f of files) if (isTestFile(f.filename)) testStems.add(testTargetStem(f.filename));
+  const out = new Set<string>();
+  if (testStems.size === 0) return out;
+  for (const f of files) {
+    if (!isProductionFile(f.filename)) continue;
+    if (testStems.has(prodStem(f.filename))) out.add(normPath(f.filename));
+  }
+  return out;
+}
+
+function shiftSeverity(sev: CommentSeverity, steps: number): CommentSeverity {
+  const idx = SEVERITY_ORDER.indexOf(sev);
+  if (idx < 0) return sev;
+  const next = Math.max(0, Math.min(SEVERITY_ORDER.length - 1, idx + steps));
+  return SEVERITY_ORDER[next];
+}
+
+function lowerConfidence(c: Confidence): Confidence {
+  return c === "high" ? "medium" : c === "medium" ? "low" : "low";
+}
+
+/** One severity change the calibration made, for transparency/logging. */
+export interface SeverityAdjustment {
+  path: string;
+  line: number;
+  title?: string;
+  from: CommentSeverity;
+  to: CommentSeverity;
+  reasons: string[];
+}
+
+export interface CalibrationResult {
+  /** Severity changes applied (confidence-only nudges are not listed here). */
+  adjustments: SeverityAdjustment[];
+  /** Findings whose confidence was lowered for being in a well-tested path. */
+  confidenceLowered: number;
+}
+
+/**
+ * Recalibrate finding severities in place against blast-radius, risk-path, and
+ * test-coverage signals. Mutates `comments[].severity` / `.confidence` and
+ * returns the changes made. A no-op (empty result, no mutation) when disabled or
+ * when there are no findings. Pure and deterministic given its inputs.
+ */
+export function calibrateSeverities(opts: {
+  comments: ReviewComment[];
+  files: FileChange[];
+  fanInByFile?: Record<string, number>;
+  coverage: CoverageSignal;
+  weights?: ResolvedSeverityCalibration;
+}): CalibrationResult {
+  const w = opts.weights ?? DEFAULT_SEVERITY_CALIBRATION;
+  const adjustments: SeverityAdjustment[] = [];
+  let confidenceLowered = 0;
+  if (!w.enabled || opts.comments.length === 0) return { adjustments, confidenceLowered };
+
+  // fan-in keys come from the graph (normRel-normalised); index by both the raw
+  // and normalised path so lookups hit regardless of which form was stored.
+  const fanIn: Record<string, number> = {};
+  for (const [k, v] of Object.entries(opts.fanInByFile ?? {})) fanIn[normPath(k)] = v;
+
+  // Per-path coverage; gated on the PR actually adding tests so we never soften
+  // a finding when the "well-tested" pairing is incidental (no new tests at all).
+  const tested = opts.coverage.testAdditions > 0 ? wellTestedPaths(opts.files) : new Set<string>();
+
+  for (const c of opts.comments) {
+    if (!c.severity) continue;
+    const key = normPath(c.path);
+    const reasons: string[] = [];
+
+    // ── escalation (applies to every finding source) ──
+    let up = 0;
+    const fileFanIn = fanIn[key] ?? 0;
+    if (w.escalateHighFanIn > 0 && fileFanIn >= w.highFanInThreshold) {
+      up += w.escalateHighFanIn;
+      reasons.push(`high fan-in (${fileFanIn})`);
+    }
+    if (w.escalateRiskPath > 0 && isHighRiskFile(c.path)) {
+      up += w.escalateRiskPath;
+      reasons.push("high-risk path");
+    }
+    up = Math.min(up, w.maxEscalation);
+
+    // ── de-escalation (only for AI findings, never for deterministic security
+    //    or pattern/safety-engine findings) ──
+    let down = 0;
+    const deterministic = !!c.patternSource;
+    const isSecurity = c.type === "security";
+    const wellTested = tested.has(key);
+    if (wellTested && !deterministic && !isSecurity) {
+      if (w.deescalateWellTested > 0) {
+        down += w.deescalateWellTested;
+        reasons.push("well-tested path");
+      }
+      if (w.lowerConfidenceWellTested) {
+        const lowered = lowerConfidence(c.confidence ?? "high");
+        if (lowered !== (c.confidence ?? "high")) {
+          c.confidence = lowered;
+          confidenceLowered++;
+        }
+      }
+    }
+
+    const net = up - down;
+    if (net === 0) continue;
+    const to = shiftSeverity(c.severity, net);
+    if (to === c.severity) continue;
+    adjustments.push({ path: c.path, line: c.line, title: c.title, from: c.severity, to, reasons });
+    c.severity = to;
+  }
+
+  return { adjustments, confidenceLowered };
+}
+
+export function renderSeverityCalibrationBlock(result: CalibrationResult): string {
+  if (result.adjustments.length === 0) return "";
+  const arrow = (a: SeverityAdjustment) => (SEVERITY_ORDER.indexOf(a.to) > SEVERITY_ORDER.indexOf(a.from) ? "⬆️" : "⬇️");
+  const lines: string[] = [];
+  lines.push("## ⚖️ Severity calibration");
+  lines.push("");
+  lines.push(
+    "Some findings were re-weighted by **blast radius** (fan-in) and **test coverage** so severity reflects real risk, not just finding type:",
+  );
+  lines.push("");
+  lines.push("| Finding | Change | Why |");
+  lines.push("|---|---|---|");
+  for (const a of result.adjustments) {
+    const label = a.title ? a.title : `\`${a.path}\`:${a.line}`;
+    lines.push(`| ${label} | ${arrow(a)} ${a.from} → ${a.to} | ${a.reasons.join(", ")} |`);
+  }
   return lines.join("\n");
 }
 
