@@ -90,7 +90,18 @@ export function FindingsPage() {
   return (
     <>
       <Breadcrumbs crumbs={[{ label: "Findings" }]} />
-      <PageHeader title="Findings" subtitle="Every finding across all reviewed PRs — filter, search, and trace recurring issues." />
+      <PageHeader
+        title="Findings"
+        subtitle="Every finding across all reviewed PRs — filter, search, and trace recurring issues."
+        right={
+          <Link
+            className="btn btn-primary"
+            to={params.toString() ? `/findings/triage?${params.toString()}` : "/findings/triage"}
+          >
+            Triage mode →
+          </Link>
+        }
+      />
 
       {fingerprint ? (
         <div style={{ marginBottom: 14 }}>
