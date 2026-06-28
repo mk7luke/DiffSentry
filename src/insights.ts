@@ -17,7 +17,10 @@ const HIGH_RISK_PATTERNS = [
   /(^|\/)(access[-_]?control|permission|rbac|policy)/i,
 ];
 
-function isHighRiskFile(path: string): boolean {
+/** True when a path matches a recognized high-risk area (auth/payment/migrations/
+ *  security/access-control). Exported so the large-diff budget can prioritize the
+ *  same files the risk score weights when not everything fits in the prompt. */
+export function isHighRiskFile(path: string): boolean {
   return HIGH_RISK_PATTERNS.some((re) => re.test(path));
 }
 
