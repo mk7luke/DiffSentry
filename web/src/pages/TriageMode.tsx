@@ -162,6 +162,8 @@ function TriageDeck({ rows, total, sort, backTo }: TriageDeckProps) {
   const [snoozeUntil, setSnoozeUntil] = useState<string>(() => defaultSnoozeDate());
 
   const cardRef = useRef<HTMLElement>(null);
+  // Finding ids with a triage write currently in flight (double-submit guard).
+  const inFlight = useRef<Set<number>>(new Set());
 
   const atEnd = index >= queue.length;
   const active = atEnd ? null : queue[index];
@@ -183,9 +185,14 @@ function TriageDeck({ rows, total, sort, backTo }: TriageDeckProps) {
         return;
       }
       const id = active.id;
+      // Guard against double-submit: until the optimistic advance re-renders,
+      // two quick clicks / key presses still see the same `active`, so block a
+      // second write for an id whose mutation is already in flight.
+      if (inFlight.current.has(id)) return;
       const until = state === "snoozed" ? new Date(`${snoozeUntil}T23:59:59`).toISOString() : undefined;
       const noteVal = note.trim() || undefined;
       // Optimistic: record the decision and advance immediately.
+      inFlight.current.add(id);
       setDecided((prev) => new Map(prev).set(id, state));
       setNote("");
       goNext();
@@ -212,6 +219,9 @@ function TriageDeck({ rows, total, sort, backTo }: TriageDeckProps) {
                 : err.message
               : "Triage failed.";
           push({ tone: "danger", title: "Triage failed", body: message });
+        })
+        .finally(() => {
+          inFlight.current.delete(id);
         });
     },
     [active, canTriage, snoozeUntil, note, goNext, triage, push],
@@ -237,7 +247,11 @@ function TriageDeck({ rows, total, sort, backTo }: TriageDeckProps) {
       );
       if (dialogOpen) return;
 
-      switch (e.key) {
+      // Normalise single-character keys so shifted / caps-locked letters (e.g.
+      // "A") still match the lowercase shortcuts; multi-char keys (ArrowLeft,
+      // ArrowRight, Enter) are longer than one char and pass through unchanged.
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      switch (key) {
         case "ArrowRight":
         case "j":
           e.preventDefault();
