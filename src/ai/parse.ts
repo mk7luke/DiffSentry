@@ -117,20 +117,25 @@ const SEVERITY_ICON: Record<CommentSeverity, string> = {
   trivial: "🟢",
 };
 
-function normalizeForFingerprint(s: string): string {
+export function normalizeForFingerprint(s: string): string {
+  // Collapse case, punctuation, and runs of whitespace so that trivial
+  // re-wording (re-indentation, capitalization, stray punctuation) of the same
+  // finding still dedupes. We keep the FULL normalized title — truncating to a
+  // token prefix used to collapse genuinely distinct findings that happened to
+  // share an opening phrase into one fingerprint, silently dropping the rest.
   return s
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .split(/\s+/)
-    .slice(0, 12)
     .join(" ");
 }
 
-function fingerprintFor(path: string, line: number, title: string): string {
-  // Hash off the normalized title (lowercased, alphanum, first 12 tokens) so
-  // re-wording the same finding doesn't break dedup. The path is kept raw
-  // so true cross-file findings still distinguish.
+export function fingerprintFor(path: string, line: number, title: string): string {
+  // Hash off the full normalized title (lowercased, alphanum, whitespace-
+  // collapsed) so re-wording the same finding doesn't break dedup while
+  // distinct findings stay distinct. The path is kept raw so true cross-file
+  // findings still distinguish.
   return createHash("sha1")
     .update(`${path}:${line}:${normalizeForFingerprint(title)}`)
     .digest("hex")
