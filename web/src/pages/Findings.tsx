@@ -6,7 +6,7 @@ import { Card, PageHeader } from "../components/primitives";
 import { SeverityBadge, TriageBadge } from "../components/badges";
 import { TriageMenu } from "../components/TriageControls";
 import { useAuth } from "../auth/useAuth";
-import { EmptyState, QueryBoundary } from "../components/states";
+import { EmptyState, QueryBoundary, SkeletonTable } from "../components/states";
 import { pluralize, relativeTime } from "../lib/format";
 import type { FindingExplorerRow } from "../api/types";
 
@@ -182,7 +182,7 @@ export function FindingsPage() {
         </div>
       </form>
 
-      <QueryBoundary query={query} loadingLabel="Loading findings…">
+      <QueryBoundary query={query} loadingLabel="Loading findings…" skeleton={<SkeletonTable rows={8} cols={4} />}>
         {(data) => (
           <>
             {data.groups.length > 0 ? (

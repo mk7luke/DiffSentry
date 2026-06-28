@@ -6,7 +6,7 @@ import { OverviewHero } from "../components/OverviewHero";
 import { Card, Chip, Metric, PageHeader } from "../components/primitives";
 import { MiniSparkbar, StackedSeverityBar } from "../components/charts";
 import { GradeBadge } from "../components/badges";
-import { EmptyState, QueryBoundary } from "../components/states";
+import { EmptyState, QueryBoundary, Skeleton, SkeletonMetrics } from "../components/states";
 import { buildDaySeries, groupActivityByRepo, relativeTime, repoHealth } from "../lib/format";
 import { computeHealth } from "../lib/health";
 import type { RepoOverviewRow } from "../api/types";
@@ -41,7 +41,46 @@ export function OverviewPage() {
     <>
       <Breadcrumbs crumbs={[{ label: "Repos" }]} />
       <OverviewHero />
-      <QueryBoundary query={query} loadingLabel="Loading repos…">
+      <QueryBoundary
+        query={query}
+        loadingLabel="Loading repos…"
+        skeleton={
+          <>
+            <div className="grid hero" style={{ marginBottom: 20 }}>
+              <section className="card">
+                <div className="card-head">
+                  <Skeleton width={180} height={12} />
+                  <Skeleton width={120} height={10} />
+                </div>
+                <div className="card-body chart">
+                  <Skeleton width="100%" height={150} />
+                </div>
+              </section>
+              <div className="grid stack">
+                <div className="metric hero">
+                  <Skeleton width="50%" height={11} />
+                  <Skeleton width="40%" height={44} style={{ marginTop: 8 }} />
+                </div>
+                <SkeletonMetrics count={3} />
+              </div>
+            </div>
+            <div className="grid two">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="repo-card">
+                  <div>
+                    <Skeleton width="55%" height={13} />
+                    <Skeleton width="80%" height={11} style={{ marginTop: 8 }} />
+                  </div>
+                  <div className="right">
+                    <Skeleton width={34} height={26} radius={7} />
+                  </div>
+                  <Skeleton width="100%" height={28} style={{ gridColumn: "1 / -1" }} />
+                </div>
+              ))}
+            </div>
+          </>
+        }
+      >
         {(data) => {
           const rows = sortRepos(data.repos, sort);
           const activityByRepo = groupActivityByRepo(data.activity);

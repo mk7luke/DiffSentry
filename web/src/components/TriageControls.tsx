@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../auth/useAuth";
 import { useToast } from "../realtime/toast";
 import { useBulkTriage, useTriageFinding, type TriageVars } from "../api/hooks";
 import { ApiError } from "../api/client";
+import { CheckIcon } from "./icons";
 import type { TriageState } from "../api/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -51,6 +52,12 @@ export function TriageMenu({ target, label = "Triage", variant = "ghost", onDone
   const [state, setState] = useState<TriageState>("dismissed");
   const [note, setNote] = useState("");
   const [until, setUntil] = useState("");
+  // Transient success cue on the trigger after a triage lands (see ActionButton).
+  const [succeeded, setSucceeded] = useState(false);
+  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (successTimer.current) clearTimeout(successTimer.current);
+  }, []);
 
   if (!capabilities.triageFindings) return null;
 
@@ -96,6 +103,9 @@ export function TriageMenu({ target, label = "Triage", variant = "ghost", onDone
       setOpen(false);
       setNote("");
       setUntil("");
+      setSucceeded(true);
+      if (successTimer.current) clearTimeout(successTimer.current);
+      successTimer.current = setTimeout(() => setSucceeded(false), 1100);
       onDone?.();
     } catch (err) {
       const message =
@@ -113,14 +123,18 @@ export function TriageMenu({ target, label = "Triage", variant = "ghost", onDone
       <button
         ref={btnRef}
         type="button"
-        className={btnClass}
+        className={`${btnClass}${succeeded ? " is-success" : ""}`}
         style={compact ? { padding: "3px 8px", fontSize: 11.5 } : undefined}
         onClick={() => (open ? setOpen(false) : openMenu())}
         disabled={pending || (target.kind === "bulk" && target.ids.length === 0)}
         aria-haspopup="dialog"
         aria-expanded={open}
       >
-        {pending ? <span className="spinner btn-spinner" /> : null}
+        {pending ? (
+          <span className="spinner btn-spinner" />
+        ) : succeeded ? (
+          <CheckIcon className="btn-success-check" aria-hidden="true" />
+        ) : null}
         {label}
         {targetCount !== undefined ? ` (${targetCount})` : ""}
       </button>
