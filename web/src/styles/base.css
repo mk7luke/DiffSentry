@@ -2860,6 +2860,17 @@ a.dot-marker:hover,
   }
 }
 
+/* Tap-target wrapper around bulk-select checkboxes. Tight on desktop; the
+   touch-target block below expands it to a 44px hit area on phones while the
+   checkbox itself stays visually 20px. The wrapping <label> also toggles the
+   checkbox natively, so the whole area is clickable. */
+.check-tap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
 /* ── Touch targets (phones) ─────────────────────────────────────────
    WCAG 2.5.5 / platform HIG: interactive controls get a comfortable ≥44px
    hit area on touch-sized viewports. Tables are already in card mode here, so
@@ -2882,14 +2893,19 @@ a.dot-marker:hover,
   .snav {
     min-height: 44px;
   }
-  /* Roomier checkboxes (findings bulk-select) and clickable row-cards. */
+  /* Bulk-select: keep the checkbox visually 20px, but expand its label wrapper
+     to a full 44px tap target (the input alone wouldn't enlarge the hit area). */
   .tbl input[type="checkbox"] {
     width: 20px;
     height: 20px;
   }
   .tbl td[data-label="Select"] {
-    padding-top: 12px;
-    padding-bottom: 12px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .tbl td[data-label="Select"] .check-tap {
+    min-width: 44px;
+    min-height: 44px;
   }
   /* Drill-in author button gets a full-height tap target. */
   .tbl tbody tr .row-link {
@@ -5032,6 +5048,14 @@ input[type="checkbox"].learn-check {
 .tbl thead th.num .th-sort,
 .tbl thead th.right .th-sort {
   justify-content: flex-end;
+}
+/* The reset strips native chrome, so give keyboard focus an explicit ring.
+   Inset (negative offset) so it can't be clipped by the card's overflow:hidden
+   at the header edge; --accent-bright carries in both themes. */
+.tbl thead th.sortable .th-sort:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: -2px;
+  border-radius: var(--r-xs);
 }
 .tbl thead th.sortable:hover .th-sort {
   color: var(--text-1);

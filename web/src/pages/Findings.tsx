@@ -276,12 +276,14 @@ export function FindingsPage() {
                         <tr>
                           {capabilities.triageFindings ? (
                             <th style={{ width: 28 }}>
-                              <input
-                                type="checkbox"
-                                aria-label="Select all on this page"
-                                checked={data.rows.length > 0 && data.rows.every((r) => selected.has(r.id))}
-                                onChange={() => toggleAll(data.rows)}
-                              />
+                              <label className="check-tap">
+                                <input
+                                  type="checkbox"
+                                  aria-label="Select all on this page"
+                                  checked={data.rows.length > 0 && data.rows.every((r) => selected.has(r.id))}
+                                  onChange={() => toggleAll(data.rows)}
+                                />
+                              </label>
                             </th>
                           ) : null}
                           <th>Severity</th>
@@ -299,12 +301,14 @@ export function FindingsPage() {
                           <tr key={f.id} data-sev={(f.severity ?? "").toLowerCase()}>
                             {capabilities.triageFindings ? (
                               <td data-label="Select">
-                                <input
-                                  type="checkbox"
-                                  aria-label={`Select finding ${f.id}`}
-                                  checked={selected.has(f.id)}
-                                  onChange={() => toggleOne(f.id)}
-                                />
+                                <label className="check-tap">
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`Select finding ${f.id}`}
+                                    checked={selected.has(f.id)}
+                                    onChange={() => toggleOne(f.id)}
+                                  />
+                                </label>
                               </td>
                             ) : null}
                             <td data-label="Severity">
