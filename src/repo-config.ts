@@ -22,6 +22,15 @@ const DEFAULT_CONFIG: RepoConfig = {
       drafts: false,
       auto_incremental_review: true,
     },
+    severity_calibration: {
+      enabled: true,
+      high_fan_in_threshold: 5,
+      escalate_high_fan_in: 1,
+      escalate_risk_path: 1,
+      deescalate_well_tested: 1,
+      lower_confidence_well_tested: true,
+      max_escalation: 2,
+    },
   },
   chat: {
     auto_reply: true,
@@ -93,6 +102,10 @@ export function mergeWithDefaults(config: RepoConfig): RepoConfig {
       auto_review: {
         ...DEFAULT_CONFIG.reviews!.auto_review,
         ...config.reviews?.auto_review,
+      },
+      severity_calibration: {
+        ...DEFAULT_CONFIG.reviews!.severity_calibration,
+        ...config.reviews?.severity_calibration,
       },
     },
     chat: {

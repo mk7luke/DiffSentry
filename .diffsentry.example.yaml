@@ -130,6 +130,24 @@ reviews:
   #     - "src/**/*.ts"
   #     - "lib/**/*.ts"
 
+  # Context-aware severity calibration. Post-processes findings so severity
+  # reflects real risk, not just finding type:
+  #   • escalates findings in high-fan-in files (blast radius — many files
+  #     depend on this one) using the code graph's per-file fan-in counts;
+  #   • escalates findings in high-risk paths (auth/, payment/, migrations/, …);
+  #   • de-escalates (and lowers confidence on) findings in well-tested paths
+  #     (a sibling test file changed in the same PR).
+  # Deterministic security / pattern findings are only ever escalated, never
+  # softened. Defaults shown; the whole feature is on by default.
+  # severity_calibration:
+  #   enabled: true
+  #   high_fan_in_threshold: 5       # fan-in ≥ this = high blast radius
+  #   escalate_high_fan_in: 1        # severity steps up in high-fan-in files
+  #   escalate_risk_path: 1          # severity steps up in high-risk paths
+  #   deescalate_well_tested: 1      # severity steps down in well-tested paths
+  #   lower_confidence_well_tested: true
+  #   max_escalation: 2              # cap on net escalation per finding
+
 chat:
   auto_reply: true  # Respond to @mentions automatically
 

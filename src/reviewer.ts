@@ -19,7 +19,7 @@ import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-m
 import { generateDocstrings, generateTests, simplifyCode, autofix } from "./finishing-touches.js";
 import { formatReviewBody } from "./review-body.js";
 import { encodeState, extractState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
-import { assessRisk, renderRiskBlock, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion, renderConfidenceAggregate, computeReviewerDeltas, renderReviewerDeltaBlock } from "./insights.js";
+import { assessRisk, renderRiskBlock, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion, renderConfidenceAggregate, computeReviewerDeltas, renderReviewerDeltaBlock, calibrateSeverities, resolveSeverityCalibration, renderSeverityCalibrationBlock, type CalibrationResult } from "./insights.js";
 import { suggestReviewersFromBlame, renderSuggestedReviewers, combineReviewers, renderCombinedReviewers } from "./blame-reviewers.js";
 import { loadCodeowners, ownersForFiles, renderCodeownersBlock } from "./codeowners.js";
 import { findPriorBotThreadsForPaths, renderPriorDiscussionsBlock, diffWithOtherPR, renderDiffPRReply } from "./cross-pr.js";
@@ -790,6 +790,48 @@ export class Reviewer {
       // Compute insights (risk, coverage, split suggestion) before posting
       const coverage = assessCoverage(context.files);
 
+      // Context-aware severity calibration: nudge each finding's severity to
+      // reflect real risk — escalate in high-fan-in (blast-radius) files and in
+      // recognized high-risk paths (auth/payment/migrations); de-escalate (and
+      // lower confidence) for findings whose source file has a directory-scoped
+      // sibling/mirrored test changed in this PR. Reuses the fan-in counts the
+      // code-review-graph persisted on the review result. Runs over the FULL
+      // merged finding set (AI + safety + pattern) and BEFORE risk assessment so
+      // the risk score sees calibrated severities. Mutates reviewResult.comments
+      // in place.
+      let calibration: CalibrationResult = { adjustments: [], confidenceLowered: 0 };
+      try {
+        calibration = calibrateSeverities({
+          comments: reviewResult.comments,
+          files: context.files,
+          fanInByFile: reviewResult.fanInByFile,
+          weights: resolveSeverityCalibration(repoConfig.reviews?.severity_calibration),
+        });
+        if (calibration.adjustments.length > 0 || calibration.confidenceLowered > 0) {
+          log.info(
+            {
+              escalated: calibration.adjustments.filter((a) => a.to === "critical" || a.to === "major").length,
+              total: calibration.adjustments.length,
+              confidenceLowered: calibration.confidenceLowered,
+            },
+            "Severity calibration applied",
+          );
+        }
+        // Keep the critical → CHANGES_REQUESTED contract consistent after
+        // recalibration: a finding calibration *escalated to critical* forces
+        // changes, exactly as a critical safety/pattern finding does above.
+        // One-directional (we never downgrade an existing REQUEST_CHANGES), so
+        // de-escalation can't silently un-block a PR.
+        if (
+          calibration.adjustments.some((a) => a.to === "critical") &&
+          reviewResult.approval !== "REQUEST_CHANGES"
+        ) {
+          reviewResult.approval = "REQUEST_CHANGES";
+        }
+      } catch (err) {
+        log.warn({ err }, "Severity calibration failed; keeping original severities");
+      }
+
       // Dependency change detection (sync, no AI)
       const depDeltas = scanDependencyChanges(context.files);
 
@@ -928,6 +970,8 @@ export class Reviewer {
         inner += "\n\n" + renderRiskBlock(risk);
         const covBlock = renderCoverageBlock(coverage);
         if (covBlock) inner += "\n\n" + covBlock;
+        const calBlock = renderSeverityCalibrationBlock(calibration);
+        if (calBlock) inner += "\n\n" + calBlock;
         const depBlock = renderDepBlock(depDeltas);
         if (depBlock) inner += "\n\n" + depBlock;
         const driftBlock = renderDriftBlock(driftFindings);

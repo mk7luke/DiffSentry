@@ -347,6 +347,27 @@ from stale or feature branches that don't contain it. A `.diffsentry.yaml`
 that exists only on a PR branch is ignored; merge it to the default branch
 to make it take effect.
 
+### Context-aware severity calibration
+
+Severity as first reported tracks the *kind* of finding, not where it lives.
+After the review, DiffSentry recalibrates each finding's severity so it
+reflects real risk (`reviews.severity_calibration`, on by default):
+
+- **Blast radius** — findings in high-fan-in files (many files depend on this
+  one) are escalated, using the per-file fan-in counts from the code graph.
+- **High-risk paths** — findings under `auth/`, `payment/`, `migrations/` (and
+  the other recognized risk paths) are escalated.
+- **Test coverage** — findings in well-tested paths (a sibling test file
+  changed in the same PR) are de-escalated and their confidence lowered.
+
+Escalation is capped (`max_escalation`, default 2) and every change is shown in
+a *Severity calibration* table in the walkthrough. Deterministic security and
+pattern findings are only ever escalated, never softened — a hardcoded-secret
+critical never drops just because the file has tests. A finding calibrated **up
+to critical** triggers `CHANGES_REQUESTED`, exactly like any other critical.
+Tune the weights, or set `enabled: false`, in `.diffsentry.yaml` — see
+`.diffsentry.example.yaml` for the full annotated block.
+
 ### Generating a tailored config with your coding agent
 
 A generic config is fine; a repo-grounded one is much better. Paste the
@@ -397,6 +418,14 @@ DiffSentry is an AI PR-review bot. Its per-repo config supports:
       required: |
         <required header text>
       paths: [glob]
+    severity_calibration:                  # context-aware risk weighting
+      enabled: bool
+      high_fan_in_threshold: int           # fan-in ≥ this = high blast radius
+      escalate_high_fan_in: int            # steps up in high-fan-in files
+      escalate_risk_path: int              # steps up in auth/payment/migrations
+      deescalate_well_tested: int          # steps down in well-tested paths
+      lower_confidence_well_tested: bool
+      max_escalation: int                  # cap on net escalation per finding
   chat:   { auto_reply: bool }
   issues: { auto_summary: { enabled, on_edit }, chat: { auto_reply } }
 
