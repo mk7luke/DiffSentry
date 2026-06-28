@@ -481,6 +481,7 @@ export function computeAddedLines(patch: string): Set<number> {
     }
     if (rightLine === null) continue; // pre-hunk noise — no line numbering yet
     if (raw.startsWith("---") || raw.startsWith("+++")) continue;
+    if (raw.startsWith("\\ ")) continue; // "\ No newline at end of file" — diff metadata, not a line
     if (raw.startsWith("-")) continue;
     if (raw.startsWith("+")) {
       added.add(rightLine);
@@ -525,6 +526,22 @@ interface ExecResult {
 }
 
 /**
+ * On Windows, the `node_modules/.bin` entries `resolveBin` returns are `.cmd` /
+ * `.bat` shims that `spawn()` can't launch directly — they must go through the
+ * command interpreter. Native executables (and every POSIX path) spawn directly.
+ * Exported (with an injectable platform) for tests. */
+export function resolveSpawn(
+  cmd: string,
+  args: string[],
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[] } {
+  if (platform === "win32" && /\.(cmd|bat)$/i.test(cmd)) {
+    return { command: "cmd.exe", args: ["/d", "/s", "/c", cmd, ...args] };
+  }
+  return { command: cmd, args };
+}
+
+/**
  * Spawn a CLI, capture bounded stdout/stderr, and resolve (never reject) with
  * the outcome. Enforces a per-call timeout and honors the review's AbortSignal
  * by killing the child. Output is captured but never piped to our own stdio.
@@ -554,7 +571,8 @@ function exec(cmd: string, args: string[], ctx: RunCtx): Promise<ExecResult> {
 
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(cmd, args, { cwd: ctx.cwd, env: process.env, windowsHide: true });
+      const { command, args: spawnArgs } = resolveSpawn(cmd, args);
+      child = spawn(command, spawnArgs, { cwd: ctx.cwd, env: process.env, windowsHide: true });
     } catch (err) {
       finish({ stdout: "", stderr: "", timedOut: false, spawnError: err as Error });
       return;

@@ -6,6 +6,7 @@ import {
   resolveCheckoutDir,
   toRepoRelative,
   parseTscDiagnostics,
+  resolveSpawn,
 } from "../../src/static-analysis.js";
 import type { ReviewComment } from "../../src/types.js";
 
@@ -36,6 +37,53 @@ describe("computeAddedLines", () => {
     const added = computeAddedLines(malformed);
     expect([...added]).toEqual([2]);
     expect(added.has(0)).toBe(false);
+  });
+
+  it("ignores the '\\ No newline at end of file' sentinel (keeps line numbers exact)", () => {
+    const patch = [
+      "@@ -1,2 +1,2 @@",
+      "-old line",
+      "\\ No newline at end of file",
+      "+new line",
+      "\\ No newline at end of file",
+    ].join("\n");
+    const added = computeAddedLines(patch);
+    // "+new line" is right-side line 1; the sentinel must not have bumped it to 2.
+    expect([...added]).toEqual([1]);
+  });
+
+  it("keeps later-hunk line numbers correct after a no-newline sentinel", () => {
+    const patch = [
+      "@@ -1,1 +1,1 @@",
+      "-a",
+      "\\ No newline at end of file",
+      "+a2",
+      "@@ -10,1 +10,2 @@",
+      " ctx",
+      "+b",
+    ].join("\n");
+    expect([...computeAddedLines(patch)].sort((x, y) => x - y)).toEqual([1, 11]);
+  });
+});
+
+describe("resolveSpawn (Windows .cmd shim routing)", () => {
+  it("spawns native/POSIX commands directly", () => {
+    expect(resolveSpawn("/repo/node_modules/.bin/eslint", ["a.ts"], "linux")).toEqual({
+      command: "/repo/node_modules/.bin/eslint",
+      args: ["a.ts"],
+    });
+  });
+
+  it("routes Windows .cmd/.bat shims through cmd.exe", () => {
+    expect(resolveSpawn("C:\\repo\\node_modules\\.bin\\eslint.cmd", ["a.ts"], "win32")).toEqual({
+      command: "cmd.exe",
+      args: ["/d", "/s", "/c", "C:\\repo\\node_modules\\.bin\\eslint.cmd", "a.ts"],
+    });
+    expect(resolveSpawn("tsc.bat", [], "win32").command).toBe("cmd.exe");
+  });
+
+  it("does not wrap .cmd on non-Windows platforms", () => {
+    expect(resolveSpawn("eslint.cmd", [], "linux")).toEqual({ command: "eslint.cmd", args: [] });
   });
 });
 
