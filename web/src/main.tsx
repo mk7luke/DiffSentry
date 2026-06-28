@@ -34,10 +34,17 @@ const queryClient = new QueryClient({
 // authed data is never rendered offline without a verified session.
 async function bootstrap() {
   // Demo via ?demo=true on some other path → bounce to the canonical /demo
-  // route so React Router's basename stays consistent. Abort this render; the
-  // redirect reloads the app under /demo.
+  // route so React Router's basename stays consistent. Preserve the current
+  // route (path + non-demo query + hash) under /demo so a deep link like
+  // /repos/acme/checkout-api/pr/142?demo=true lands on the analogous demo page
+  // rather than the demo root. Abort this render; the redirect reloads under /demo.
   if (DEMO && !demoPathActive()) {
-    window.location.replace(DEMO_BASENAME);
+    const query = new URLSearchParams(window.location.search);
+    query.delete("demo");
+    const qs = query.toString();
+    const suffix = `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`;
+    // "/" carries no useful route, so drop it (avoids a redundant "/demo/").
+    window.location.replace(`${DEMO_BASENAME}${suffix === "/" ? "" : suffix}`);
     return;
   }
 

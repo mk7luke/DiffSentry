@@ -34,15 +34,17 @@ export class ApiError extends Error {
 const BASE = "/api/v1";
 
 export async function apiGet<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
-  // Demo mode: resolve from bundled fixtures, never touching the network.
-  if (DEMO) return resolveDemoGet<T>(path);
-
   const url = new URL(BASE + path, window.location.origin);
   if (params) {
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
     }
   }
+
+  // Demo mode: resolve from bundled fixtures, never touching the network. Pass
+  // the same relative path + serialized query the live request would use, so the
+  // resolver can route on filters too (not just the base path).
+  if (DEMO) return resolveDemoGet<T>(path + url.search);
 
   let resp: Response;
   try {
