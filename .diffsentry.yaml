@@ -173,6 +173,21 @@ reviews:
         vars or webhook setup, the README + docs/ change should be in
         the same PR.
 
+    - path: "web/**"
+      instructions: |
+        The React/Vite dashboard SPA — the only JSX/TSX in the repo.
+          - This SPA has NO i18n / translation pipeline. Every user-facing
+            string across the app is intentionally hardcoded English. Do NOT
+            flag "hardcoded user-facing string" / suggest wrapping text in a
+            `t()` / i18n helper — there is no such helper and never will be.
+          - Accessibility DOES matter here — keep flagging real a11y gaps
+            (missing labels/roles, focus traps, keyboard-only reachability).
+          - Optional bot-authored text (finding bodies, summaries) is rendered
+            with a truthiness check on purpose: an empty string is treated as
+            "missing" and shown via the fallback, because rendering an empty
+            string produces a blank gap. Don't suggest swapping these to a
+            `!= null` presence check.
+
   # Coach checks on PR title + description. Commit style here is plain
   # imperative ("Add X", "Fix Y", "Replace Z with W"), no Conventional
   # Commits prefix, no trailing period — see `git log --oneline`.
@@ -195,8 +210,10 @@ reviews:
         instructions: "If src/safety-scanner.ts or src/pattern-checks.ts gained a new rule, verify tests/e2e/scenarios/ has a scenario covering it."
 
   # Built-in performance/footgun heuristics. Leave on — they're tuned for
-  # JS/TS and this project IS JS/TS. The a11y/i18n ones only fire on JSX,
-  # which we don't have, so they're free.
+  # JS/TS and this project IS JS/TS. The a11y/i18n ones fire on JSX, which
+  # now exists in web/ (the React dashboard SPA): a11y stays valuable there,
+  # but i18n is a false positive for this single-maintainer English app — the
+  # web/** path_instructions above tell the bot to skip the i18n flag.
   builtin_patterns: true
 
   # Repo-specific anti-patterns. Each one is grounded in something I
