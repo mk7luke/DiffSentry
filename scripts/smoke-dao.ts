@@ -17,7 +17,9 @@ async function main(): Promise<void> {
   process.env.DB_PATH = tmpDb;
 
   const { openDatabase, closeDatabase } = await import("../src/storage/db.js");
-  const { triageFinding } = await import("../src/storage/dao.js");
+  const { triageFinding, saveWalkthroughState, getWalkthroughState } = await import("../src/storage/dao.js");
+  const { compactState } = await import("../src/walkthrough-state.js");
+  type WalkthroughState = import("../src/walkthrough-state.js").WalkthroughState;
 
   const db = openDatabase();
   if (!db) throw new Error("failed to open temp db");
@@ -68,6 +70,51 @@ async function main(): Promise<void> {
     assert.equal(triageFinding({ findingId: 9_999_999, accepted: true }), false, "missing finding returns false");
 
     console.log("ok  triageFinding: multi-field update, idempotent repeat, change detection, no-op guards");
+
+    // ── Walkthrough / incremental-review state (schema v6) ──────────────
+    // Missing row → null (reviewer then falls back to the embedded comment blob).
+    assert.equal(getWalkthroughState("acme", "widgets", 7), null, "missing walkthrough state reads null");
+
+    const state: WalkthroughState = {
+      v: 1,
+      lastReviewedSha: "cafe1234",
+      fileShas: { "src/a.ts": "h1", "src/b.ts": "h2" },
+      postedFingerprints: ["fp-a", "fp-b"],
+      filesProcessed: ["src/a.ts"],
+      filesSkippedSimilar: ["src/b.ts"],
+      filesSkippedTrivial: [],
+      updatedAt: "2026-01-02T00:00:00.000Z",
+      riskHistory: [10, 20, 30],
+    };
+    assert.equal(saveWalkthroughState("acme", "widgets", 7, state), true, "saveWalkthroughState writes a row");
+
+    const loaded = getWalkthroughState("acme", "widgets", 7);
+    assert.ok(loaded, "walkthrough state round-trips");
+    assert.equal(loaded!.lastReviewedSha, "cafe1234", "lastReviewedSha persisted");
+    assert.deepEqual(loaded!.fileShas, state.fileShas, "fileShas persisted in full (the DB is the source of truth)");
+    assert.deepEqual(loaded!.postedFingerprints, state.postedFingerprints, "postedFingerprints persisted in full");
+
+    // Upsert overwrites the same (owner, repo, number) key in place.
+    const next: WalkthroughState = { ...state, lastReviewedSha: "beef5678", riskHistory: [10, 20, 30, 40] };
+    assert.equal(saveWalkthroughState("acme", "widgets", 7, next), true, "second save upserts");
+    const reloaded = getWalkthroughState("acme", "widgets", 7);
+    assert.equal(reloaded!.lastReviewedSha, "beef5678", "upsert replaces lastReviewedSha");
+    assert.deepEqual(reloaded!.riskHistory, [10, 20, 30, 40], "upsert replaces riskHistory");
+    assert.equal(
+      (db.prepare(`SELECT COUNT(*) AS n FROM walkthrough_state WHERE owner=? AND repo=? AND number=?`).get("acme", "widgets", 7) as { n: number }).n,
+      1,
+      "upsert keeps exactly one row per PR",
+    );
+
+    // The compact comment copy drops the unbounded arrays but keeps the metadata
+    // a DB-less reader still renders.
+    const compact = compactState(next);
+    assert.equal(compact.fileShas, undefined, "compactState drops fileShas (DB-only)");
+    assert.equal(compact.postedFingerprints, undefined, "compactState drops postedFingerprints (DB-only)");
+    assert.equal(compact.lastReviewedSha, "beef5678", "compactState keeps lastReviewedSha");
+    assert.deepEqual(compact.filesSkippedSimilar, ["src/b.ts"], "compactState keeps skip lists");
+
+    console.log("ok  walkthroughState: missing→null, round-trip (full), upsert-in-place, compact copy drops big arrays");
   } finally {
     closeDatabase();
     try {

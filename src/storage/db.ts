@@ -360,6 +360,34 @@ CREATE TABLE IF NOT EXISTS processed_deliveries (
 CREATE INDEX IF NOT EXISTS idx_processed_deliveries_ts ON processed_deliveries(ts);
 `;
 
+/**
+ * Migration 6 — durable walkthrough/incremental-review state. Previously the
+ * per-PR incremental state (last-reviewed SHAs, posted-fingerprint dedup set,
+ * skipped-file lists, risk history) lived only inside a base64(gzip(JSON)) blob
+ * embedded in the walkthrough comment. That made the comment the single source
+ * of truth: a failed comment upsert, or a human/bot editing the comment, could
+ * silently lose state and force a full re-review.
+ *
+ * This table is the authoritative store, keyed by repo+PR. The walkthrough
+ * comment keeps a small reference plus a compact fallback copy for backward
+ * compatibility (PRs created before this migration, and degraded runs with
+ * persistence disabled). `state_json` is the serialized WalkthroughState; a
+ * single row per PR is upserted on every review.
+ *
+ * Strictly additive (one new table) — same rules as every other migration.
+ */
+const SCHEMA_V6 = `
+CREATE TABLE IF NOT EXISTS walkthrough_state (
+  owner TEXT NOT NULL,
+  repo TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  state_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (owner, repo, number)
+);
+CREATE INDEX IF NOT EXISTS idx_walkthrough_state_updated ON walkthrough_state(updated_at);
+`;
+
 export interface Migration {
   version: number;
   name: string;
@@ -444,6 +472,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 3, name: "custom_rules", sql: SCHEMA_V3, post: ensurePatternHitsCustomRuleId },
   { version: 4, name: "notification_deliveries", sql: SCHEMA_V4 },
   { version: 5, name: "durable_queue", sql: SCHEMA_V5 },
+  { version: 6, name: "walkthrough_state", sql: SCHEMA_V6 },
 ];
 
 /** Highest version this binary knows how to migrate to. */

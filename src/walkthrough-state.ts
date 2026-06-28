@@ -2,6 +2,10 @@ import { gunzipSync, gzipSync } from "node:zlib";
 
 const STATE_MARKER_START = "<!-- diffsentry-state:";
 const STATE_MARKER_END = "-->";
+// A distinct marker (note the `-ref:` suffix) for the small DB pointer embedded
+// alongside the fallback blob. extractState looks for the bare `diffsentry-state:`
+// marker, whose `:` follows `state` directly, so it never matches this one.
+const STATE_REF_MARKER_START = "<!-- diffsentry-state-ref:";
 
 /**
  * Persistent state attached to a PR's walkthrough comment so that
@@ -41,6 +45,47 @@ export function encodeState(state: WalkthroughState): string {
   const gz = gzipSync(Buffer.from(json, "utf8"));
   const b64 = gz.toString("base64");
   return `${STATE_MARKER_START}${b64}${STATE_MARKER_END}`;
+}
+
+/**
+ * A small pointer embedded in the comment when the authoritative state lives in
+ * the database. It is informational only — the reviewer always reads the full
+ * state from the DB (preferred) or the fallback blob — but it documents, in the
+ * comment itself, that this PR's state is DB-backed and when it was last written.
+ */
+export interface WalkthroughStateRef {
+  v: 1;
+  /** Always true: the marker only exists when a DB write succeeded. */
+  db: true;
+  owner: string;
+  repo: string;
+  number: number;
+  updatedAt?: string;
+}
+
+export function encodeStateRef(ref: WalkthroughStateRef): string {
+  return `${STATE_REF_MARKER_START}${JSON.stringify(ref)}${STATE_MARKER_END}`;
+}
+
+/**
+ * Strip the unbounded arrays (per-file SHAs and the posted-fingerprint dedup
+ * set) from a state, keeping only the small metadata. Used to embed a compact
+ * fallback copy in the comment when the full state is safely persisted in the
+ * DB — the dropped fields grow with every commit over a PR's life and belong in
+ * the DB, while what remains still lets a DB-less reader render skip lists and
+ * the risk sparkline.
+ */
+export function compactState(state: WalkthroughState): WalkthroughState {
+  return {
+    v: 1,
+    lastReviewedSha: state.lastReviewedSha,
+    filesProcessed: state.filesProcessed,
+    filesSkippedSimilar: state.filesSkippedSimilar,
+    filesSkippedTrivial: state.filesSkippedTrivial,
+    preMergeCounts: state.preMergeCounts,
+    updatedAt: state.updatedAt,
+    riskHistory: state.riskHistory,
+  };
 }
 
 export function extractState(walkthroughBody: string | null | undefined): WalkthroughState | null {

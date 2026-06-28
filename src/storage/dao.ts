@@ -3,6 +3,7 @@ import type { Database as DB } from "better-sqlite3";
 import { openDatabase } from "./db.js";
 import type { AntiPattern, CommentSeverity, CommentType, IssueContext, PRContext, ReviewComment, ReviewResult } from "../types.js";
 import type { RiskAssessment } from "../insights.js";
+import type { WalkthroughState } from "../walkthrough-state.js";
 import { logger } from "../logger.js";
 
 /** Best-effort upsert of a (owner, repo) row. */
@@ -254,6 +255,82 @@ export function recordIssueAction(opts: {
     );
   } catch (err) {
     logger.debug({ err }, "dao.recordIssueAction failed");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Walkthrough / incremental-review state (schema v6). The authoritative store
+// for per-PR incremental state, keyed by (owner, repo, number). The walkthrough
+// comment keeps only a small reference + a compact fallback copy; this table is
+// the source of truth so a failed comment upsert (or a hand-edited comment) can
+// no longer silently drop the state and force a full re-review.
+//
+// Best-effort no-ops when persistence is disabled (DB_PATH=""), so the reviewer
+// transparently degrades to the embedded comment blob.
+// ---------------------------------------------------------------------------
+
+/**
+ * Upsert the walkthrough state for a PR. Returns true when the row was written,
+ * false when persistence is disabled, the v6 table is missing, the state can't
+ * be serialized, or the write errored — letting the caller decide whether the
+ * comment must still carry the full fallback blob.
+ */
+export function saveWalkthroughState(
+  owner: string,
+  repo: string,
+  number: number,
+  state: WalkthroughState,
+): boolean {
+  const db = openDatabase();
+  if (!db) return false;
+  if (!ensureCommandCenterSchema(db, ["walkthrough_state"])) return false;
+  try {
+    const json = safeJsonStringify(state);
+    if (json == null) {
+      logger.debug({ owner, repo, number }, "dao.saveWalkthroughState: state not JSON-serializable — skipping write");
+      return false;
+    }
+    db.prepare(
+      `INSERT INTO walkthrough_state (owner, repo, number, state_json, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(owner, repo, number) DO UPDATE SET
+         state_json = excluded.state_json,
+         updated_at = excluded.updated_at`,
+    ).run(owner, repo, number, json, state.updatedAt ?? new Date().toISOString());
+    return true;
+  } catch (err) {
+    logger.debug({ err, owner, repo, number }, "dao.saveWalkthroughState failed");
+    return false;
+  }
+}
+
+/**
+ * Read the durable walkthrough state for a PR. Returns null when persistence is
+ * disabled, the table is missing, no row exists, or the stored JSON is unusable
+ * (wrong shape / corrupt) — in every such case the caller falls back to the
+ * embedded comment blob.
+ */
+export function getWalkthroughState(owner: string, repo: string, number: number): WalkthroughState | null {
+  const db = openDatabase();
+  if (!db) return null;
+  if (!ensureCommandCenterSchema(db, ["walkthrough_state"])) return null;
+  try {
+    const row = db
+      .prepare(`SELECT state_json FROM walkthrough_state WHERE owner = ? AND repo = ? AND number = ?`)
+      .get(owner, repo, number) as { state_json?: string } | undefined;
+    if (!row || row.state_json == null) return null;
+    try {
+      const parsed = JSON.parse(row.state_json);
+      if (parsed && typeof parsed === "object" && parsed.v === 1) return parsed as WalkthroughState;
+      logger.warn({ owner, repo, number }, "dao.getWalkthroughState: stored state has unexpected shape — ignoring");
+      return null;
+    } catch (parseErr) {
+      logger.warn({ err: parseErr, owner, repo, number }, "dao.getWalkthroughState: invalid stored JSON — ignoring");
+      return null;
+    }
+  } catch (err) {
+    logger.debug({ err, owner, repo, number }, "dao.getWalkthroughState failed");
+    return null;
   }
 }
 
