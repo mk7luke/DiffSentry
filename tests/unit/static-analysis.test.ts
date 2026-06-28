@@ -4,6 +4,7 @@ import {
   computeAddedLines,
   dedupeStaticFindings,
   resolveCheckoutDir,
+  toRepoRelative,
 } from "../../src/static-analysis.js";
 import type { ReviewComment } from "../../src/types.js";
 
@@ -54,6 +55,37 @@ describe("dedupeStaticFindings", () => {
       [],
     );
     expect(out.map((c) => `${c.path}:${c.line}`)).toEqual(["a.ts:9", "b.ts:1"]);
+  });
+});
+
+describe("toRepoRelative", () => {
+  const cwd = "/repo/checkout";
+
+  it("maps a plain relative path to a POSIX repo-relative path", () => {
+    expect(toRepoRelative("src/foo.ts", cwd)).toBe("src/foo.ts");
+  });
+
+  it("maps a ./-prefixed relative path (common analyzer output)", () => {
+    expect(toRepoRelative("./src/foo.ts", cwd)).toBe("src/foo.ts");
+  });
+
+  it("maps an absolute path inside the checkout", () => {
+    expect(toRepoRelative("/repo/checkout/src/foo.ts", cwd)).toBe("src/foo.ts");
+  });
+
+  it("folds . and .. segments that stay inside the checkout", () => {
+    expect(toRepoRelative("/repo/checkout/sub/../src/foo.ts", cwd)).toBe("src/foo.ts");
+    expect(toRepoRelative("src/./bar/../foo.ts", cwd)).toBe("src/foo.ts");
+  });
+
+  it("rejects paths that escape the checkout", () => {
+    expect(toRepoRelative("../outside.ts", cwd)).toBeNull();
+    expect(toRepoRelative("/etc/passwd", cwd)).toBeNull();
+  });
+
+  it("rejects the checkout root itself (no file)", () => {
+    expect(toRepoRelative("", cwd)).toBeNull();
+    expect(toRepoRelative(".", cwd)).toBeNull();
   });
 });
 

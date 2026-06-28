@@ -457,9 +457,12 @@ export function computeAddedLines(patch: string): Set<number> {
 }
 
 /** Normalize an analyzer-reported path to a repo-relative POSIX path, or null if
- *  it escapes the checkout. */
-function toRepoRelative(file: string, cwd: string): string | null {
-  const abs = path.isAbsolute(file) ? file : path.resolve(cwd, file);
+ *  it escapes the checkout. Accepts absolute paths, plain relative paths, and
+ *  `./`-prefixed / `..`-containing forms — `path.resolve`+`path.relative` fold
+ *  all of those to the same canonical relative path before the escape check.
+ *  Exported for tests (path mapping is the highest-risk step in this module). */
+export function toRepoRelative(file: string, cwd: string): string | null {
+  const abs = path.isAbsolute(file) ? path.normalize(file) : path.resolve(cwd, file);
   const rel = path.relative(cwd, abs);
   if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return null;
   return rel.split(path.sep).join("/");
