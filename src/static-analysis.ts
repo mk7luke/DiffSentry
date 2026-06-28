@@ -220,7 +220,7 @@ function semgrepOnPath(): boolean {
 
 // ─── Analyzer drivers ─────────────────────────────────────────────────────────
 
-interface RawFinding {
+export interface RawFinding {
   /** File path as the analyzer reported it (absolute or cwd-relative). */
   file: string;
   line: number;
@@ -255,7 +255,7 @@ async function runEslint(ctx: RunCtx): Promise<RawFinding[]> {
   if (targets.length === 0) return [];
 
   const res = await exec(bin, ["--format", "json", "--no-error-on-unmatched-pattern", ...targets], ctx);
-  if (res.spawnError || res.timedOut) return [];
+  if (res.spawnError || res.timedOut || res.outputTooLarge) return [];
   // ESLint exits 1 when it finds lint errors — that's expected, parse anyway.
   const json = parseJson<EslintFileResult[]>(res.stdout);
   if (!Array.isArray(json)) return [];
@@ -288,20 +288,32 @@ async function runTsc(ctx: RunCtx): Promise<RawFinding[]> {
   // files, so we run the whole project (bounded by the timeout) and filter the
   // output down to changed files + added lines afterwards.
   const res = await exec(bin, ["--noEmit", "--pretty", "false"], ctx);
-  if (res.spawnError || res.timedOut) return [];
-  // tsc writes diagnostics to stdout. Lines look like:
-  //   src/foo.ts(12,5): error TS2322: Type 'x' is not assignable to 'y'.
-  const re = /^(.+?)\((\d+),\d+\):\s+(error|warning)\s+(TS\d+):\s+(.*)$/;
+  if (res.spawnError || res.timedOut || res.outputTooLarge) return [];
+  return parseTscDiagnostics(`${res.stdout}\n${res.stderr}`);
+}
+
+// tsc (`--pretty false`) writes one diagnostic per line, e.g.:
+//   src/foo.ts(12,5): error TS2322: Type 'x' is not assignable to 'y'.
+//   C:\repo\src\foo.ts(12,5): error TS2322: ...        (Windows absolute path)
+//   src/some(weird).ts(12,5): error TS2322: ...        (parens in the filename)
+// A greedy filename capture (`.*` rather than `.+?`) anchored by the trailing
+// `(line,col):` segment lets it backtrack to the *last* coordinate group, so
+// drive-letter colons and parentheses inside the path don't truncate the match.
+const TSC_DIAGNOSTIC_RE = /^(.*)\((\d+),(\d+)\):\s+(error|warning)\s+(TS\d+):\s+(.*)$/;
+
+/** Parse `tsc --pretty false` text diagnostics into raw findings. Exported for
+ *  tests — the spawn path is exercised separately. */
+export function parseTscDiagnostics(text: string): RawFinding[] {
   const out: RawFinding[] = [];
-  for (const raw of `${res.stdout}\n${res.stderr}`.split("\n")) {
-    const m = raw.match(re);
+  for (const raw of text.split("\n")) {
+    const m = raw.trimEnd().match(TSC_DIAGNOSTIC_RE);
     if (!m) continue;
     out.push({
       file: m[1],
       line: parseInt(m[2], 10),
-      ruleId: m[4],
-      message: m[5],
-      level: m[3] === "warning" ? "warning" : "error",
+      ruleId: m[5],
+      message: m[6],
+      level: m[4] === "warning" ? "warning" : "error",
     });
   }
   return out;
@@ -315,7 +327,7 @@ async function runSemgrep(ctx: RunCtx): Promise<RawFinding[]> {
   if (!cfg) return [];
   const targets = ctx.changedFiles.length > 0 ? ctx.changedFiles : ["."];
   const res = await exec("semgrep", ["--json", "--quiet", "--config", cfg, ...targets], ctx);
-  if (res.spawnError || res.timedOut) return [];
+  if (res.spawnError || res.timedOut || res.outputTooLarge) return [];
   const json = parseJson<{ results?: SemgrepResult[] }>(res.stdout);
   const results = json?.results;
   if (!Array.isArray(results)) return [];
@@ -479,6 +491,9 @@ interface ExecResult {
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  /** Child was killed because its output exceeded MAX_OUTPUT_BYTES. The captured
+   *  stdout/stderr is truncated, so callers treat this like a failed run. */
+  outputTooLarge?: boolean;
   spawnError?: Error;
 }
 
@@ -515,10 +530,15 @@ function exec(cmd: string, args: string[], ctx: RunCtx): Promise<ExecResult> {
     let stderr = "";
     let bytes = 0;
     let timedOut = false;
+    let outputTooLarge = false;
 
     const onData = (which: "out" | "err") => (chunk: Buffer) => {
+      // Once over the limit, stop buffering entirely and kill exactly once — the
+      // subsequent `close` resolves the promise with the outputTooLarge flag.
+      if (outputTooLarge) return;
       bytes += chunk.length;
       if (bytes > MAX_OUTPUT_BYTES) {
+        outputTooLarge = true;
         try {
           child.kill("SIGKILL");
         } catch {
@@ -553,8 +573,8 @@ function exec(cmd: string, args: string[], ctx: RunCtx): Promise<ExecResult> {
     };
     ctx.signal?.addEventListener("abort", onAbort, { once: true });
 
-    child.on("error", (err) => finish({ code: null, stdout, stderr, timedOut, spawnError: err }));
-    child.on("close", (code) => finish({ code, stdout, stderr, timedOut }));
+    child.on("error", (err) => finish({ code: null, stdout, stderr, timedOut, outputTooLarge, spawnError: err }));
+    child.on("close", (code) => finish({ code, stdout, stderr, timedOut, outputTooLarge }));
   });
 }
 

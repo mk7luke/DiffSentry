@@ -5,6 +5,7 @@ import {
   dedupeStaticFindings,
   resolveCheckoutDir,
   toRepoRelative,
+  parseTscDiagnostics,
 } from "../../src/static-analysis.js";
 import type { ReviewComment } from "../../src/types.js";
 
@@ -55,6 +56,36 @@ describe("dedupeStaticFindings", () => {
       [],
     );
     expect(out.map((c) => `${c.path}:${c.line}`)).toEqual(["a.ts:9", "b.ts:1"]);
+  });
+});
+
+describe("parseTscDiagnostics", () => {
+  it("parses a standard POSIX diagnostic line", () => {
+    const out = parseTscDiagnostics("src/foo.ts(12,5): error TS2322: Type 'x' is not assignable to 'y'.");
+    expect(out).toEqual([
+      { file: "src/foo.ts", line: 12, ruleId: "TS2322", message: "Type 'x' is not assignable to 'y'.", level: "error" },
+    ]);
+  });
+
+  it("parses a Windows absolute path (drive-letter colon, backslashes)", () => {
+    const out = parseTscDiagnostics("C:\\repo\\src\\foo.ts(7,1): error TS1005: ';' expected.");
+    expect(out).toHaveLength(1);
+    expect(out[0].file).toBe("C:\\repo\\src\\foo.ts");
+    expect(out[0].line).toBe(7);
+    expect(out[0].ruleId).toBe("TS1005");
+  });
+
+  it("handles parentheses inside the filename via greedy backtracking", () => {
+    const out = parseTscDiagnostics("src/some(weird).ts(3,9): warning TS6133: 'x' is declared but never used.");
+    expect(out).toHaveLength(1);
+    expect(out[0].file).toBe("src/some(weird).ts");
+    expect(out[0].line).toBe(3);
+    expect(out[0].level).toBe("warning");
+  });
+
+  it("ignores summary/non-diagnostic lines and blank input", () => {
+    const out = parseTscDiagnostics("Found 2 errors in 1 file.\n\n   src/ok.ts:not-a-diagnostic");
+    expect(out).toEqual([]);
   });
 });
 
