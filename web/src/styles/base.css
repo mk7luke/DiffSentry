@@ -4866,8 +4866,13 @@ button.diffv-dot {
   transition: box-shadow 0.12s ease;
 }
 button.diffv-dot:hover,
-button.diffv-dot[aria-expanded="true"] {
+button.diffv-dot[aria-expanded="true"],
+button.diffv-dot:focus-visible {
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+button.diffv-dot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .btn-reset {
   appearance: none;

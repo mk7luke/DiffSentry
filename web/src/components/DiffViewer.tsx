@@ -153,6 +153,21 @@ function DiffViewerBody({
   const rowRefs = useRef(new Map<number, HTMLTableRowElement>());
   const panelRefs = useRef(new Map<number, HTMLTableCellElement>());
 
+  // Reconcile selection state when the findings payload changes (triage/SSE
+  // refresh, diff reload): drop ids that no longer exist so navigation never
+  // starts from a removed finding and openPanels can't retain a dead id whose
+  // panel ref will never be recreated. Functional updates keep this keyed on
+  // `findings` alone (no churn when activeId/triageRequest change).
+  useEffect(() => {
+    const valid = new Set(findings.map((f) => f.id));
+    setOpenPanels((prev) => {
+      const next = new Set([...prev].filter((id) => valid.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+    setActiveId((cur) => (cur != null && !valid.has(cur) ? null : cur));
+    setTriageRequest((cur) => (cur != null && !valid.has(cur) ? null : cur));
+  }, [findings]);
+
   // Derive a valid file every render: honour the user's selection when it still
   // exists, else fall back to the same choice the reconciling effect makes
   // (first-with-findings, then first) so render and effect never disagree for a
