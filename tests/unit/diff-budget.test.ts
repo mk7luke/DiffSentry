@@ -37,6 +37,31 @@ describe("truncatePatch", () => {
     expect(out.text.length).toBeLessThanOrEqual(500); // invariant: never exceeds perFileChars
   });
 
+  it("never duplicates lines at the head/tail boundary (body just over keep sum)", () => {
+    // The smallest body that gets trimmed is keepHead+keepTail+1. The line-91
+    // guard means head [0,keepHead) and tail [len-keepTail,len) can't overlap.
+    // Pair the boundary hunk A with a huge hunk B so truncatePatch is entered
+    // and A's trimmed form stays well under the char cap (no hard-slice).
+    const keepHeadLines = 6;
+    const keepTailLines = 4;
+    const n = keepHeadLines + keepTailLines + 1; // 11 — smallest trimmed body
+    const hunkA = [
+      `@@ -1,1 +1,${n} @@`,
+      ...Array.from({ length: n }, (_, i) => `+AAAA ${i} ${"x".repeat(20)}`),
+    ];
+    const hunkB = [
+      "@@ -100,1 +100,5000 @@",
+      ...Array.from({ length: 5000 }, (_, i) => `+b${i}`),
+    ];
+    const patch = [...hunkA, ...hunkB].join("\n");
+    const out = truncatePatch(patch, { perFileChars: 5000, keepHeadLines, keepTailLines });
+    expect(out.truncated).toBe(true);
+    const aLines = out.text.split("\n").filter((l) => l.startsWith("+AAAA"));
+    expect(new Set(aLines).size).toBe(aLines.length); // no duplicated lines
+    expect(aLines.length).toBe(keepHeadLines + keepTailLines); // exactly one omitted
+    expect(out.text).toContain("1 line(s) omitted from this hunk");
+  });
+
   it("never exceeds perFileChars even for a budget smaller than the marker", () => {
     const patch = patchWithLines(500);
     const out = truncatePatch(patch, { perFileChars: 10, keepHeadLines: 5, keepTailLines: 5 });
