@@ -234,7 +234,20 @@ function DiffViewerBody({
         return;
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (document.querySelector('[role="dialog"]')) return;
+      // Suppress shortcuts only while an actually-visible dialog is open (the
+      // triage popover or the command palette), not merely because a dialog node
+      // exists in the DOM. getClientRects() is used rather than offsetParent so
+      // the check stays correct for position:fixed dialogs (offsetParent is null
+      // for those even when visible).
+      const dialogOpen = Array.from(
+        document.querySelectorAll<HTMLElement>('[role="dialog"]'),
+      ).some(
+        (el) =>
+          !el.hasAttribute("hidden") &&
+          el.getAttribute("aria-hidden") !== "true" &&
+          el.getClientRects().length > 0,
+      );
+      if (dialogOpen) return;
       if (e.key === "j" || e.key === "k") {
         e.preventDefault();
         const idx = activeId == null ? -1 : navList.findIndex((n) => n.id === activeId);
