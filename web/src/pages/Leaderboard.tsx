@@ -5,7 +5,7 @@ import { Breadcrumbs } from "../components/Shell";
 import { Card, Metric, PageHeader } from "../components/primitives";
 import { ApprovalBadge, RiskBadge } from "../components/badges";
 import { Donut, Hbar, LineSpark } from "../components/charts";
-import { EmptyState, QueryBoundary } from "../components/states";
+import { EmptyChartArt, EmptyState, QueryBoundary } from "../components/states";
 import { buildDaySeries, relativeTime, type DayBin } from "../lib/format";
 import type { AuthorDayRow, AuthorStatRow } from "../api/types";
 
@@ -122,6 +122,13 @@ export function LeaderboardPage() {
             <th
               className={`sortable${cls ? " " + cls : ""}${sort.key === k ? " sorted" : ""}`}
               onClick={() => toggleSort(k)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggleSort(k);
+                }
+              }}
+              tabIndex={0}
               aria-sort={sort.key === k ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
             >
               {label}
@@ -147,7 +154,16 @@ export function LeaderboardPage() {
                 bodyClass="flush"
               >
                 {data.authors.length === 0 ? (
-                  <EmptyState title="No review activity yet" hint="Author stats appear once PRs are reviewed in this window." />
+                  <EmptyState
+                    illustration={<EmptyChartArt />}
+                    title="No review activity yet"
+                    hint="Author stats appear once DiffSentry reviews PRs in this window. Try a wider window, or open a PR to kick off the first review."
+                    action={
+                      <Link className="btn btn-primary" to="/overview">
+                        View repositories
+                      </Link>
+                    }
+                  />
                 ) : (
                   <table className="tbl">
                     <thead>
@@ -168,17 +184,27 @@ export function LeaderboardPage() {
                         <tr
                           key={a.author}
                           className={`clickable${a.author === selected ? " selected" : ""}`}
+                          tabIndex={0}
+                          role="button"
+                          aria-pressed={a.author === selected}
+                          aria-label={`${a.author} — view details`}
                           onClick={() => selectAuthor(a.author === selected ? null : a.author)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              selectAuthor(a.author === selected ? null : a.author);
+                            }
+                          }}
                         >
-                          <td className="strong">{a.author}</td>
-                          <td className="num">{a.prs_reviewed}</td>
-                          <td className="num muted">{a.reviews}</td>
-                          <td className="num">{a.avg_risk == null ? "—" : Math.round(a.avg_risk)}</td>
-                          <td className="num">{a.findings}</td>
-                          <td className="num muted">{a.findings_per_pr.toFixed(1)}</td>
-                          <td className={`num ${a.critical > 0 ? "crit" : "zero"}`}>{a.critical}</td>
-                          <td className="num">{a.acceptance == null ? "—" : `${Math.round(a.acceptance * 100)}%`}</td>
-                          <td className="right" style={{ width: 130 }}>
+                          <td className="strong cell-primary" data-label="Author">{a.author}</td>
+                          <td className="num" data-label="PRs">{a.prs_reviewed}</td>
+                          <td className="num muted" data-label="Reviews">{a.reviews}</td>
+                          <td className="num" data-label="Avg risk">{a.avg_risk == null ? "—" : Math.round(a.avg_risk)}</td>
+                          <td className="num" data-label="Findings">{a.findings}</td>
+                          <td className="num muted" data-label="Per PR">{a.findings_per_pr.toFixed(1)}</td>
+                          <td className={`num ${a.critical > 0 ? "crit" : "zero"}`} data-label="Critical">{a.critical}</td>
+                          <td className="num" data-label="Accepted">{a.acceptance == null ? "—" : `${Math.round(a.acceptance * 100)}%`}</td>
+                          <td className="right" data-label="Trend" style={{ width: 130 }}>
                             <LineSpark
                               values={authorVolume(data.series, a.author, days)}
                               title={`${a.author} · reviews/day`}
@@ -293,24 +319,24 @@ function AuthorDrilldown({ author, days, onClose }: { author: string; days: numb
                       <tbody>
                         {data.prs.map((pr) => (
                           <tr key={`${pr.owner}/${pr.repo}#${pr.number}`}>
-                            <td className="mono">
+                            <td className="mono cell-primary" data-label="PR">
                               <Link className="link" to={`/repos/${encodeURIComponent(pr.owner)}/${encodeURIComponent(pr.repo)}/pr/${pr.number}`}>
                                 #{pr.number}
                               </Link>
                             </td>
-                            <td className="mono muted">
+                            <td className="mono muted" data-label="Repo">
                               <Link className="link" to={`/repos/${encodeURIComponent(pr.owner)}/${encodeURIComponent(pr.repo)}`}>
                                 {pr.owner}/{pr.repo}
                               </Link>
                             </td>
-                            <td>
+                            <td data-label="Risk">
                               <RiskBadge level={pr.latest_risk_level} score={pr.latest_risk_score} />
                             </td>
-                            <td>
+                            <td data-label="Outcome">
                               <ApprovalBadge approval={pr.latest_approval} />
                             </td>
-                            <td className="num">{pr.total_findings}</td>
-                            <td className="right muted">{relativeTime(pr.latest_at)}</td>
+                            <td className="num" data-label="Findings">{pr.total_findings}</td>
+                            <td className="right muted" data-label="Latest">{relativeTime(pr.latest_at)}</td>
                           </tr>
                         ))}
                       </tbody>

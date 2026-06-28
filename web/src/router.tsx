@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { createBrowserRouter, Navigate } from "react-router-dom";
+import { createBrowserRouter, Link, Navigate } from "react-router-dom";
 import { DEMO, DEMO_BASENAME } from "./demo/mode";
 import { Shell } from "./components/Shell";
 import { useAuth } from "./auth/useAuth";
@@ -26,7 +26,7 @@ import { AuditPage } from "./pages/Audit";
 import { NotificationsPage } from "./pages/Notifications";
 import { ApiTokensPage } from "./pages/ApiTokens";
 import { WebhooksPage } from "./pages/Webhooks";
-import { LoadingState, NotFoundState } from "./components/states";
+import { LoadingState, NotFoundState, RouteErrorBoundary } from "./components/states";
 
 // Code editor (CodeMirror) only loads on the config screen, so split it out of
 // the main bundle.
@@ -35,12 +35,14 @@ const RepoConfigPage = lazy(() => import("./pages/RepoConfig").then((m) => ({ de
 function NotFoundPage() {
   return (
     <div style={{ marginTop: 14 }}>
-      <NotFoundState message="That page doesn't exist." />
-      <div style={{ marginTop: 14 }}>
-        <a href="/overview" className="btn btn-ghost">
-          ← Back to overview
-        </a>
-      </div>
+      <NotFoundState
+        message="That page doesn't exist."
+        action={
+          <Link to="/overview" className="btn btn-primary">
+            ← Back to overview
+          </Link>
+        }
+      />
     </div>
   );
 }
@@ -62,6 +64,9 @@ export const router = createBrowserRouter(
   { path: "/share/impact/:id", element: <PublicImpactPage /> },
   {
     element: <Shell />,
+    // A render/loader error in any child renders the friendly recovery page
+    // instead of a blank screen.
+    errorElement: <RouteErrorBoundary />,
     children: [
       { path: "/", element: <RootLanding /> },
       { path: "/ops", element: <OpsConsolePage /> },

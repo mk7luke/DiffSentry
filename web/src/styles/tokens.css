@@ -34,12 +34,16 @@
   --line-strong: #2a3043;
   --line-soft: #141824;
 
-  /* Text */
+  /* Text. The muted tiers (--text-3 / --text-4) are tuned to clear WCAG AA on
+     the surfaces they actually render on: --text-3 ≥ 4.5:1 (normal-text AA)
+     against --bg / --bg-elev / --bg-elev-2 / --bg-hover; --text-4 ≥ 3:1 (the
+     graphical / large-text floor) for faint placeholder / zero / tick text.
+     --text-2 already clears AA and is left as-is. */
   --text: #f1f3f8;
   --text-1: #d8dbe5;
   --text-2: #9aa0b2;
-  --text-3: #6a7085;
-  --text-4: #40465a;
+  --text-3: #82879b;
+  --text-4: #616a88;
 
   /* Brand. These six are also what an admin accent override replaces inline. */
   --accent: #5a8dff;
@@ -154,8 +158,10 @@
   --text: #11151f;
   --text-1: #2b3142;
   --text-2: #565d72;
-  --text-3: #78808f;
-  --text-4: #a7aebd;
+  /* Darkened to clear WCAG AA: --text-3 ≥ 4.5:1, --text-4 ≥ 3:1 on light
+     surfaces (--bg / --bg-elev / --bg-elev-2 / --bg-deep). See dark theme. */
+  --text-3: #646b79;
+  --text-4: #7e889e;
 
   /* Deepen the accent a touch so it carries on white surfaces. */
   --accent: #3d6ee8;

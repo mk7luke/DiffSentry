@@ -6,7 +6,7 @@ import { Card, PageHeader } from "../components/primitives";
 import { SeverityBadge, TriageBadge } from "../components/badges";
 import { TriageMenu } from "../components/TriageControls";
 import { useAuth } from "../auth/useAuth";
-import { EmptyState, QueryBoundary, SkeletonTable } from "../components/states";
+import { EmptySearchArt, EmptyState, QueryBoundary, SkeletonTable } from "../components/states";
 import { pluralize, relativeTime } from "../lib/format";
 import type { FindingExplorerRow } from "../api/types";
 
@@ -259,7 +259,16 @@ export function FindingsPage() {
                 bodyClass="flush"
               >
                 {data.rows.length === 0 ? (
-                  <EmptyState title="No findings match" hint="Try widening the filters above." />
+                  <EmptyState
+                    illustration={<EmptySearchArt />}
+                    title="No findings match"
+                    hint="No findings line up with these filters. Try widening the severity, source, or age, or clear everything to start fresh."
+                    action={
+                      <button type="button" className="btn btn-primary" onClick={reset}>
+                        Clear filters
+                      </button>
+                    }
+                  />
                 ) : (
                   <>
                     <table className="tbl rail">

@@ -1894,11 +1894,101 @@ a.dot-marker:hover,
   color: var(--text-3);
   font-size: 13px;
 }
+.empty.has-art {
+  padding: 30px 20px 34px;
+}
 .empty .title {
   color: var(--text-1);
   font-size: 14px;
   font-weight: 500;
   margin-bottom: 6px;
+}
+/* Light line-art: a muted base stroke (--text-4) with a single accent-keyed
+   highlight (.art-accent). Decorative — the EmptyState text carries meaning. */
+.empty-art {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 15px;
+  color: var(--text-4);
+}
+.empty-art svg {
+  width: 84px;
+  height: 84px;
+}
+.empty-art .art-accent {
+  stroke: var(--accent);
+  opacity: 0.9;
+}
+.empty-hint {
+  max-width: 48ch;
+  margin: 0 auto;
+  line-height: 1.5;
+}
+.empty-cta {
+  margin-top: 18px;
+}
+.empty-code {
+  color: var(--text-3);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  margin-bottom: 8px;
+}
+
+/* ── Full-page error / 404 boundary ────────────────────────────── */
+.error-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  background: radial-gradient(ellipse 1200px 500px at 50% -10%, var(--page-glow), transparent 60%), var(--bg);
+}
+.error-page-inner {
+  text-align: center;
+  max-width: 460px;
+}
+.error-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 22px;
+  color: var(--accent-bright);
+}
+.error-brand .logo {
+  filter: drop-shadow(0 0 8px var(--accent-glow));
+}
+.error-wordmark {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 17px;
+  color: var(--text);
+  letter-spacing: -0.015em;
+}
+.error-art {
+  margin-bottom: 18px;
+}
+.error-art svg {
+  width: 96px;
+  height: 96px;
+}
+.error-title {
+  font-size: 22px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  margin-bottom: 8px;
+}
+.error-detail {
+  color: var(--text-2);
+  font-size: 13.5px;
+  line-height: 1.55;
+  margin-bottom: 22px;
+}
+.error-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
 }
 
 /* ── Markdown body ─────────────────────────────────────────────── */
@@ -2767,6 +2857,42 @@ a.dot-marker:hover,
   }
   .filterbar .wide {
     grid-column: auto;
+  }
+}
+
+/* ── Touch targets (phones) ─────────────────────────────────────────
+   WCAG 2.5.5 / platform HIG: interactive controls get a comfortable ≥44px
+   hit area on touch-sized viewports. Tables are already in card mode here, so
+   each row-card and its inline actions are easy to tap. */
+@media (max-width: 640px) {
+  .btn {
+    min-height: 44px;
+  }
+  .btn-link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  /* Window / segmented pickers + PR tabs become full-height tap targets. */
+  .seg-btn,
+  .prtab {
+    min-height: 44px;
+  }
+  /* Sidebar/drawer nav rows. */
+  .snav {
+    min-height: 44px;
+  }
+  /* Roomier checkboxes (findings bulk-select) and clickable row-cards. */
+  .tbl input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+  }
+  .tbl td[data-label="Select"] {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+  .tbl tbody tr.clickable {
+    min-height: 44px;
   }
 }
 /* ─── Theme / density controls (W1 theming) ────────────────────────── */
