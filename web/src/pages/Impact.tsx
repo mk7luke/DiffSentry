@@ -448,7 +448,10 @@ function CopyShareLinkButton({ report }: { report: ImpactReport }) {
 export function ImpactPage() {
   const [range, setRange] = useState("30d");
   const query = useImpact(range);
-  const { capabilities } = useAuth();
+  // Mirror the server contract directly: the share routes are requireRole('admin'),
+  // so gate the control on the admin role rather than reusing an unrelated
+  // capability flag (there is no `capabilities.admin`).
+  const { role } = useAuth();
 
   return (
     <>
@@ -461,7 +464,7 @@ export function ImpactPage() {
             onRange={setRange}
             extraActions={
               <>
-                {capabilities.manageTokens && <CopyShareLinkButton report={report} />}
+                {role === "admin" && <CopyShareLinkButton report={report} />}
                 <button className="btn btn-ghost" onClick={() => window.print()}>
                   Print
                 </button>
