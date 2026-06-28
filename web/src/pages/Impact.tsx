@@ -135,15 +135,18 @@ function AcceptanceBar({ w }: { w: ImpactWindow }) {
 
 // ── Time-range selector ────────────────────────────────────────────
 // The date-range selector shared by the authed page and the public share view.
+// This is a segmented *filter* (clicking a range re-windows the same report),
+// not a set of tab panels — so it's a group of toggle buttons exposing state
+// via aria-pressed, rather than a role="tablist" (which would promise arrow-key
+// navigation + tabpanel association it doesn't implement).
 function RangeToggle({ range, onRange }: { range: string; onRange: (r: string) => void }) {
   return (
-    <div className="seg-toggle" role="tablist" aria-label="Time range">
+    <div className="seg-toggle" role="group" aria-label="Time range">
       {IMPACT_RANGES.map((r) => (
         <button
           key={r.key}
           type="button"
-          role="tab"
-          aria-selected={r.key === range}
+          aria-pressed={r.key === range}
           className={`seg-btn${r.key === range ? " active" : ""}`}
           onClick={() => onRange(r.key)}
         >
