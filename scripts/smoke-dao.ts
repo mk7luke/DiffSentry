@@ -18,7 +18,6 @@ async function main(): Promise<void> {
 
   const { openDatabase, closeDatabase } = await import("../src/storage/db.js");
   const { triageFinding, saveWalkthroughState, getWalkthroughState } = await import("../src/storage/dao.js");
-  const { compactState } = await import("../src/walkthrough-state.js");
   type WalkthroughState = import("../src/walkthrough-state.js").WalkthroughState;
 
   const db = openDatabase();
@@ -106,15 +105,7 @@ async function main(): Promise<void> {
       "upsert keeps exactly one row per PR",
     );
 
-    // The compact comment copy drops the unbounded arrays but keeps the metadata
-    // a DB-less reader still renders.
-    const compact = compactState(next);
-    assert.equal(compact.fileShas, undefined, "compactState drops fileShas (DB-only)");
-    assert.equal(compact.postedFingerprints, undefined, "compactState drops postedFingerprints (DB-only)");
-    assert.equal(compact.lastReviewedSha, "beef5678", "compactState keeps lastReviewedSha");
-    assert.deepEqual(compact.filesSkippedSimilar, ["src/b.ts"], "compactState keeps skip lists");
-
-    console.log("ok  walkthroughState: missing→null, round-trip (full), upsert-in-place, compact copy drops big arrays");
+    console.log("ok  walkthroughState: missing→null, round-trip (full), upsert-in-place");
   } finally {
     closeDatabase();
     try {

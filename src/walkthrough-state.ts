@@ -67,27 +67,6 @@ export function encodeStateRef(ref: WalkthroughStateRef): string {
   return `${STATE_REF_MARKER_START}${JSON.stringify(ref)}${STATE_MARKER_END}`;
 }
 
-/**
- * Strip the unbounded arrays (per-file SHAs and the posted-fingerprint dedup
- * set) from a state, keeping only the small metadata. Used to embed a compact
- * fallback copy in the comment when the full state is safely persisted in the
- * DB — the dropped fields grow with every commit over a PR's life and belong in
- * the DB, while what remains still lets a DB-less reader render skip lists and
- * the risk sparkline.
- */
-export function compactState(state: WalkthroughState): WalkthroughState {
-  return {
-    v: 1,
-    lastReviewedSha: state.lastReviewedSha,
-    filesProcessed: state.filesProcessed,
-    filesSkippedSimilar: state.filesSkippedSimilar,
-    filesSkippedTrivial: state.filesSkippedTrivial,
-    preMergeCounts: state.preMergeCounts,
-    updatedAt: state.updatedAt,
-    riskHistory: state.riskHistory,
-  };
-}
-
 export function extractState(walkthroughBody: string | null | undefined): WalkthroughState | null {
   if (!walkthroughBody) return null;
   const start = walkthroughBody.indexOf(STATE_MARKER_START);
