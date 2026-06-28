@@ -291,7 +291,7 @@ function DiffViewerBody({
             <button
               key={file.path}
               type="button"
-              className={`diffv-file${file.path === selectedPath ? " active" : ""}`}
+              className={`diffv-file${file.path === selectedFile?.path ? " active" : ""}`}
               onClick={() => setSelectedPath(file.path)}
               title={file.path}
             >
