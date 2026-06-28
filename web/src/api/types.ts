@@ -580,6 +580,20 @@ export interface CreatedToken {
   token: string;
 }
 
+/** Returned once by POST /impact/shares — `token`/`url` reveal the share link
+ *  (the plaintext is never retrievable again). */
+export interface CreatedImpactShare {
+  id: number;
+  label: string | null;
+  repo: string | null;
+  range: string;
+  token: string;
+  /** Absolute, public link to the chrome-less Impact share view. */
+  url: string;
+  /** Path-only form of `url` (e.g. /share/impact/<token>). */
+  path: string;
+}
+
 // ─── Custom rules (admin-authored anti-patterns) ────────────────────
 
 export type RuleSeverity = "critical" | "major" | "minor" | "trivial";

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { useImpact } from "../api/hooks";
+import { useCreateImpactShare, useImpact } from "../api/hooks";
+import { useAuth } from "../auth/useAuth";
 import { Breadcrumbs } from "../components/Shell";
 import { Card } from "../components/primitives";
 import { Donut, StackedSeverityBar } from "../components/charts";
@@ -10,7 +11,7 @@ import { buildDaySeries, formatCompact, formatMinutesSaved, percentDelta, relati
 import type { DayBin } from "../lib/format";
 import type { ImpactReport, ImpactWindow } from "../api/types";
 
-const RANGES: { key: string; label: string }[] = [
+export const IMPACT_RANGES: { key: string; label: string }[] = [
   { key: "7d", label: "7D" },
   { key: "30d", label: "30D" },
   { key: "90d", label: "90D" },
@@ -132,16 +133,45 @@ function AcceptanceBar({ w }: { w: ImpactWindow }) {
   );
 }
 
-export function ImpactPage() {
-  const [range, setRange] = useState("30d");
-  const query = useImpact(range);
-
+// ── Time-range selector ────────────────────────────────────────────
+// The date-range selector shared by the authed page and the public share view.
+function RangeToggle({ range, onRange }: { range: string; onRange: (r: string) => void }) {
   return (
-    <>
-      <Breadcrumbs crumbs={[{ label: "Impact" }]} />
-      <QueryBoundary query={query} loadingLabel="Computing impact…">
-        {(report) => {
-          const c = report.current;
+    <div className="seg-toggle" role="tablist" aria-label="Time range">
+      {IMPACT_RANGES.map((r) => (
+        <button
+          key={r.key}
+          role="tab"
+          aria-selected={r.key === range}
+          className={`seg-btn${r.key === range ? " active" : ""}`}
+          onClick={() => onRange(r.key)}
+        >
+          {r.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The full Impact report rendering, reused verbatim by the authed page and the
+ * chrome-less public share view. `extraActions` lets each caller add buttons
+ * (Print, Copy share link) beside the shared range selector; everything below
+ * the header is purely aggregate (counts, severities, time bins) — no source
+ * code or per-finding detail — which is what makes it safe to share publicly.
+ */
+export function ImpactReportBody({
+  report,
+  range,
+  onRange,
+  extraActions,
+}: {
+  report: ImpactReport;
+  range: string;
+  onRange: (r: string) => void;
+  extraActions?: ReactNode;
+}) {
+  const c = report.current;
           const p = report.previous;
           const saved = formatMinutesSaved(c.timeSavedMinutes);
           const series = buildTrendSeries(report);
@@ -166,22 +196,8 @@ export function ImpactPage() {
                   </p>
                 </div>
                 <div className="actions">
-                  <div className="seg-toggle" role="tablist" aria-label="Time range">
-                    {RANGES.map((r) => (
-                      <button
-                        key={r.key}
-                        role="tab"
-                        aria-selected={r.key === range}
-                        className={`seg-btn${r.key === range ? " active" : ""}`}
-                        onClick={() => setRange(r.key)}
-                      >
-                        {r.label}
-                      </button>
-                    ))}
-                  </div>
-                  <button className="btn btn-ghost" onClick={() => window.print()}>
-                    Print / share
-                  </button>
+                  <RangeToggle range={range} onRange={onRange} />
+                  {extraActions}
                 </div>
               </header>
 
@@ -376,9 +392,78 @@ export function ImpactPage() {
                 reviews, findings, and PR tables for {report.range.label.toLowerCase()}
                 {report.repo ? ` in ${report.repo}` : ""}.
               </p>
-            </div>
-          );
-        }}
+    </div>
+  );
+}
+
+/**
+ * "Copy share link" — mints a public, revocable share link for the current
+ * report scope (admins only) and copies it to the clipboard. The link is minted
+ * once and reused on subsequent clicks, so repeated copies don't spawn shares.
+ */
+function CopyShareLinkButton({ report }: { report: ImpactReport }) {
+  const create = useCreateImpactShare();
+  const [url, setUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function copyToClipboard(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard blocked (e.g. insecure context) — fall back to a prompt so the
+      // operator can still grab the link.
+      window.prompt("Copy this share link:", value);
+    }
+  }
+
+  async function onClick() {
+    if (url) {
+      await copyToClipboard(url);
+      return;
+    }
+    const res = await create.mutateAsync({ repo: report.repo, range: report.range.days == null ? "all" : `${report.range.days}d` });
+    setUrl(res.url);
+    await copyToClipboard(res.url);
+  }
+
+  return (
+    <button
+      className="btn btn-ghost"
+      onClick={() => void onClick()}
+      disabled={create.isPending}
+      title="Create a public, revocable link to this aggregate impact report"
+    >
+      {create.isPending ? "Creating link…" : copied ? "Link copied ✓" : "Copy share link"}
+    </button>
+  );
+}
+
+export function ImpactPage() {
+  const [range, setRange] = useState("30d");
+  const query = useImpact(range);
+  const { capabilities } = useAuth();
+
+  return (
+    <>
+      <Breadcrumbs crumbs={[{ label: "Impact" }]} />
+      <QueryBoundary query={query} loadingLabel="Computing impact…">
+        {(report) => (
+          <ImpactReportBody
+            report={report}
+            range={range}
+            onRange={setRange}
+            extraActions={
+              <>
+                {capabilities.manageTokens && <CopyShareLinkButton report={report} />}
+                <button className="btn btn-ghost" onClick={() => window.print()}>
+                  Print
+                </button>
+              </>
+            }
+          />
+        )}
       </QueryBoundary>
     </>
   );

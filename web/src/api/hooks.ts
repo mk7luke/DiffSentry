@@ -9,6 +9,7 @@ import type {
   BrandingResponse,
   BrandingUpdate,
   CostResponse,
+  CreatedImpactShare,
   CreatedToken,
   AuthorDetailResponse,
   AuthorsResponse,
@@ -196,6 +197,31 @@ export function useImpact(range: string, repo?: string) {
     queryKey: ["impact", range, repo ?? null],
     queryFn: () => apiGet<ImpactReport>("/impact", { range, repo }),
     placeholderData: (prev) => prev,
+  });
+}
+
+/**
+ * The public, no-auth Impact report behind a share token. Hits the public read
+ * endpoint (no login, scoped to the share's fixed repo); the viewer can re-window
+ * the date range. `retry: false` so a revoked/invalid link surfaces its 404
+ * immediately instead of retrying.
+ */
+export function usePublicImpact(token: string, range: string) {
+  return useQuery({
+    queryKey: ["public-impact", token, range],
+    queryFn: () => apiGet<ImpactReport>(`/public/impact/${encodeURIComponent(token)}`, { range }),
+    enabled: !!token,
+    placeholderData: (prev) => prev,
+    retry: false,
+  });
+}
+
+/** Admin: mint a public, revocable share link for the Impact report. Resolves
+ *  with the one-time plaintext token + absolute URL. */
+export function useCreateImpactShare() {
+  return useMutation({
+    mutationFn: (vars: { repo?: string | null; range?: string; label?: string }) =>
+      apiSend<CreatedImpactShare>("/impact/shares", { body: vars }),
   });
 }
 

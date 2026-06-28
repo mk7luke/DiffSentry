@@ -5312,3 +5312,62 @@ button.diffv-dot:focus-visible {
     display: none;
   }
 }
+
+/* ── Public Impact share view (chrome-less) ───────────────────────────
+   The shareable Impact artifact served at /share/impact/:id. No sidebar or
+   nav — just a slim brand bar, the reused ImpactReportBody, and a footer. */
+.public-share {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+}
+.public-share-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-elev);
+}
+.public-share-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: var(--text);
+  text-decoration: none;
+}
+.public-share-brand svg {
+  width: 22px;
+  height: 22px;
+}
+.public-share-tag {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.public-share-main {
+  flex: 1;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 20px 40px;
+}
+.public-share-foot {
+  padding: 16px 20px;
+  border-top: 1px solid var(--line);
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+  background: var(--bg-elev);
+}
+@media print {
+  .public-share-bar,
+  .public-share-foot {
+    display: none;
+  }
+}
