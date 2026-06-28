@@ -153,7 +153,12 @@ function DiffViewerBody({
   const rowRefs = useRef(new Map<number, HTMLTableRowElement>());
   const panelRefs = useRef(new Map<number, HTMLTableCellElement>());
 
-  const selectedFile = files.find((f) => f.path === selectedPath) ?? files[0] ?? null;
+  // Derive a valid file every render: honour the user's selection when it still
+  // exists, else fall back to the same choice the reconciling effect makes
+  // (first-with-findings, then first) so render and effect never disagree for a
+  // frame.
+  const selectedFile =
+    files.find((f) => f.path === selectedPath) ?? firstWithFindings ?? files[0] ?? null;
 
   // Reconcile the selected file against async `files` updates: when the current
   // selection is empty or no longer present (e.g. a degraded diff:null first
@@ -198,10 +203,11 @@ function DiffViewerBody({
     if (triageRequest == null) return;
     const cell = panelRefs.current.get(triageRequest);
     const trigger = cell?.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]');
-    if (trigger) {
-      trigger.click();
-      setTriageRequest(null);
-    }
+    trigger?.click();
+    // Always clear the request after one attempt — if no trigger exists (e.g.
+    // TriageMenu rendered nothing because the user lacks the capability) we must
+    // not leave the request latched, re-firing on every openPanels change.
+    setTriageRequest(null);
   }, [triageRequest, openPanels]);
 
   // Keyboard navigation. Ignored while typing or when a popover/dialog is open.
@@ -276,8 +282,8 @@ function DiffViewerBody({
             >
               <span className={`diffv-status chip ${tag.cls} uppercase`}>{tag.label}</span>
               <span className="diffv-file-name mono">
-                {dir ? <span className="muted">{dir}</span> : null}
-                {base}
+                {dir ? <span className="diffv-file-dir muted">{dir}</span> : null}
+                <span className="diffv-file-base">{base}</span>
               </span>
               <span className="diffv-file-meta">
                 {ff.length > 0 ? (

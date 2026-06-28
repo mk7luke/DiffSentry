@@ -4808,14 +4808,21 @@ a.cb-name:hover {
   flex: 1;
   min-width: 0;
   font-size: 11.5px;
+  display: flex;
+  align-items: baseline;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
-  direction: rtl;
-  text-align: left;
 }
-.diffv-file-name .muted {
+/* Natural LTR order: the directory ellipsizes from its end while the basename
+   (the part that matters in a file picker) stays fully visible and pinned. */
+.diffv-file-dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text-4);
+}
+.diffv-file-base {
+  flex: 0 0 auto;
 }
 .diffv-file-meta {
   flex-shrink: 0;
