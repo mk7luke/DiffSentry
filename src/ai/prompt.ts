@@ -110,7 +110,12 @@ export function buildReviewPrompt(
 ): { system: string; user: string } {
   const system = buildReviewSystemPrompt(repoConfig, learnings);
 
+  const budget = context.diffBudget;
+
   const filesSection = context.files
+    // Files dropped entirely for size carry no diff to review — surface them in
+    // the omitted note below instead of an empty code fence.
+    .filter((f) => !budget?.byFile[f.filename]?.omitted)
     .map((f) => {
       // Gather path-specific instructions
       const pathInstructions = getPathInstructionsForFile(f.filename, repoConfig);
@@ -118,9 +123,24 @@ export function buildReviewPrompt(
         ? `\n**Path-specific review guidance:**\n${pathInstructions.map((i) => `- ${i}`).join("\n")}\n`
         : "";
 
-      return `### ${f.filename} (${f.status}, +${f.additions} -${f.deletions})${pathNote}\n\`\`\`diff\n${f.patch}\n\`\`\``;
+      const budgeted = budget?.byFile[f.filename];
+      const patch = budgeted ? budgeted.patch : f.patch;
+      const truncNote = budgeted?.truncated
+        ? `\n> ⚠️ This patch was truncated to fit the review size budget — hunk headers plus a head/tail of each hunk are shown. Flag findings only against the lines you can see.\n`
+        : "";
+
+      return `### ${f.filename} (${f.status}, +${f.additions} -${f.deletions})${pathNote}${truncNote}\n\`\`\`diff\n${patch}\n\`\`\``;
     })
     .join("\n\n");
+
+  // Note files dropped from the prompt entirely so the model knows the diff it
+  // sees is partial (and won't claim a clean review of the whole PR).
+  const omittedNote =
+    budget && budget.filesOmitted.length > 0
+      ? `\n\n> ⚠️ **${budget.filesOmitted.length} file(s) were omitted from the diff above to stay within the review size budget** (lower-risk / larger files dropped first): ${budget.filesOmitted
+          .map((p) => `\`${p}\``)
+          .join(", ")}. These were not shown to you — do not assume they are correct or approve them.`
+      : "";
 
   // Bounded graph-backed context (whole-function bodies, cross-file
   // dependents/dependencies, high-fan-in flags). Already token-budgeted by the
@@ -139,7 +159,7 @@ ${context.description || "(no description provided)"}
 
 ## Changed Files
 
-${filesSection}${relatedSection}
+${filesSection}${omittedNote}${relatedSection}
 
 Review this pull request and respond with JSON. Remember to obey the Repository Learnings in the system prompt — they override your default flagging heuristics.`;
 
@@ -201,13 +221,32 @@ export function buildWalkthroughPrompt(
     ? "\nInclude a short poem about this PR."
     : "\nDo NOT include a poem (leave empty string).";
 
+  const budget = context.diffBudget;
+
+  // The file LIST always names every changed file (so cohorts/descriptions can
+  // cover them); only the heavyweight patch section honors the size budget.
   const filesSection = context.files
     .map((f) => `- ${f.filename} (${f.status}, +${f.additions} -${f.deletions})`)
     .join("\n");
 
   const patchSection = context.files
-    .map((f) => `### ${f.filename}\n\`\`\`diff\n${f.patch}\n\`\`\``)
+    .filter((f) => !budget?.byFile[f.filename]?.omitted)
+    .map((f) => {
+      const budgeted = budget?.byFile[f.filename];
+      const patch = budgeted ? budgeted.patch : f.patch;
+      const truncNote = budgeted?.truncated ? " _(patch truncated to fit the size budget)_" : "";
+      return `### ${f.filename}${truncNote}\n\`\`\`diff\n${patch}\n\`\`\``;
+    })
     .join("\n\n");
+
+  // Mirror buildReviewPrompt: when files were dropped from the diff for size,
+  // name them and tell the model to summarize only from the patches it can see.
+  const omittedNote =
+    budget && budget.filesOmitted.length > 0
+      ? `\n\n> ⚠️ **${budget.filesOmitted.length} file(s) had their diffs omitted to stay within the size budget** (they appear in the file list above but not in the diffs below): ${budget.filesOmitted
+          .map((p) => `\`${p}\``)
+          .join(", ")}. Base your summary and sequence diagrams only on the patches shown below; note these files as changed but not detailed.`
+      : "";
 
   const user = `## Pull Request: ${context.title}
 
@@ -217,7 +256,7 @@ export function buildWalkthroughPrompt(
 ${context.description || "(no description provided)"}
 
 ## Changed Files
-${filesSection}
+${filesSection}${omittedNote}
 
 ## Diffs
 ${patchSection}

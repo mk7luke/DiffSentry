@@ -157,6 +157,19 @@ export const REPO_CONFIG_SCHEMA: JsonSchema = {
           },
         },
 
+        diff_budget: {
+          type: "object",
+          additionalProperties: false,
+          description: "Large-diff guard: bound the diff size sent to the model (per-file + per-review).",
+          properties: {
+            enabled: { type: "boolean", description: "Master switch (default true)." },
+            per_file_chars: { type: "integer", minimum: 0, description: "A file's patch is truncated past this many chars (default 24000)." },
+            per_review_chars: { type: "integer", minimum: 0, description: "Combined budget for diff + related context across the review (default 180000)." },
+            keep_head_lines: { type: "integer", minimum: 0, description: "Lines kept at the head of each over-budget hunk (default 40)." },
+            keep_tail_lines: { type: "integer", minimum: 0, description: "Lines kept at the tail of each over-budget hunk (default 20)." },
+          },
+        },
+
         static_analysis: {
           type: "object",
           additionalProperties: false,

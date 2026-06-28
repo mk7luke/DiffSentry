@@ -37,6 +37,7 @@ import { runWithCostContext, getCostContext, setCostReviewId, flushCostEvents } 
 import { isPauseAll, resolveProfileOverride, resolveMaxFilesOverride } from "./settings/overrides.js";
 import { reviewQueue, type ReviewHandle } from "./realtime/queue.js";
 import { buildGraphContext } from "./graph-context.js";
+import { applyDiffBudget } from "./ai/diff-budget.js";
 
 /** Map a PR chat command to the cost-attribution kind for its AI calls. */
 function costKindForCommand(type: string): string {
@@ -619,6 +620,33 @@ export class Reviewer {
             relatedChars: graphContext.relatedContextMarkdown.length,
           },
           "Injected code-graph related context into review prompt",
+        );
+      }
+
+      // Large-diff guard: bound what's sent to the model. Computed AFTER the
+      // graph related-context so the per-review budget can reserve room for it
+      // (the two together must fit the model window). Truncates oversized file
+      // patches (hunk headers + head/tail) and, when the whole diff is too big,
+      // keeps higher-risk files and drops lower-risk/larger ones. Attached to
+      // context so every provider's prompt builder picks it up; the deterministic
+      // scanners below keep operating on the FULL context.files patches.
+      const diffBudget = applyDiffBudget(
+        context.files.map((f) => ({ filename: f.filename, patch: f.patch })),
+        repoConfig.reviews?.diff_budget,
+        { relatedContextChars: graphContext.relatedContextMarkdown.length },
+      );
+      context.diffBudget = diffBudget;
+      if (diffBudget.enabled && (diffBudget.filesTruncated.length > 0 || diffBudget.filesOmitted.length > 0)) {
+        log.info(
+          {
+            truncated: diffBudget.filesTruncated.length,
+            omitted: diffBudget.filesOmitted.length,
+            totalOriginalChars: diffBudget.totalOriginalChars,
+            totalSentChars: diffBudget.totalSentChars,
+            effectivePerReviewChars: diffBudget.effectivePerReviewChars,
+            relatedContextChars: graphContext.relatedContextMarkdown.length,
+          },
+          "Large-diff budget applied to model prompt",
         );
       }
 
@@ -1230,6 +1258,8 @@ export class Reviewer {
         filesNoReviewableChanges,
         filesSkippedSimilar,
         filesSkippedTrivial,
+        filesTruncatedForSize: diffBudget.filesTruncated,
+        filesSkippedForSize: diffBudget.filesOmitted,
         incrementalFromSha:
           mode === "incremental" && priorState?.lastReviewedSha
             ? priorState.lastReviewedSha

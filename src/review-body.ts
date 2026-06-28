@@ -20,6 +20,10 @@ export type ReviewBodyMeta = {
   filesNoReviewableChanges?: string[];
   filesSkippedTrivial?: string[];
   filesSkippedSimilar?: string[];
+  /** Files whose patch was truncated to fit the large-diff size budget (still reviewed, partially). */
+  filesTruncatedForSize?: string[];
+  /** Files dropped entirely from the model prompt to fit the large-diff size budget (NOT reviewed). */
+  filesSkippedForSize?: string[];
   configUsed?: string;
   plan?: string;
   botName: string;
@@ -271,6 +275,16 @@ function renderReviewInfo(meta: ReviewBodyMeta, runId: string): string {
       "Files skipped from review as they are similar to previous changes",
       meta.filesSkippedSimilar,
       "🚧",
+    ),
+    renderFileList(
+      "Files with diffs truncated to fit the review size budget",
+      meta.filesTruncatedForSize,
+      "✂️",
+    ),
+    renderFileList(
+      "Files skipped from review due to size (not sent to the model)",
+      meta.filesSkippedForSize,
+      "🪓",
     ),
     `</details>`,
   ];

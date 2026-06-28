@@ -84,6 +84,67 @@ export interface ReviewsConfig {
   severity_calibration?: SeverityCalibrationConfig;
   /** Deterministic static analysis (lint / typecheck / SAST). Opt-in. */
   static_analysis?: StaticAnalysisConfig;
+  /** Large-diff guard: per-file + per-review size budget for what is sent to the model. */
+  diff_budget?: DiffBudgetConfig;
+}
+
+// ─── Large-diff budgeting ──────────────────────────────────────
+// Bounds the size of the diff content sent to the model so a huge PR can't blow
+// the context window (or run up cost). Truncation is intelligent — hunk headers
+// plus a head/tail of each hunk are kept — and the whole-review pass prioritizes
+// higher-risk files (auth/, payment/, migrations/, …) when not everything fits.
+// Applies ONLY to the model prompt; deterministic scanners always see the full
+// diff. See src/ai/diff-budget.ts. Coordinates with the code-graph related-
+// context budget: `per_review_chars` is the COMBINED ceiling for the diff plus
+// the related-context section, so the two together stay within the model window.
+export interface DiffBudgetConfig {
+  /** Master switch. Default true. */
+  enabled?: boolean;
+  /** A single file's patch is truncated past this many chars. Default 24000. */
+  per_file_chars?: number;
+  /** Combined budget (chars) for diff + related context across the review. Default 180000. */
+  per_review_chars?: number;
+  /** Lines kept at the head of each over-budget hunk. Default 40. */
+  keep_head_lines?: number;
+  /** Lines kept at the tail of each over-budget hunk. Default 20. */
+  keep_tail_lines?: number;
+}
+
+/** Per-file outcome of the diff-budget pass. */
+export interface BudgetedFile {
+  filename: string;
+  /** Patch to send to the model: original, truncated, or "" when omitted. */
+  patch: string;
+  /** The patch was shortened to fit the per-file budget. */
+  truncated: boolean;
+  /** The file was dropped entirely from the model prompt to fit the per-review budget. */
+  omitted: boolean;
+  /** Original patch length in chars. */
+  originalChars: number;
+  /** Chars actually sent to the model for this file (0 when omitted). */
+  sentChars: number;
+}
+
+/** Result of applying the diff budget to a PR's changed files. */
+export interface DiffBudgetResult {
+  /** Whether budgeting ran (false ⇒ feature disabled, files untouched). */
+  enabled: boolean;
+  /** Per-file outcomes, in the original file order. */
+  files: BudgetedFile[];
+  /** Lookup by filename. */
+  byFile: Record<string, BudgetedFile>;
+  /** Filenames whose patch was truncated (still sent). */
+  filesTruncated: string[];
+  /** Filenames dropped entirely from the model prompt for size. */
+  filesOmitted: string[];
+  /** Sum of original patch lengths across all files. */
+  totalOriginalChars: number;
+  /** Sum of patch lengths actually sent to the model. */
+  totalSentChars: number;
+  /** Effective per-review diff budget after reserving room for related context. */
+  effectivePerReviewChars: number;
+  /** Resolved per-file budget. */
+  perFileChars: number;
 }
 
 // ─── Static analysis ──────────────────────────────────────────────
@@ -328,6 +389,15 @@ export interface PRContext {
    * graph-context.ts.
    */
   relatedContext?: string;
+  /**
+   * Optional result of the large-diff budget pass. When present, the review and
+   * walkthrough prompt builders render the budgeted (possibly truncated) patches
+   * and annotate truncated/omitted files instead of the raw diff. Absent ⇒ the
+   * full diff is sent (legacy behaviour). Computed once in reviewer.ts so the
+   * model prompt and the human-facing review body agree on what was trimmed.
+   * See src/ai/diff-budget.ts.
+   */
+  diffBudget?: DiffBudgetResult;
 }
 
 // ─── AI Provider Interface ─────────────────────────────────────
