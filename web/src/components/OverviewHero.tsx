@@ -84,17 +84,21 @@ export function OverviewHero() {
 
   const onEvent = useCallback(
     (env: StreamEnvelope) => {
-      // Only the hero's own 7-day window — don't refetch whatever range the
-      // Impact page happens to be showing. Prefix-matches useImpact("7d")'s
-      // ["impact", "7d", null] cache entry.
-      const refetch7d = () => void qc.invalidateQueries({ queryKey: ["impact", "7d"] });
       if (env.topic === "finding.surfaced") {
+        // Optimistic bump only. We deliberately do NOT refetch here: the
+        // aggregate usually hasn't folded this just-surfaced finding into
+        // criticalMajorCaughtBeforeMerge yet, so an immediate refetch could
+        // reset `bonus` and flash the count back down. Reconciliation happens
+        // on review.finished below.
         const sev = (env.payload as { severity?: string } | null)?.severity;
         if (sev === "critical" || sev === "major") setBonus((b) => b + 1);
-        refetch7d();
       } else if (env.topic === "review.finished") {
-        // A finished review may have caught new issues — pull the real numbers.
-        refetch7d();
+        // The review is done, so the aggregate is now authoritative — pull the
+        // real numbers, which fold any optimistic bonus back in via [caught].
+        // Scoped to the hero's own 7-day window (prefix-matches useImpact("7d")'s
+        // ["impact", "7d", null] cache entry) so we don't refetch whatever range
+        // the Impact page happens to be showing.
+        void qc.invalidateQueries({ queryKey: ["impact", "7d"] });
       }
     },
     [qc],
