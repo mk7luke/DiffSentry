@@ -3426,6 +3426,191 @@ input[type="checkbox"].learn-check {
   }
 }
 
+/* ── Overview hero ─────────────────────────────────────────────────
+   Leads the Overview: caught-issues headline + time-saved aside + CTA into
+   the Impact report. Shares the impact-hero visual language (accent border,
+   dual radial glow, display-font numerals) but is self-contained. */
+.ov-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(210px, 0.85fr);
+  gap: 0;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-xl);
+  overflow: hidden;
+  background:
+    radial-gradient(1200px 320px at 6% -40%, var(--accent-glow), transparent 60%),
+    radial-gradient(900px 300px at 100% 140%, rgba(154, 107, 255, 0.14), transparent 55%),
+    linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-elev-2) 100%);
+  box-shadow: var(--shadow-accent);
+  margin-bottom: 20px;
+}
+.ov-hero-main {
+  padding: 26px 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+}
+.ov-hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-bright);
+}
+.ov-hero-eyebrow svg {
+  width: 14px;
+  height: 14px;
+}
+.ov-hero-headline {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.ov-hero-headline .big {
+  font-family: var(--font-display);
+  font-size: 80px;
+  font-weight: 680;
+  line-height: 0.9;
+  letter-spacing: -0.04em;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(180deg, var(--text), var(--accent-bright) 95%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.ov-hero-headline .rest {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 560;
+  line-height: 1.2;
+  color: var(--text-1);
+  letter-spacing: -0.01em;
+}
+.ov-hero-headline .rest-lead {
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--text);
+}
+.ov-hero-sub {
+  font-size: 13px;
+  color: var(--text-2);
+  max-width: 56ch;
+}
+.ov-hero-sub b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.ov-hero-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 2px;
+  padding: 8px 14px;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  border: 1px solid var(--accent-deep);
+  transition: background 0.12s ease, transform 0.12s ease;
+}
+.ov-hero-cta:hover {
+  background: var(--accent-bright);
+  transform: translateY(-1px);
+}
+.ov-hero-cta span {
+  transition: transform 0.12s ease;
+}
+.ov-hero-cta:hover span {
+  transform: translateX(2px);
+}
+.ov-hero-aside {
+  padding: 26px 24px;
+  border-left: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--inset-hi-soft), transparent);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  justify-content: center;
+}
+.ov-hero-aside-icon {
+  color: var(--accent-bright);
+  margin-bottom: 6px;
+}
+.ov-hero-aside-icon svg {
+  width: 20px;
+  height: 20px;
+}
+.ov-hero-aside-value {
+  font-family: var(--font-display);
+  font-size: 46px;
+  font-weight: 660;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.ov-hero-aside-unit {
+  font-size: 13px;
+  color: var(--text-1);
+  font-weight: 500;
+}
+.ov-hero-aside-note {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  margin-top: 4px;
+}
+.ov-hero-firstrun .ov-hero-aside-value {
+  color: var(--text-3);
+}
+/* Loading skeleton — a sized placeholder so the page doesn't jump. */
+.ov-hero-skeleton {
+  min-height: 196px;
+  border-color: var(--line);
+  box-shadow: var(--shadow-card);
+  animation: ov-hero-pulse 1.4s ease-in-out infinite;
+}
+@keyframes ov-hero-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+@media (max-width: 900px) {
+  .ov-hero {
+    grid-template-columns: 1fr;
+  }
+  .ov-hero-aside {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  .ov-hero-headline .big {
+    font-size: 62px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ov-hero-skeleton {
+    animation: none;
+  }
+  .ov-hero-cta,
+  .ov-hero-cta span {
+    transition: none;
+  }
+}
+
 /* Headline stat strip */
 .impact-stat {
   display: flex;

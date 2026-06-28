@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useRepos } from "../api/hooks";
 import { Breadcrumbs } from "../components/Shell";
+import { OverviewHero } from "../components/OverviewHero";
 import { Card, Chip, Metric, PageHeader } from "../components/primitives";
 import { MiniSparkbar, StackedSeverityBar } from "../components/charts";
 import { EmptyState, QueryBoundary } from "../components/states";
@@ -37,6 +38,7 @@ export function OverviewPage() {
   return (
     <>
       <Breadcrumbs crumbs={[{ label: "Repos" }]} />
+      <OverviewHero />
       <QueryBoundary query={query} loadingLabel="Loading repos…">
         {(data) => {
           const rows = sortRepos(data.repos, sort);
