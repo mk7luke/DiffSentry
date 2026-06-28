@@ -1010,24 +1010,14 @@ export class Reviewer {
         }
         const reviewerLastReviewed = Array.from(lastByLogin.entries()).map(([login, submittedAt]) => ({ login, submittedAt }));
 
-        // For each file, find latest commit timestamp that modified it (within this PR)
-        const prCommits = await octokit.paginate(octokit.pulls.listCommits, { owner, repo, pull_number: pullNumber, per_page: 100 });
-        const latestCommitByFile = new Map<string, string>();
-        for (const commit of prCommits) {
-          const ts = commit.commit?.author?.date ?? commit.commit?.committer?.date ?? "";
-          if (!ts) continue;
-          try {
-            const detail = await octokit.repos.getCommit({ owner, repo, ref: commit.sha });
-            for (const f of detail.data.files ?? []) {
-              const prev = latestCommitByFile.get(f.filename);
-              if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
-                latestCommitByFile.set(f.filename, ts);
-              }
-            }
-          } catch {
-            // skip
-          }
-        }
+        // For each file, find latest commit timestamp that modified it (within
+        // this PR). Batched into as few calls as possible (newest-commit-first
+        // with early exit) rather than a per-commit getCommit loop.
+        const latestCommitByFile = await this.github.getLatestCommitTimestampByFile(
+          installationId, owner, repo, pullNumber,
+          context.files.map((f) => f.filename),
+          signal,
+        );
         const fileMeta = context.files.map((f) => ({ filename: f.filename, latestCommitAt: latestCommitByFile.get(f.filename) }));
         reviewerDeltas = computeReviewerDeltas({
           reviewerLastReviewed,

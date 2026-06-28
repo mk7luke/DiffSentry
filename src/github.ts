@@ -650,6 +650,83 @@ export class GitHubClient {
     }));
   }
 
+  /**
+   * For each requested file path, return the latest commit timestamp (author
+   * date, falling back to committer date) among the PR's commits that modified
+   * that path.
+   *
+   * Replaces the per-commit `getCommit` N+1 loop that previously powered the
+   * "Changes since last reviewed" insight. GitHub exposes a commit's changed
+   * files only via `repos.getCommit` (the GraphQL `Commit` type has no file
+   * list, and the compare endpoint only returns an aggregate diff), so we still
+   * read per-commit file lists — but we process commits newest-timestamp first
+   * and stop as soon as every requested path is resolved. A typical PR (whose
+   * latest commit touches most changed files) therefore costs only a handful of
+   * calls instead of one per commit.
+   *
+   * Semantics match the previous loop exactly for the requested paths: the value
+   * for a path is the maximum author/committer date over all commits that
+   * touched it. Commits with no author/committer date are skipped, and
+   * individual `getCommit` failures are tolerated (best-effort), as before. The
+   * supplied `signal` propagates through the retry hook, so a cancelled review
+   * stops both in-flight requests and any backoff wait.
+   */
+  async getLatestCommitTimestampByFile(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    paths: string[],
+    signal?: AbortSignal,
+  ): Promise<Map<string, string>> {
+    const octokit = await this.getInstallationOctokit(installationId, signal);
+    const latestCommitByFile = new Map<string, string>();
+
+    // Only the requested paths are ever read back, so we can stop once they are
+    // all resolved. Tracking the outstanding set drives early termination.
+    const pending = new Set(paths);
+    if (pending.size === 0) return latestCommitByFile;
+
+    const commits = await octokit.paginate(octokit.pulls.listCommits, {
+      owner,
+      repo,
+      pull_number: pullNumber,
+      per_page: 100,
+    });
+
+    // Attach each commit's timestamp (author date, then committer date), drop
+    // commits without one (matching the previous loop's `continue`), then sort
+    // newest first. Processing in descending-timestamp order with "first write
+    // wins" yields, for every path, the maximum timestamp over the commits that
+    // touched it — identical to taking the max in arrival order.
+    const dated = commits
+      .map((c: any) => ({
+        sha: c.sha as string,
+        ts: (c.commit?.author?.date ?? c.commit?.committer?.date ?? "") as string,
+      }))
+      .filter((c) => c.ts)
+      .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+
+    for (const commit of dated) {
+      if (pending.size === 0) break;
+      if (signal?.aborted) break;
+      try {
+        const detail = await octokit.repos.getCommit({ owner, repo, ref: commit.sha });
+        for (const f of detail.data.files ?? []) {
+          // First (newest) commit touching a pending path wins — that is its max.
+          if (pending.has(f.filename)) {
+            latestCommitByFile.set(f.filename, commit.ts);
+            pending.delete(f.filename);
+          }
+        }
+      } catch {
+        // Best-effort: a transient per-commit failure shouldn't drop the insight.
+      }
+    }
+
+    return latestCommitByFile;
+  }
+
   async findCommentByMarker(
     installationId: number,
     owner: string,
