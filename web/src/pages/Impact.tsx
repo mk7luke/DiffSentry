@@ -5,7 +5,7 @@ import { useAuth } from "../auth/useAuth";
 import { Breadcrumbs } from "../components/Shell";
 import { Card } from "../components/primitives";
 import { Donut, StackedSeverityBar } from "../components/charts";
-import { EmptyState, QueryBoundary } from "../components/states";
+import { EmptyState, QueryBoundary, SkeletonCard, SkeletonMetrics } from "../components/states";
 import { CheckIcon, ClockIcon, ImpactIcon, RepeatIcon, ShieldIcon } from "../components/icons";
 import { buildDaySeries, formatCompact, formatMinutesSaved, percentDelta, relativeTime } from "../lib/format";
 import type { DayBin } from "../lib/format";
@@ -501,7 +501,19 @@ export function ImpactPage() {
   return (
     <>
       <Breadcrumbs crumbs={[{ label: "Impact" }]} />
-      <QueryBoundary query={query} loadingLabel="Computing impact…">
+      <QueryBoundary
+        query={query}
+        loadingLabel="Computing impact…"
+        skeleton={
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            <SkeletonMetrics count={4} />
+            <div className="grid two">
+              <SkeletonCard lines={5} />
+              <SkeletonCard lines={5} />
+            </div>
+          </div>
+        }
+      >
         {(report) => (
           <ImpactReportBody
             report={report}

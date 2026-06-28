@@ -335,7 +335,11 @@ export function Shell() {
       <main ref={mainRef} className="main">
         <DemoBanner />
         <SetupWizard />
-        <Outlet />
+        {/* Keyed by path so each route mounts fresh and plays the fade+slide
+            transition (route-view in base.css; no-op under reduced-motion). */}
+        <div className="route-view" key={location.pathname}>
+          <Outlet />
+        </div>
       </main>
       <CommandPalette />
     </div>

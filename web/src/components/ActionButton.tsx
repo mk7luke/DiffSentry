@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiSend, ApiError } from "../api/client";
 import { useAuth } from "../auth/useAuth";
 import { useToast } from "../realtime/toast";
+import { CheckIcon } from "./icons";
 import type { Capabilities } from "../api/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -65,6 +66,14 @@ export function ActionButton(props: ActionButtonProps) {
   const { push } = useToast();
   const qc = useQueryClient();
   const [pending, setPending] = useState(false);
+  // Brief success cue after a write lands: the button flashes a green pop and
+  // swaps to a checkmark for ~1s. Cleared on unmount so a late timer can't set
+  // state on a gone component.
+  const [succeeded, setSucceeded] = useState(false);
+  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (successTimer.current) clearTimeout(successTimer.current);
+  }, []);
 
   const allowed = !props.capability || capabilities[props.capability];
   const variant = props.variant ?? "ghost";
@@ -93,6 +102,9 @@ export function ActionButton(props: ActionButtonProps) {
       for (const key of props.invalidateKeys ?? []) {
         void qc.invalidateQueries({ queryKey: key });
       }
+      setSucceeded(true);
+      if (successTimer.current) clearTimeout(successTimer.current);
+      successTimer.current = setTimeout(() => setSucceeded(false), 1100);
       props.onDone?.(data);
     } catch (err) {
       const message =
@@ -112,14 +124,20 @@ export function ActionButton(props: ActionButtonProps) {
   return (
     <button
       type="button"
-      className={btnClass}
+      className={`${btnClass}${succeeded ? " is-success" : ""}`}
       onClick={run}
       disabled={pending || !allowed}
       aria-disabled={pending || !allowed}
       aria-busy={pending}
       title={!allowed ? "Requires a higher role" : props.title}
     >
-      {pending ? <span className="spinner btn-spinner" /> : props.icon}
+      {pending ? (
+        <span className="spinner btn-spinner" />
+      ) : succeeded ? (
+        <CheckIcon className="btn-success-check" aria-hidden="true" />
+      ) : (
+        props.icon
+      )}
       {pending ? props.pendingLabel ?? "Working…" : props.children}
     </button>
   );

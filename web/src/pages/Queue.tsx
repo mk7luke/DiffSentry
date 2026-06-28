@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Breadcrumbs } from "../components/Shell";
 import { PageHeader } from "../components/primitives";
 import { ActionButton } from "../components/ActionButton";
-import { EmptyState, ErrorState, LoadingState } from "../components/states";
+import { EmptyState, ErrorState, LiveCount, Skeleton, SkeletonBlock } from "../components/states";
 import { useQueue } from "../api/hooks";
 import { useEventStream, type StreamEnvelope } from "../realtime/useEventStream";
 import { pluralize } from "../lib/format";
@@ -236,7 +236,23 @@ export function QueuePage() {
       />
 
       {query.isPending && !seeded.current ? (
-        <LoadingState label="Loading queue…" />
+        <SkeletonBlock label="Loading queue…">
+          <div className="board">
+            {["accent", "good", "danger", "neutral"].map((tone, li) => (
+              <section key={tone} className={`lane tone-${tone}`}>
+                <header className="lane-head">
+                  <Skeleton width={70} height={11} />
+                  <Skeleton width={20} height={16} radius={999} />
+                </header>
+                <div className="lane-body" style={{ padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {Array.from({ length: li === 3 ? 1 : 2 }).map((_, i) => (
+                    <Skeleton key={i} width="100%" height={62} radius={8} />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        </SkeletonBlock>
       ) : query.isError && !seeded.current ? (
         <ErrorState error={query.error} />
       ) : all.length === 0 ? (
@@ -252,7 +268,7 @@ export function QueuePage() {
             <section key={lane.key} className={`lane tone-${lane.tone}`}>
               <header className="lane-head">
                 <span className="lane-title">{lane.title}</span>
-                <span className="lane-count mono">{lane.items.length}</span>
+                <LiveCount className="lane-count mono" value={lane.items.length} />
               </header>
               <div className="lane-body">
                 {lane.items.length === 0 ? (

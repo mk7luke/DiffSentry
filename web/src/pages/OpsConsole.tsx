@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { fetchActivity, useActivity, useRepos } from "../api/hooks";
 import { Breadcrumbs } from "../components/Shell";
 import { Card, PageHeader } from "../components/primitives";
-import { EmptyState, ErrorState, LoadingState } from "../components/states";
+import { EmptyState, ErrorState, LiveCount, Skeleton, SkeletonBlock } from "../components/states";
 import { relativeTime } from "../lib/format";
 import {
   useEventStream,
@@ -449,7 +449,13 @@ export function OpsConsolePage() {
         title="Activity stream"
         right={
           <span className={`ops-tailstate ${paused ? "paused" : "live"}`}>
-            {paused ? "paused — move away to resume" : `tailing · ${visible.length} shown`}
+            {paused ? (
+              "paused — move away to resume"
+            ) : (
+              <>
+                tailing · <LiveCount value={visible.length} /> shown
+              </>
+            )}
           </span>
         }
         id="ops-feed-card"
@@ -477,7 +483,18 @@ export function OpsConsolePage() {
             }}
           >
             {backfill.isPending ? (
-              <LoadingState label="Loading activity…" />
+              <SkeletonBlock label="Loading activity…">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="ops-row" style={{ alignItems: "center" }}>
+                    <Skeleton width={48} height={10} />
+                    <Skeleton width={9} height={9} radius={999} />
+                    <Skeleton width={40} height={10} />
+                    <Skeleton width="80%" height={10} />
+                    <Skeleton width="60%" height={10} />
+                    <Skeleton width={32} height={10} />
+                  </div>
+                ))}
+              </SkeletonBlock>
             ) : backfill.isError ? (
               <ErrorState error={backfill.error} />
             ) : visible.length === 0 ? (
