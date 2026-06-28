@@ -192,6 +192,16 @@ describe("parseTscDiagnostics", () => {
     expect(out[0].level).toBe("warning");
   });
 
+  it("does not let the colon-form drive colon shift file/line (greedy backtrack)", () => {
+    // Regression guard: the greedy filename capture must backtrack to the
+    // rightmost ":line:col - " delimiter, so the C: drive colon and the
+    // embedded path don't bleed into the line number.
+    const out = parseTscDiagnostics("C:\\repo\\src\\foo.ts:12:5 - error TS2322: Type 'x' is not assignable to 'y'.");
+    expect(out).toEqual([
+      { file: "C:\\repo\\src\\foo.ts", line: 12, ruleId: "TS2322", message: "Type 'x' is not assignable to 'y'.", level: "error" },
+    ]);
+  });
+
   it("maps suggestion/message categories to the info level", () => {
     const out = parseTscDiagnostics(
       [
@@ -268,8 +278,8 @@ describe("resolveCheckoutDir", () => {
     expect(resolveCheckoutDir({ DIFFSENTRY_REPO_CHECKOUT_DIR: "/no/such/dir/xyz123" })).toBeUndefined();
   });
 
-  it("honors the legacy DIFFSENTRY_STATIC_ANALYSIS_DIR alias", () => {
-    expect(resolveCheckoutDir({ DIFFSENTRY_STATIC_ANALYSIS_DIR: process.cwd() })).toBe(process.cwd());
+  it("only recognizes DIFFSENTRY_REPO_CHECKOUT_DIR (no legacy alias)", () => {
+    expect(resolveCheckoutDir({ DIFFSENTRY_STATIC_ANALYSIS_DIR: process.cwd() })).toBeUndefined();
   });
 });
 

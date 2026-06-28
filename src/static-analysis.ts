@@ -122,8 +122,10 @@ export async function runStaticAnalysis(opts: RunStaticAnalysisOptions): Promise
     );
 
     const findings = perTool.flat();
-    // De-dup analyzer-vs-analyzer (e.g. eslint + a semgrep rule on the same
-    // line) by fingerprint before they reach the reviewer.
+    // Remove EXACT-duplicate findings (same path/line/source/rule) before they
+    // reach the reviewer. Distinct findings on the same line — including two
+    // different analyzers — have different fingerprints and intentionally
+    // survive; cross-producer overlap is handled later by dedupeStaticFindings.
     return dedupeByFingerprint(findings);
   } catch (err) {
     // Belt-and-suspenders: the whole feature must never break a review.
@@ -139,7 +141,7 @@ export async function runStaticAnalysis(opts: RunStaticAnalysisOptions): Promise
  * (e.g. a CI job). Returns undefined when unset or not a directory.
  */
 export function resolveCheckoutDir(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const raw = env.DIFFSENTRY_REPO_CHECKOUT_DIR || env.DIFFSENTRY_STATIC_ANALYSIS_DIR;
+  const raw = env.DIFFSENTRY_REPO_CHECKOUT_DIR;
   if (!raw) return undefined;
   const resolved = path.resolve(raw);
   return isDir(resolved) ? resolved : undefined;
