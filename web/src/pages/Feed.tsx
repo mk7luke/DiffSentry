@@ -253,7 +253,7 @@ export function FeedPage() {
                   <FeedRow key={it.key} item={it} />
                 ))}
               </ul>
-              {!hasFilters && merged.length >= limit && limit < total ? (
+              {baseItems.length >= limit && limit < total ? (
                 <div className="feed-foot">
                   <button className="btn btn-ghost" onClick={() => setLimit((n) => n + PAGE)} disabled={backfill.isFetching}>
                     {backfill.isFetching ? "Loading…" : "Load more"}
