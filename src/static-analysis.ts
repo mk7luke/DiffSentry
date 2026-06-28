@@ -85,8 +85,12 @@ export async function runStaticAnalysis(opts: RunStaticAnalysisOptions): Promise
     const changedFiles: string[] = [];
     for (const f of opts.files) {
       if (!f.patch) continue;
-      addedLines.set(f.filename, computeAddedLines(f.patch));
-      changedFiles.push(f.filename);
+      const added = computeAddedLines(f.patch);
+      addedLines.set(f.filename, added);
+      // Skip files with no added lines (pure deletions / context-only changes):
+      // normalize() would discard every finding for them anyway, so running an
+      // analyzer over them is wasted work under the per-tool timeout budget.
+      if (added.size > 0) changedFiles.push(f.filename);
     }
     if (changedFiles.length === 0) return [];
 
@@ -264,7 +268,9 @@ async function runEslint(ctx: RunCtx): Promise<RawFinding[]> {
   const targets = ctx.changedFiles.filter((f) => ESLINT_EXTS.has(path.extname(f).toLowerCase()));
   if (targets.length === 0) return [];
 
-  const res = await exec(bin, ["--format", "json", "--no-error-on-unmatched-pattern", ...targets], ctx);
+  // `--` separates options from target paths so a filename beginning with `-`
+  // can't be parsed as a flag.
+  const res = await exec(bin, ["--format", "json", "--no-error-on-unmatched-pattern", "--", ...targets], ctx);
   if (res.spawnError || res.timedOut || res.outputTooLarge) return [];
   // ESLint exits 1 when it finds lint errors — that's expected, parse anyway.
   const json = parseJson<EslintFileResult[]>(res.stdout);
@@ -367,7 +373,9 @@ async function runSemgrep(ctx: RunCtx): Promise<RawFinding[]> {
   const cfg = localSemgrepConfig(ctx.cwd);
   if (!cfg) return [];
   const targets = ctx.changedFiles.length > 0 ? ctx.changedFiles : ["."];
-  const res = await exec("semgrep", ["--json", "--quiet", "--config", cfg, ...targets], ctx);
+  // `--` separates options from target paths so a filename beginning with `-`
+  // can't be parsed as a Semgrep flag.
+  const res = await exec("semgrep", ["--json", "--quiet", "--config", cfg, "--", ...targets], ctx);
   if (res.spawnError || res.timedOut || res.outputTooLarge) return [];
   const json = parseJson<{ results?: SemgrepResult[] }>(res.stdout);
   const results = json?.results;
