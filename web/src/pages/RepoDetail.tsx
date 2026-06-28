@@ -174,11 +174,17 @@ export function RepoDetailPage() {
                   subtitle={`${findingsTotal} across ${activeDays} active days`}
                   bodyClass="chart"
                 >
-                  <StackedSeverityBar series={activity} />
+                  <StackedSeverityBar
+                    series={activity}
+                    hrefForSeverity={(s) => `/findings?${new URLSearchParams({ severity: s, repo: `${owner}/${repo}` }).toString()}`}
+                  />
                 </Card>
                 <div className="grid stack">
                   <Card title="Risk score · 90d" subtitle={`${a.sparkline.length} ${pluralize(a.sparkline.length, "review")}`} bodyClass="chart">
-                    <RiskLine points={a.sparkline} />
+                    <RiskLine
+                      points={a.sparkline}
+                      hrefForPoint={(p) => `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pr/${p.number}`}
+                    />
                   </Card>
                   <Card title="Approval mix · 30d">
                     {approvalTotal === 0 ? (

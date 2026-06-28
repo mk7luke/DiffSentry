@@ -84,7 +84,7 @@ export function TrendsPage() {
 
               <Card title="Activity over time" subtitle={`Reviews and findings by severity, last ${Math.min(days, 30)} days`} bodyClass="chart">
                 <div className="activity-chart-frame">
-                  <StackedSeverityBar series={series} />
+                  <StackedSeverityBar series={series} hrefForSeverity={(s) => `/findings?severity=${s}`} />
                 </div>
               </Card>
 

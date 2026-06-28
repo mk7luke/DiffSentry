@@ -252,7 +252,12 @@ export function ImpactPage() {
                   bodyClass="chart"
                 >
                   {hasData ? (
-                    <StackedSeverityBar series={series} />
+                    <StackedSeverityBar
+                      series={series}
+                      hrefForSeverity={(s) =>
+                        `/findings?${new URLSearchParams(report.repo ? { severity: s, repo: report.repo } : { severity: s }).toString()}`
+                      }
+                    />
                   ) : (
                     <EmptyState
                       title="No reviews in this range"
