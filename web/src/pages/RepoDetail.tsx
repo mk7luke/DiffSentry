@@ -5,11 +5,12 @@ import { Breadcrumbs } from "../components/Shell";
 import { Card, PageHeader } from "../components/primitives";
 import { RepoSettingsCard } from "../components/SettingsControls";
 import { ActionBar } from "../components/ActionBar";
-import { ApprovalBadge, RiskBadge } from "../components/badges";
+import { ApprovalBadge, GradeBadge, RiskBadge } from "../components/badges";
 import { Donut, Hbar, RiskLine, StackedSeverityBar } from "../components/charts";
 import { EmptyState, QueryBoundary } from "../components/states";
 import { GithubIcon } from "../components/icons";
 import { buildDaySeries, pluralize, relativeTime, toDayBins } from "../lib/format";
+import { computeHealth, riskTrend } from "../lib/health";
 import type { IssueRow, RecentPRRow } from "../api/types";
 
 function RecentPRs({ owner, repo, prs }: { owner: string; repo: string; prs: RecentPRRow[] }) {
@@ -128,6 +129,16 @@ export function RepoDetailPage() {
           const commentN =
             a.approvalMix.find((m) => ["comment", "commented", ""].includes((m.approval ?? "").toLowerCase()))?.count ?? 0;
           const approvalTotal = approveN + changesN + commentN;
+          const criticalTotal = activity.reduce((n, d) => n + d.critical, 0);
+          const health = computeHealth({
+            prsReviewed: approvalTotal,
+            approved: approveN,
+            changesRequested: changesN,
+            pending: commentN,
+            findings: findingsTotal,
+            critical: criticalTotal,
+            riskTrend: riskTrend(a.sparkline.map((p) => p.risk_score)),
+          });
 
           return (
             <>
@@ -140,6 +151,7 @@ export function RepoDetailPage() {
                 }
                 right={
                   <>
+                    <GradeBadge health={health} size="lg" />
                     {latestPR ? <RiskBadge level={latestPR.latest_risk_level} score={latestPR.latest_risk_score} /> : null}
                     <a
                       href={`https://github.com/${owner}/${repo}`}

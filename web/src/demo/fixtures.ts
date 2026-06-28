@@ -59,9 +59,9 @@ const ME: MeResponse = {
 
 // ─── /repos — the Overview ───────────────────────────────────────────
 const REPOS: ReposResponse["repos"] = [
-  { owner: OWNER, repo: HERO_REPO, prs_reviewed: 24, findings_7d: 11, critical_7d: 2, last_review: iso(hours(2)) },
-  { owner: OWNER, repo: "payments-core", prs_reviewed: 31, findings_7d: 9, critical_7d: 1, last_review: iso(hours(6)) },
-  { owner: OWNER, repo: "web-dashboard", prs_reviewed: 18, findings_7d: 6, critical_7d: 0, last_review: iso(days(1)) },
+  { owner: OWNER, repo: HERO_REPO, prs_reviewed: 24, findings_7d: 11, critical_7d: 2, last_review: iso(hours(2)), approved: 14, changes_requested: 7, commented: 3 },
+  { owner: OWNER, repo: "payments-core", prs_reviewed: 31, findings_7d: 9, critical_7d: 1, last_review: iso(hours(6)), approved: 24, changes_requested: 5, commented: 2 },
+  { owner: OWNER, repo: "web-dashboard", prs_reviewed: 18, findings_7d: 6, critical_7d: 0, last_review: iso(days(1)), approved: 16, changes_requested: 1, commented: 1 },
 ];
 
 // 14 days of activity across the repos, weighted toward the hero repo.
