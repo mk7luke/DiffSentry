@@ -10,5 +10,14 @@ services:
       - diffsentry-data:/app/data
     restart: unless-stopped
 
+  demo:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+    ports:
+      - "3027:80"
+    restart: unless-stopped
+    container_name: diffsentry-demo
+
 volumes:
   diffsentry-data:
