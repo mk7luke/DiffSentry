@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "react-router-dom";
 import { router } from "./router";
-import { DEMO, DEMO_BASENAME, demoPathActive } from "./demo/mode";
+import { DEMO, DEMO_BASENAME, FORCE_DEMO, demoPathActive } from "./demo/mode";
 import { AuthProvider } from "./auth/useAuth";
 import { EventStreamProvider } from "./realtime/useEventStream";
 import { ToastProvider } from "./realtime/toast";
@@ -38,7 +38,9 @@ async function bootstrap() {
   // route (path + non-demo query + hash) under /demo so a deep link like
   // /repos/acme/checkout-api/pr/142?demo=true lands on the analogous demo page
   // rather than the demo root. Abort this render; the redirect reloads under /demo.
-  if (DEMO && !demoPathActive()) {
+  // A forced root build (FORCE_DEMO) already serves at "/"; never redirect it
+  // to /demo — that would loop. Only ?demo=true on a normal build bounces.
+  if (DEMO && !FORCE_DEMO && !demoPathActive()) {
     const query = new URLSearchParams(window.location.search);
     query.delete("demo");
     const qs = query.toString();

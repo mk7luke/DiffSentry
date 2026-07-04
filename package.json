@@ -7,6 +7,7 @@
     "build": "npm run build:server && npm run build:web",
     "build:server": "tsc",
     "build:web": "npm --prefix web ci && npm --prefix web run build",
+    "build:web:demo": "VITE_FORCE_DEMO=true npm --prefix web run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
