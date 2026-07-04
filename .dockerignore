@@ -1,0 +1,18 @@
+# Build-context hygiene. Both Dockerfile and Dockerfile.demo run `npm ci` and
+# build fresh INSIDE the image; a later `COPY web/ ./` (or `COPY web/ ./web/`)
+# must not overlay the host's platform-specific node_modules onto the
+# container's install, nor drag stale build output into the context.
+**/node_modules
+**/dist
+web/dev-dist
+
+# VCS, scratch, and local-only tooling
+.git
+.gitignore
+.superpowers
+.playwright-mcp
+**/*.log
+
+# Never bake secrets into the build context (mounted at runtime, not built in)
+.env
+*.pem
