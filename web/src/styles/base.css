@@ -1169,8 +1169,15 @@ label.field {
   display: flex;
   align-items: flex-end;
   gap: 3px;
-  flex: 1;
-  min-height: 140px;
+  /* `height` (not just min-height) so the bar has a *definite* height in any
+     layout context: percentage-based column/segment heights only resolve
+     against a definite ancestor. `flex: 1 1 auto` still lets the bar grow to
+     fill a taller stretched card (e.g. the Overview grid), but the explicit
+     height is the definite fallback when the card body is content-sized (e.g.
+     the standalone Impact "Findings by severity over time" card), which
+     otherwise collapsed every column to 0. */
+  flex: 1 1 auto;
+  height: 200px;
   padding: 6px 0;
 }
 .chart-bar .col {

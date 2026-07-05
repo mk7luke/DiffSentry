@@ -1,5 +1,5 @@
 import { logger } from "../logger.js";
-import { recordEvent } from "../storage/dao.js";
+import { markPRClosed, recordEvent } from "../storage/dao.js";
 import { bus } from "../realtime/bus.js";
 import { runReviewJob } from "../realtime/jobs.js";
 import { isPauseAll, isAutoReviewEnabled } from "../settings/overrides.js";
@@ -187,9 +187,18 @@ export async function dispatchWebhookEvent(
       return { status: 202, body: { status: "accepted" } };
     }
 
-    // closed — abort in-flight reviews
+    // closed — record the close/merge, then abort in-flight reviews
     if (action === "closed") {
-      logger.info({ owner, repo, pr: number, action }, "PR closed, aborting any in-flight review");
+      // Persist merge/close status. This is the only live path that sets
+      // prs.merged_at, which the Impact/Overview "caught before merge" and
+      // "merged PRs" metrics (and cross-PR memory) are gated on.
+      const pr = payload.pull_request;
+      const merged = !!pr.merged;
+      markPRClosed(owner, repo, number, { merged, mergedAt: pr.merged_at, closedAt: pr.closed_at });
+      logger.info(
+        { owner, repo, pr: number, action, merged },
+        merged ? "PR merged, recording merge and aborting any in-flight review" : "PR closed, aborting any in-flight review",
+      );
       reviewer.handlePRClose(owner, repo, number);
       return { status: 200, body: { status: "ok" } };
     }
