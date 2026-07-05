@@ -62,6 +62,47 @@ export function recordPR(ctx: PRContext, extras: { state?: string; closedAt?: st
   }
 }
 
+/**
+ * Record a PR close/merge from the webhook `pull_request.closed` event.
+ *
+ * This is the ONLY live path that persists `prs.merged_at`. The review path
+ * calls `recordPR(ctx, { state: "open" })` with no `mergedAt`, and that upsert
+ * always writes `merged_at = excluded.merged_at` (i.e. NULL), so a merge is
+ * never captured during review. A merge emits no further `synchronize` events,
+ * so setting `merged_at` here on close persists — which is what the Impact /
+ * Overview "caught before merge" and "merged PRs" metrics (they filter on
+ * `merged_at IS NOT NULL`) and cross-PR memory depend on.
+ *
+ * UPDATE-only by design: those metrics JOIN reviews → prs, so any PR that
+ * matters here already has a row from `recordPR` during its review. A PR the
+ * bot never reviewed no-ops harmlessly (it carries no findings anyway).
+ */
+export function markPRClosed(
+  owner: string,
+  repo: string,
+  number: number,
+  info: { merged: boolean; mergedAt?: string | null; closedAt?: string | null },
+): void {
+  const db = openDatabase();
+  if (!db) return;
+  try {
+    db.prepare(
+      `UPDATE prs
+         SET state = ?, closed_at = ?, merged_at = ?
+       WHERE owner = ? AND repo = ? AND number = ?`,
+    ).run(
+      info.merged ? "merged" : "closed",
+      info.closedAt ?? null,
+      info.merged ? info.mergedAt ?? null : null,
+      owner,
+      repo,
+      number,
+    );
+  } catch (err) {
+    logger.debug({ err }, "dao.markPRClosed failed");
+  }
+}
+
 /** Insert a review row, return its rowid. Returns null when persistence is disabled. */
 export function recordReview(opts: {
   ctx: PRContext;
