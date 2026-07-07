@@ -199,6 +199,22 @@ async function userInAnyOrg(token: string, login: string, allowedOrgs: string[])
   return null;
 }
 
+/**
+ * A `next`/return-to value we're willing to redirect a freshly-signed-in user
+ * to. Must be a same-origin absolute path — this covers both the SPA routes
+ * (served at `/`, e.g. `/overview`, `/repos/acme/x/pr/1`) and the legacy
+ * dashboard (`/dashboard/...`). Reject protocol-relative (`//evil.com`) and
+ * backslash (`/\evil.com`) forms so this can never become an open redirect.
+ */
+function isSafeReturnPath(next: unknown): next is string {
+  return (
+    typeof next === "string" &&
+    next.startsWith("/") &&
+    !next.startsWith("//") &&
+    !next.startsWith("/\\")
+  );
+}
+
 export function createAuth(cfg: AuthConfig | null): AuthRuntime | null {
   if (!cfg) return null;
 
@@ -217,7 +233,7 @@ export function createAuth(cfg: AuthConfig | null): AuthRuntime | null {
   const routes: AuthRuntime["routes"] = (router) => {
     router.get("/auth/login", (req, res) => {
       const state = crypto.randomBytes(18).toString("base64url");
-      const next_ = typeof req.query.next === "string" ? req.query.next : "/dashboard";
+      const next_ = isSafeReturnPath(req.query.next) ? req.query.next : "/dashboard";
       const stateBody = Buffer.from(JSON.stringify({ state, next: next_, iat: Math.floor(Date.now() / 1000) })).toString("base64url");
       const stateSig = sign(cfg.sessionSecret, stateBody);
       setCookie(res, STATE_COOKIE, `${stateBody}.${stateSig}`, 600);
@@ -304,7 +320,7 @@ export function createAuth(cfg: AuthConfig | null): AuthRuntime | null {
         { login: user.login, via: loginMatch ? "login-allowlist" : `org:${matchingOrg}` },
         "Dashboard login",
       );
-      const nextUrl = parsedState.next && parsedState.next.startsWith("/dashboard") ? parsedState.next : "/dashboard";
+      const nextUrl = isSafeReturnPath(parsedState.next) ? parsedState.next : "/dashboard";
       res.redirect(nextUrl);
     });
 

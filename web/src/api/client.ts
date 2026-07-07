@@ -33,6 +33,29 @@ export class ApiError extends Error {
 
 const BASE = "/api/v1";
 
+// A 401 from the JSON API means the cookie session has expired or was never
+// established. Every request the SPA makes is cookie-based, and the server only
+// answers 401 when OAuth is enabled (open mode never gates on a session), so a
+// 401 unambiguously means "sign in again". Bounce the whole page to the server
+// login route — it 302s to GitHub OAuth and returns here afterwards (`next`).
+// Without this the SPA just paints an "Authentication required" error card with
+// no visible way to re-auth (the old workaround was to hunt for /dashboard,
+// sign out, then sign back in).
+let redirectingToLogin = false;
+
+function redirectToLogin(path: string): void {
+  // Nothing to redirect in SSR/tests or demo mode. Public reads (/public/*) are
+  // served BEFORE the auth gate, so a 401 there isn't a session problem — never
+  // hijack the no-auth share viewer into a GitHub login.
+  if (typeof window === "undefined" || DEMO || path.startsWith("/public/")) return;
+  // A screen fires many queries at once; the first 401 wins the redirect and the
+  // rest are no-ops, so we never stack navigations.
+  if (redirectingToLogin) return;
+  redirectingToLogin = true;
+  const returnTo = window.location.pathname + window.location.search + window.location.hash;
+  window.location.assign(`/dashboard/auth/login?next=${encodeURIComponent(returnTo)}`);
+}
+
 export async function apiGet<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
   const url = new URL(BASE + path, window.location.origin);
   if (params) {
@@ -71,6 +94,9 @@ export async function apiGet<T>(path: string, params?: Record<string, string | n
   }
 
   if (!resp.ok) {
+    // Session expired / not signed in → send the whole page to re-auth rather
+    // than surfacing a dead-end error card.
+    if (resp.status === 401) redirectToLogin(path);
     const body = (json as { error?: ApiErrorBody })?.error;
     throw new ApiError(resp.status, body ?? { code: "http_error", message: `HTTP ${resp.status}` });
   }
@@ -145,6 +171,9 @@ export async function apiSend<T>(
   }
 
   if (!resp.ok) {
+    // A write that 401s means the session lapsed mid-action — re-auth, keeping
+    // the user on the page they were working from.
+    if (resp.status === 401) redirectToLogin(path);
     const body = (json as { error?: ApiErrorBody })?.error;
     throw new ApiError(resp.status, body ?? { code: "http_error", message: `HTTP ${resp.status}` });
   }
