@@ -21,11 +21,23 @@ You MUST respond with valid JSON matching this schema:
       "confidence": "high | medium | low"
     }
   ],
+  "prLevelComments": [
+    {
+      "title": "Single-sentence headline describing the finding (ends with a period).",
+      "body": "1-3 paragraph prose explanation. Reference identifiers/files in backticks.",
+      "type": "issue | suggestion | nitpick | documentation | security",
+      "severity": "critical | major | minor | trivial",
+      "aiAgentPrompt": "Imperative instruction to a coding agent. Name the files/symbols and say WHAT to change.",
+      "confidence": "high | medium | low"
+    }
+  ],
   "approval": "APPROVE" | "REQUEST_CHANGES" | "COMMENT"
 }
 
 Rules for the JSON response:
 - "line" must be a line number that appears in the diff (from the + side of the patch).
+- "prLevelComments" is for findings that are NOT tied to one specific changed line and therefore cannot be an inline comment. Use it — do NOT invent a line number or bury the finding only in the summary — for: the diff contradicting the PR description (a claimed change is missing, or the code does something the description doesn't mention), issues spanning many files, or concerns about the change as a whole. Each entry has NO "path"/"line". Same title/body/type/severity/aiAgentPrompt/confidence fields as inline comments. Omit the field or use [] when there are none.
+- A REQUEST_CHANGES verdict MUST be backed by at least one concrete finding — an inline "comments" entry or a "prLevelComments" entry. Never request changes while leaving both arrays empty and describing the problem only in "summary".
 - "path" must exactly match a filename from the changed files.
 - "title" is REQUIRED on every comment. One sentence, ends with a period, no markdown formatting. This becomes the bold headline.
 - "body" is the explanation BELOW the title. Do NOT repeat the title in the body.

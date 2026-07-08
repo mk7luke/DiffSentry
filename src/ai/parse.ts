@@ -321,7 +321,7 @@ export function synthesizeReviewSummary(
 
 /** Shape of one comment as it arrives from the model: untyped JSON, so every
  *  field is optional and validated at runtime in parseReviewResponse. */
-interface RawComment {
+export interface RawComment {
   path?: string;
   line?: number;
   body?: string;
@@ -332,6 +332,56 @@ interface RawComment {
   suggestionLanguage?: string;
   aiAgentPrompt?: string;
   confidence?: string;
+}
+
+/**
+ * Build a validated ReviewComment from an untrusted raw model comment plus the
+ * already-resolved anchor. Shared by the inline path (a real diff line), the
+ * un-anchorable-demotion path, and the PR-level path (line 0, prLevel: true) so
+ * all three produce identical body/fingerprint formatting. Assumes `c.body` is
+ * present (the caller validated it).
+ */
+export function buildReviewComment(
+  c: RawComment,
+  anchor: { path: string; line: number; prLevel: boolean },
+): ReviewComment {
+  const type = VALID_TYPES.includes(c.type as CommentType) ? (c.type as CommentType) : undefined;
+  const severity = VALID_SEVERITIES.includes(c.severity as CommentSeverity) ? (c.severity as CommentSeverity) : undefined;
+  const title = typeof c.title === "string" && c.title.trim() ? c.title.trim() : undefined;
+  const suggestion = typeof c.suggestion === "string" && c.suggestion.trim() ? c.suggestion : undefined;
+  const suggestionLanguage: "diff" | "suggestion" =
+    c.suggestionLanguage === "diff" ? "diff" : "suggestion";
+  const aiAgentPrompt = typeof c.aiAgentPrompt === "string" && c.aiAgentPrompt.trim()
+    ? c.aiAgentPrompt
+    : undefined;
+  const confidence = VALID_CONFIDENCE.includes(c.confidence as Confidence) ? (c.confidence as Confidence) : "high";
+  const fingerprint = fingerprintFor(anchor.path, anchor.line, title || c.body!.slice(0, 80));
+
+  return {
+    path: anchor.path,
+    line: anchor.line,
+    side: "RIGHT" as const,
+    body: formatCommentBody({
+      title,
+      body: c.body!,
+      type,
+      severity,
+      suggestion,
+      suggestionLanguage,
+      aiAgentPrompt,
+      fingerprint,
+      confidence,
+    }),
+    type,
+    severity,
+    title,
+    suggestion,
+    suggestionLanguage,
+    aiAgentPrompt,
+    fingerprint,
+    confidence,
+    ...(anchor.prLevel ? { prLevel: true } : {}),
+  };
 }
 
 export function parseReviewResponse(raw: string, context: PRContext): ReviewResult {
@@ -360,10 +410,11 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
   }
 
   // Track how many findings we couldn't anchor (dropped) vs. snapped to a
-  // nearby valid line (remapped) so the loss is visible in logs instead of
-  // silent. See nearestAnchor for the remap rationale.
+  // nearby valid line (remapped) vs. demoted to PR-level so the loss/rescue is
+  // visible in logs instead of silent. See nearestAnchor for the remap rationale.
   let droppedCount = 0;
   let remappedCount = 0;
+  let demotedCount = 0;
   const comments: ReviewComment[] = [];
 
   // Model output is untrusted JSON, so we model an incoming comment as a loose
@@ -384,18 +435,34 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
       continue;
     }
 
+    const severity = VALID_SEVERITIES.includes(c.severity as CommentSeverity) ? (c.severity as CommentSeverity) : undefined;
+
     // Anchor the finding to a real diff line: keep it as-is when it already
-    // lands on one, otherwise snap to the nearest changed line. Only when no
-    // line is close enough do we discard it.
+    // lands on one, otherwise snap to the nearest changed line. When no line is
+    // close enough we can't post it inline — but rather than losing a real
+    // blocking finding (a critical/major issue the model located imprecisely,
+    // which is exactly how diff-vs-description discrepancies present), we DEMOTE
+    // it to a PR-level finding so its substance still reaches the reviewer.
+    // Minor/trivial un-anchorable findings are still dropped: not worth the
+    // noise once they've slipped their line.
     let line = c.line;
     if (!info.valid.has(line)) {
       const anchor = nearestAnchor(line, info);
       if (anchor === null) {
-        log.warn(
-          { path: c.path, line },
-          "Comment references line not in diff with no nearby anchor, dropping",
-        );
-        droppedCount++;
+        if (severity === "critical" || severity === "major") {
+          comments.push(buildReviewComment(c, { path: c.path, line: 0, prLevel: true }));
+          demotedCount++;
+          log.info(
+            { path: c.path, line, severity },
+            "Un-anchorable blocking finding demoted to PR-level (kept, not posted inline)",
+          );
+        } else {
+          log.warn(
+            { path: c.path, line },
+            "Comment references line not in diff with no nearby anchor, dropping",
+          );
+          droppedCount++;
+        }
         continue;
       }
       log.info({ path: c.path, from: line, to: anchor }, "Remapped finding to nearest valid diff line");
@@ -403,47 +470,26 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
       remappedCount++;
     }
 
-    const type = VALID_TYPES.includes(c.type as CommentType) ? (c.type as CommentType) : undefined;
-    const severity = VALID_SEVERITIES.includes(c.severity as CommentSeverity) ? (c.severity as CommentSeverity) : undefined;
-    const title = typeof c.title === "string" && c.title.trim() ? c.title.trim() : undefined;
-    const suggestion = typeof c.suggestion === "string" && c.suggestion.trim() ? c.suggestion : undefined;
-    const suggestionLanguage: "diff" | "suggestion" =
-      c.suggestionLanguage === "diff" ? "diff" : "suggestion";
-    const aiAgentPrompt = typeof c.aiAgentPrompt === "string" && c.aiAgentPrompt.trim()
-      ? c.aiAgentPrompt
-      : undefined;
-    const confidence = VALID_CONFIDENCE.includes(c.confidence as Confidence) ? (c.confidence as Confidence) : "high";
-    const fingerprint = fingerprintFor(c.path, line, title || c.body.slice(0, 80));
-
-    comments.push({
-      path: c.path,
-      line,
-      side: "RIGHT" as const,
-      body: formatCommentBody({
-        title,
-        body: c.body,
-        type,
-        severity,
-        suggestion,
-        suggestionLanguage,
-        aiAgentPrompt,
-        fingerprint,
-        confidence,
-      }),
-      type,
-      severity,
-      title,
-      suggestion,
-      suggestionLanguage,
-      aiAgentPrompt,
-      fingerprint,
-      confidence,
-    });
+    comments.push(buildReviewComment(c, { path: c.path, line, prLevel: false }));
   }
 
-  if (droppedCount > 0 || remappedCount > 0) {
+  // PR-level findings: the model's dedicated channel for issues not tied to a
+  // single changed line (diff contradicts the PR description, a claimed change
+  // is missing, cross-cutting concerns). No anchoring and — per the schema in
+  // ai/prompt.ts, which gives these entries no "path"/"line" — always built with
+  // path: "" so their title-based fingerprint stays stable across reviews.
+  // Non-array degrades to none.
+  const rawPrLevel: RawComment[] = Array.isArray(parsed.prLevelComments) ? parsed.prLevelComments : [];
+  let prLevelKept = 0;
+  for (const c of rawPrLevel) {
+    if (!c.body || !(typeof c.title === "string" && c.title.trim())) continue;
+    comments.push(buildReviewComment(c, { path: "", line: 0, prLevel: true }));
+    prLevelKept++;
+  }
+
+  if (droppedCount > 0 || remappedCount > 0 || demotedCount > 0 || prLevelKept > 0) {
     log.info(
-      { dropped: droppedCount, remapped: remappedCount, kept: comments.length },
+      { dropped: droppedCount, remapped: remappedCount, demoted: demotedCount, prLevel: prLevelKept, kept: comments.length },
       "Finding line validation complete",
     );
   }

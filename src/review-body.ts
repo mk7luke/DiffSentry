@@ -58,12 +58,30 @@ function parseFailureBanner(botName: string): string {
  * documentation hints, minor issues) goes into the Nitpicks collapse.
  * Mirrors CodeRabbit's "Actionable comments posted" semantics.
  */
-function isNitpick(c: ReviewComment): boolean {
+export function isNitpick(c: ReviewComment): boolean {
   if (c.type === "nitpick" || c.type === "suggestion" || c.type === "documentation") {
     return true;
   }
   if (c.severity === "trivial" || c.severity === "minor") return true;
   return false;
+}
+
+/**
+ * A REQUEST_CHANGES verdict must be backed by at least one actionable finding
+ * (inline OR PR-level; nitpicks/suggestions don't count). When every backing
+ * finding was dropped by line-anchoring/verification — or the model requested
+ * changes while describing the problem only in the summary — return COMMENT so
+ * the verdict and the visible findings never contradict each other. Pure and
+ * one-directional: only ever relaxes a block, never creates one.
+ */
+export function reconcileApproval(
+  approval: ReviewResult["approval"],
+  comments: ReviewComment[],
+): ReviewResult["approval"] {
+  if (approval === "REQUEST_CHANGES" && !comments.some((c) => !isNitpick(c))) {
+    return "COMMENT";
+  }
+  return approval;
 }
 
 function fileHeading(path: string, count: number): string {
@@ -109,6 +127,27 @@ function renderNitpickEntry(c: ReviewComment): string {
     lines.push("</details>");
   }
   return lines.join("\n");
+}
+
+/**
+ * Findings not tied to a specific changed line (prLevel) — e.g. the diff
+ * contradicts the PR description, a claimed change is missing, or a cross-cutting
+ * concern. They can't be posted as GitHub inline comments, so without this
+ * section they'd be invisible: the review would read as "changes requested / 0
+ * actionable comments" with the substance only hinted at in the summary. Each
+ * comment's `body` is already the fully-formatted standalone block (type/severity
+ * header, title, prose, agent prompt), so we render it directly.
+ */
+function renderPrLevelSection(prLevel: ReviewComment[]): string {
+  if (prLevel.length === 0) return "";
+  const blocks = prLevel.map((c) => c.body.trim()).join("\n\n---\n\n");
+  return [
+    `### 🔎 Issues not tied to a specific line (${prLevel.length})`,
+    "",
+    "<sub>These findings concern the change as a whole (for example, the diff versus the PR description) and can't be attached to a single changed line.</sub>",
+    "",
+    blocks,
+  ].join("\n");
 }
 
 function renderNitpicksSection(nitpicks: ReviewComment[]): string {
@@ -303,8 +342,16 @@ export function formatReviewBody(
   result: ReviewResult,
   meta: ReviewBodyMeta,
 ): string {
-  const actionable = result.comments.filter((c) => !isNitpick(c));
-  const nitpicks = result.comments.filter(isNitpick);
+  // Three buckets. PR-level findings (no diff-line anchor) are split out first
+  // so they render in their own section and never leak into the inline
+  // nitpick/actionable collapses. The "posted" count spans inline actionable +
+  // actionable PR-level findings, so a blocking review whose only finding is
+  // PR-level no longer reads as "Actionable comments posted: 0".
+  const prLevel = result.comments.filter((c) => c.prLevel);
+  const inline = result.comments.filter((c) => !c.prLevel);
+  const actionable = inline.filter((c) => !isNitpick(c));
+  const nitpicks = inline.filter(isNitpick);
+  const actionableCount = actionable.length + prLevel.filter((c) => !isNitpick(c)).length;
   const runId = randomUUID();
 
   const sections: string[] = [];
@@ -316,7 +363,7 @@ export function formatReviewBody(
     sections.push(parseFailureBanner(meta.botName));
   }
 
-  sections.push(`**Actionable comments posted: ${actionable.length}**`);
+  sections.push(`**Actionable comments posted: ${actionableCount}**`);
 
   // Show the AI/synthesized summary — but suppress it on the parse-failure path
   // when there are no findings at all, because the synthesized text there reads
@@ -328,10 +375,16 @@ export function formatReviewBody(
     sections.push(result.summary.trim());
   }
 
+  const prLevelBlock = renderPrLevelSection(prLevel);
+  if (prLevelBlock) sections.push(prLevelBlock);
+
   const nitpicksBlock = renderNitpicksSection(nitpicks);
   if (nitpicksBlock) sections.push(nitpicksBlock);
 
-  const bulkPrompt = renderBulkAiPrompt(result.comments);
+  // Only inline comments feed the bulk agent prompt — its entries are keyed by
+  // `path`/`line`, which PR-level findings don't have (their agent prompt is
+  // already shown inline in the PR-level section above).
+  const bulkPrompt = renderBulkAiPrompt(inline);
   if (bulkPrompt) sections.push(bulkPrompt);
 
   if (result.comments.length > 0) {

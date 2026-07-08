@@ -101,9 +101,14 @@ describe("parse: line remapping", () => {
     expect(res.comments[0].line).toBe(3);
   });
 
-  it("drops a finding whose line is far from any diff line (no valid anchor)", () => {
+  it("demotes an un-anchorable major finding to PR-level instead of dropping it", () => {
+    // reviewJson emits severity "major"; a line far from any anchor can't be an
+    // inline comment, but a blocking finding is kept as a PR-level finding
+    // rather than lost. (See pr-level-findings.test.ts for the minor→drop case.)
     const res = parseReviewResponse(reviewJson([{ path: "src/a.ts", line: 500, title: "Hallucinated location." }]), ctx());
-    expect(res.comments).toHaveLength(0);
+    expect(res.comments).toHaveLength(1);
+    expect(res.comments[0].prLevel).toBe(true);
+    expect(res.comments[0].line).toBe(0);
   });
 
   it("drops a finding referencing an unknown file", () => {
