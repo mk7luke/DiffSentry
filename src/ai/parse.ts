@@ -321,7 +321,7 @@ export function synthesizeReviewSummary(
 
 /** Shape of one comment as it arrives from the model: untyped JSON, so every
  *  field is optional and validated at runtime in parseReviewResponse. */
-interface RawComment {
+export interface RawComment {
   path?: string;
   line?: number;
   body?: string;
@@ -341,7 +341,7 @@ interface RawComment {
  * all three produce identical body/fingerprint formatting. Assumes `c.body` is
  * present (the caller validated it).
  */
-function buildReviewComment(
+export function buildReviewComment(
   c: RawComment,
   anchor: { path: string; line: number; prLevel: boolean },
 ): ReviewComment {
@@ -475,15 +475,15 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
 
   // PR-level findings: the model's dedicated channel for issues not tied to a
   // single changed line (diff contradicts the PR description, a claimed change
-  // is missing, cross-cutting concerns). No anchoring — line 0, path kept for
-  // context/fingerprint stability if the model supplied one. See the schema in
-  // ai/prompt.ts. Non-array degrades to none.
+  // is missing, cross-cutting concerns). No anchoring and — per the schema in
+  // ai/prompt.ts, which gives these entries no "path"/"line" — always built with
+  // path: "" so their title-based fingerprint stays stable across reviews.
+  // Non-array degrades to none.
   const rawPrLevel: RawComment[] = Array.isArray(parsed.prLevelComments) ? parsed.prLevelComments : [];
   let prLevelKept = 0;
   for (const c of rawPrLevel) {
     if (!c.body || !(typeof c.title === "string" && c.title.trim())) continue;
-    const path = typeof c.path === "string" ? c.path : "";
-    comments.push(buildReviewComment(c, { path, line: 0, prLevel: true }));
+    comments.push(buildReviewComment(c, { path: "", line: 0, prLevel: true }));
     prLevelKept++;
   }
 

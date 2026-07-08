@@ -10,7 +10,7 @@ import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, for
 import { parseCommand, formatHelpMessage, formatConfigMessage } from "./commands.js";
 import { parseIssueCommand, formatIssueHelpMessage } from "./issue-commands.js";
 import { buildIssueSummaryInstruction, buildIssuePlanInstruction } from "./ai/prompt.js";
-import { synthesizeReviewSummary, fingerprintFor, renderInlineCommentBody } from "./ai/parse.js";
+import { synthesizeReviewSummary, buildReviewComment } from "./ai/parse.js";
 import { verifyFindings } from "./ai/verify.js";
 import { LearningsStore, synthesizeLearning, extractFindingMeta, type FindingContext } from "./learnings.js";
 import { loadGuidelines, getRelevantGuidelines, formatGuidelinesForPrompt } from "./guidelines.js";
@@ -948,31 +948,22 @@ export class Reviewer {
       const driftWarnings = driftFindings.filter((f) => f.level === "warning");
       if (driftWarnings.length > 0) {
         for (const f of driftWarnings) {
-          const title = f.summary;
-          const fingerprint = fingerprintFor("", 0, title);
-          const aiAgentPrompt =
-            `Reconcile the PR description with the actual diff. ${f.summary} ${f.details}`.trim();
-          reviewResult.comments.push({
-            path: "",
-            line: 0,
-            side: "RIGHT",
-            body: renderInlineCommentBody({
-              title,
-              body: f.details || f.summary,
-              type: "issue",
-              severity: "major",
-              aiAgentPrompt,
-              fingerprint,
-              confidence: "medium",
-            }),
-            type: "issue",
-            severity: "major",
-            title,
-            aiAgentPrompt,
-            fingerprint,
-            confidence: "medium",
-            prLevel: true,
-          });
+          // Build through the same normalizer parseReviewResponse uses so
+          // PR-level body formatting and title-based fingerprinting stay
+          // identical to model-emitted findings.
+          reviewResult.comments.push(
+            buildReviewComment(
+              {
+                title: f.summary,
+                body: f.details || f.summary,
+                type: "issue",
+                severity: "major",
+                aiAgentPrompt: `Reconcile the PR description with the actual diff. ${f.summary} ${f.details}`.trim(),
+                confidence: "medium",
+              },
+              { path: "", line: 0, prLevel: true },
+            ),
+          );
         }
         if (reviewResult.approval === "APPROVE") {
           reviewResult.approval = "COMMENT";
