@@ -10,14 +10,14 @@ import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, for
 import { parseCommand, formatHelpMessage, formatConfigMessage } from "./commands.js";
 import { parseIssueCommand, formatIssueHelpMessage } from "./issue-commands.js";
 import { buildIssueSummaryInstruction, buildIssuePlanInstruction } from "./ai/prompt.js";
-import { synthesizeReviewSummary } from "./ai/parse.js";
+import { synthesizeReviewSummary, fingerprintFor, renderInlineCommentBody } from "./ai/parse.js";
 import { verifyFindings } from "./ai/verify.js";
 import { LearningsStore, synthesizeLearning, extractFindingMeta, type FindingContext } from "./learnings.js";
 import { loadGuidelines, getRelevantGuidelines, formatGuidelinesForPrompt } from "./guidelines.js";
 import { parseIssueReferences, fetchLinkedIssues, formatIssuesForPrompt, formatIssuesForWalkthrough } from "./issues.js";
 import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-merge.js";
 import { generateDocstrings, generateTests, simplifyCode, autofix } from "./finishing-touches.js";
-import { formatReviewBody } from "./review-body.js";
+import { formatReviewBody, reconcileApproval } from "./review-body.js";
 import { encodeState, encodeStateRef, extractState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
 import { assessRisk, renderRiskBlock, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion, renderConfidenceAggregate, computeReviewerDeltas, renderReviewerDeltaBlock, calibrateSeverities, resolveSeverityCalibration, renderSeverityCalibrationBlock, type CalibrationResult } from "./insights.js";
 import { suggestReviewersFromBlame, renderSuggestedReviewers, combineReviewers, renderCombinedReviewers } from "./blame-reviewers.js";
@@ -935,6 +935,50 @@ export class Reviewer {
       } catch (err) {
         log.debug({ err }, "Drift detection failed");
       }
+
+      // Fold WARNING-level description drift into first-class PR-level findings.
+      // Diff-vs-description discrepancies are the exact class that has no diff
+      // line to anchor to, so they belong in the PR-level channel (visible +
+      // actionable) rather than buried as an info block in the walkthrough. This
+      // also gives the REQUEST_CHANGES invariant below a deterministic backstop.
+      // Non-blocking on their own: they bump APPROVE→COMMENT but never force
+      // REQUEST_CHANGES. Info-level drift (incl. the "description too short"
+      // sentinel) stays in the walkthrough block. Deduped cross-review by
+      // fingerprint alongside every other finding.
+      const driftWarnings = driftFindings.filter((f) => f.level === "warning");
+      if (driftWarnings.length > 0) {
+        for (const f of driftWarnings) {
+          const title = f.summary;
+          const fingerprint = fingerprintFor("", 0, title);
+          const aiAgentPrompt =
+            `Reconcile the PR description with the actual diff. ${f.summary} ${f.details}`.trim();
+          reviewResult.comments.push({
+            path: "",
+            line: 0,
+            side: "RIGHT",
+            body: renderInlineCommentBody({
+              title,
+              body: f.details || f.summary,
+              type: "issue",
+              severity: "major",
+              aiAgentPrompt,
+              fingerprint,
+              confidence: "medium",
+            }),
+            type: "issue",
+            severity: "major",
+            title,
+            aiAgentPrompt,
+            fingerprint,
+            confidence: "medium",
+            prLevel: true,
+          });
+        }
+        if (reviewResult.approval === "APPROVE") {
+          reviewResult.approval = "COMMENT";
+        }
+        log.info({ count: driftWarnings.length }, "Folded description-drift warnings into PR-level findings");
+      }
       const risk = assessRisk({
         files: context.files,
         review: reviewResult,
@@ -1048,7 +1092,10 @@ export class Reviewer {
         if (calBlock) inner += "\n\n" + calBlock;
         const depBlock = renderDepBlock(depDeltas);
         if (depBlock) inner += "\n\n" + depBlock;
-        const driftBlock = renderDriftBlock(driftFindings);
+        // Warning-level drift is now surfaced as PR-level findings on the review
+        // (see the fold above); render only the remaining info-level drift here
+        // so it isn't reported twice.
+        const driftBlock = renderDriftBlock(driftFindings.filter((f) => f.level !== "warning"));
         if (driftBlock) inner += "\n\n" + driftBlock;
         const coachBlock = renderCommitCoachBlock(commitFindings);
         if (coachBlock) inner += "\n\n" + coachBlock;
@@ -1244,6 +1291,25 @@ export class Reviewer {
           const dropped = before - reviewResult.comments.length;
           if (dropped > 0) log.info({ dropped }, "Suppressed findings via triage feedback");
         }
+      }
+
+      // Invariant: a REQUEST_CHANGES verdict must be backed by at least one
+      // actionable finding (inline OR PR-level). When every backing finding was
+      // dropped by line-anchoring/verification — or the model blocked while
+      // describing the problem only in prose — the review would otherwise read
+      // as "changes requested / 0 actionable comments" with nothing to act on
+      // (the exact failure this addresses). Downgrade to COMMENT so the verdict
+      // and the visible findings never contradict each other. Runs AFTER every
+      // producer (AI, safety, pattern, static, calibration, drift) has merged
+      // and after cross-review dedup/suppression, so it sees the final set.
+      // One-directional: only ever relaxes a block, never creates one.
+      const reconciledApproval = reconcileApproval(reviewResult.approval, reviewResult.comments);
+      if (reconciledApproval !== reviewResult.approval) {
+        log.info(
+          { from: reviewResult.approval, to: reconciledApproval, totalComments: reviewResult.comments.length },
+          "Downgrading REQUEST_CHANGES → COMMENT: no actionable finding survived to back the block",
+        );
+        reviewResult.approval = reconciledApproval;
       }
 
       // If the AI didn't supply a usable summary, regenerate from the

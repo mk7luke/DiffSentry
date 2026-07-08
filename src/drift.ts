@@ -20,7 +20,10 @@ export async function detectDescriptionDrift(opts: {
   if (desc.length < 30) {
     return [
       {
-        level: "warning",
+        // Informational, not a warning: a thin description is worth noting in
+        // the walkthrough but shouldn't be folded into an actionable PR-level
+        // finding (that folding keys off level === "warning" in reviewer.ts).
+        level: "info",
         summary: "PR description is too short to drift-check.",
         details:
           "The PR description has less than 30 characters of meaningful content. " +

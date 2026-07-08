@@ -277,6 +277,13 @@ export interface ReviewComment {
   fingerprint?: string;
   /** AI's self-rated confidence in this finding (default high). */
   confidence?: Confidence;
+  /** A finding NOT tied to a specific changed line — e.g. the diff contradicts
+   *  the PR description, a claimed change is missing, or a cross-cutting concern
+   *  spans the whole PR. These carry title/body/severity but no meaningful
+   *  `line` (conventionally 0), are never posted as GitHub inline comments
+   *  (submitReview's `line > 0` filter excludes them), and are rendered in a
+   *  dedicated "not tied to a specific line" section of the review body. */
+  prLevel?: boolean;
   /** Set by the pattern engine so callers can record the hit source without
    *  re-sniffing the rendered body. "builtin" = shipped heuristic; "custom" =
    *  a `.diffsentry.yaml` anti-pattern or an admin-authored command-center rule. */
