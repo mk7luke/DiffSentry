@@ -74,6 +74,17 @@ describe("backup provider config", () => {
     expect(cfg.primaryAiTimeoutMs).toBe(15_000);
   });
 
+  it("falls back to 20000 for a non-positive PRIMARY_AI_TIMEOUT_MS", () => {
+    // 0 or negative would disable the primary's deadline (withAiTimeout treats
+    // <= 0 as no bound) and defeat fast failover — must not be accepted.
+    process.env.ANTHROPIC_API_KEY = "sk";
+    process.env.BACKUP_AI_PROVIDER = "anthropic";
+    process.env.PRIMARY_AI_TIMEOUT_MS = "0";
+    expect(loadConfig().primaryAiTimeoutMs).toBe(20_000);
+    process.env.PRIMARY_AI_TIMEOUT_MS = "-5";
+    expect(loadConfig().primaryAiTimeoutMs).toBe(20_000);
+  });
+
   it("throws when openai-compatible backup has no base URL or model to resolve", () => {
     process.env.AI_PROVIDER = "anthropic";
     process.env.ANTHROPIC_API_KEY = "sk-ant-primary";

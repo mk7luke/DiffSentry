@@ -135,8 +135,13 @@ export function loadConfig(): Config {
   // Short primary deadline (only meaningful when a backup is configured). Clamp
   // to at most the normal bound so the primary is never given LONGER than the
   // overall per-op budget.
+  // A non-positive value would disable the primary's bound (withAiTimeout treats
+  // timeoutMs <= 0 as "no deadline"), so a mis-set 0/negative would leave the
+  // primary un-bounded and defeat fast failover. Reject it and fall back to the
+  // 20s default, mirroring the breaker-knob guards below.
   const parsedPrimaryTimeout = parseInt(process.env.PRIMARY_AI_TIMEOUT_MS || "", 10);
-  let primaryAiTimeoutMs = Number.isFinite(parsedPrimaryTimeout) ? parsedPrimaryTimeout : 20_000;
+  let primaryAiTimeoutMs =
+    Number.isFinite(parsedPrimaryTimeout) && parsedPrimaryTimeout > 0 ? parsedPrimaryTimeout : 20_000;
   if (aiRequestTimeoutMs > 0 && primaryAiTimeoutMs > aiRequestTimeoutMs) {
     primaryAiTimeoutMs = aiRequestTimeoutMs;
   }

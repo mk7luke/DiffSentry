@@ -24,12 +24,22 @@ export interface ProviderSpec {
 }
 
 export function buildProvider(spec: ProviderSpec): AIProvider {
+  // loadConfig validates the configured provider's credentials at boot, but this
+  // factory is a shared construction path for both primary and backup — throw a
+  // named error here so a future partial spec fails fast at the factory rather
+  // than with an opaque failure deep inside a provider SDK constructor.
   if (spec.provider === "anthropic") {
-    return new AnthropicProvider(spec.anthropicApiKey!, spec.anthropicModel, spec.anthropicBaseUrl, spec.timeoutMs);
+    if (!spec.anthropicApiKey) {
+      throw new Error("buildProvider(anthropic) requires anthropicApiKey");
+    }
+    return new AnthropicProvider(spec.anthropicApiKey, spec.anthropicModel, spec.anthropicBaseUrl, spec.timeoutMs);
   }
   if (spec.provider === "openai-compatible") {
+    if (!spec.localAiBaseUrl) {
+      throw new Error("buildProvider(openai-compatible) requires localAiBaseUrl");
+    }
     return new OpenAICompatibleProvider({
-      baseURL: spec.localAiBaseUrl!,
+      baseURL: spec.localAiBaseUrl,
       model: spec.localAiModel,
       apiKey: spec.localAiApiKey,
       jsonMode: spec.localAiJsonMode,
@@ -37,5 +47,8 @@ export function buildProvider(spec: ProviderSpec): AIProvider {
       providerLabel: spec.label,
     });
   }
-  return new OpenAIProvider(spec.openaiApiKey!, spec.openaiModel, spec.openaiBaseUrl, spec.timeoutMs);
+  if (!spec.openaiApiKey) {
+    throw new Error("buildProvider(openai) requires openaiApiKey");
+  }
+  return new OpenAIProvider(spec.openaiApiKey, spec.openaiModel, spec.openaiBaseUrl, spec.timeoutMs);
 }

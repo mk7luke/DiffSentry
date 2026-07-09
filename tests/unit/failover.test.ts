@@ -113,6 +113,31 @@ describe("FailoverProvider", () => {
     expect(res.servedBy).toBeUndefined(); // primary served
   });
 
+  it("re-opens the breaker for a fresh cooldown when the half-open probe fails", async () => {
+    let clock = 1_000;
+    const now = () => clock;
+    // Primary fails every time; backup always serves.
+    const primaryReview = vi.fn().mockRejectedValue(new AiTimeoutError("primary", "review", 20000));
+    const backupReview = vi.fn().mockResolvedValue(review("backup"));
+    const p = new FailoverProvider(
+      fakeProvider({ review: primaryReview }),
+      fakeProvider({ review: backupReview }),
+      { ...OPTS, now },
+    );
+    await p.review(ctx()); await p.review(ctx()); await p.review(ctx()); // breaker opens (3 probes)
+    expect(primaryReview).toHaveBeenCalledTimes(3);
+
+    clock += 60_001; // cooldown elapsed → next call is a half-open probe on the primary
+    await p.review(ctx());
+    expect(primaryReview).toHaveBeenCalledTimes(4); // probe hit the primary...
+
+    // ...and its failure must re-arm the cooldown. The immediately-following call
+    // stays on the backup instead of re-probing the just-failed primary.
+    await p.review(ctx());
+    expect(primaryReview).toHaveBeenCalledTimes(4); // primary skipped — breaker re-opened
+    expect(backupReview).toHaveBeenCalledTimes(5);
+  });
+
   it("resets consecutive failures on a primary success", async () => {
     const primaryReview = vi
       .fn()
