@@ -422,8 +422,20 @@ export class GitHubClient {
     ]);
 
     const fileCap = maxFiles != null && maxFiles > 0 ? maxFiles : this.config.maxFilesPerReview;
-    const files: FileChange[] = filesResponse.data
-      .filter((f) => !this.isIgnored(f.filename))
+    const ignoredFiles: string[] = [];
+    const afterIgnore = filesResponse.data.filter((f) => {
+      if (this.isIgnored(f.filename)) {
+        ignoredFiles.push(f.filename);
+        return false;
+      }
+      return true;
+    });
+    // Files beyond the max-files cap are dropped from review. Record them (like
+    // ignoredFiles) so the reviewer can surface "N files beyond the review cap"
+    // instead of silently returning a green status when the cap is the only
+    // reason nothing was reviewed.
+    const cappedFiles: string[] = afterIgnore.slice(fileCap).map((f) => f.filename);
+    const files: FileChange[] = afterIgnore
       .slice(0, fileCap)
       .map((f) => ({
         filename: f.filename,
@@ -445,6 +457,8 @@ export class GitHubClient {
       headSha: pr.data.head.sha,
       defaultBranch: pr.data.base.repo.default_branch,
       files,
+      ignoredFiles,
+      cappedFiles,
       isDraft: pr.data.draft,
       labels: pr.data.labels.map((l) => l.name ?? ""),
       author: pr.data.user?.login,
@@ -771,6 +785,13 @@ export class GitHubClient {
       (c) => c.user?.type === "Bot" && c.body?.includes(marker)
     );
 
+    // upsertComment is generic — it backs the status, walkthrough, sticky,
+    // issue-summary and pre-merge comments alike. Derive a label from the
+    // marker so the log names the actual comment type instead of always saying
+    // "walkthrough comment", which made distinct comments look like duplicate
+    // walkthroughs in the logs.
+    const commentLabel = marker.replace(/<!--\s*/, "").replace(/\s*-->/, "").trim() || marker;
+
     if (existing) {
       await octokit.issues.updateComment({
         owner,
@@ -778,15 +799,15 @@ export class GitHubClient {
         comment_id: existing.id,
         body,
       });
-      log.info({ commentId: existing.id }, "Updated existing walkthrough comment");
+      log.info({ commentId: existing.id, comment: commentLabel }, "Updated existing comment");
     } else {
-      await octokit.issues.createComment({
+      const created = await octokit.issues.createComment({
         owner,
         repo,
         issue_number: pullNumber,
         body,
       });
-      log.info("Created new walkthrough comment");
+      log.info({ commentId: created?.data?.id, comment: commentLabel }, "Created new comment");
     }
   }
 

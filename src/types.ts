@@ -385,6 +385,20 @@ export interface PRContext {
   /** Repo default branch (e.g. "main"). Authoritative source for .diffsentry.yaml. */
   defaultBranch?: string;
   files: FileChange[];
+  /**
+   * Filenames dropped by the operator-level ignore list (`ignoredPatterns` —
+   * e.g. *.min.js, *.map, dist/**, lockfiles) before `files` was built. Kept so
+   * the reviewer can tell "PR only contains ignored files (minified bundle)"
+   * apart from a genuinely empty diff and surface which files were skipped.
+   */
+  ignoredFiles?: string[];
+  /**
+   * Filenames dropped by the `maxFilesPerReview` cap — the post-`ignoredFiles`
+   * overflow beyond `.slice(0, fileCap)`. Recorded so the empty-files status
+   * comment can explain "N files beyond the review cap" rather than silently
+   * returning when the cap is the only reason nothing was reviewed.
+   */
+  cappedFiles?: string[];
   isDraft?: boolean;
   labels?: string[];
   author?: string;
