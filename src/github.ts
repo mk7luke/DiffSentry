@@ -423,14 +423,19 @@ export class GitHubClient {
 
     const fileCap = maxFiles != null && maxFiles > 0 ? maxFiles : this.config.maxFilesPerReview;
     const ignoredFiles: string[] = [];
-    const files: FileChange[] = filesResponse.data
-      .filter((f) => {
-        if (this.isIgnored(f.filename)) {
-          ignoredFiles.push(f.filename);
-          return false;
-        }
-        return true;
-      })
+    const afterIgnore = filesResponse.data.filter((f) => {
+      if (this.isIgnored(f.filename)) {
+        ignoredFiles.push(f.filename);
+        return false;
+      }
+      return true;
+    });
+    // Files beyond the max-files cap are dropped from review. Record them (like
+    // ignoredFiles) so the reviewer can surface "N files beyond the review cap"
+    // instead of silently returning a green status when the cap is the only
+    // reason nothing was reviewed.
+    const cappedFiles: string[] = afterIgnore.slice(fileCap).map((f) => f.filename);
+    const files: FileChange[] = afterIgnore
       .slice(0, fileCap)
       .map((f) => ({
         filename: f.filename,
@@ -453,6 +458,7 @@ export class GitHubClient {
       defaultBranch: pr.data.base.repo.default_branch,
       files,
       ignoredFiles,
+      cappedFiles,
       isDraft: pr.data.draft,
       labels: pr.data.labels.map((l) => l.name ?? ""),
       author: pr.data.user?.login,

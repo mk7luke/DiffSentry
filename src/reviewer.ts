@@ -594,6 +594,7 @@ export class Reviewer {
         const skippedGroups: Array<{ label: string; files: string[] }> = [
           { label: "Ignored (minified, generated, or lockfile)", files: context.ignoredFiles ?? [] },
           { label: "Excluded by path filters", files: filesIgnoredByPathFilter.map((f) => f.path) },
+          { label: "Beyond the max-files-per-review cap", files: context.cappedFiles ?? [] },
           { label: "No reviewable changes", files: filesSkippedTrivial },
         ].filter((g) => g.files.length > 0);
 

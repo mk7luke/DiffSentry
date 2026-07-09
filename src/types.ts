@@ -392,6 +392,13 @@ export interface PRContext {
    * apart from a genuinely empty diff and surface which files were skipped.
    */
   ignoredFiles?: string[];
+  /**
+   * Filenames dropped by the `maxFilesPerReview` cap — the post-`ignoredFiles`
+   * overflow beyond `.slice(0, fileCap)`. Recorded so the empty-files status
+   * comment can explain "N files beyond the review cap" rather than silently
+   * returning when the cap is the only reason nothing was reviewed.
+   */
+  cappedFiles?: string[];
   isDraft?: boolean;
   labels?: string[];
   author?: string;
