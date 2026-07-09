@@ -73,4 +73,26 @@ describe("backup provider config", () => {
     const cfg = loadConfig();
     expect(cfg.primaryAiTimeoutMs).toBe(15_000);
   });
+
+  it("throws when openai-compatible backup has no base URL or model to resolve", () => {
+    process.env.AI_PROVIDER = "anthropic";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-primary";
+    process.env.BACKUP_AI_PROVIDER = "openai-compatible";
+    delete process.env.LOCAL_AI_BASE_URL;
+    delete process.env.LOCAL_AI_MODEL;
+    expect(() => loadConfig()).toThrow(/BACKUP_AI_PROVIDER=openai-compatible/);
+  });
+
+  it("resolves BACKUP_LOCAL_AI_* overrides for an openai-compatible backup", () => {
+    process.env.AI_PROVIDER = "anthropic";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-primary";
+    process.env.BACKUP_AI_PROVIDER = "openai-compatible";
+    delete process.env.LOCAL_AI_BASE_URL;
+    delete process.env.LOCAL_AI_MODEL;
+    process.env.BACKUP_LOCAL_AI_BASE_URL = "http://localhost:9999/v1";
+    process.env.BACKUP_LOCAL_AI_MODEL = "backup-model";
+    const cfg = loadConfig();
+    expect(cfg.backupLocalAiBaseUrl).toBe("http://localhost:9999/v1");
+    expect(cfg.backupLocalAiModel).toBe("backup-model");
+  });
 });

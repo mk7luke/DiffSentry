@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { FailoverProvider } from "../../src/ai/failover.js";
 import { AiTimeoutError } from "../../src/ai/timeout.js";
-import type { AIProvider, ReviewResult, PRContext, RepoConfig } from "../../src/types.js";
+import type { AIProvider, ReviewResult, PRContext } from "../../src/types.js";
 
 function ctx(): PRContext {
   return {
