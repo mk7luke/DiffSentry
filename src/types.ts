@@ -26,6 +26,27 @@ export interface Config {
    * as a "review failed (AI timeout)" outcome instead of stalling indefinitely.
    */
   aiRequestTimeoutMs: number;
+  // ─── Backup AI provider / failover (all optional; off unless backupAiProvider set) ───
+  /** When set, wrap the primary provider in a FailoverProvider with this backup. */
+  backupAiProvider?: "anthropic" | "openai" | "openai-compatible";
+  backupAnthropicApiKey?: string;
+  backupAnthropicModel?: string;
+  backupAnthropicBaseUrl?: string;
+  backupOpenaiApiKey?: string;
+  backupOpenaiModel?: string;
+  backupOpenaiBaseUrl?: string;
+  backupLocalAiBaseUrl?: string;
+  backupLocalAiApiKey?: string;
+  backupLocalAiModel?: string;
+  backupLocalAiJsonMode?: boolean;
+  /** Short per-op deadline for the PRIMARY when a backup is configured, so a
+   *  slow-hang fails over quickly. Ignored (primary uses aiRequestTimeoutMs)
+   *  when no backup is set. */
+  primaryAiTimeoutMs: number;
+  /** Consecutive primary failures before the failover breaker opens. */
+  backupCircuitThreshold: number;
+  /** How long (ms) the failover breaker stays open. */
+  backupCircuitCooldownMs: number;
   maxFilesPerReview: number;
   ignoredPatterns: string[];
   botName: string;
