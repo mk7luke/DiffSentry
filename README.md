@@ -722,6 +722,31 @@ GitHub webhook
 minified assets (`*.min.js`, `*.min.css`), sourcemaps (`*.map`), build output
 (`dist/**`, `build/**`, `.next/**`).
 
+### Backup provider / failover
+
+Off by default. Set `BACKUP_AI_PROVIDER` (`anthropic`, `openai`, or
+`openai-compatible`) to enable a second provider that the review falls over to
+when the primary fails *transiently* (timeout, 5xx, 429, network) — it does
+**not** fail over on 401/403, since those indicate misconfiguration rather
+than an outage. Backup credentials reuse the matching primary vars
+(`ANTHROPIC_*`, `OPENAI_*`, `LOCAL_AI_*`) unless a `BACKUP_*` override is set.
+When a backup is configured, the primary is given a short deadline
+(`PRIMARY_AI_TIMEOUT_MS`, default 20000ms) so a slow-hang fails over quickly
+instead of eating the full `AI_REQUEST_TIMEOUT_MS`. A circuit breaker
+(`BACKUP_CIRCUIT_THRESHOLD` / `BACKUP_CIRCUIT_COOLDOWN_MS`) skips a
+persistently-down primary for a cooldown window rather than retrying it on
+every review.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `BACKUP_AI_PROVIDER` | No | | `anthropic`, `openai`, or `openai-compatible`. Unset = failover disabled. |
+| `PRIMARY_AI_TIMEOUT_MS` | No | `20000` | Deadline given to the primary before failing over (clamped to `AI_REQUEST_TIMEOUT_MS`). |
+| `BACKUP_CIRCUIT_THRESHOLD` | No | `3` | Consecutive primary failures before the circuit breaker skips it. |
+| `BACKUP_CIRCUIT_COOLDOWN_MS` | No | `60000` | How long the circuit breaker stays open before retrying the primary. |
+
+See `.env.example` for the full list of `BACKUP_ANTHROPIC_*` / `BACKUP_OPENAI_*` /
+`BACKUP_LOCAL_AI_*` override vars.
+
 ## Using local models (Ollama, LM Studio, vLLM, llama.cpp, LocalAI)
 
 DiffSentry can talk to any server that exposes an **OpenAI-compatible
