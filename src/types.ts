@@ -315,6 +315,10 @@ export interface ReviewResult {
    *  by downstream passes (e.g. severity calibration). Absent when the graph
    *  was unavailable. */
   fanInByFile?: Record<string, number>;
+  /** Which provider produced this review. Set to "backup" by FailoverProvider
+   *  when the primary failed over; absent/"primary" otherwise. Drives the
+   *  subtle "reviewed by backup provider" footnote in the posted body. */
+  servedBy?: "primary" | "backup";
 }
 
 // ─── Walkthrough Result ────────────────────────────────────────
