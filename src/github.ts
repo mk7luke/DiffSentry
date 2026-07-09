@@ -801,7 +801,7 @@ export class GitHubClient {
         issue_number: pullNumber,
         body,
       });
-      log.info({ commentId: created.data.id, comment: commentLabel }, "Created new comment");
+      log.info({ commentId: created?.data?.id, comment: commentLabel }, "Created new comment");
     }
   }
 

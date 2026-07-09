@@ -607,7 +607,7 @@ export class Reviewer {
           const MAX_FILES_PER_GROUP = 50;
           const body =
             STATUS_MARKER + "\n" +
-            `> :next_track_button: **DiffSentry** — no reviewable changes. ` +
+            `> ⏭️ **DiffSentry** — no reviewable changes. ` +
             `This ${mode === "full" ? "pull request" : "update"} only contains ` +
             `${totalSkipped} file${totalSkipped === 1 ? "" : "s"} DiffSentry skips, ` +
             `so there's nothing to review.\n\n` +
