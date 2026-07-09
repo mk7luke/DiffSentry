@@ -85,6 +85,33 @@ describe("backup provider config", () => {
     expect(loadConfig().primaryAiTimeoutMs).toBe(20_000);
   });
 
+  it("fail-soft parses the breaker knobs (invalid → defaults; cooldown 0 kept)", () => {
+    process.env.ANTHROPIC_API_KEY = "sk";
+    process.env.BACKUP_AI_PROVIDER = "anthropic";
+    // threshold: 0 / negative / non-numeric all fall back to 3 (min 1).
+    for (const bad of ["0", "-2", "abc"]) {
+      process.env.BACKUP_CIRCUIT_THRESHOLD = bad;
+      expect(loadConfig().backupCircuitThreshold).toBe(3);
+    }
+    delete process.env.BACKUP_CIRCUIT_THRESHOLD;
+    // cooldown: non-numeric → 60000, but an explicit 0 is a valid "no cooldown".
+    process.env.BACKUP_CIRCUIT_COOLDOWN_MS = "nope";
+    expect(loadConfig().backupCircuitCooldownMs).toBe(60_000);
+    process.env.BACKUP_CIRCUIT_COOLDOWN_MS = "0";
+    expect(loadConfig().backupCircuitCooldownMs).toBe(0);
+  });
+
+  it("leaves breaker/primary-timeout knobs at defaults when failover is off", () => {
+    // With no BACKUP_AI_PROVIDER, the knob env is not even read.
+    process.env.PRIMARY_AI_TIMEOUT_MS = "5";
+    process.env.BACKUP_CIRCUIT_THRESHOLD = "99";
+    const cfg = loadConfig();
+    expect(cfg.backupAiProvider).toBeUndefined();
+    expect(cfg.primaryAiTimeoutMs).toBe(20_000);
+    expect(cfg.backupCircuitThreshold).toBe(3);
+    expect(cfg.backupCircuitCooldownMs).toBe(60_000);
+  });
+
   it("throws when openai-compatible backup has no base URL or model to resolve", () => {
     process.env.AI_PROVIDER = "anthropic";
     process.env.ANTHROPIC_API_KEY = "sk-ant-primary";

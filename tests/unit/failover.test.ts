@@ -86,10 +86,11 @@ describe("FailoverProvider", () => {
     await p.review(ctx());
     await p.review(ctx());
     expect(primaryReview).toHaveBeenCalledTimes(3);
-    // 4th call: breaker open → primary skipped entirely.
-    await p.review(ctx());
+    // 4th call: breaker open → primary skipped entirely, still tagged servedBy.
+    const openRes = await p.review(ctx());
     expect(primaryReview).toHaveBeenCalledTimes(3);
     expect(backupReview).toHaveBeenCalledTimes(4);
+    expect(openRes.servedBy).toBe("backup");
   });
 
   it("half-opens after cooldown; a primary success closes the breaker", async () => {

@@ -135,22 +135,31 @@ export function loadConfig(): Config {
   // Short primary deadline (only meaningful when a backup is configured). Clamp
   // to at most the normal bound so the primary is never given LONGER than the
   // overall per-op budget.
-  // A non-positive value would disable the primary's bound (withAiTimeout treats
-  // timeoutMs <= 0 as "no deadline"), so a mis-set 0/negative would leave the
-  // primary un-bounded and defeat fast failover. Reject it and fall back to the
-  // 20s default, mirroring the breaker-knob guards below.
-  const parsedPrimaryTimeout = parseInt(process.env.PRIMARY_AI_TIMEOUT_MS || "", 10);
-  let primaryAiTimeoutMs =
-    Number.isFinite(parsedPrimaryTimeout) && parsedPrimaryTimeout > 0 ? parsedPrimaryTimeout : 20_000;
-  if (aiRequestTimeoutMs > 0 && primaryAiTimeoutMs > aiRequestTimeoutMs) {
-    primaryAiTimeoutMs = aiRequestTimeoutMs;
+  // The short primary deadline and the breaker knobs only matter when a backup
+  // is configured; keep them at their defaults (and don't even read their env)
+  // when failover is off, so a mis-set PRIMARY_AI_TIMEOUT_MS can't affect an
+  // operator who never opted into failover. Preserves the "off by default =
+  // unchanged" invariant.
+  let primaryAiTimeoutMs = 20_000;
+  let backupCircuitThreshold = 3;
+  let backupCircuitCooldownMs = 60_000;
+  if (backupAiProvider) {
+    // A non-positive value would disable the primary's bound (withAiTimeout
+    // treats timeoutMs <= 0 as "no deadline"), leaving the primary un-bounded and
+    // defeating fast failover. Reject it and fall back to the 20s default.
+    const parsedPrimaryTimeout = parseInt(process.env.PRIMARY_AI_TIMEOUT_MS || "", 10);
+    primaryAiTimeoutMs =
+      Number.isFinite(parsedPrimaryTimeout) && parsedPrimaryTimeout > 0 ? parsedPrimaryTimeout : 20_000;
+    if (aiRequestTimeoutMs > 0 && primaryAiTimeoutMs > aiRequestTimeoutMs) {
+      primaryAiTimeoutMs = aiRequestTimeoutMs;
+    }
+
+    const parsedThreshold = parseInt(process.env.BACKUP_CIRCUIT_THRESHOLD || "", 10);
+    backupCircuitThreshold = Number.isFinite(parsedThreshold) && parsedThreshold >= 1 ? parsedThreshold : 3;
+
+    const parsedCooldown = parseInt(process.env.BACKUP_CIRCUIT_COOLDOWN_MS || "", 10);
+    backupCircuitCooldownMs = Number.isFinite(parsedCooldown) && parsedCooldown >= 0 ? parsedCooldown : 60_000;
   }
-
-  const parsedThreshold = parseInt(process.env.BACKUP_CIRCUIT_THRESHOLD || "", 10);
-  const backupCircuitThreshold = Number.isFinite(parsedThreshold) && parsedThreshold >= 1 ? parsedThreshold : 3;
-
-  const parsedCooldown = parseInt(process.env.BACKUP_CIRCUIT_COOLDOWN_MS || "", 10);
-  const backupCircuitCooldownMs = Number.isFinite(parsedCooldown) && parsedCooldown >= 0 ? parsedCooldown : 60_000;
 
   const ignoredPatterns = (process.env.IGNORED_PATTERNS || "")
     .split(",")

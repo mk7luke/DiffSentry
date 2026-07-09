@@ -18,8 +18,14 @@ export interface ProviderSpec {
   localAiModel: string;
   localAiJsonMode: boolean;
   timeoutMs: number;
-  /** Overrides the openai-compatible provider label (for cost/log attribution
-   *  when a same-type backup would otherwise collide with the primary). */
+  /** Overrides the openai-compatible provider label for cost/log attribution.
+   *  Only `OpenAICompatibleProvider` accepts a label, so this disambiguates a
+   *  same-type openai-compatible backup from the primary. For anthropic/openai,
+   *  attribution relies on provider+model distinctness (`recordAiUsage` keys on
+   *  both): a backup with a different model is already distinct; a same-provider
+   *  AND same-model backup collapses into the primary in cost/logs (an unusual
+   *  config). Extending the anthropic/openai constructors to take a label would
+   *  be the follow-up if that pairing ever needs splitting. */
   label?: string;
 }
 
@@ -35,8 +41,8 @@ export function buildProvider(spec: ProviderSpec): AIProvider {
     return new AnthropicProvider(spec.anthropicApiKey, spec.anthropicModel, spec.anthropicBaseUrl, spec.timeoutMs);
   }
   if (spec.provider === "openai-compatible") {
-    if (!spec.localAiBaseUrl) {
-      throw new Error("buildProvider(openai-compatible) requires localAiBaseUrl");
+    if (!spec.localAiBaseUrl || !spec.localAiModel) {
+      throw new Error("buildProvider(openai-compatible) requires localAiBaseUrl and localAiModel");
     }
     return new OpenAICompatibleProvider({
       baseURL: spec.localAiBaseUrl,
