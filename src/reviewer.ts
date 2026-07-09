@@ -599,6 +599,12 @@ export class Reviewer {
 
         if (skippedGroups.length > 0) {
           const totalSkipped = skippedGroups.reduce((n, g) => n + g.files.length, 0);
+          // Cap each group's rendered list: a monorepo PR touching hundreds of
+          // lockfiles / dist artifacts could otherwise blow past GitHub's ~65 KB
+          // comment-body limit, making the upsert throw — which would leave the
+          // stale "reviewing…" comment in place, the very thing this branch exists
+          // to resolve. Overflow is summarised as "…and N more".
+          const MAX_FILES_PER_GROUP = 50;
           const body =
             STATUS_MARKER + "\n" +
             `> :next_track_button: **DiffSentry** — no reviewable changes. ` +
@@ -606,11 +612,16 @@ export class Reviewer {
             `${totalSkipped} file${totalSkipped === 1 ? "" : "s"} DiffSentry skips, ` +
             `so there's nothing to review.\n\n` +
             skippedGroups
-              .map((g) =>
-                `<details><summary>${g.label} (${g.files.length})</summary>\n\n` +
-                g.files.map((f) => `- \`${f}\``).join("\n") +
-                `\n</details>`,
-              )
+              .map((g) => {
+                const shown = g.files.slice(0, MAX_FILES_PER_GROUP);
+                const overflow = g.files.length - shown.length;
+                return (
+                  `<details><summary>${g.label} (${g.files.length})</summary>\n\n` +
+                  shown.map((f) => `- \`${f}\``).join("\n") +
+                  (overflow > 0 ? `\n- …and ${overflow} more` : "") +
+                  `\n</details>`
+                );
+              })
               .join("\n\n");
           try {
             await this.github.upsertComment(

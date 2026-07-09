@@ -779,6 +779,13 @@ export class GitHubClient {
       (c) => c.user?.type === "Bot" && c.body?.includes(marker)
     );
 
+    // upsertComment is generic — it backs the status, walkthrough, sticky,
+    // issue-summary and pre-merge comments alike. Derive a label from the
+    // marker so the log names the actual comment type instead of always saying
+    // "walkthrough comment", which made distinct comments look like duplicate
+    // walkthroughs in the logs.
+    const commentLabel = marker.replace(/<!--\s*/, "").replace(/\s*-->/, "").trim() || marker;
+
     if (existing) {
       await octokit.issues.updateComment({
         owner,
@@ -786,15 +793,15 @@ export class GitHubClient {
         comment_id: existing.id,
         body,
       });
-      log.info({ commentId: existing.id }, "Updated existing walkthrough comment");
+      log.info({ commentId: existing.id, comment: commentLabel }, "Updated existing comment");
     } else {
-      await octokit.issues.createComment({
+      const created = await octokit.issues.createComment({
         owner,
         repo,
         issue_number: pullNumber,
         body,
       });
-      log.info("Created new walkthrough comment");
+      log.info({ commentId: created.data.id, comment: commentLabel }, "Created new comment");
     }
   }
 
