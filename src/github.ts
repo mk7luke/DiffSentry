@@ -422,8 +422,15 @@ export class GitHubClient {
     ]);
 
     const fileCap = maxFiles != null && maxFiles > 0 ? maxFiles : this.config.maxFilesPerReview;
+    const ignoredFiles: string[] = [];
     const files: FileChange[] = filesResponse.data
-      .filter((f) => !this.isIgnored(f.filename))
+      .filter((f) => {
+        if (this.isIgnored(f.filename)) {
+          ignoredFiles.push(f.filename);
+          return false;
+        }
+        return true;
+      })
       .slice(0, fileCap)
       .map((f) => ({
         filename: f.filename,
@@ -445,6 +452,7 @@ export class GitHubClient {
       headSha: pr.data.head.sha,
       defaultBranch: pr.data.base.repo.default_branch,
       files,
+      ignoredFiles,
       isDraft: pr.data.draft,
       labels: pr.data.labels.map((l) => l.name ?? ""),
       author: pr.data.user?.login,

@@ -583,6 +583,45 @@ export class Reviewer {
 
       if (context.files.length === 0) {
         log.info("No reviewable files in PR, skipping");
+
+        // Distinguish "PR only contains files we deliberately skip (a minified
+        // bundle, lockfile, generated output)" from a genuinely empty diff. In
+        // the former case, post an info comment naming the skipped files so the
+        // PR doesn't just show a green check with no explanation — and so the
+        // "…reviewing… hang tight" status comment gets resolved rather than
+        // left hanging forever. `filesSkippedSimilar` is excluded on purpose:
+        // in incremental mode it means nothing new changed (a true no-op).
+        const skippedGroups: Array<{ label: string; files: string[] }> = [
+          { label: "Ignored (minified, generated, or lockfile)", files: context.ignoredFiles ?? [] },
+          { label: "Excluded by path filters", files: filesIgnoredByPathFilter.map((f) => f.path) },
+          { label: "No reviewable changes", files: filesSkippedTrivial },
+        ].filter((g) => g.files.length > 0);
+
+        if (skippedGroups.length > 0) {
+          const totalSkipped = skippedGroups.reduce((n, g) => n + g.files.length, 0);
+          const body =
+            STATUS_MARKER + "\n" +
+            `> :next_track_button: **DiffSentry** — no reviewable changes. ` +
+            `This ${mode === "full" ? "pull request" : "update"} only contains ` +
+            `${totalSkipped} file${totalSkipped === 1 ? "" : "s"} DiffSentry skips, ` +
+            `so there's nothing to review.\n\n` +
+            skippedGroups
+              .map((g) =>
+                `<details><summary>${g.label} (${g.files.length})</summary>\n\n` +
+                g.files.map((f) => `- \`${f}\``).join("\n") +
+                `\n</details>`,
+              )
+              .join("\n\n");
+          try {
+            await this.github.upsertComment(
+              installationId, owner, repo, pullNumber, body, STATUS_MARKER, signal
+            );
+            log.info({ totalSkipped }, "Posted no-reviewable-files status comment");
+          } catch (err) {
+            log.warn({ err }, "Failed to post no-reviewable-files status comment");
+          }
+        }
+
         if (repoConfig.reviews?.commit_status !== false) {
           await this.github.setCommitStatus(
             installationId, owner, repo, context.headSha,

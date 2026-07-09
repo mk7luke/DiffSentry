@@ -385,6 +385,13 @@ export interface PRContext {
   /** Repo default branch (e.g. "main"). Authoritative source for .diffsentry.yaml. */
   defaultBranch?: string;
   files: FileChange[];
+  /**
+   * Filenames dropped by the operator-level ignore list (`ignoredPatterns` —
+   * e.g. *.min.js, *.map, dist/**, lockfiles) before `files` was built. Kept so
+   * the reviewer can tell "PR only contains ignored files (minified bundle)"
+   * apart from a genuinely empty diff and surface which files were skipped.
+   */
+  ignoredFiles?: string[];
   isDraft?: boolean;
   labels?: string[];
   author?: string;
