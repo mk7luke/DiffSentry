@@ -82,6 +82,85 @@ export function loadConfig(): Config {
     ? parsedTimeout
     : DEFAULT_AI_REQUEST_TIMEOUT_MS;
 
+  // ─── Backup AI provider (failover) — off unless BACKUP_AI_PROVIDER is set ───
+  const backupRaw = process.env.BACKUP_AI_PROVIDER;
+  let backupAiProvider: Config["backupAiProvider"];
+  let backupAnthropicApiKey: string | undefined;
+  let backupAnthropicModel: string | undefined;
+  let backupAnthropicBaseUrl: string | undefined;
+  let backupOpenaiApiKey: string | undefined;
+  let backupOpenaiModel: string | undefined;
+  let backupOpenaiBaseUrl: string | undefined;
+  let backupLocalAiBaseUrl: string | undefined;
+  let backupLocalAiApiKey: string | undefined;
+  let backupLocalAiModel: string | undefined;
+  let backupLocalAiJsonMode: boolean | undefined;
+
+  if (backupRaw) {
+    if (!isAiProvider(backupRaw)) {
+      throw new Error(
+        `BACKUP_AI_PROVIDER must be one of: ${AI_PROVIDERS.join(", ")} (got: ${backupRaw})`
+      );
+    }
+    backupAiProvider = backupRaw;
+
+    // Reuse-with-override: BACKUP_* wins, else fall back to the primary's env.
+    backupAnthropicApiKey = process.env.BACKUP_ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
+    backupAnthropicModel = process.env.BACKUP_ANTHROPIC_MODEL || process.env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL;
+    backupAnthropicBaseUrl = process.env.BACKUP_ANTHROPIC_BASE_URL || process.env.ANTHROPIC_BASE_URL;
+    backupOpenaiApiKey = process.env.BACKUP_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+    backupOpenaiModel = process.env.BACKUP_OPENAI_MODEL || process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
+    backupOpenaiBaseUrl = process.env.BACKUP_OPENAI_BASE_URL || process.env.OPENAI_BASE_URL;
+    backupLocalAiBaseUrl = process.env.BACKUP_LOCAL_AI_BASE_URL || process.env.LOCAL_AI_BASE_URL;
+    backupLocalAiApiKey = process.env.BACKUP_LOCAL_AI_API_KEY || process.env.LOCAL_AI_API_KEY;
+    backupLocalAiModel = process.env.BACKUP_LOCAL_AI_MODEL || process.env.LOCAL_AI_MODEL || "";
+    backupLocalAiJsonMode =
+      (process.env.BACKUP_LOCAL_AI_JSON_MODE || process.env.LOCAL_AI_JSON_MODE || "true").toLowerCase() !== "false";
+
+    // Fail fast if the resolved backup can't actually be constructed.
+    if (backupAiProvider === "anthropic" && !backupAnthropicApiKey) {
+      throw new Error("BACKUP_AI_PROVIDER=anthropic requires BACKUP_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY");
+    }
+    if (backupAiProvider === "openai" && !backupOpenaiApiKey) {
+      throw new Error("BACKUP_AI_PROVIDER=openai requires BACKUP_OPENAI_API_KEY or OPENAI_API_KEY");
+    }
+    if (backupAiProvider === "openai-compatible" && (!backupLocalAiBaseUrl || !backupLocalAiModel)) {
+      throw new Error(
+        "BACKUP_AI_PROVIDER=openai-compatible requires BACKUP_LOCAL_AI_BASE_URL and BACKUP_LOCAL_AI_MODEL " +
+          "(or the primary LOCAL_AI_BASE_URL / LOCAL_AI_MODEL to reuse)"
+      );
+    }
+  }
+
+  // Short primary deadline (only meaningful when a backup is configured). Clamp
+  // to at most the normal bound so the primary is never given LONGER than the
+  // overall per-op budget.
+  // The short primary deadline and the breaker knobs only matter when a backup
+  // is configured; keep them at their defaults (and don't even read their env)
+  // when failover is off, so a mis-set PRIMARY_AI_TIMEOUT_MS can't affect an
+  // operator who never opted into failover. Preserves the "off by default =
+  // unchanged" invariant.
+  let primaryAiTimeoutMs = 20_000;
+  let backupCircuitThreshold = 3;
+  let backupCircuitCooldownMs = 60_000;
+  if (backupAiProvider) {
+    // A non-positive value would disable the primary's bound (withAiTimeout
+    // treats timeoutMs <= 0 as "no deadline"), leaving the primary un-bounded and
+    // defeating fast failover. Reject it and fall back to the 20s default.
+    const parsedPrimaryTimeout = parseInt(process.env.PRIMARY_AI_TIMEOUT_MS || "", 10);
+    primaryAiTimeoutMs =
+      Number.isFinite(parsedPrimaryTimeout) && parsedPrimaryTimeout > 0 ? parsedPrimaryTimeout : 20_000;
+    if (aiRequestTimeoutMs > 0 && primaryAiTimeoutMs > aiRequestTimeoutMs) {
+      primaryAiTimeoutMs = aiRequestTimeoutMs;
+    }
+
+    const parsedThreshold = parseInt(process.env.BACKUP_CIRCUIT_THRESHOLD || "", 10);
+    backupCircuitThreshold = Number.isFinite(parsedThreshold) && parsedThreshold >= 1 ? parsedThreshold : 3;
+
+    const parsedCooldown = parseInt(process.env.BACKUP_CIRCUIT_COOLDOWN_MS || "", 10);
+    backupCircuitCooldownMs = Number.isFinite(parsedCooldown) && parsedCooldown >= 0 ? parsedCooldown : 60_000;
+  }
+
   const ignoredPatterns = (process.env.IGNORED_PATTERNS || "")
     .split(",")
     .map((p) => p.trim())
@@ -117,6 +196,20 @@ export function loadConfig(): Config {
     localAiModel: process.env.LOCAL_AI_MODEL || "",
     localAiJsonMode: (process.env.LOCAL_AI_JSON_MODE || "true").toLowerCase() !== "false",
     aiRequestTimeoutMs,
+    backupAiProvider,
+    backupAnthropicApiKey,
+    backupAnthropicModel,
+    backupAnthropicBaseUrl,
+    backupOpenaiApiKey,
+    backupOpenaiModel,
+    backupOpenaiBaseUrl,
+    backupLocalAiBaseUrl,
+    backupLocalAiApiKey,
+    backupLocalAiModel,
+    backupLocalAiJsonMode,
+    primaryAiTimeoutMs,
+    backupCircuitThreshold,
+    backupCircuitCooldownMs,
     maxFilesPerReview: parseInt(process.env.MAX_FILES_PER_REVIEW || "50", 10),
     ignoredPatterns: [...defaultIgnored, ...ignoredPatterns],
     botName: process.env.BOT_NAME || "diffsentry",
