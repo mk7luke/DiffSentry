@@ -33,7 +33,7 @@ import { runSafetyScanners } from "./safety-scanner.js";
 import { runPatternChecks } from "./pattern-checks.js";
 import { runStaticAnalysis, resolveCheckoutDir, dedupeStaticFindings } from "./static-analysis.js";
 import { scanDependencyChanges, renderDepBlock } from "./dep-scanner.js";
-import { detectDescriptionDrift, renderDriftBlock, reviewCommitMessages, renderCommitCoachBlock, reviewPRTitle, renderTitleCoachBlock, scanLicenseHeaders, renderLicenseHeaderBlock } from "./drift.js";
+import { detectDescriptionDrift, applyDriftToApproval, renderDriftBlock, reviewCommitMessages, renderCommitCoachBlock, reviewPRTitle, renderTitleCoachBlock, scanLicenseHeaders, renderLicenseHeaderBlock } from "./drift.js";
 import { createHash } from "node:crypto";
 import { logger } from "./logger.js";
 import { bus } from "./realtime/bus.js";
@@ -1064,13 +1064,7 @@ export class Reviewer {
             ),
           );
         }
-        // Withholding an approval is a claim about the change, so only drift we
-        // actually stand behind may do it. A hedged observation still renders
-        // (collapsed, uncounted) — but it rides along with the APPROVE rather
-        // than quietly turning every clean PR into a commented one.
-        if (reviewResult.approval === "APPROVE" && driftWarnings.some((f) => f.confidence === "high")) {
-          reviewResult.approval = "COMMENT";
-        }
+        reviewResult.approval = applyDriftToApproval(reviewResult.approval, driftWarnings);
         log.info(
           { count: driftWarnings.length, highConfidence: driftWarnings.filter((f) => f.confidence === "high").length },
           "Folded description-drift warnings into PR-level findings",

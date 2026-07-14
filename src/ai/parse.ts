@@ -200,8 +200,16 @@ export function prLevelRepeatKey(path: string, title: string): string {
 
 /**
  * Whether a PR-level finding restates one already posted on a previous review.
- * Only compares findings scoped to the same file (or both unscoped), so a real
- * finding is never swallowed by a same-sounding one about different code.
+ * Covers BOTH prLevel flavours — the caller filters on `prLevel`, so file-scoped
+ * findings dedup here too and re-wordings don't stack duplicate threads in the
+ * Files tab across pushes.
+ *
+ * `path` is part of a finding's identity, so comparison is same-scope only: a
+ * file-scoped finding matches only file-scoped priors on that same file, and an
+ * unscoped one only unscoped priors. Two findings that read alike about
+ * different code are different findings. This is why drift must keep emitting
+ * with `path: ""` (reviewer.ts) — scope it to a file and it stops collapsing
+ * against its own unscoped history.
  */
 export function isRepeatPrLevelFinding(
   candidate: { path: string; title?: string },

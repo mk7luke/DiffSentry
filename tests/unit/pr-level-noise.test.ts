@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { formatReviewBody, reconcileApproval, isVisiblyActionable } from "../../src/review-body.js";
 import { titleSimilarity, isRepeatPrLevelFinding, prLevelRepeatKey } from "../../src/ai/parse.js";
-import { detectDescriptionDrift } from "../../src/drift.js";
+import { detectDescriptionDrift, applyDriftToApproval, type DriftFinding } from "../../src/drift.js";
 import { GitHubClient } from "../../src/github.js";
 import type { Config, PRContext, ReviewComment, ReviewResult } from "../../src/types.js";
 
@@ -158,6 +158,44 @@ describe("reconcileApproval with confidence-gated findings", () => {
   });
 });
 
+describe("applyDriftToApproval: only drift we stand behind costs an approval", () => {
+  function drift(confidence: DriftFinding["confidence"]): DriftFinding {
+    return { level: "warning", summary: "s", details: "d", confidence };
+  }
+
+  it("keeps APPROVE when the only drift is medium-confidence", () => {
+    // The headline promise: a hedged diff-vs-description reading must not
+    // quietly turn a clean PR into a commented one.
+    expect(applyDriftToApproval("APPROVE", [drift("medium")])).toBe("APPROVE");
+  });
+
+  it("keeps APPROVE when the only drift is low-confidence", () => {
+    expect(applyDriftToApproval("APPROVE", [drift("low")])).toBe("APPROVE");
+  });
+
+  it("downgrades APPROVE to COMMENT for high-confidence drift", () => {
+    expect(applyDriftToApproval("APPROVE", [drift("high")])).toBe("COMMENT");
+  });
+
+  it("downgrades when any drift in a mixed set is high-confidence", () => {
+    expect(applyDriftToApproval("APPROVE", [drift("medium"), drift("high")])).toBe("COMMENT");
+  });
+
+  it("never escalates a block or relaxes one", () => {
+    expect(applyDriftToApproval("REQUEST_CHANGES", [drift("high")])).toBe("REQUEST_CHANGES");
+    expect(applyDriftToApproval("COMMENT", [drift("high")])).toBe("COMMENT");
+    expect(applyDriftToApproval("APPROVE", [])).toBe("APPROVE");
+  });
+
+  it("cannot be turned into a downgrade by reconcileApproval afterwards", () => {
+    // reconcileApproval is the only other thing that touches the verdict, and it
+    // guards on REQUEST_CHANGES — so the APPROVE + medium-drift path stays
+    // APPROVE end to end, through both rules in the order reviewer.ts runs them.
+    const approval = applyDriftToApproval("APPROVE", [drift("medium")]);
+    expect(reconcileApproval(approval, [bodyFinding({ confidence: "medium" })])).toBe("APPROVE");
+  });
+});
+
 describe("titleSimilarity / isRepeatPrLevelFinding", () => {
   it("scores a re-worded restatement of one finding above the repeat threshold", () => {
     const a = "Lead detail removes editable Qualification Long Form fields";
@@ -197,6 +235,30 @@ describe("titleSimilarity / isRepeatPrLevelFinding", () => {
   it("suppresses nothing when there is no prior state or no title", () => {
     expect(isRepeatPrLevelFinding({ path: "", title: "anything" }, [])).toBe(false);
     expect(isRepeatPrLevelFinding({ path: "", title: undefined }, [prLevelRepeatKey("", "anything")])).toBe(false);
+  });
+
+  it("covers FILE-level findings, not just body-level ones", () => {
+    // Guards the property that keeps re-worded file findings from stacking
+    // duplicate threads in the Files tab on every push: the reviewer's
+    // similarity pass filters on `c.prLevel`, which spans both flavours, and
+    // records keys with each finding's real path. A path-scoped repeat must
+    // collapse against its path-scoped prior exactly like an unscoped one does.
+    const prior = [prLevelRepeatKey("src/22-leads.js", "Lead detail removes editable Qualification Long Form fields")];
+    const reworded = {
+      path: "src/22-leads.js",
+      title: "Lead detail removes the editable Qualification Long Form accordion fields",
+    };
+    expect(isRepeatPrLevelFinding(reworded, prior)).toBe(true);
+  });
+
+  it("keeps file-level and body-level findings in separate identity scopes", () => {
+    // Drift is always emitted unscoped (path: ""), so an unscoped candidate must
+    // not collapse against a same-titled file-scoped prior — they are claims
+    // about different things and each deserves its own thread/section.
+    const fileScopedPrior = [prLevelRepeatKey("src/a.ts", "Lead detail removes editable Qualification Long Form")];
+    expect(
+      isRepeatPrLevelFinding({ path: "", title: "Lead detail removes editable Qualification Long Form" }, fileScopedPrior),
+    ).toBe(false);
   });
 });
 

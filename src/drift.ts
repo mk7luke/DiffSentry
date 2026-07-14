@@ -1,4 +1,4 @@
-import type { AIProvider, Confidence, FileChange, LicenseHeaderConfig, PRContext } from "./types.js";
+import type { AIProvider, Confidence, FileChange, LicenseHeaderConfig, PRContext, ReviewResult } from "./types.js";
 import { minimatch } from "minimatch";
 
 /**
@@ -75,6 +75,24 @@ Be specific — name files and identifiers, don't say "various changes".`;
   } catch {
     return [];
   }
+}
+
+/**
+ * How folded drift may move the verdict. Withholding an approval is itself a
+ * claim about the change, so only drift the model actually stands behind may do
+ * it — a hedged observation still renders (collapsed, uncounted) but rides along
+ * with the APPROVE rather than quietly turning every clean PR into a commented
+ * one. Pure and one-directional: drift may cost an approval, never grant one,
+ * and never escalates to a block.
+ */
+export function applyDriftToApproval(
+  approval: ReviewResult["approval"],
+  driftWarnings: DriftFinding[],
+): ReviewResult["approval"] {
+  if (approval === "APPROVE" && driftWarnings.some((f) => f.confidence === "high")) {
+    return "COMMENT";
+  }
+  return approval;
 }
 
 export function renderDriftBlock(findings: DriftFinding[]): string {
