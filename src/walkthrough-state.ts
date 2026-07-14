@@ -26,6 +26,11 @@ export interface WalkthroughState {
   fileShas?: Record<string, string>;
   /** Inline-comment fingerprints already posted (for dedup). */
   postedFingerprints?: string[];
+  /** Keys (`path \t title`) of PR-level findings already posted, for similarity
+   *  dedup. Separate from postedFingerprints because a PR-level finding has no
+   *  `path:line` to pin its fingerprint — see isRepeatPrLevelFinding in
+   *  ai/parse.ts. Capped at the most recent 50; older entries fall off. */
+  postedPrLevelKeys?: string[];
   /** Files we processed (passed path filters, had reviewable changes). */
   filesProcessed?: string[];
   /** Files skipped because their content matches the previously reviewed snapshot. */

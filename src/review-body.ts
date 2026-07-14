@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type {
+  Confidence,
   PRContext,
   ReviewComment,
   ReviewResult,
@@ -31,7 +32,7 @@ export type ReviewBodyMeta = {
   incrementalFromSha?: string;
 };
 
-const REVIEW_BODY_MARKER = "<!-- This is an auto-generated comment by DiffSentry for review status -->";
+export const REVIEW_BODY_MARKER = "<!-- This is an auto-generated comment by DiffSentry for review status -->";
 
 /**
  * Honest banner for the parse-failure path. When the AI's response can't be
@@ -67,18 +68,65 @@ export function isNitpick(c: ReviewComment): boolean {
 }
 
 /**
- * A REQUEST_CHANGES verdict must be backed by at least one actionable finding
- * (inline OR PR-level; nitpicks/suggestions don't count). When every backing
- * finding was dropped by line-anchoring/verification — or the model requested
- * changes while describing the problem only in the summary — return COMMENT so
- * the verdict and the visible findings never contradict each other. Pure and
- * one-directional: only ever relaxes a block, never creates one.
+ * The two flavours of `prLevel` finding, distinguished by whether a `path`
+ * survived. Both carry line 0 and are excluded from inline posting.
+ *
+ * - FILE-level (`path` set): the model located the finding in a specific file
+ *   but on a line we couldn't anchor to the diff (see the demotion path in
+ *   ai/parse.ts). GitHub can host these as real, resolvable file-scoped review
+ *   threads (`subject_type: "file"`), so they are posted as threads rather than
+ *   rendered into the review body.
+ * - BODY-level (`path` empty): no file to attach to at all — the diff versus the
+ *   PR description, or a concern spanning the whole change. GitHub has nowhere
+ *   to hang a thread, so these are the only findings that must live as prose in
+ *   the review body.
+ */
+export function isFileLevelFinding(c: ReviewComment): boolean {
+  return c.prLevel === true && !!c.path && c.line === 0;
+}
+
+export function isPrBodyFinding(c: ReviewComment): boolean {
+  return c.prLevel === true && !c.path;
+}
+
+/** Confidence with the documented default applied (see ai/prompt.ts: an omitted
+ *  confidence means the model was sure enough not to qualify the finding). */
+export function confidenceOf(c: ReviewComment): Confidence {
+  return c.confidence ?? "high";
+}
+
+/**
+ * Whether a finding is actionable AND lands somewhere the reader can act on it.
+ *
+ * Inline and file-level findings become resolvable threads, so being actionable
+ * is enough. Body-level findings are unresolvable prose in the review summary —
+ * the one place noise cannot be dismissed — so they must additionally be
+ * high-confidence to claim that space. A medium/low-confidence body finding
+ * still renders, but in a collapsed block and without inflating the count.
+ *
+ * Single source of truth for both the "Actionable comments posted" count and the
+ * REQUEST_CHANGES invariant, so the number in the header and the verdict can
+ * never disagree about what counts.
+ */
+export function isVisiblyActionable(c: ReviewComment): boolean {
+  if (isNitpick(c)) return false;
+  if (isPrBodyFinding(c)) return confidenceOf(c) === "high";
+  return true;
+}
+
+/**
+ * A REQUEST_CHANGES verdict must be backed by at least one finding the reader
+ * can actually see and act on. When every backing finding was dropped by
+ * line-anchoring/verification, demoted into a collapsed low-confidence block, or
+ * the model requested changes while describing the problem only in the summary,
+ * return COMMENT so the verdict and the visible findings never contradict each
+ * other. Pure and one-directional: only ever relaxes a block, never creates one.
  */
 export function reconcileApproval(
   approval: ReviewResult["approval"],
   comments: ReviewComment[],
 ): ReviewResult["approval"] {
-  if (approval === "REQUEST_CHANGES" && !comments.some((c) => !isNitpick(c))) {
+  if (approval === "REQUEST_CHANGES" && !comments.some(isVisiblyActionable)) {
     return "COMMENT";
   }
   return approval;
@@ -130,13 +178,17 @@ function renderNitpickEntry(c: ReviewComment): string {
 }
 
 /**
- * Findings not tied to a specific changed line (prLevel) — e.g. the diff
- * contradicts the PR description, a claimed change is missing, or a cross-cutting
- * concern. They can't be posted as GitHub inline comments, so without this
- * section they'd be invisible: the review would read as "changes requested / 0
- * actionable comments" with the substance only hinted at in the summary. Each
- * comment's `body` is already the fully-formatted standalone block (type/severity
- * header, title, prose, agent prompt), so we render it directly.
+ * Body-level findings with nowhere to hang a thread — the diff contradicts the
+ * PR description, a claimed change is missing, a concern spans the whole change.
+ * Without this section they'd be invisible: the review would read as "changes
+ * requested / 0 actionable comments" with the substance only hinted at in the
+ * summary. Each comment's `body` is already the fully-formatted standalone block
+ * (type/severity header, title, prose, agent prompt), so we render it directly.
+ *
+ * Deliberately narrow. This is the only DiffSentry output a reader cannot
+ * resolve, reply to, or collapse — it reprints in full on every subsequent
+ * review — so entry is gated on high confidence by isVisiblyActionable.
+ * Everything else goes to renderUncertainPrLevelSection below.
  */
 function renderPrLevelSection(prLevel: ReviewComment[]): string {
   if (prLevel.length === 0) return "";
@@ -147,6 +199,28 @@ function renderPrLevelSection(prLevel: ReviewComment[]): string {
     "<sub>These findings concern the change as a whole (for example, the diff versus the PR description) and can't be attached to a single changed line.</sub>",
     "",
     blocks,
+  ].join("\n");
+}
+
+/**
+ * Body-level findings the model itself flagged as medium/low confidence. They're
+ * hypotheses that depend on intent the model can't see, so they're worth
+ * surfacing but not worth the top of the review: collapsed, and excluded from
+ * the actionable count. Same treatment the nitpick collapse gives uncertain
+ * inline findings.
+ */
+function renderUncertainPrLevelSection(prLevel: ReviewComment[]): string {
+  if (prLevel.length === 0) return "";
+  const blocks = prLevel.map((c) => c.body.trim()).join("\n\n---\n\n");
+  return [
+    `<details>`,
+    `<summary>🤔 Lower-confidence observations about the change as a whole (${prLevel.length})</summary><blockquote>`,
+    "",
+    "<sub>DiffSentry is unsure about these — they depend on intent it can't verify from the diff. Worth a glance, not a blocker.</sub>",
+    "",
+    blocks,
+    "",
+    `</blockquote></details>`,
   ].join("\n");
 }
 
@@ -342,16 +416,25 @@ export function formatReviewBody(
   result: ReviewResult,
   meta: ReviewBodyMeta,
 ): string {
-  // Three buckets. PR-level findings (no diff-line anchor) are split out first
-  // so they render in their own section and never leak into the inline
-  // nitpick/actionable collapses. The "posted" count spans inline actionable +
-  // actionable PR-level findings, so a blocking review whose only finding is
-  // PR-level no longer reads as "Actionable comments posted: 0".
-  const prLevel = result.comments.filter((c) => c.prLevel);
+  // Buckets, by where each finding ends up in the rendered PR.
+  //
+  //   inline    → resolvable line threads (posted by submitReview)
+  //   fileLevel → resolvable file threads (posted by submitReview); NOT rendered
+  //               here, or they'd say everything twice
+  //   prBody    → prose in this body; the only unresolvable channel, so it's
+  //               split by confidence: high gets its own section, the rest
+  //               collapses
+  //
+  // The "posted" count spans everything visibly actionable across all three, so
+  // a blocking review whose only finding is unanchored still reads honestly
+  // instead of "Actionable comments posted: 0".
+  const fileLevel = result.comments.filter(isFileLevelFinding);
+  const prBody = result.comments.filter(isPrBodyFinding);
   const inline = result.comments.filter((c) => !c.prLevel);
-  const actionable = inline.filter((c) => !isNitpick(c));
   const nitpicks = inline.filter(isNitpick);
-  const actionableCount = actionable.length + prLevel.filter((c) => !isNitpick(c)).length;
+  const prBodyProminent = prBody.filter(isVisiblyActionable);
+  const prBodyUncertain = prBody.filter((c) => !isVisiblyActionable(c));
+  const actionableCount = [...inline, ...fileLevel, ...prBody].filter(isVisiblyActionable).length;
   const runId = randomUUID();
 
   const sections: string[] = [];
@@ -375,11 +458,14 @@ export function formatReviewBody(
     sections.push(result.summary.trim());
   }
 
-  const prLevelBlock = renderPrLevelSection(prLevel);
+  const prLevelBlock = renderPrLevelSection(prBodyProminent);
   if (prLevelBlock) sections.push(prLevelBlock);
 
   const nitpicksBlock = renderNitpicksSection(nitpicks);
   if (nitpicksBlock) sections.push(nitpicksBlock);
+
+  const uncertainBlock = renderUncertainPrLevelSection(prBodyUncertain);
+  if (uncertainBlock) sections.push(uncertainBlock);
 
   // Only inline comments feed the bulk agent prompt — its entries are keyed by
   // `path`/`line`, which PR-level findings don't have (their agent prompt is

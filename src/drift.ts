@@ -1,4 +1,4 @@
-import type { AIProvider, FileChange, LicenseHeaderConfig, PRContext } from "./types.js";
+import type { AIProvider, Confidence, FileChange, LicenseHeaderConfig, PRContext, ReviewResult } from "./types.js";
 import { minimatch } from "minimatch";
 
 /**
@@ -10,6 +10,12 @@ export type DriftFinding = {
   level: "warning" | "info";
   summary: string;
   details: string;
+  /** How sure the model is that this is real drift rather than a description
+   *  that's merely terse. Drift is diagnosed by comparing prose to code, so it
+   *  is unusually prone to confident-sounding false positives — the reviewer
+   *  fold in reviewer.ts carries this through to the finding, and the review
+   *  body only gives high-confidence drift a prominent, uncollapsed section. */
+  confidence: Confidence;
 };
 
 export async function detectDescriptionDrift(opts: {
@@ -28,6 +34,7 @@ export async function detectDescriptionDrift(opts: {
         details:
           "The PR description has less than 30 characters of meaningful content. " +
           "Consider expanding it so reviewers can see at a glance what changed and why.",
+        confidence: "high",
       },
     ];
   }
@@ -38,10 +45,13 @@ Respond with ONLY a JSON array (no prose, no code fences). Each entry:
 {
   "level": "warning" | "info",
   "summary": "one-line summary",
-  "details": "1-3 sentences with specifics referencing files/symbols"
+  "details": "1-3 sentences with specifics referencing files/symbols",
+  "confidence": "high" | "medium" | "low"
 }
 
 Use "warning" only when the drift is meaningful: missing critical changes, contradictory claims, or unsupported features named. Use "info" for minor omissions. If the description matches the diff well, return an empty array [].
+
+"confidence" is how sure you are the drift is REAL, judged separately from how bad it would be. Use "high" ONLY when the description makes a concrete claim the diff plainly contradicts, and you verified both sides. Use "medium" when the reading depends on intent you can't see — an author's shorthand, an omission that may be deliberate, a description that's incomplete rather than wrong. Use "low" for a hypothesis worth raising but not standing behind. A description being terse or informal is NOT drift. Prefer "medium" when torn: a wrong high-confidence finding costs the reviewer more than a hedged one.
 
 Be specific — name files and identifiers, don't say "various changes".`;
 
@@ -56,10 +66,33 @@ Be specific — name files and identifiers, don't say "various changes".`;
         level: f.level === "info" ? "info" : "warning",
         summary: String(f.summary).slice(0, 200),
         details: String(f.details ?? "").slice(0, 600),
+        // Default to "medium", NOT the "high" that ReviewComment defaults to:
+        // an omitted confidence here means the model didn't engage with the
+        // question, and drift is the finding class least entitled to the
+        // benefit of the doubt. Only an explicit "high" earns the prominent slot.
+        confidence: f.confidence === "high" || f.confidence === "low" ? f.confidence : "medium",
       })) as DriftFinding[];
   } catch {
     return [];
   }
+}
+
+/**
+ * How folded drift may move the verdict. Withholding an approval is itself a
+ * claim about the change, so only drift the model actually stands behind may do
+ * it — a hedged observation still renders (collapsed, uncounted) but rides along
+ * with the APPROVE rather than quietly turning every clean PR into a commented
+ * one. Pure and one-directional: drift may cost an approval, never grant one,
+ * and never escalates to a block.
+ */
+export function applyDriftToApproval(
+  approval: ReviewResult["approval"],
+  driftWarnings: DriftFinding[],
+): ReviewResult["approval"] {
+  if (approval === "APPROVE" && driftWarnings.some((f) => f.confidence === "high")) {
+    return "COMMENT";
+  }
+  return approval;
 }
 
 export function renderDriftBlock(findings: DriftFinding[]): string {
