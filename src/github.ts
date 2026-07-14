@@ -1,7 +1,33 @@
 import { createAppAuth } from "@octokit/auth-app";
 import { Octokit } from "@octokit/rest";
-import { Config, FileChange, PRContext, ReviewResult, IssueContext, IssueComment } from "./types.js";
+import { Config, FileChange, PRContext, ReviewComment, ReviewResult, IssueContext, IssueComment } from "./types.js";
 import { logger } from "./logger.js";
+import { isFileLevelFinding, REVIEW_BODY_MARKER } from "./review-body.js";
+
+type Logger = typeof logger;
+
+/** Body a superseded COMMENTED review is rewritten to. Keeps the timeline entry
+ *  honest (the review did happen) without leaving its full text competing with
+ *  the current one. Carries no REVIEW_BODY_MARKER, so a later run doesn't
+ *  re-retire what's already retired. */
+const SUPERSEDED_REVIEW_STUB =
+  "<sub>🛡️ This DiffSentry review has been superseded by a newer one. Its findings, if still present, appear there.</sub>";
+
+/** Findings GitHub refused as file-scoped threads, rendered into the review body
+ *  so their substance still reaches the reviewer. Rare — the file usually left
+ *  the diff mid-review. */
+function renderFileLevelFallbackSection(comments: ReviewComment[]): string {
+  const blocks = comments
+    .map((c) => `**\`${c.path}\`**\n\n${c.body.trim()}`)
+    .join("\n\n---\n\n");
+  return [
+    `### 🔎 Findings that couldn't be attached to their file (${comments.length})`,
+    "",
+    "<sub>DiffSentry couldn't open a review thread on these files — they may no longer be part of the diff.</sub>",
+    "",
+    blocks,
+  ].join("\n");
+}
 
 // ─── Rate-limit / transient-error backoff ──────────────────────────
 // Every Octokit instance this module hands out (installation- and App-level)
@@ -544,6 +570,96 @@ export class GitHubClient {
     };
   }
 
+  /**
+   * Clear DiffSentry's own superseded reviews off the PR before adding another.
+   *
+   * Two states, two mechanisms, because GitHub only lets you dismiss a review
+   * that carries a verdict:
+   *   - CHANGES_REQUESTED → dismissReview, which strikes it through and drops
+   *     the block.
+   *   - COMMENTED → NOT dismissable (the API rejects it), and submitted reviews
+   *     can't be deleted. The body is editable though, so rewrite it to a
+   *     one-line stub. Without this, every commented review — the state a
+   *     drift-only review lands in — keeps its full text on the timeline
+   *     forever, and each push adds another.
+   *
+   * Matching is on our own body marker, not `user.type === "Bot"`, which would
+   * have us dismissing other bots' reviews.
+   */
+  private async retireSupersededReviews(
+    octokit: Octokit,
+    context: PRContext,
+    log: Logger,
+  ): Promise<void> {
+    try {
+      const reviews = await octokit.paginate(octokit.pulls.listReviews, {
+        owner: context.owner,
+        repo: context.repo,
+        pull_number: context.pullNumber,
+      });
+      const ours = reviews.filter((r) => r.body?.includes(REVIEW_BODY_MARKER));
+
+      for (const review of ours) {
+        try {
+          if (review.state === "CHANGES_REQUESTED") {
+            await octokit.pulls.dismissReview({
+              owner: context.owner,
+              repo: context.repo,
+              pull_number: context.pullNumber,
+              review_id: review.id,
+              message: "Superseded by a newer DiffSentry review.",
+            });
+          } else if (review.state === "COMMENTED") {
+            await octokit.pulls.updateReview({
+              owner: context.owner,
+              repo: context.repo,
+              pull_number: context.pullNumber,
+              review_id: review.id,
+              body: SUPERSEDED_REVIEW_STUB,
+            });
+          }
+        } catch (err) {
+          // One un-retirable review must not block the new one from posting.
+          log.debug({ err, reviewId: review.id, state: review.state }, "Could not retire superseded review");
+        }
+      }
+    } catch {
+      log.warn("Could not list previous reviews to retire (may lack permission)");
+    }
+  }
+
+  /**
+   * Post file-scoped findings as their own resolvable review threads.
+   * Returns the findings GitHub refused, for the caller to fold back into the
+   * review body — most often because the file left the diff since the review
+   * started.
+   */
+  private async postFileLevelComments(
+    octokit: Octokit,
+    context: PRContext,
+    comments: ReviewComment[],
+    log: Logger,
+  ): Promise<ReviewComment[]> {
+    const unpostable: ReviewComment[] = [];
+    for (const c of comments) {
+      try {
+        await octokit.pulls.createReviewComment({
+          owner: context.owner,
+          repo: context.repo,
+          pull_number: context.pullNumber,
+          commit_id: context.headSha,
+          path: c.path,
+          body: c.body,
+          subject_type: "file",
+        });
+      } catch (err) {
+        log.warn({ err, path: c.path }, "File-level comment rejected; folding into review body");
+        unpostable.push(c);
+      }
+    }
+    return unpostable;
+  }
+
   async submitReview(
     installationId: number,
     context: PRContext,
@@ -553,34 +669,28 @@ export class GitHubClient {
     const octokit = await this.getInstallationOctokit(installationId, signal);
     const log = logger.child({ owner: context.owner, repo: context.repo, pr: context.pullNumber });
 
-    // Dismiss previous DiffSentry reviews so we don't pile up stale comments
-    try {
-      const reviews = await octokit.pulls.listReviews({
-        owner: context.owner,
-        repo: context.repo,
-        pull_number: context.pullNumber,
-      });
-      const botReviews = reviews.data.filter(
-        (r) => r.user?.type === "Bot" && r.state === "CHANGES_REQUESTED"
-      );
-      for (const review of botReviews) {
-        await octokit.pulls.dismissReview({
-          owner: context.owner,
-          repo: context.repo,
-          pull_number: context.pullNumber,
-          review_id: review.id,
-          message: "Superseded by new review.",
-        });
-      }
-    } catch {
-      log.warn("Could not dismiss previous reviews (may lack permission)");
-    }
+    await this.retireSupersededReviews(octokit, context, log);
 
     // Submit the new review
     const validComments = result.comments.filter((c) => c.line > 0 && c.path);
 
+    // File-scoped findings: the model named a file but no line we could anchor
+    // to the diff. GitHub hosts these as real review threads via
+    // `subject_type: "file"` — resolvable, repliable, and collapsible like any
+    // inline comment — so post them as threads instead of as permanent prose in
+    // the review body. They go FIRST: any that GitHub rejects are folded back
+    // into the body below, so a finding is never silently lost between the two
+    // channels (the failure #76 set out to fix).
+    const fileLevelComments = result.comments.filter(isFileLevelFinding);
+    const unpostable = await this.postFileLevelComments(octokit, context, fileLevelComments, log);
+
+    let body = result.summary;
+    if (unpostable.length > 0) {
+      body += "\n\n" + renderFileLevelFallbackSection(unpostable);
+    }
+
     // GitHub rejects reviews with empty body and no comments (422)
-    if (!result.summary && validComments.length === 0) {
+    if (!body && validComments.length === 0) {
       log.warn("Skipping review submission: no summary and no comments");
       return;
     }
@@ -592,7 +702,7 @@ export class GitHubClient {
         pull_number: context.pullNumber,
         commit_id: context.headSha,
         event: result.approval,
-        body: result.summary,
+        body,
         comments: validComments.map((c) => ({
           path: c.path,
           line: c.line,
@@ -601,7 +711,7 @@ export class GitHubClient {
         })),
       });
       log.info(
-        { comments: validComments.length, event: result.approval },
+        { comments: validComments.length, fileLevel: fileLevelComments.length - unpostable.length, event: result.approval },
         "Review submitted"
       );
     } catch (err: any) {
@@ -618,7 +728,7 @@ export class GitHubClient {
           pull_number: context.pullNumber,
           commit_id: context.headSha,
           event: result.approval,
-          body: `${result.summary}\n\n---\n\n## Inline Comments\n\n${commentBlock}`,
+          body: `${body}\n\n---\n\n## Inline Comments\n\n${commentBlock}`,
         });
       } else {
         throw err;

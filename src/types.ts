@@ -301,9 +301,18 @@ export interface ReviewComment {
   /** A finding NOT tied to a specific changed line — e.g. the diff contradicts
    *  the PR description, a claimed change is missing, or a cross-cutting concern
    *  spans the whole PR. These carry title/body/severity but no meaningful
-   *  `line` (conventionally 0), are never posted as GitHub inline comments
-   *  (submitReview's `line > 0` filter excludes them), and are rendered in a
-   *  dedicated "not tied to a specific line" section of the review body. */
+   *  `line` (conventionally 0) and are never posted as inline comments
+   *  (submitReview's `line > 0` filter excludes them).
+   *
+   *  `path` then decides where the finding surfaces, because it decides whether
+   *  GitHub can host a thread for it (see isFileLevelFinding / isPrBodyFinding
+   *  in review-body.ts):
+   *   - path set   → posted as a resolvable file-scoped review thread
+   *                  (`subject_type: "file"`).
+   *   - path empty → no file to attach to, so it renders as prose in the review
+   *                  body — the one channel a reader can't resolve or collapse,
+   *                  which is why entry there additionally requires high
+   *                  `confidence`. */
   prLevel?: boolean;
   /** Set by the pattern engine so callers can record the hit source without
    *  re-sniffing the rendered body. "builtin" = shipped heuristic; "custom" =

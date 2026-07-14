@@ -9,7 +9,12 @@ import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, for
 import { parseCommand, formatHelpMessage, formatConfigMessage } from "./commands.js";
 import { parseIssueCommand, formatIssueHelpMessage } from "./issue-commands.js";
 import { buildIssueSummaryInstruction, buildIssuePlanInstruction } from "./ai/prompt.js";
-import { synthesizeReviewSummary, buildReviewComment } from "./ai/parse.js";
+import {
+  synthesizeReviewSummary,
+  buildReviewComment,
+  isRepeatPrLevelFinding,
+  prLevelRepeatKey,
+} from "./ai/parse.js";
 import { verifyFindings } from "./ai/verify.js";
 import { LearningsStore, synthesizeLearning, extractFindingMeta, type FindingContext } from "./learnings.js";
 import { loadGuidelines, getRelevantGuidelines, formatGuidelinesForPrompt } from "./guidelines.js";
@@ -591,6 +596,7 @@ export class Reviewer {
         getWalkthroughState(owner, repo, pullNumber) ??
         (priorComment ? extractState(priorComment.body) : null);
       const priorFingerprints = new Set(priorState?.postedFingerprints ?? []);
+      const priorPrLevelKeys = priorState?.postedPrLevelKeys ?? [];
 
       // Classify each file against prior state
       const currentFileShas: Record<string, string> = {};
@@ -1025,10 +1031,19 @@ export class Reviewer {
       // line to anchor to, so they belong in the PR-level channel (visible +
       // actionable) rather than buried as an info block in the walkthrough. This
       // also gives the REQUEST_CHANGES invariant below a deterministic backstop.
-      // Non-blocking on their own: they bump APPROVE→COMMENT but never force
-      // REQUEST_CHANGES. Info-level drift (incl. the "description too short"
-      // sentinel) stays in the walkthrough block. Deduped cross-review by
-      // fingerprint alongside every other finding.
+      // Non-blocking on their own: high-confidence drift bumps APPROVE→COMMENT,
+      // but none of it ever forces REQUEST_CHANGES. Info-level drift (incl. the
+      // "description too short" sentinel) stays in the walkthrough block.
+      // Deduped cross-review by fingerprint and by title similarity alongside
+      // every other finding.
+      //
+      // severity and confidence are orthogonal here and must not be conflated:
+      // "major" says drift matters IF real (the drift prompt only emits
+      // level: "warning" for meaningful discrepancies), while the model's own
+      // confidence says whether it IS real. Only confidence may decide whether a
+      // finding claims the prominent, unresolvable section of the review body;
+      // pinning it to a constant here hands every drift warning a Major slot at
+      // the top of the review regardless of how sure the model was.
       const driftWarnings = driftFindings.filter((f) => f.level === "warning");
       if (driftWarnings.length > 0) {
         for (const f of driftWarnings) {
@@ -1043,16 +1058,23 @@ export class Reviewer {
                 type: "issue",
                 severity: "major",
                 aiAgentPrompt: `Reconcile the PR description with the actual diff. ${f.summary} ${f.details}`.trim(),
-                confidence: "medium",
+                confidence: f.confidence,
               },
               { path: "", line: 0, prLevel: true },
             ),
           );
         }
-        if (reviewResult.approval === "APPROVE") {
+        // Withholding an approval is a claim about the change, so only drift we
+        // actually stand behind may do it. A hedged observation still renders
+        // (collapsed, uncounted) — but it rides along with the APPROVE rather
+        // than quietly turning every clean PR into a commented one.
+        if (reviewResult.approval === "APPROVE" && driftWarnings.some((f) => f.confidence === "high")) {
           reviewResult.approval = "COMMENT";
         }
-        log.info({ count: driftWarnings.length }, "Folded description-drift warnings into PR-level findings");
+        log.info(
+          { count: driftWarnings.length, highConfidence: driftWarnings.filter((f) => f.confidence === "high").length },
+          "Folded description-drift warnings into PR-level findings",
+        );
       }
       const risk = assessRisk({
         files: context.files,
@@ -1253,6 +1275,17 @@ export class Reviewer {
               ...reviewResult.comments.map((c) => c.fingerprint).filter((x): x is string => !!x),
             ]),
           ),
+          // Trailing window, most-recent last: a PR-level finding that stopped
+          // recurring 50 findings ago is not worth suppressing forever, and the
+          // list is compared token-wise (not hashed), so it has to stay bounded.
+          postedPrLevelKeys: Array.from(
+            new Set([
+              ...(priorState?.postedPrLevelKeys ?? []),
+              ...reviewResult.comments
+                .filter((c) => c.prLevel && c.title)
+                .map((c) => prLevelRepeatKey(c.path, c.title!)),
+            ]),
+          ).slice(-50),
           filesProcessed: context.files.map((f) => f.filename),
           filesSkippedSimilar,
           filesSkippedTrivial,
@@ -1344,6 +1377,27 @@ export class Reviewer {
           }
           return true;
         });
+      }
+
+      // Second dedup pass, PR-level only. The fingerprint pass above catches a
+      // repeat only when the model re-words nothing; a PR-level finding has no
+      // path:line to pin its fingerprint, so any re-phrasing between runs slips
+      // through and the finding reprints in every review body. Match on title
+      // similarity instead. Inline findings never reach here — their fingerprint
+      // is already stable, and near-miss matching would be a real dedup risk
+      // across the many findings a single file can carry.
+      if (priorPrLevelKeys.length > 0) {
+        const before = reviewResult.comments.length;
+        reviewResult.comments = reviewResult.comments.filter((c) => {
+          if (!c.prLevel) return true;
+          if (isRepeatPrLevelFinding(c, priorPrLevelKeys)) {
+            log.debug({ path: c.path, title: c.title }, "Dropping re-worded PR-level finding posted on an earlier review");
+            return false;
+          }
+          return true;
+        });
+        const dropped = before - reviewResult.comments.length;
+        if (dropped > 0) log.info({ dropped }, "Suppressed re-worded PR-level repeats");
       }
 
       // Opt-in: suppress findings whose fingerprint a human has dismissed (or
