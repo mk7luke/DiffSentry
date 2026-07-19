@@ -21,6 +21,12 @@ export type DriftFinding = {
 export async function detectDescriptionDrift(opts: {
   ai: AIProvider;
   context: PRContext;
+  /** Filenames that are part of the PR but whose diffs are absent from the
+   *  prompt (ignored by config, past the file cap, or dropped by the size
+   *  budget). Absence of a diff is not evidence of absence of a change, so the
+   *  model is told to stay silent about these rather than reporting them as
+   *  unsupported description claims. */
+  unavailableFiles?: string[];
 }): Promise<DriftFinding[]> {
   const desc = opts.context.description.trim();
   if (desc.length < 30) {
@@ -55,7 +61,19 @@ Use "warning" only when the drift is meaningful: missing critical changes, contr
 
 Be specific — name files and identifiers, don't say "various changes".`;
 
-  const raw = await opts.ai.chat(opts.context, ask);
+  // Scope guard. The diff shown may be incomplete; claiming "no matching diff"
+  // for code you simply weren't shown is the single most common false positive
+  // this check produces, and it reads as confident because the reasoning is
+  // sound given the (wrong) input.
+  const unavailable = [...new Set(opts.unavailableFiles ?? [])];
+  const scopeNote =
+    unavailable.length > 0
+      ? `\n\nIMPORTANT: these files are part of this PR but their diffs are NOT shown to you: ${unavailable
+          .map((f) => `\`${f}\``)
+          .join(", ")}. Do NOT report drift about them — you cannot see their contents, so you have no evidence either way. Report a claim as unsupported only when the file it concerns IS shown above and plainly lacks the change.`
+      : "";
+
+  const raw = await opts.ai.chat(opts.context, ask + scopeNote);
   const cleaned = raw.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
   try {
     const parsed = JSON.parse(cleaned);

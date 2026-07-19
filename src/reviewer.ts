@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Config, AIProvider, PRContext, RepoConfig, ReviewComment } from "./types.js";
+import { Config, AIProvider, FileChange, PRContext, RepoConfig, ReviewComment } from "./types.js";
 import { buildProvider, ProviderSpec } from "./ai/provider-factory.js";
 import { FailoverProvider } from "./ai/failover.js";
 import { isAiTimeoutError } from "./ai/timeout.js";
@@ -83,6 +83,50 @@ export function normalizePatchForHash(filename: string, patch: string): string {
 
 function patchHash(filename: string, patch: string): string {
   return createHash("sha256").update(normalizePatchForHash(filename, patch)).digest("hex").slice(0, 16);
+}
+
+/**
+ * Splits the PR's files into the set worth reviewing line-by-line and the sets
+ * deliberately skipped (trivial diffs, and — in incremental mode — files whose
+ * patch is byte-identical to the last review).
+ *
+ * `allFiles` is returned alongside deliberately: callers that reason about the
+ * PR as a whole rather than about individual lines (description drift, most
+ * notably) MUST use it rather than `filesToReview`. Judging a whole-PR
+ * description against the incremental slice reports every claim whose code
+ * landed in an earlier commit as unsupported.
+ */
+export function partitionFilesForReview(
+  files: FileChange[],
+  mode: "full" | "incremental",
+  priorFileShas: Record<string, string> | undefined,
+): {
+  allFiles: FileChange[];
+  filesToReview: FileChange[];
+  currentFileShas: Record<string, string>;
+  filesSkippedSimilar: string[];
+  filesSkippedTrivial: string[];
+} {
+  const currentFileShas: Record<string, string> = {};
+  const filesSkippedSimilar: string[] = [];
+  const filesSkippedTrivial: string[] = [];
+  const filesToReview: FileChange[] = [];
+
+  for (const f of files) {
+    const ph = patchHash(f.filename, f.patch);
+    currentFileShas[f.filename] = ph;
+    if (isTrivialPatch(f.patch)) {
+      filesSkippedTrivial.push(f.filename);
+      continue;
+    }
+    if (mode === "incremental" && priorFileShas?.[f.filename] === ph) {
+      filesSkippedSimilar.push(f.filename);
+      continue;
+    }
+    filesToReview.push(f);
+  }
+
+  return { allFiles: files, filesToReview, currentFileShas, filesSkippedSimilar, filesSkippedTrivial };
 }
 
 const WALKTHROUGH_MARKER = "<!-- DiffSentry Walkthrough -->";
@@ -598,24 +642,12 @@ export class Reviewer {
       const priorFingerprints = new Set(priorState?.postedFingerprints ?? []);
       const priorPrLevelKeys = priorState?.postedPrLevelKeys ?? [];
 
-      // Classify each file against prior state
-      const currentFileShas: Record<string, string> = {};
-      const filesSkippedSimilar: string[] = [];
-      const filesSkippedTrivial: string[] = [];
-      const filesToReview: typeof context.files = [];
-      for (const f of context.files) {
-        const ph = patchHash(f.filename, f.patch);
-        currentFileShas[f.filename] = ph;
-        if (isTrivialPatch(f.patch)) {
-          filesSkippedTrivial.push(f.filename);
-          continue;
-        }
-        if (mode === "incremental" && priorState?.fileShas?.[f.filename] === ph) {
-          filesSkippedSimilar.push(f.filename);
-          continue;
-        }
-        filesToReview.push(f);
-      }
+      // Classify each file against prior state. allReviewableFiles keeps the
+      // complete set alive past the trim below — line-level review is rightly
+      // incremental, but whole-PR reasoning (description drift) is not.
+      const { allFiles: allReviewableFiles, filesToReview, currentFileShas, filesSkippedSimilar, filesSkippedTrivial } =
+        partitionFilesForReview(context.files, mode, priorState?.fileShas);
+
       // Replace context.files with the trimmed set so the AI prompt + review
       // submission only operate on what actually changed.
       context.files = filesToReview;
@@ -1018,10 +1050,38 @@ export class Reviewer {
         log.debug({ err }, "listPRCommits failed");
       }
 
-      // Description drift detection (one extra AI call, best-effort)
+      // Description drift detection (one extra AI call, best-effort).
+      //
+      // Drift MUST see the full PR diff, not the incremental slice. The
+      // description describes every commit on the branch; comparing it against
+      // only the files that changed since the last review manufactures
+      // "description claims X with no matching diff" for every claim whose
+      // supporting code landed in an earlier commit. That failure mode is
+      // silent and worsens with each push, since more files fall into
+      // filesSkippedSimilar.
+      //
+      // The full set needs its own budget: context.diffBudget was computed
+      // above against the trimmed set, so reusing it would leave the restored
+      // files unbounded and risk overflowing the window (which throws, and the
+      // catch below would swallow drift entirely).
       let driftFindings: Awaited<ReturnType<typeof detectDescriptionDrift>> = [];
       try {
-        driftFindings = await detectDescriptionDrift({ ai: this.ai, context });
+        const driftBudget = applyDiffBudget(
+          allReviewableFiles.map((f) => ({ filename: f.filename, patch: f.patch })),
+          repoConfig.reviews?.diff_budget,
+        );
+        driftFindings = await detectDescriptionDrift({
+          ai: this.ai,
+          context: { ...context, files: allReviewableFiles, diffBudget: driftBudget },
+          // Files that are part of the PR but whose diffs drift cannot see.
+          // Without this the check reports the same false positive for large
+          // or ignored files even on a full review.
+          unavailableFiles: [
+            ...(context.ignoredFiles ?? []),
+            ...(context.cappedFiles ?? []),
+            ...driftBudget.filesOmitted,
+          ],
+        });
       } catch (err) {
         log.debug({ err }, "Drift detection failed");
       }
