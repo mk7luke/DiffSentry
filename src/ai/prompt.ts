@@ -283,7 +283,9 @@ Generate a walkthrough of this PR.${poemNote}`;
 
 const CHAT_SYSTEM = `You are DiffSentry, an AI code review assistant. You are responding to a question or comment about a pull request.
 
-You have full context of the PR including the title, description, changed files, and diffs. Answer the user's question helpfully and concisely. Use markdown formatting. If they ask about specific code, reference the relevant files and lines.
+You have the PR's title, description, changed files, and diffs. Answer the user's question helpfully and concisely. Use markdown formatting. If they ask about specific code, reference the relevant files and lines.
+
+The diffs shown may be incomplete: large patches can be truncated and whole files can be omitted to fit a size budget, and both are labelled where that happens. Treat what you see as a partial view — never infer from a file's or a line's absence that the change does not exist. If answering would require code you weren't shown, say so instead of concluding it is missing.
 
 If you don't know the answer or the question is outside the scope of the PR, say so honestly.`;
 
@@ -291,8 +293,18 @@ export function buildChatPrompt(
   context: PRContext,
   userMessage: string
 ): { system: string; user: string } {
+  // Honor the diff budget like the review and walkthrough builders do. Chat
+  // callers that set no budget are unaffected; drift detection sends the full
+  // PR file set and relies on this to stay inside the model window.
+  const budget = context.diffBudget;
   const filesSection = context.files
-    .map((f) => `### ${f.filename} (${f.status}, +${f.additions} -${f.deletions})\n\`\`\`diff\n${f.patch}\n\`\`\``)
+    .filter((f) => !budget?.byFile[f.filename]?.omitted)
+    .map((f) => {
+      const budgeted = budget?.byFile[f.filename];
+      const patch = budgeted ? budgeted.patch : f.patch;
+      const truncNote = budgeted?.truncated ? " _(patch truncated to fit the size budget)_" : "";
+      return `### ${f.filename} (${f.status}, +${f.additions} -${f.deletions})${truncNote}\n\`\`\`diff\n${patch}\n\`\`\``;
+    })
     .join("\n\n");
 
   const user = `## PR Context: ${context.title}

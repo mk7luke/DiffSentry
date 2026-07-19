@@ -46,6 +46,11 @@ function renderFileLevelFallbackSection(comments: ReviewComment[]): string {
 //   - A live AbortSignal short-circuits both the wait and any further retry,
 //     so a cancelled review stops hammering GitHub immediately.
 
+/** GitHub's own hard ceiling on pulls.listFiles — it will not return more than
+ *  3000 files for a PR regardless of pagination, so walking past this is pure
+ *  wasted API calls. */
+const LISTFILES_MAX = 3000;
+
 const MAX_RETRIES = 3;
 const MAX_RETRY_WAIT_MS = 60_000;
 const BASE_BACKOFF_MS = 1_000;
@@ -442,10 +447,29 @@ export class GitHubClient {
   ): Promise<PRContext> {
     const octokit = await this.getInstallationOctokit(installationId, signal);
 
-    const [pr, filesResponse] = await Promise.all([
+    // Paginate. A single page caps at 100 files, and silently losing the
+    // remainder is worse than it looks: the dropped files are invisible to
+    // BOTH the review and the description-drift check, and they never reach
+    // ignoredFiles/cappedFiles, so nothing downstream can even report that
+    // they were missed. Drift then reads their absence as the description
+    // claiming changes that aren't there.
+    //
+    // Bounded at GitHub's own listFiles ceiling (3000 files) so a runaway PR
+    // costs a known number of API calls rather than an unbounded walk.
+    let fetchedCount = 0;
+    const [pr, allFiles] = await Promise.all([
       octokit.pulls.get({ owner, repo, pull_number: pullNumber }),
-      octokit.pulls.listFiles({ owner, repo, pull_number: pullNumber, per_page: 100 }),
+      octokit.paginate(
+        octokit.pulls.listFiles,
+        { owner, repo, pull_number: pullNumber, per_page: 100 },
+        (response, done) => {
+          fetchedCount += response.data.length;
+          if (fetchedCount >= LISTFILES_MAX) done();
+          return response.data;
+        },
+      ),
     ]);
+    const filesResponse = { data: allFiles.slice(0, LISTFILES_MAX) };
 
     const fileCap = maxFiles != null && maxFiles > 0 ? maxFiles : this.config.maxFilesPerReview;
     const ignoredFiles: string[] = [];
