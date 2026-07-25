@@ -365,7 +365,12 @@ code {
     height: 18px;
   }
 
-  .nav-backdrop {
+  /* Scope to :not([hidden]) so the drawer-closed state (the JSX sets the
+     `hidden` attribute) actually disappears. An author `display: block` rule
+     otherwise beats the UA `[hidden] { display: none }` rule, which would pin
+     the backdrop over the page permanently — greying it out and eating every
+     tap while the drawer is closed. */
+  .nav-backdrop:not([hidden]) {
     display: block;
     position: fixed;
     inset: 0;
