@@ -1,4 +1,4 @@
-import { PRContext, RepoConfig, Learning, IssueContext } from "../types.js";
+import { PRContext, PriorReviewContext, RepoConfig, Learning, IssueContext } from "../types.js";
 
 // ─── Review Prompts ────────────────────────────────────────────
 
@@ -37,6 +37,7 @@ You MUST respond with valid JSON matching this schema:
 Rules for the JSON response:
 - "line" must be a line number that appears in the diff (from the + side of the patch).
 - "prLevelComments" is for findings that are NOT tied to one specific changed line and therefore cannot be an inline comment. Use it — do NOT invent a line number or bury the finding only in the summary — for: the diff contradicting the PR description (a claimed change is missing, or the code does something the description doesn't mention), issues spanning many files, or concerns about the change as a whole. Each entry has NO "path"/"line". Same title/body/type/severity/aiAgentPrompt/confidence fields as inline comments. Omit the field or use [] when there are none.
+- NEVER raise a description-vs-diff finding ("the description claims X but the diff doesn't do it") when the prompt tells you the diff you were shown is partial — an incremental review, a truncated patch, or omitted files. The code backing the claim may simply not have been shown to you, and a separate whole-PR check handles that comparison with the complete diff. A file's absence from what you were given is never evidence that it is unchanged or that its work is missing.
 - Reserve "prLevelComments" for findings that genuinely have no home in the diff. Unlike an inline comment, a reader cannot resolve one, reply to it, or collapse it — it stays in the review body permanently — so a high-confidence entry here is the most expensive thing you can emit. If a finding CAN be pinned to a changed line, always prefer "comments". Rate "confidence" honestly: a "medium" entry still reaches the reviewer, just without claiming the top of the review.
 - A REQUEST_CHANGES verdict MUST be backed by at least one concrete finding — an inline "comments" entry or a "prLevelComments" entry. Never request changes while leaving both arrays empty and describing the problem only in "summary".
 - "path" must exactly match a filename from the changed files.
@@ -116,6 +117,54 @@ How to apply:
   return REVIEW_SYSTEM_BASE + instructions + tone + learningsBlock;
 }
 
+/**
+ * Render the "already reviewed earlier in this PR" block for an incremental
+ * review, or "" when there is nothing prior (every full review, and the first
+ * review of a PR).
+ *
+ * The rules matter more than the diffs. A model handed a one-file delta plus a
+ * description of a ten-file feature will confidently report the other nine as
+ * unimplemented — the failure mode this block exists to prevent — so it states
+ * outright that the diff is partial, that the description covers the earlier
+ * commits too, and that absence proves nothing.
+ */
+function buildPriorReviewSection(prior: PriorReviewContext | undefined): string {
+  if (!prior || prior.files.length === 0) return "";
+
+  const budget = prior.budget;
+  const shown = prior.namesOnly
+    ? []
+    : prior.files.filter((f) => !budget?.byFile[f.filename]?.omitted);
+  const shownNames = new Set(shown.map((f) => f.filename));
+  const notShown = prior.files.filter((f) => !shownNames.has(f.filename));
+
+  const blocks = shown
+    .map((f) => {
+      const budgeted = budget?.byFile[f.filename];
+      const patch = budgeted ? budgeted.patch : f.patch;
+      const truncNote = budgeted?.truncated ? " _(patch truncated to fit the size budget)_" : "";
+      return `### ${f.filename}${truncNote}\n\`\`\`diff\n${patch}\n\`\`\``;
+    })
+    .join("\n\n");
+
+  const notShownNote =
+    notShown.length > 0
+      ? `\n\nAlso already reviewed, diffs not shown here to stay within the size budget: ${notShown
+          .map((f) => `\`${f.filename}\``)
+          .join(", ")}. They are part of this pull request and their changes are in place.`
+      : "";
+
+  return `
+
+## Already reviewed earlier in this PR (context only — do NOT comment on these)
+
+This is an incremental review. The "Changed Files" section above contains ONLY what changed since the last review of this pull request. The files below belong to the same pull request and were reviewed on an earlier commit; they are shown so you can judge the new changes against the complete change set.
+
+- The PR title and description describe the ENTIRE pull request, including this earlier work. Treat what the description promises as already delivered by it.
+- Do NOT report that something the description mentions is missing, unimplemented, or not wired up. You are looking at a partial diff, and absence from the "Changed Files" section is not evidence that code does not exist.
+- Post findings ONLY against files in "Changed Files". These files were already reviewed — do not re-report issues in them.${blocks ? "\n\n" + blocks : ""}${notShownNote}`;
+}
+
 export function buildReviewPrompt(
   context: PRContext,
   repoConfig?: RepoConfig,
@@ -155,6 +204,13 @@ export function buildReviewPrompt(
           .join(", ")}. These were not shown to you — do not assume they are correct or approve them.`
       : "";
 
+  // On an incremental run "Changed Files" above is only the delta since the
+  // last review, while the title/description below cover the whole branch. Show
+  // the already-reviewed remainder of the PR so the model can judge the new
+  // commit against the complete change set — and, critically, so it stops
+  // reporting the earlier commits' work as missing.
+  const priorSection = buildPriorReviewSection(context.priorReview);
+
   // Bounded graph-backed context (whole-function bodies, cross-file
   // dependents/dependencies, high-fan-in flags). Already token-budgeted by the
   // builder; injected only when present so diff-only behaviour is preserved.
@@ -172,7 +228,7 @@ ${context.description || "(no description provided)"}
 
 ## Changed Files
 
-${filesSection}${omittedNote}${relatedSection}
+${filesSection}${omittedNote}${priorSection}${relatedSection}
 
 Review this pull request and respond with JSON. Remember to obey the Repository Learnings in the system prompt — they override your default flagging heuristics.`;
 

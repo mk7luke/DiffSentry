@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reviews after a push now judge the whole PR, not just the newest commit: the
+  review prompt carries the already-reviewed files as read-only context, and the
+  walkthrough, risk score, coverage signal, and split suggestion are computed
+  from the full branch. Stops incremental reviews reporting earlier commits'
+  work as missing.
 - Docker build: the builder stage now compiles the server only, not the SPA (#43).
 - Self-heal when a model rejects our chosen `reasoning_effort` (#17).
 - Stop GPT-5+ reasoning models from starving review output of tokens (#16).

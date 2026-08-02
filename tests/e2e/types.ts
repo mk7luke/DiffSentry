@@ -33,6 +33,12 @@ export type Scenario = {
   expect?: {
     reviewState?: "CHANGES_REQUESTED" | "COMMENTED" | "APPROVED";
     reviewBodyContains?: string[];
+    /**
+     * Needles that must appear in NO bot review body. For regressions whose
+     * symptom is the bot saying something it shouldn't (e.g. reporting an
+     * earlier commit's work as missing on an incremental re-review).
+     */
+    reviewBodyNotContains?: string[];
     inlineCommentsContain?: Array<{ pathContains?: string; bodyContains: string[] }>;
     walkthroughContains?: string[];
     issueCommentContains?: string[];

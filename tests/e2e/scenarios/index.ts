@@ -12,6 +12,7 @@ import { scenario as pathFilter } from "./path-filter.js";
 import { scenario as chatQuestion } from "./chat-question.js";
 import { scenario as linkedIssue } from "./linked-issue.js";
 import { scenario as incrementalReview } from "./incremental-review.js";
+import { scenario as incrementalFullPr } from "./incremental-full-pr.js";
 import { scenario as trivialSkip } from "./trivial-skip.js";
 import { scenario as riskAndCoverage } from "./risk-and-coverage.js";
 import { scenario as chatTldr } from "./chat-tldr.js";
@@ -59,6 +60,7 @@ export const ALL_SCENARIOS: Scenario[] = [
   linkedIssue,
   trivialSkip,
   incrementalReview,
+  incrementalFullPr,
   riskAndCoverage,
   secretScanner,
   mergeMarker,

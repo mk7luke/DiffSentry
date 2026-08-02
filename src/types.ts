@@ -453,6 +453,38 @@ export interface PRContext {
    * See src/ai/diff-budget.ts.
    */
   diffBudget?: DiffBudgetResult;
+  /**
+   * Incremental reviews only: the part of THIS PR that was already reviewed on
+   * an earlier commit, handed to the review prompt as read-only context. See
+   * PriorReviewContext.
+   */
+  priorReview?: PriorReviewContext;
+}
+
+/**
+ * The already-reviewed remainder of an incremental review's pull request.
+ *
+ * On a synchronize push `PRContext.files` is trimmed to the delta, but the
+ * title and description still describe the whole branch — so a model shown the
+ * slice alone reliably concludes that the feature the description promises was
+ * never implemented. This carries the rest of the PR into the prompt as
+ * context: never commented on, only used to judge the new commit against the
+ * complete change set.
+ */
+export interface PriorReviewContext {
+  /** Files in this PR reviewed on an earlier commit, with their full patches. */
+  files: FileChange[];
+  /**
+   * Budget applied to those patches. Entries marked `omitted` are named in the
+   * prompt but not shown. Absent ⇒ send every patch in full (budgeting off).
+   */
+  budget?: DiffBudgetResult;
+  /**
+   * Set when the delta and related-context sections already consumed the review
+   * budget: name the earlier files so the model knows they exist, but spend no
+   * budget on their diffs.
+   */
+  namesOnly?: boolean;
 }
 
 // ─── AI Provider Interface ─────────────────────────────────────

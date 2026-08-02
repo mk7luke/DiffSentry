@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Config, AIProvider, FileChange, PRContext, RepoConfig, ReviewComment } from "./types.js";
+import { Config, AIProvider, DiffBudgetConfig, FileChange, PRContext, PriorReviewContext, RepoConfig, ReviewComment } from "./types.js";
 import { buildProvider, ProviderSpec } from "./ai/provider-factory.js";
 import { FailoverProvider } from "./ai/failover.js";
 import { isAiTimeoutError } from "./ai/timeout.js";
@@ -41,7 +41,7 @@ import { runWithCostContext, getCostContext, setCostReviewId, flushCostEvents } 
 import { isPauseAll, resolveProfileOverride, resolveMaxFilesOverride } from "./settings/overrides.js";
 import { reviewQueue, type ReviewHandle } from "./realtime/queue.js";
 import { buildGraphContext } from "./graph-context.js";
-import { applyDiffBudget } from "./ai/diff-budget.js";
+import { applyDiffBudget, resolveDiffBudget } from "./ai/diff-budget.js";
 
 /** Map a PR chat command to the cost-attribution kind for its AI calls. */
 function costKindForCommand(type: string): string {
@@ -127,6 +127,67 @@ export function partitionFilesForReview(
   }
 
   return { allFiles: files, filesToReview, currentFileShas, filesSkippedSimilar, filesSkippedTrivial };
+}
+
+/**
+ * Package the already-reviewed part of an incremental review's PR as read-only
+ * prompt context, sized to whatever review budget the delta left unspent.
+ *
+ * `usedChars` is what the prompt has already committed to (the budgeted delta
+ * plus the graph related-context section). Prior context is strictly secondary:
+ * it never displaces the diff actually under review, and when there isn't room
+ * for even one more file it degrades to naming the files rather than pushing
+ * the prompt past `per_review_chars`. Naming alone is most of the value — the
+ * false "you never implemented this" finding comes from the model believing
+ * those files aren't in the PR at all.
+ */
+export function buildPriorReviewContext(params: {
+  /** Files in this PR already reviewed on an earlier commit. */
+  files: FileChange[];
+  cfg: DiffBudgetConfig | undefined;
+  usedChars: number;
+}): PriorReviewContext | undefined {
+  const { files, cfg, usedChars } = params;
+  if (files.length === 0) return undefined;
+
+  const resolved = resolveDiffBudget(cfg);
+  // Budgeting off ⇒ the caller has opted out of size limits entirely; send the
+  // patches as-is, exactly as the primary diff is sent.
+  if (!resolved.enabled) return { files };
+
+  const headroom = resolved.perReviewChars - usedChars;
+  // applyDiffBudget floors its per-review budget at per_file_chars (it never
+  // sends an empty diff), so anything below that floor would overshoot rather
+  // than trim. Name the files instead.
+  if (headroom < resolved.perFileChars) return { files, namesOnly: true };
+
+  return {
+    files,
+    budget: applyDiffBudget(
+      files.map((f) => ({ filename: f.filename, patch: f.patch })),
+      { ...cfg, per_review_chars: headroom },
+    ),
+  };
+}
+
+/**
+ * Drop inline findings the model raised against a context-only file.
+ *
+ * The prior-review files are in the prompt to be READ, not reviewed — they were
+ * reviewed on an earlier commit and their threads already exist. The prompt says
+ * so; this is the deterministic backstop, so a model that comments on them
+ * anyway can't turn every push into a re-litigation of the whole branch.
+ * PR-level findings (no path) are never touched — those are whole-PR by
+ * definition, and reasoning about the whole PR is exactly why the context is
+ * there.
+ */
+export function dropContextOnlyFindings(
+  comments: ReviewComment[],
+  prior: PriorReviewContext | undefined,
+): ReviewComment[] {
+  if (!prior || prior.files.length === 0) return comments;
+  const contextOnly = new Set(prior.files.map((f) => f.filename));
+  return comments.filter((c) => !c.path || !contextOnly.has(c.path));
 }
 
 const WALKTHROUGH_MARKER = "<!-- DiffSentry Walkthrough -->";
@@ -779,6 +840,37 @@ export class Reviewer {
         );
       }
 
+      // Incremental runs: carry the rest of the PR into the review prompt as
+      // read-only context. context.files is the delta, but the title and
+      // description below it describe the whole branch — a model given only the
+      // slice reads every earlier commit's work as never written and reports
+      // the feature as unimplemented (mk7luke/atlas-timeclock#89: a docs-only
+      // follow-up commit flipped an approved branch to REQUEST_CHANGES over
+      // four files that had been reviewed a week earlier). PR #81 fixed this
+      // for the drift pass; the main review call had the same blind spot.
+      // Sized against what the delta + related context already spent, so it
+      // never displaces the diff actually under review.
+      const alreadyReviewedFiles = allReviewableFiles.filter((f) =>
+        filesSkippedSimilar.includes(f.filename),
+      );
+      const priorReview = buildPriorReviewContext({
+        files: alreadyReviewedFiles,
+        cfg: repoConfig.reviews?.diff_budget,
+        usedChars: diffBudget.totalSentChars + graphContext.relatedContextMarkdown.length,
+      });
+      if (priorReview) {
+        context.priorReview = priorReview;
+        log.info(
+          {
+            priorFiles: priorReview.files.length,
+            namesOnly: priorReview.namesOnly === true,
+            omitted: priorReview.budget?.filesOmitted.length ?? 0,
+            sentChars: priorReview.budget?.totalSentChars ?? 0,
+          },
+          "Attached already-reviewed PR files to the review prompt as context",
+        );
+      }
+
       const relevantGuidelines = getRelevantGuidelines(allGuidelines, filenames);
       const linkedIssues = issueNumbers.length > 0
         ? await fetchLinkedIssues(octokit, owner, repo, issueNumbers)
@@ -847,10 +939,27 @@ export class Reviewer {
       const walkthroughEnabled = repoConfig.reviews?.walkthrough?.enabled !== false;
       const summaryEnabled = repoConfig.reviews?.high_level_summary !== false;
 
+      // The walkthrough describes the pull request AS A WHOLE — it upserts one
+      // comment and rewrites the PR-description summary table on every push, so
+      // generating it from the incremental slice replaces a whole-PR summary
+      // with one covering only the newest commit. Same reason drift gets the
+      // full set. Full reviews are untouched: their context already is the
+      // whole PR, so they keep the exact prompt (and budget) they had.
+      const wholePRBudget =
+        alreadyReviewedFiles.length > 0
+          ? applyDiffBudget(
+              allReviewableFiles.map((f) => ({ filename: f.filename, patch: f.patch })),
+              repoConfig.reviews?.diff_budget,
+            )
+          : null;
+      const walkthroughContext: PRContext = wholePRBudget
+        ? { ...context, files: allReviewableFiles, diffBudget: wholePRBudget }
+        : context;
+
       const [reviewResult, walkthroughResult] = await Promise.all([
         this.ai.review(context, repoConfig, knowledgeLearnings),
         walkthroughEnabled || summaryEnabled
-          ? this.ai.generateWalkthrough(context, repoConfig)
+          ? this.ai.generateWalkthrough(walkthroughContext, repoConfig)
           : Promise.resolve(null),
       ]);
 
@@ -863,6 +972,19 @@ export class Reviewer {
       }
 
       if (signal.aborted) return;
+
+      // Enforce the "context only" contract on the prior-review files before
+      // anything else consumes the findings.
+      if (context.priorReview) {
+        const kept = dropContextOnlyFindings(reviewResult.comments, context.priorReview);
+        if (kept.length !== reviewResult.comments.length) {
+          log.info(
+            { dropped: reviewResult.comments.length - kept.length },
+            "Dropped findings raised against already-reviewed context files",
+          );
+          reviewResult.comments = kept;
+        }
+      }
 
       // Second, cheap verification pass over the AI's OWN findings: ask the
       // model to cite the diff line(s) that substantiate each finding and drop
@@ -993,8 +1115,18 @@ export class Reviewer {
         }
       }
 
-      // Compute insights (risk, coverage, split suggestion) before posting
-      const coverage = assessCoverage(context.files);
+      // Compute insights (risk, coverage, split suggestion) before posting.
+      //
+      // These describe the PULL REQUEST, not this review pass: they render
+      // inside the whole-PR walkthrough and feed the sticky status, and every
+      // push replaces them. Computing them from the incremental delta reports
+      // the branch wrong — "🔴 production code added with no test changes" for
+      // a PR whose tests landed two commits ago, a risk score that resets to
+      // near-zero on a one-line follow-up. Same reasoning as the walkthrough
+      // and drift: whole-PR questions get the whole PR. Identical to
+      // context.files on a full review.
+      const wholePRFiles = walkthroughContext.files;
+      const coverage = assessCoverage(wholePRFiles);
 
       // Context-aware severity calibration: nudge each finding's severity to
       // reflect real risk — escalate in high-fan-in (blast-radius) files and in
@@ -1066,10 +1198,14 @@ export class Reviewer {
       // catch below would swallow drift entirely).
       let driftFindings: Awaited<ReturnType<typeof detectDescriptionDrift>> = [];
       try {
-        const driftBudget = applyDiffBudget(
-          allReviewableFiles.map((f) => ({ filename: f.filename, patch: f.patch })),
-          repoConfig.reviews?.diff_budget,
-        );
+        // Same full-set budget the walkthrough used when this is an incremental
+        // run (identical inputs, so reusing it just avoids recomputing it).
+        const driftBudget =
+          wholePRBudget ??
+          applyDiffBudget(
+            allReviewableFiles.map((f) => ({ filename: f.filename, patch: f.patch })),
+            repoConfig.reviews?.diff_budget,
+          );
         driftFindings = await detectDescriptionDrift({
           ai: this.ai,
           context: { ...context, files: allReviewableFiles, diffBudget: driftBudget },
@@ -1131,7 +1267,9 @@ export class Reviewer {
         );
       }
       const risk = assessRisk({
-        files: context.files,
+        // Size / high-risk-path factors describe the whole PR; the findings
+        // factors come from this pass, which is what the sticky status reports.
+        files: wholePRFiles,
         review: reviewResult,
         effortEstimate: walkthroughResult?.effortEstimate,
         hasNewTests: coverage.testAdditions > 0,
@@ -1274,13 +1412,15 @@ export class Reviewer {
 
         // PR splitting heuristic
         const cohorts = walkthroughResult.cohorts ?? [];
-        const totalLines = context.files.reduce((s, f) => s + f.additions + f.deletions, 0);
+        // "Is this PR too big to review in one go?" is a question about the PR,
+        // so it counts every file on the branch — not just this push's.
+        const totalLines = wholePRFiles.reduce((s, f) => s + f.additions + f.deletions, 0);
         if (
           cohorts.length > 0 &&
           shouldSuggestSplit({
             cohortCount: cohorts.length,
             effortEstimate: walkthroughResult.effortEstimate,
-            fileCount: context.files.length,
+            fileCount: wholePRFiles.length,
             totalChangedLines: totalLines,
           })
         ) {
