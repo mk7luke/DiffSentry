@@ -1,5 +1,5 @@
 import { ChatCommand } from "./types.js";
-import { extractSlashCommand, SlashOptions } from "./slash-commands.js";
+import { extractSlashCommand, SlashOptions, SlashSyntax } from "./slash-commands.js";
 
 /**
  * Parse a chat command from a PR comment body.
@@ -58,12 +58,56 @@ export function resolvesToSlashCommand(
  * never draws a reply from us.
  */
 export function unrecognized(
-  syntax: "slash-namespaced" | "slash-bare",
+  syntax: SlashSyntax,
   name: string
-): { type: "unknown_command"; name: string } | null {
-  if (syntax === "slash-namespaced") return { type: "unknown_command", name };
-  return suggestCommand(name) ? { type: "unknown_command", name } : null;
+): { type: "unknown_command"; name: string; syntax: SlashSyntax } | null {
+  if (syntax === "slash-namespaced") return { type: "unknown_command", name, syntax };
+  return suggestCommand(name) ? { type: "unknown_command", name, syntax } : null;
 }
+
+/**
+ * Single-word commands. Module-scope so the suggestion corpus can be derived
+ * from it rather than hand-maintained alongside it — a parallel list drifts the
+ * moment a command is added.
+ */
+const COMMAND_MAP: Record<string, ChatCommand> = {
+  review: { type: "review" },
+  "full review": { type: "full_review" },
+  pause: { type: "pause" },
+  resume: { type: "resume" },
+  resolve: { type: "resolve" },
+  help: { type: "help" },
+  configuration: { type: "configuration" },
+  summary: { type: "summary" },
+  simplify: { type: "simplify" },
+  autofix: { type: "autofix" },
+  tldr: { type: "tldr" },
+  tour: { type: "tour" },
+  ship: { type: "ship" },
+  "rubber-duck": { type: "rubber_duck" },
+  rubberduck: { type: "rubber_duck" },
+  eli5: { type: "eli5" },
+  timeline: { type: "timeline" },
+  bench: { type: "bench" },
+  benchmark: { type: "bench" },
+  changelog: { type: "changelog" },
+  "release-notes": { type: "release_notes" },
+  releasenotes: { type: "release_notes" },
+  rewrite: { type: "rewrite_description" },
+};
+
+/**
+ * Prefix-matched commands, i.e. everything matchCommand recognizes that
+ * COMMAND_MAP does not: multi-word forms, their slash spellings, and aliases.
+ * Kept adjacent to the matcher branches below so the two move together.
+ */
+const PREFIX_COMMANDS = [
+  "full review", "full-review",
+  "generate docstrings", "generate docstring", "generate-docstrings",
+  "generate unit tests", "generate tests", "generate-tests",
+  "learn", "remember",
+  "5why", "diff",
+];
 
 /**
  * Match command text (the phrase after `@bot` or after the slash) against the
@@ -73,37 +117,11 @@ export function unrecognized(
 function matchCommand(text: string): ChatCommand | null {
   const afterMention = text.trim();
 
-  const commandMap: Record<string, ChatCommand> = {
-    review: { type: "review" },
-    "full review": { type: "full_review" },
-    pause: { type: "pause" },
-    resume: { type: "resume" },
-    resolve: { type: "resolve" },
-    help: { type: "help" },
-    configuration: { type: "configuration" },
-    summary: { type: "summary" },
-    simplify: { type: "simplify" },
-    autofix: { type: "autofix" },
-    tldr: { type: "tldr" },
-    tour: { type: "tour" },
-    ship: { type: "ship" },
-    "rubber-duck": { type: "rubber_duck" },
-    rubberduck: { type: "rubber_duck" },
-    eli5: { type: "eli5" },
-    timeline: { type: "timeline" },
-    bench: { type: "bench" },
-    benchmark: { type: "bench" },
-    changelog: { type: "changelog" },
-    "release-notes": { type: "release_notes" },
-    releasenotes: { type: "release_notes" },
-    rewrite: { type: "rewrite_description" },
-  };
-
   const lower = afterMention.toLowerCase();
 
   // Check multi-word commands first
   if (lower.startsWith("full review")) {
-    return commandMap["full review"];
+    return COMMAND_MAP["full review"];
   }
   if (lower.startsWith("generate docstrings") || lower.startsWith("generate docstring")) {
     return { type: "generate_docstrings" };
@@ -133,25 +151,38 @@ function matchCommand(text: string): ChatCommand | null {
 
   // Check single-word commands
   const firstWord = lower.split(/\s/)[0];
-  if (firstWord in commandMap) {
-    return commandMap[firstWord];
+  if (firstWord in COMMAND_MAP) {
+    return COMMAND_MAP[firstWord];
   }
 
   return null;
 }
 
 /**
- * Every command word users can type, for "did you mean" suggestions. Multi-word
- * commands appear in their slash spelling since that is the form being typed
- * when this list is consulted.
+ * Every command word users can type, for "did you mean" suggestions. Derived
+ * from the matcher's own tables so a new command cannot be added without also
+ * becoming suggestible. `plan` is issue-only and has no entry in COMMAND_MAP,
+ * so it is appended explicitly.
  */
 const COMMAND_NAMES = [
-  "review", "full-review", "pause", "resume", "resolve", "help",
-  "configuration", "summary", "simplify", "autofix", "tldr", "tour", "ship",
-  "rubber-duck", "eli5", "timeline", "bench", "changelog", "release-notes",
-  "rewrite", "learn", "diff", "5why", "plan",
-  "generate-docstrings", "generate-tests",
+  ...Object.keys(COMMAND_MAP),
+  ...PREFIX_COMMANDS,
+  "plan",
+  "summarize",
+  "config",
 ];
+
+/**
+ * Argument placeholders, mirroring the help tables, so a suggestion shows the
+ * whole recovery path rather than a bare verb the user still has to look up.
+ */
+const COMMAND_ARGS: Record<string, string> = {
+  learn: " <text>",
+  remember: " <text>",
+  diff: " <PR-number>",
+  "5why": " <target>",
+  plan: " [focus]",
+};
 
 /** Levenshtein distance, bounded use only (command words are short). */
 function editDistance(a: string, b: string): number {
@@ -200,16 +231,28 @@ export function suggestCommand(name: string): string | null {
 }
 
 /**
- * Reply for a namespaced slash command we don't recognize. Only ever sent for
- * `/<bot> <command>`, which is unambiguously addressed to us — a bare
- * `/something` is ignored so we never talk over another bot on the repo.
+ * Reply for a slash command we don't recognize.
+ *
+ * Sent for any namespaced `/<bot> <command>`, and for a bare `/<command>` only
+ * when it is close enough to our vocabulary to be a typo rather than another
+ * bot's traffic.
+ *
+ * The reply answers in whichever form the user typed. Suggesting `/review` to
+ * someone who wrote `/diffsentry reveiw` would be wrong on a repo with
+ * SLASH_COMMANDS_BARE=false: the bare form we advertised is one this bot then
+ * ignores, leaving them stuck with no working spelling.
  */
-export function formatUnknownCommandMessage(botName: string, name: string): string {
+export function formatUnknownCommandMessage(
+  botName: string,
+  name: string,
+  syntax: SlashSyntax = "slash-bare"
+): string {
+  const prefix = syntax === "slash-namespaced" ? `/${botName} ` : "/";
   const suggestion = suggestCommand(name);
   const hint = suggestion
-    ? `Did you mean \`/${suggestion}\`?`
-    : `Run \`/${botName} help\` for the full list.`;
-  return `> [!NOTE]\n> Unknown command \`/${name}\`. ${hint}`;
+    ? `Did you mean \`${prefix}${suggestion}${COMMAND_ARGS[suggestion] ?? ""}\`?`
+    : `Run \`${prefix}help\` for the full list.`;
+  return `> [!NOTE]\n> Unknown command \`${prefix}${name}\`. ${hint}`;
 }
 
 /**

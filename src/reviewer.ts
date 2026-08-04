@@ -1953,7 +1953,7 @@ export class Reviewer {
       log.info({ name: command.name }, "Unknown slash command");
       await this.github.replyToComment(
         installationId, owner, repo, pullNumber, commentId,
-        formatUnknownCommandMessage(this.config.botName, command.name), commentKind,
+        formatUnknownCommandMessage(this.config.botName, command.name, command.syntax), commentKind,
       );
       return;
     }
@@ -2838,7 +2838,7 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
 
     if (command.type === "unknown_command") {
       log.info({ name: command.name }, "Unknown slash command");
-      await reply(formatUnknownCommandMessage(this.config.botName, command.name));
+      await reply(formatUnknownCommandMessage(this.config.botName, command.name, command.syntax));
       return;
     }
 

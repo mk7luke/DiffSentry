@@ -18,12 +18,20 @@
  * command is silently ignored so we never answer another bot's `/lgtm`.
  */
 
+/**
+ * How a slash command was addressed. Carried through to the unknown-command
+ * reply so it can answer in the same form the user typed — telling someone on
+ * a bare-disabled repo to "try `/review`" would send them to a command we
+ * ignore.
+ */
+export type SlashSyntax = "slash-namespaced" | "slash-bare";
+
 export interface SlashCommand {
   /** Command text with the leading `/` (and bot namespace) stripped, e.g. "full review". */
   text: string;
   /** The bare command word, used for logging and "unknown command" replies. */
   name: string;
-  syntax: "slash-namespaced" | "slash-bare";
+  syntax: SlashSyntax;
 }
 
 export interface SlashOptions {

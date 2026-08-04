@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { extractSlashCommand, addressesBot } from "../../src/slash-commands.js";
-import { parseCommand, suggestCommand } from "../../src/commands.js";
+import { parseCommand, suggestCommand, formatUnknownCommandMessage } from "../../src/commands.js";
 import { parseIssueCommand } from "../../src/issue-commands.js";
 
 const BOT = "diffsentry";
@@ -126,12 +126,17 @@ describe("parseCommand — slash path", () => {
     expect(parseCommand("/diffsentry what do you think of this design", BOT)).toEqual({
       type: "unknown_command",
       name: "what",
+      syntax: "slash-namespaced",
     });
   });
 
   it("catches a bare typo of one of our commands", () => {
-    expect(parseCommand("/reveiw", BOT)).toEqual({ type: "unknown_command", name: "reveiw" });
-    expect(parseCommand("/summry", BOT)).toEqual({ type: "unknown_command", name: "summry" });
+    expect(parseCommand("/reveiw", BOT)).toEqual({
+      type: "unknown_command", name: "reveiw", syntax: "slash-bare",
+    });
+    expect(parseCommand("/summry", BOT)).toEqual({
+      type: "unknown_command", name: "summry", syntax: "slash-bare",
+    });
   });
 
   it("stays silent on other bots' commands", () => {
@@ -148,6 +153,7 @@ describe("parseCommand — slash path", () => {
     expect(parseCommand("/diffsentry frobnicate", BOT)).toEqual({
       type: "unknown_command",
       name: "frobnicate",
+      syntax: "slash-namespaced",
     });
   });
 });
@@ -196,6 +202,7 @@ describe("parseIssueCommand", () => {
     expect(parseIssueCommand("/diffsentry review", BOT)).toEqual({
       type: "unknown_command",
       name: "review",
+      syntax: "slash-namespaced",
     });
   });
 
@@ -242,5 +249,51 @@ describe("suggestCommand", () => {
   it("declines to suggest for an exact match", () => {
     // "/review on an issue" is a valid command in the wrong place, not a typo.
     expect(suggestCommand("review")).toBeNull();
+  });
+
+  it("covers matcher aliases, not just the canonical names", () => {
+    // The corpus is derived from the matcher's tables, so aliases are included.
+    expect(suggestCommand("rememer")).toBe("remember");
+    expect(suggestCommand("benchmrk")).toBe("benchmark");
+  });
+});
+
+describe("formatUnknownCommandMessage", () => {
+  it("answers a bare typo in bare form", () => {
+    const msg = formatUnknownCommandMessage(BOT, "reveiw", "slash-bare");
+    expect(msg).toContain("Unknown command `/reveiw`");
+    expect(msg).toContain("Did you mean `/review`?");
+  });
+
+  it("answers a namespaced typo in namespaced form", () => {
+    // Critical on repos with SLASH_COMMANDS_BARE=false: suggesting the bare
+    // spelling would send the user to a command this bot then ignores.
+    const msg = formatUnknownCommandMessage(BOT, "reveiw", "slash-namespaced");
+    expect(msg).toContain("Unknown command `/diffsentry reveiw`");
+    expect(msg).toContain("Did you mean `/diffsentry review`?");
+    expect(msg).not.toMatch(/`\/review`/);
+  });
+
+  it("points at help in the matching form when there is no suggestion", () => {
+    expect(formatUnknownCommandMessage(BOT, "frobnicate", "slash-namespaced"))
+      .toContain("Run `/diffsentry help`");
+    expect(formatUnknownCommandMessage(BOT, "frobnicate", "slash-bare"))
+      .toContain("Run `/help`");
+  });
+
+  it("shows argument placeholders so the suggestion is directly usable", () => {
+    expect(formatUnknownCommandMessage(BOT, "lern", "slash-bare"))
+      .toContain("Did you mean `/learn <text>`?");
+    expect(formatUnknownCommandMessage(BOT, "dif", "slash-bare"))
+      .toContain("Did you mean `/diff <PR-number>`?");
+  });
+
+  it("carries the addressing form on the parsed command", () => {
+    expect(parseCommand("/diffsentry frobnicate", BOT)).toEqual({
+      type: "unknown_command", name: "frobnicate", syntax: "slash-namespaced",
+    });
+    expect(parseCommand("/reveiw", BOT)).toEqual({
+      type: "unknown_command", name: "reveiw", syntax: "slash-bare",
+    });
   });
 });
