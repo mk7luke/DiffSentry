@@ -216,6 +216,29 @@ describe("parseIssueCommand", () => {
       message: "any ideas?",
     });
   });
+
+  it("accepts the whole issue vocabulary as slash commands", () => {
+    expect(parseIssueCommand("/summary", BOT)).toEqual({ type: "summary" });
+    expect(parseIssueCommand("/pause", BOT)).toEqual({ type: "pause" });
+    expect(parseIssueCommand("/resume", BOT)).toEqual({ type: "resume" });
+    expect(parseIssueCommand("/configuration", BOT)).toEqual({ type: "configuration" });
+    expect(parseIssueCommand("/help", BOT)).toEqual({ type: "help" });
+    expect(parseIssueCommand("/learn we ship on Fridays", BOT)).toEqual({
+      type: "learn", content: "we ship on Fridays",
+    });
+  });
+
+  it("handles diff-shaped PR commands per addressing form", () => {
+    // These have nothing to operate on in an issue. Namespaced says so;
+    // bare stays silent, since the word is a real command elsewhere and so
+    // earns no "did you mean".
+    for (const cmd of ["tldr", "review", "ship", "diff"]) {
+      expect(parseIssueCommand(`/diffsentry ${cmd}`, BOT), cmd).toEqual({
+        type: "unknown_command", name: cmd, syntax: "slash-namespaced",
+      });
+      expect(parseIssueCommand(`/${cmd}`, BOT), cmd).toBeNull();
+    }
+  });
 });
 
 describe("addressesBot", () => {
