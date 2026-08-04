@@ -148,7 +148,7 @@ export function createServer(config: Config): CreatedServer {
             payload,
             replayedFrom,
           });
-          const { status } = await dispatchWebhookEvent({ reviewer, botName: config.botName }, event, payload);
+          const { status } = await dispatchWebhookEvent({ reviewer, botName: config.botName, slashCommands: config.slashCommands, bareSlashCommands: config.bareSlashCommands }, event, payload);
           return { newDeliveryId, status };
         },
         // First-run diagnostics: the AI reachability probe + the GitHub App
@@ -289,7 +289,7 @@ export function createServer(config: Config): CreatedServer {
 
     try {
       const { status, body: responseBody } = await dispatchWebhookEvent(
-        { reviewer, botName: config.botName },
+        { reviewer, botName: config.botName, slashCommands: config.slashCommands, bareSlashCommands: config.bareSlashCommands },
         event,
         payload,
       );

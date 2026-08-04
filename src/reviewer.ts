@@ -6,7 +6,8 @@ import { isAiTimeoutError } from "./ai/timeout.js";
 import { GitHubClient } from "./github.js";
 import { loadRepoConfig, mergeWithDefaults, shouldReviewPR, isPathIncluded } from "./repo-config.js";
 import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary, injectSummaryIntoPRBody } from "./walkthrough.js";
-import { parseCommand, formatHelpMessage, formatConfigMessage } from "./commands.js";
+import { parseCommand, formatHelpMessage, formatConfigMessage, formatUnknownCommandMessage } from "./commands.js";
+import type { SlashOptions } from "./slash-commands.js";
 import { parseIssueCommand, formatIssueHelpMessage } from "./issue-commands.js";
 import { buildIssueSummaryInstruction, buildIssuePlanInstruction } from "./ai/prompt.js";
 import {
@@ -311,6 +312,11 @@ export class Reviewer {
   private github: GitHubClient;
   private config: Config;
   private learnings: LearningsStore;
+
+  /** Slash-command parsing options derived from server config. */
+  private slashOptions(): SlashOptions {
+    return { enabled: this.config.slashCommands, bare: this.config.bareSlashCommands };
+  }
 
   constructor(config: Config) {
     this.config = config;
@@ -1919,9 +1925,18 @@ export class Reviewer {
     const log = logger.child({ owner, repo, pr: pullNumber, commentId, commentKind });
     const key = prKey(owner, repo, pullNumber);
 
-    const command = parseCommand(commentBody, this.config.botName);
+    const command = parseCommand(commentBody, this.config.botName, this.slashOptions());
     if (!command) {
       log.debug("No command found in comment");
+      return;
+    }
+
+    if (command.type === "unknown_command") {
+      log.info({ name: command.name }, "Unknown slash command");
+      await this.github.replyToComment(
+        installationId, owner, repo, pullNumber, commentId,
+        formatUnknownCommandMessage(this.config.botName, command.name), commentKind,
+      );
       return;
     }
 
@@ -2793,7 +2808,7 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
     const log = logger.child({ owner, repo, issue: issueNumber, commentId, surface: "issue.comment" });
     const key = issueKey(owner, repo, issueNumber);
 
-    const command = parseIssueCommand(commentBody, this.config.botName);
+    const command = parseIssueCommand(commentBody, this.config.botName, this.slashOptions());
     if (!command) {
       log.debug("No issue command in comment");
       return;
@@ -2802,6 +2817,12 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
 
     const reply = (body: string): Promise<void> =>
       this.github.postComment(installationId, owner, repo, issueNumber, body);
+
+    if (command.type === "unknown_command") {
+      log.info({ name: command.name }, "Unknown slash command");
+      await reply(formatUnknownCommandMessage(this.config.botName, command.name));
+      return;
+    }
 
     try {
       const octokit = await this.github.getInstallationOctokit(installationId);

@@ -684,7 +684,9 @@ GitHub webhook
 | `MAX_FILES_PER_REVIEW` | No | `50` | Max files per review (runtime-overridable per-global/-repo from Settings) |
 | `AI_REQUEST_TIMEOUT_MS` | No | `60000` | Per-request timeout (ms) for every AI provider call. On timeout the call is aborted and the review fails with a visible "AI timeout" outcome instead of hanging. |
 | `IGNORED_PATTERNS` | No | | Comma-separated globs to skip |
-| `BOT_NAME` | No | `diffsentry` | Bot mention name for chat commands |
+| `BOT_NAME` | No | `diffsentry` | Bot mention name, and the namespace for `/<bot>` slash commands |
+| `SLASH_COMMANDS` | No | `true` | Accept `/command` syntax in PR and issue comments. Set to `false` to require `@bot` mentions. |
+| `SLASH_COMMANDS_BARE` | No | `true` | Accept bare `/review` as well as `/diffsentry review`. Set to `false` on repos running another ChatOps bot (Prow etc.) that owns the bare namespace. |
 | `LEARNINGS_DIR` | No | `./data/learnings` | Per-repo learnings storage |
 | `DB_PATH` | No | `./data/diffsentry.db` | SQLite file. Set to `""` to disable persistence (dashboard becomes empty). |
 | `ENABLE_DASHBOARD` | No | | Set to `1` to mount the read-only command-center SPA at `/`, its JSON API at `/api/v1`, and the legacy dashboard at `/dashboard`. Off by default. |

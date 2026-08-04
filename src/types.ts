@@ -51,6 +51,14 @@ export interface Config {
   ignoredPatterns: string[];
   botName: string;
   learningsDir: string;
+  /** Accept `/command` syntax in comments at all (SLASH_COMMANDS). */
+  slashCommands: boolean;
+  /**
+   * Accept bare `/review` in addition to namespaced `/diffsentry review`
+   * (SLASH_COMMANDS_BARE). Turn off on repos that run another ChatOps bot —
+   * Prow, for instance, also answers `/help`.
+   */
+  bareSlashCommands: boolean;
 }
 
 // ─── Per-Repo YAML Config (.diffsentry.yaml) ──────────────────
@@ -541,6 +549,7 @@ export type ChatCommand =
   | { type: "release_notes" }
   | { type: "diff_pr"; target: string }
   | { type: "rewrite_description" }
+  | { type: "unknown_command"; name: string }
   | { type: "chat"; message: string };
 
 // ─── Issue Chat Command ────────────────────────────────────────
@@ -552,6 +561,7 @@ export type IssueChatCommand =
   | { type: "resume" }
   | { type: "configuration" }
   | { type: "learn"; content: string }
+  | { type: "unknown_command"; name: string }
   | { type: "chat"; message: string };
 
 // ─── Pre-Merge Checks ──────────────────────────────────────────

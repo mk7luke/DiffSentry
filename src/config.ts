@@ -214,5 +214,7 @@ export function loadConfig(): Config {
     ignoredPatterns: [...defaultIgnored, ...ignoredPatterns],
     botName: process.env.BOT_NAME || "diffsentry",
     learningsDir: process.env.LEARNINGS_DIR || "./data/learnings",
+    slashCommands: (process.env.SLASH_COMMANDS || "true").toLowerCase() !== "false",
+    bareSlashCommands: (process.env.SLASH_COMMANDS_BARE || "true").toLowerCase() !== "false",
   };
 }

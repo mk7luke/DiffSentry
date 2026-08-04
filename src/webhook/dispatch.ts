@@ -3,6 +3,8 @@ import { markPRClosed, recordEvent } from "../storage/dao.js";
 import { bus } from "../realtime/bus.js";
 import { runReviewJob } from "../realtime/jobs.js";
 import { isPauseAll, isAutoReviewEnabled } from "../settings/overrides.js";
+import { addressesBot, SlashOptions } from "../slash-commands.js";
+import { resolvesToSlashCommand } from "../commands.js";
 
 /**
  * Whether an automatic (webhook-triggered) review should be queued for a repo,
@@ -71,6 +73,15 @@ export interface WebhookReviewer {
 export interface WebhookDispatchDeps {
   reviewer: WebhookReviewer;
   botName: string;
+  /** Accept `/command` syntax. Defaults to true when the caller omits it. */
+  slashCommands?: boolean;
+  /** Accept bare `/review` as well as `/<bot> review`. Defaults to true. */
+  bareSlashCommands?: boolean;
+}
+
+/** Slash options for the comment gate, defaulting both switches on. */
+function slashOptions(deps: WebhookDispatchDeps): SlashOptions {
+  return { enabled: deps.slashCommands !== false, bare: deps.bareSlashCommands !== false };
 }
 
 export interface WebhookDispatchResult {
@@ -324,15 +335,17 @@ export async function dispatchWebhookEvent(
       return { status: 200, body: { status: "ignored" } };
     }
 
-    // Check if our bot is mentioned. The mention check is the same on PRs
-    // and issues — only what we do next differs.
-    if (!commentBody.toLowerCase().includes(`@${botName.toLowerCase()}`)) {
+    // Is this comment addressed to us — by @mention or by slash command? The
+    // check is the same on PRs and issues; only what we do next differs. An
+    // unrecognized bare `/command` passes this gate but parses to nothing, so
+    // another bot's ChatOps traffic costs us a no-op, not a reply.
+    if (!addressesBot(commentBody, botName, slashOptions(deps))) {
       return { status: 200, body: { status: "ignored" } };
     }
 
     // Comment on a PR → existing PR comment handler.
     if (issue.pull_request) {
-      logger.info({ owner, repo, pr: issueOrPRNumber, commentId }, "Bot mentioned in PR comment, processing command");
+      logger.info({ owner, repo, pr: issueOrPRNumber, commentId }, "PR comment addressed to bot, processing command");
       reviewer
         .handleComment(installationId, owner, repo, issueOrPRNumber, commentBody, commentId)
         .catch((err) => {
@@ -342,7 +355,7 @@ export async function dispatchWebhookEvent(
     }
 
     // Comment on an actual issue → new issue handler.
-    logger.info({ owner, repo, issue: issueOrPRNumber, commentId }, "Bot mentioned in issue comment, processing command");
+    logger.info({ owner, repo, issue: issueOrPRNumber, commentId }, "Issue comment addressed to bot, processing command");
     reviewer
       .handleIssueComment(installationId, owner, repo, issueOrPRNumber, commentBody, commentId)
       .catch((err) => {
@@ -389,13 +402,22 @@ export async function dispatchWebhookEvent(
     }
 
     const isMention = commentBody.toLowerCase().includes(`@${botName.toLowerCase()}`);
-    if (!isMention && !isImplicitReply) {
+    const isSlash = !isMention && addressesBot(commentBody, botName, slashOptions(deps));
+    if (!isMention && !isSlash && !isImplicitReply) {
       return { status: 200, body: { status: "ignored" } };
     }
 
     // For implicit replies, prepend the mention so parseCommand routes
     // free-form text to the chat handler instead of returning null.
-    const dispatchBody = isImplicitReply && !isMention ? `@${botName} ${commentBody}` : commentBody;
+    //
+    // A reply carrying a real command is left alone — prepending would turn
+    // `/review` into a chat message about the word. The check is deliberately
+    // stricter than the gate above: a reply that merely starts with a slash
+    // ("/shrug", "/2 of these are flaky") is conversation, and rewriting it
+    // into chat is better than dropping it on the floor.
+    const carriesCommand = resolvesToSlashCommand(commentBody, botName, slashOptions(deps));
+    const dispatchBody =
+      isImplicitReply && !isMention && !carriesCommand ? `@${botName} ${commentBody}` : commentBody;
 
     logger.info({ owner, repo, pr: pullNumber, commentId, implicit: isImplicitReply }, "Processing review-thread comment");
     reviewer
