@@ -306,7 +306,8 @@ export interface ReviewComment {
    *
    *  `path` then decides where the finding surfaces, because it decides whether
    *  GitHub can host a thread for it (see isFileLevelFinding / isPrBodyFinding
-   *  in review-body.ts):
+   *  in review-body.ts). Both the model and the drift check may name a file
+   *  directly, so a path here is the norm rather than a demotion artefact:
    *   - path set   → posted as a resolvable file-scoped review thread
    *                  (`subject_type: "file"`).
    *   - path empty → no file to attach to, so it renders as prose in the review

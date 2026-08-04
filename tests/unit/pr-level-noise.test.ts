@@ -251,14 +251,21 @@ describe("titleSimilarity / isRepeatPrLevelFinding", () => {
     expect(isRepeatPrLevelFinding(reworded, prior)).toBe(true);
   });
 
-  it("keeps file-level and body-level findings in separate identity scopes", () => {
-    // Drift is always emitted unscoped (path: ""), so an unscoped candidate must
-    // not collapse against a same-titled file-scoped prior — they are claims
-    // about different things and each deserves its own thread/section.
+  it("collapses a repeat that changed scope between pushes", () => {
+    // Whether a finding names a file is a property of the run, not of the claim:
+    // drift and the model name one only when they can, so the same finding can
+    // arrive scoped on one push and unscoped on the next. Requiring the scopes to
+    // agree would reprint it every time it flipped — the exact noise this pass
+    // exists to stop. Matches in both directions.
     const fileScopedPrior = [prLevelRepeatKey("src/a.ts", "Lead detail removes editable Qualification Long Form")];
     expect(
       isRepeatPrLevelFinding({ path: "", title: "Lead detail removes editable Qualification Long Form" }, fileScopedPrior),
-    ).toBe(false);
+    ).toBe(true);
+
+    const unscopedPrior = [prLevelRepeatKey("", "Lead detail removes editable Qualification Long Form")];
+    expect(
+      isRepeatPrLevelFinding({ path: "src/a.ts", title: "Lead detail removes editable Qualification Long Form" }, unscopedPrior),
+    ).toBe(true);
   });
 });
 
@@ -307,6 +314,64 @@ describe("drift: confidence is carried, not assumed", () => {
     const out = await detectDescriptionDrift({ ai, context: ctx("tiny") });
     expect(out[0].level).toBe("info");
     expect(ai.chat).not.toHaveBeenCalled();
+  });
+});
+
+describe("drift: a named file makes the finding resolvable", () => {
+  function ctx(): PRContext {
+    return {
+      owner: "o", repo: "r", pullNumber: 1, title: "t",
+      description: "This PR does a number of things worth describing at length.",
+      baseBranch: "main", headBranch: "feat", headSha: "deadbee",
+      files: [{ filename: "README.md", status: "modified", patch: "@@ -1 +1 @@\n+x", additions: 1, deletions: 0 }],
+    };
+  }
+
+  function aiReturning(raw: string) {
+    return { chat: vi.fn().mockResolvedValue(raw) } as any;
+  }
+
+  it("carries a path naming a file whose diff the model was shown", async () => {
+    // The bug this fixes: drift had no path field at all, so a finding squarely
+    // about README.md could only ever be printed as unresolvable body prose.
+    const ai = aiReturning(JSON.stringify([
+      { level: "warning", summary: "README documents a command the compose change doesn't support", details: "d", confidence: "high", path: "README.md" },
+    ]));
+    const out = await detectDescriptionDrift({ ai, context: ctx() });
+    expect(out[0].path).toBe("README.md");
+  });
+
+  it("drops a path naming a file outside the shown diff, keeping the finding", async () => {
+    // GitHub would reject the thread. The finding is worth more in the body
+    // than lost, and a hallucinated filename must never anchor it elsewhere.
+    const ai = aiReturning(JSON.stringify([
+      { level: "warning", summary: "s", details: "d", confidence: "high", path: "src/imaginary.ts" },
+    ]));
+    const out = await detectDescriptionDrift({ ai, context: ctx() });
+    expect(out).toHaveLength(1);
+    expect(out[0].path).toBeUndefined();
+  });
+
+  it("drops a path naming a file the model was told it cannot see", async () => {
+    // Same rule as the scope note: a file whose diff was withheld (ignored,
+    // capped, budget-omitted) can't justify a path, even though it is in the PR.
+    const ai = aiReturning(JSON.stringify([
+      { level: "warning", summary: "s", details: "d", confidence: "high", path: "README.md" },
+    ]));
+    const out = await detectDescriptionDrift({ ai, context: ctx(), unavailableFiles: ["README.md"] });
+    expect(out[0].path).toBeUndefined();
+  });
+
+  it("leaves genuinely whole-PR drift unscoped", async () => {
+    const ai = aiReturning(JSON.stringify([{ level: "warning", summary: "s", details: "d", confidence: "high" }]));
+    const out = await detectDescriptionDrift({ ai, context: ctx() });
+    expect(out[0].path).toBeUndefined();
+  });
+
+  it("asks the model for a path", async () => {
+    const ai = aiReturning("[]");
+    await detectDescriptionDrift({ ai, context: ctx() });
+    expect(ai.chat.mock.calls[0][1]).toContain('"path"');
   });
 });
 

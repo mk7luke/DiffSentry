@@ -204,12 +204,15 @@ export function prLevelRepeatKey(path: string, title: string): string {
  * findings dedup here too and re-wordings don't stack duplicate threads in the
  * Files tab across pushes.
  *
- * `path` is part of a finding's identity, so comparison is same-scope only: a
- * file-scoped finding matches only file-scoped priors on that same file, and an
- * unscoped one only unscoped priors. Two findings that read alike about
- * different code are different findings. This is why drift must keep emitting
- * with `path: ""` (reviewer.ts) — scope it to a file and it stops collapsing
- * against its own unscoped history.
+ * Two DIFFERENT files never collapse: a finding on `src/a.ts` is not a repeat of
+ * a same-sounding one on `src/b.ts`, however alike they read.
+ *
+ * An unscoped side, though, matches either way. Whether a finding carries a path
+ * is a property of the run, not of the claim: drift and the model both name a
+ * file only when they can, so the same finding can arrive scoped on one push and
+ * unscoped on the next. Requiring the scopes to agree would let exactly those
+ * re-scoped repeats through — which is the noise this function exists to stop —
+ * so an empty path is treated as "any file" rather than as its own scope.
  */
 export function isRepeatPrLevelFinding(
   candidate: { path: string; title?: string },
@@ -220,7 +223,8 @@ export function isRepeatPrLevelFinding(
   return priorKeys.some((key) => {
     const tab = key.indexOf("\t");
     if (tab === -1) return false;
-    if (key.slice(0, tab) !== candidate.path) return false;
+    const priorPath = key.slice(0, tab);
+    if (priorPath && candidate.path && priorPath !== candidate.path) return false;
     return titleSimilarity(key.slice(tab + 1), title) >= PR_LEVEL_REPEAT_THRESHOLD;
   });
 }
@@ -507,7 +511,7 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
   const rawComments: RawComment[] = Array.isArray(parsed.comments) ? parsed.comments : [];
 
   for (const c of rawComments) {
-    if (!c.path || !c.body || typeof c.line !== "number" || c.line < 1) {
+    if (!c.path || !c.body) {
       droppedCount++;
       continue;
     }
@@ -519,6 +523,22 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
     }
 
     const severity = VALID_SEVERITIES.includes(c.severity as CommentSeverity) ? (c.severity as CommentSeverity) : undefined;
+
+    // A finding that named a real changed file but no usable line still knows
+    // where it lives. GitHub can host it as a file-scoped thread, so treat a
+    // missing line exactly like an un-anchorable one below rather than throwing
+    // the finding away: blocking severities become file-level, the rest are
+    // still dropped as not worth the noise once they've slipped their line.
+    if (typeof c.line !== "number" || c.line < 1) {
+      if (severity === "critical" || severity === "major") {
+        comments.push(buildReviewComment(c, { path: c.path, line: 0, prLevel: true }));
+        demotedCount++;
+        log.info({ path: c.path, severity }, "Blocking finding with no line demoted to file-level");
+      } else {
+        droppedCount++;
+      }
+      continue;
+    }
 
     // Anchor the finding to a real diff line: keep it as-is when it already
     // lands on one, otherwise snap to the nearest changed line. When no line is
@@ -558,16 +578,58 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
 
   // PR-level findings: the model's dedicated channel for issues not tied to a
   // single changed line (diff contradicts the PR description, a claimed change
-  // is missing, cross-cutting concerns). No anchoring and — per the schema in
-  // ai/prompt.ts, which gives these entries no "path"/"line" — always built with
-  // path: "" so their title-based fingerprint stays stable across reviews.
-  // Non-array degrades to none.
+  // is missing, cross-cutting concerns). Non-array degrades to none.
+  //
+  // The optional "path" decides which of the three channels the finding lands
+  // in, cheapest first. Most "PR-level" findings are really about ONE file and
+  // only the reasoning spans the change ("the README documents a command the
+  // compose change doesn't support"), so honouring the path is what keeps them
+  // out of the unresolvable review body:
+  //   path + anchorable line → a real inline comment (the model filed it in the
+  //     wrong array; anchor it rather than downgrade it)
+  //   path only              → file-scoped thread, resolvable like any comment
+  //   no usable path         → review-body prose, the only unresolvable channel
+  // A path naming a file outside the diff is dropped, not trusted: GitHub would
+  // reject the thread, and the finding is worth more in the body than lost.
   const rawPrLevel: RawComment[] = Array.isArray(parsed.prLevelComments) ? parsed.prLevelComments : [];
   let prLevelKept = 0;
+  let prLevelScoped = 0;
+  let prLevelPromoted = 0;
   for (const c of rawPrLevel) {
     if (!c.body || !(typeof c.title === "string" && c.title.trim())) continue;
-    comments.push(buildReviewComment(c, { path: "", line: 0, prLevel: true }));
+
+    const info = c.path ? diffInfoByFile.get(c.path) : undefined;
+    if (!info) {
+      if (c.path) log.info({ path: c.path }, "PR-level finding names a file outside the diff, keeping it body-level");
+      comments.push(buildReviewComment(c, { path: "", line: 0, prLevel: true }));
+      prLevelKept++;
+      continue;
+    }
+
+    // A line arriving on this channel is off-schema, but it is evidence the
+    // model knows exactly where the finding lives. Anchor it the same way an
+    // inline finding is anchored; fall back to the file thread when it can't be.
+    const line =
+      typeof c.line === "number" && c.line >= 1
+        ? info.valid.has(c.line)
+          ? c.line
+          : nearestAnchor(c.line, info)
+        : null;
+    if (line !== null) {
+      comments.push(buildReviewComment(c, { path: c.path!, line, prLevel: false }));
+      prLevelPromoted++;
+      continue;
+    }
+
+    comments.push(buildReviewComment(c, { path: c.path!, line: 0, prLevel: true }));
+    prLevelScoped++;
     prLevelKept++;
+  }
+  if (prLevelScoped > 0 || prLevelPromoted > 0) {
+    log.info(
+      { fileScoped: prLevelScoped, promotedToInline: prLevelPromoted },
+      "PR-level findings routed to a file",
+    );
   }
 
   if (droppedCount > 0 || remappedCount > 0 || demotedCount > 0 || prLevelKept > 0) {

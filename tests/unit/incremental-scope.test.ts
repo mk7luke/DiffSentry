@@ -146,6 +146,19 @@ describe("context files are read, not re-reviewed", () => {
     expect(kept[0].path).toBe("");
   });
 
+  it("keeps a PR-level finding that names an already-reviewed file", () => {
+    // A PR-level finding is recognised by its flag, not by an empty path. Now
+    // that one can name the file it concerns, matching on path alone would
+    // silently swallow the whole-PR claims this context exists to enable — "the
+    // README documents a command this compose change doesn't support" is about
+    // a file the newest commit didn't touch.
+    const prLevel: ReviewComment = { ...finding("old.ts", 0), prLevel: true };
+    const kept = dropContextOnlyFindings([prLevel, finding("old.ts")], prior);
+
+    expect(kept).toHaveLength(1);
+    expect(kept[0].prLevel).toBe(true);
+  });
+
   it("is a no-op on a full review", () => {
     const comments = [finding("a.ts"), finding("b.ts")];
 

@@ -147,6 +147,29 @@ describe("verifyFindings", () => {
     expect(out.stats.unparseable).toBe(false);
   });
 
+  it("never sends a file-level (line 0) finding to the verifier, and keeps it", async () => {
+    // File-scoped findings now arrive with a real path, so the verifier's
+    // per-finding gate must still exclude them: there is no line for it to cite,
+    // and a finding it was never shown must not be judged unsupported. Index
+    // alignment matters too — the verdict below addresses the one finding sent.
+    const fileLevel: ReviewComment = {
+      path: "src/a.ts", line: 0, side: "RIGHT", body: "b", title: "File-scoped finding.", prLevel: true,
+    };
+    let sent = "";
+    const ai = {
+      complete: async (_s: string, user: string) => {
+        sent = user;
+        return JSON.stringify({ verdicts: [{ index: 0, supported: true, citedLines: [2] }] });
+      },
+    };
+    const out = await verifyFindings({ ai, context: ctx(), comments: [comments[0], fileLevel] });
+
+    expect(sent).not.toContain("File-scoped finding.");
+    expect(out.comments.map((c) => c.title)).toEqual(["Finding zero.", "File-scoped finding."]);
+    expect(out.stats.dropped).toBe(0);
+    expect(out.stats.skipped).toBe(1);
+  });
+
   it("parses fenced JSON wrapped in prose (leading + trailing text)", async () => {
     const ai = {
       complete: async () =>
