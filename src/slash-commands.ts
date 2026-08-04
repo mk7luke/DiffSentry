@@ -18,9 +18,6 @@
  * command is silently ignored so we never answer another bot's `/lgtm`.
  */
 
-/** How a command was addressed to us. */
-export type CommandSyntax = "mention" | "slash-namespaced" | "slash-bare";
-
 export interface SlashCommand {
   /** Command text with the leading `/` (and bot namespace) stripped, e.g. "full review". */
   text: string;

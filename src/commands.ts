@@ -1,5 +1,5 @@
 import { ChatCommand } from "./types.js";
-import { extractSlashCommand, SlashOptions, CommandSyntax } from "./slash-commands.js";
+import { extractSlashCommand, SlashOptions } from "./slash-commands.js";
 
 /**
  * Parse a chat command from a PR comment body.
@@ -63,19 +63,6 @@ export function unrecognized(
 ): { type: "unknown_command"; name: string } | null {
   if (syntax === "slash-namespaced") return { type: "unknown_command", name };
   return suggestCommand(name) ? { type: "unknown_command", name } : null;
-}
-
-/**
- * How a comment addressed us, for callers that need to distinguish the paths
- * (logging, metrics) without re-parsing.
- */
-export function detectCommandSyntax(
-  body: string,
-  botName: string,
-  slashOpts: SlashOptions = {}
-): CommandSyntax | null {
-  if (new RegExp(`@${botName}\\b`, "i").test(body)) return "mention";
-  return extractSlashCommand(body, botName, slashOpts)?.syntax ?? null;
 }
 
 /**

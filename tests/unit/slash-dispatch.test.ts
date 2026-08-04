@@ -5,6 +5,7 @@ const ORIGINAL_DB_PATH = process.env.DB_PATH;
 process.env.DB_PATH = "";
 
 import { dispatchWebhookEvent, WebhookDispatchDeps } from "../../src/webhook/dispatch.js";
+import { parseCommand } from "../../src/commands.js";
 
 afterAll(() => {
   if (ORIGINAL_DB_PATH === undefined) delete process.env.DB_PATH;
@@ -123,33 +124,80 @@ describe("webhook gate — slash commands", () => {
 });
 
 describe("webhook gate — review thread replies", () => {
-  function threadPayload(body: string): any {
+  function threadPayload(body: string, replyToId?: number): any {
     return {
       action: "created",
       installation: { id: 1 },
       repository: { owner: { login: "acme" }, name: "app" },
       pull_request: { number: 7 },
-      comment: { id: 99, body, user: { type: "User" } },
+      comment: { id: 99, body, user: { type: "User" }, in_reply_to_id: replyToId },
     };
   }
 
-  it("passes a slash command through verbatim", async () => {
-    // Regression guard: the implicit-reply path prepends "@bot " to free-form
-    // replies. Doing that to "/review" would turn a command into a chat message.
+  /** Deps whose parent-comment lookup reports a thread our bot started. */
+  function depsOnOurThread(): WebhookDispatchDeps {
+    const deps = makeDeps();
+    (deps.reviewer as any).getInstallationOctokit = async () => ({
+      pulls: {
+        getReviewComment: async () => ({
+          data: { user: { type: "Bot", login: "diffsentry[bot]" } },
+        }),
+      },
+    });
+    return deps;
+  }
+
+  it("dispatches a standalone slash command on any thread", async () => {
     await dispatchWebhookEvent(makeDeps(), "pull_request_review_comment", threadPayload("/review"));
     await settle();
     expect(handled).toEqual([{ kind: "thread", body: "/review" }]);
   });
 
-  it("ignores a reply that only looks like a command", async () => {
-    // "/shrug" is not ours and not a typo of ours. On a thread we did not
-    // start, there is nothing to answer.
+  it("forwards a non-command slash reply, which then no-ops in parse", async () => {
+    // "/shrug" is neither ours nor a typo of ours. It passes the loose gate and
+    // parseCommand drops it — the bot stays silent on a thread it does not own.
     const res = await dispatchWebhookEvent(
       makeDeps(), "pull_request_review_comment", threadPayload("/shrug"),
     );
     await settle();
-    expect(res.status).toBe(202); // passes the loose gate…
-    expect(handled).toEqual([{ kind: "thread", body: "/shrug" }]); // …and no-ops in parse
+    expect(res.status).toBe(202);
+    expect(handled).toEqual([{ kind: "thread", body: "/shrug" }]);
+    expect(parseCommand("/shrug", "diffsentry")).toBeNull(); // the actual no-op
+  });
+
+  // ─── Implicit replies, on threads our bot started ─────────────
+
+  it("keeps a slash command intact on our own thread", async () => {
+    // Regression guard: the implicit-reply path prepends "@bot " to free-form
+    // replies. Doing that to "/review" would turn a command into a chat message.
+    await dispatchWebhookEvent(
+      depsOnOurThread(), "pull_request_review_comment", threadPayload("/review", 555),
+    );
+    await settle();
+    expect(handled).toEqual([{ kind: "thread", body: "/review" }]);
+    expect(parseCommand("/review", "diffsentry")).toEqual({ type: "review" });
+  });
+
+  it("rewrites a non-command slash reply on our thread into chat", async () => {
+    // This is the case the prepend exists for: conversation that happens to
+    // start with a slash must reach chat, not be dropped.
+    await dispatchWebhookEvent(
+      depsOnOurThread(), "pull_request_review_comment", threadPayload("/shrug", 555),
+    );
+    await settle();
+    expect(handled).toEqual([{ kind: "thread", body: "@diffsentry /shrug" }]);
+    expect(parseCommand("@diffsentry /shrug", "diffsentry")).toEqual({
+      type: "chat",
+      message: "/shrug",
+    });
+  });
+
+  it("rewrites ordinary prose on our thread into chat", async () => {
+    await dispatchWebhookEvent(
+      depsOnOurThread(), "pull_request_review_comment", threadPayload("why is that unsafe?", 555),
+    );
+    await settle();
+    expect(handled).toEqual([{ kind: "thread", body: "@diffsentry why is that unsafe?" }]);
   });
 
   it("ignores an unrelated reply that is not on our thread", async () => {
