@@ -14,7 +14,7 @@ import {
   synthesizeReviewSummary,
   buildReviewComment,
   isRepeatPrLevelFinding,
-  prLevelRepeatKey,
+  prLevelRepeatKeysFor,
 } from "./ai/parse.js";
 import { verifyFindings } from "./ai/verify.js";
 import { LearningsStore, synthesizeLearning, extractFindingMeta, type FindingContext } from "./learnings.js";
@@ -178,9 +178,13 @@ export function buildPriorReviewContext(params: {
  * reviewed on an earlier commit and their threads already exist. The prompt says
  * so; this is the deterministic backstop, so a model that comments on them
  * anyway can't turn every push into a re-litigation of the whole branch.
- * PR-level findings (no path) are never touched — those are whole-PR by
- * definition, and reasoning about the whole PR is exactly why the context is
- * there.
+ * PR-level findings are never touched — those are whole-PR by definition, and
+ * reasoning about the whole PR is exactly why the context is there. They are
+ * matched on the `prLevel` flag, NOT on an empty path: a PR-level finding may
+ * now name the file it concerns (a drift finding, or a `prLevelComments` entry
+ * with a path), and that file is very often a context-only one — "the README
+ * documents a command this compose change doesn't support" is precisely the
+ * cross-file claim the prior-review context exists to make possible.
  */
 export function dropContextOnlyFindings(
   comments: ReviewComment[],
@@ -188,7 +192,7 @@ export function dropContextOnlyFindings(
 ): ReviewComment[] {
   if (!prior || prior.files.length === 0) return comments;
   const contextOnly = new Set(prior.files.map((f) => f.filename));
-  return comments.filter((c) => !c.path || !contextOnly.has(c.path));
+  return comments.filter((c) => c.prLevel || !c.path || !contextOnly.has(c.path));
 }
 
 const WALKTHROUGH_MARKER = "<!-- DiffSentry Walkthrough -->";
@@ -1230,7 +1234,11 @@ export class Reviewer {
 
       // Fold WARNING-level description drift into first-class PR-level findings.
       // Diff-vs-description discrepancies are the exact class that has no diff
-      // line to anchor to, so they belong in the PR-level channel (visible +
+      // LINE to anchor to — but most of them do land on a single file, and when
+      // the model names one (validated against the shown diff in drift.ts) the
+      // finding is folded with that path so it becomes a resolvable file-scoped
+      // thread instead of permanent prose. Only genuinely whole-PR drift keeps
+      // `path: ""`. So they belong in the PR-level channel (visible +
       // actionable) rather than buried as an info block in the walkthrough. This
       // also gives the REQUEST_CHANGES invariant below a deterministic backstop.
       // Non-blocking on their own: high-confidence drift bumps APPROVE→COMMENT,
@@ -1262,13 +1270,17 @@ export class Reviewer {
                 aiAgentPrompt: `Reconcile the PR description with the actual diff. ${f.summary} ${f.details}`.trim(),
                 confidence: f.confidence,
               },
-              { path: "", line: 0, prLevel: true },
+              { path: f.path ?? "", line: 0, prLevel: true },
             ),
           );
         }
         reviewResult.approval = applyDriftToApproval(reviewResult.approval, driftWarnings);
         log.info(
-          { count: driftWarnings.length, highConfidence: driftWarnings.filter((f) => f.confidence === "high").length },
+          {
+            count: driftWarnings.length,
+            highConfidence: driftWarnings.filter((f) => f.confidence === "high").length,
+            fileScoped: driftWarnings.filter((f) => f.path).length,
+          },
           "Folded description-drift warnings into PR-level findings",
         );
       }
@@ -1478,14 +1490,20 @@ export class Reviewer {
           // Trailing window, most-recent last: a PR-level finding that stopped
           // recurring 50 findings ago is not worth suppressing forever, and the
           // list is compared token-wise (not hashed), so it has to stay bounded.
+          //
+          // The bound counts KEYS, and a path-scoped finding contributes two
+          // (see prLevelRepeatKeysFor), so it is set at 2 × the intended
+          // 50-finding depth. That keeps the old retention floor intact for the
+          // worst case where every finding is path-scoped; anything less would
+          // quietly shorten the window that a purely body-level PR gets today.
           postedPrLevelKeys: Array.from(
             new Set([
               ...(priorState?.postedPrLevelKeys ?? []),
               ...reviewResult.comments
-                .filter((c) => c.prLevel && c.title)
-                .map((c) => prLevelRepeatKey(c.path, c.title!)),
+                .filter((c) => c.prLevel)
+                .flatMap((c) => prLevelRepeatKeysFor(c)),
             ]),
-          ).slice(-50),
+          ).slice(-100),
           filesProcessed: context.files.map((f) => f.filename),
           filesSkippedSimilar,
           filesSkippedTrivial,

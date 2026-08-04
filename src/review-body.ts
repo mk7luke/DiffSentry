@@ -71,11 +71,12 @@ export function isNitpick(c: ReviewComment): boolean {
  * The two flavours of `prLevel` finding, distinguished by whether a `path`
  * survived. Both carry line 0 and are excluded from inline posting.
  *
- * - FILE-level (`path` set): the model located the finding in a specific file
- *   but on a line we couldn't anchor to the diff (see the demotion path in
- *   ai/parse.ts). GitHub can host these as real, resolvable file-scoped review
- *   threads (`subject_type: "file"`), so they are posted as threads rather than
- *   rendered into the review body.
+ * - FILE-level (`path` set): the finding belongs to a specific file but not to
+ *   one changed line — the model said so outright (a `prLevelComments` entry or
+ *   a drift finding carrying a `path`), or it named a line we couldn't anchor to
+ *   the diff (the demotion path in ai/parse.ts). GitHub can host these as real,
+ *   resolvable file-scoped review threads (`subject_type: "file"`), so they are
+ *   posted as threads rather than rendered into the review body.
  * - BODY-level (`path` empty): no file to attach to at all — the diff versus the
  *   PR description, or a concern spanning the whole change. GitHub has nowhere
  *   to hang a thread, so these are the only findings that must live as prose in
@@ -185,7 +186,9 @@ function renderNitpickEntry(c: ReviewComment): string {
  * summary. Each comment's `body` is already the fully-formatted standalone block
  * (type/severity header, title, prose, agent prompt), so we render it directly.
  *
- * Deliberately narrow. This is the only DiffSentry output a reader cannot
+ * Deliberately narrow, and a last resort: a finding reaches here only after
+ * failing to name any changed file, since one that names a file becomes a
+ * resolvable thread instead. This is the only DiffSentry output a reader cannot
  * resolve, reply to, or collapse — it reprints in full on every subsequent
  * review — so entry is gated on high confidence by isVisiblyActionable.
  * Everything else goes to renderUncertainPrLevelSection below.

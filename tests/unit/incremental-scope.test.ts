@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildReviewPrompt } from "../../src/ai/prompt.js";
+import { parseReviewResponse } from "../../src/ai/parse.js";
 import {
   buildPriorReviewContext,
   dropContextOnlyFindings,
@@ -146,10 +147,58 @@ describe("context files are read, not re-reviewed", () => {
     expect(kept[0].path).toBe("");
   });
 
+  it("keeps a PR-level finding that names an already-reviewed file", () => {
+    // A PR-level finding is recognised by its flag, not by an empty path. Now
+    // that one can name the file it concerns, matching on path alone would
+    // silently swallow the whole-PR claims this context exists to enable — "the
+    // README documents a command this compose change doesn't support" is about
+    // a file the newest commit didn't touch.
+    const prLevel: ReviewComment = { ...finding("old.ts", 0), prLevel: true };
+    const kept = dropContextOnlyFindings([prLevel, finding("old.ts")], prior);
+
+    expect(kept).toHaveLength(1);
+    expect(kept[0].prLevel).toBe(true);
+  });
+
   it("is a no-op on a full review", () => {
     const comments = [finding("a.ts"), finding("b.ts")];
 
     expect(dropContextOnlyFindings(comments, undefined)).toBe(comments);
+  });
+
+  it("a file-scoped finding from the inline channel can never name a context-only file", () => {
+    // Why exempting every `prLevel` finding above is safe rather than a hole.
+    // `prLevel` spans two origins: whole-PR claims that named a file (drift,
+    // prLevelComments) and inline findings demoted for want of a line. Only the
+    // first should out-scope this guard — but the second can never reach it,
+    // because partitionFilesForReview puts a file in EITHER filesToReview or
+    // filesSkippedSimilar, reviewer.ts narrows context.files to the former, and
+    // parseReviewResponse drops any comment naming a file outside it.
+    //
+    // That invariant is load-bearing and lives three functions away, so pin it
+    // here: if context.files ever widens to include already-reviewed files, a
+    // demoted finding could name one and this exemption would start re-posting
+    // findings on context-only files — exactly what the guard exists to stop.
+    const files = [file("old.ts"), file("new.ts")];
+    const seed = partitionFilesForReview(files, "full", undefined);
+    const part = partitionFilesForReview(files, "incremental", { "old.ts": seed.currentFileShas["old.ts"] });
+
+    expect(part.filesSkippedSimilar).toEqual(["old.ts"]);
+    expect(part.filesToReview.map((f) => f.filename)).toEqual(["new.ts"]);
+    expect(part.filesToReview.filter((f) => part.filesSkippedSimilar.includes(f.filename))).toEqual([]);
+
+    const ctx: PRContext = {
+      owner: "o", repo: "r", pullNumber: 1, title: "t", description: "",
+      baseBranch: "main", headBranch: "feat", headSha: "dead", files: part.filesToReview,
+    };
+    const res = parseReviewResponse(
+      JSON.stringify({
+        summary: "", approval: "REQUEST_CHANGES",
+        comments: [{ path: "old.ts", title: "Blocking, no line.", body: "b", severity: "major" }],
+      }),
+      ctx,
+    );
+    expect(res.comments).toHaveLength(0);
   });
 });
 

@@ -47,6 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Findings that concern one file no longer land in the unresolvable "Issues not
+  tied to a specific line" section. Description-drift findings and the model's
+  own PR-level findings can now name the file they're about, and become
+  resolvable file-scoped review threads; a blocking finding that names a real
+  file but no line is threaded there too instead of being dropped. Only findings
+  that genuinely span the whole change still render as review-body prose.
 - Reviews after a push now judge the whole PR, not just the newest commit: the
   review prompt carries the already-reviewed files as read-only context, and the
   walkthrough, risk score, coverage signal, and split suggestion are computed

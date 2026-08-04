@@ -80,6 +80,74 @@ describe("parse: PR-level findings channel", () => {
     expect(res.comments[0].line).not.toBeGreaterThan(0);
   });
 
+  it("routes a path-carrying prLevelComment to a file-scoped thread", () => {
+    // The headline fix: a finding about one file — the README documenting a
+    // command the compose change doesn't support — used to be forced into the
+    // review body because the channel had no path. Now it becomes a resolvable
+    // thread on that file.
+    const raw = JSON.stringify({
+      summary: "",
+      approval: "COMMENT",
+      comments: [],
+      prLevelComments: [
+        {
+          path: "src/a.ts",
+          title: "README still documents the old host path.",
+          body: "The description and the README disagree with the compose change.",
+          type: "issue",
+          severity: "major",
+        },
+      ],
+    });
+    const res = parseReviewResponse(raw, ctx());
+    expect(res.comments).toHaveLength(1);
+    expect(res.comments[0].prLevel).toBe(true);
+    expect(res.comments[0].path).toBe("src/a.ts");
+    expect(res.comments[0].line).toBe(0);
+  });
+
+  it("promotes a prLevelComment that also names an anchorable line to inline", () => {
+    const raw = JSON.stringify({
+      summary: "",
+      approval: "COMMENT",
+      comments: [],
+      prLevelComments: [
+        { path: "src/a.ts", line: 3, title: "Filed in the wrong array.", body: "b", severity: "major" },
+      ],
+    });
+    const res = parseReviewResponse(raw, ctx());
+    expect(res.comments).toHaveLength(1);
+    expect(res.comments[0].prLevel).toBeUndefined();
+    expect(res.comments[0].line).toBe(3);
+  });
+
+  it("keeps a prLevelComment body-level when its path is not a changed file", () => {
+    const raw = JSON.stringify({
+      summary: "",
+      approval: "COMMENT",
+      comments: [],
+      prLevelComments: [
+        { path: "src/imaginary.ts", title: "Still a real finding.", body: "b", severity: "major" },
+      ],
+    });
+    const res = parseReviewResponse(raw, ctx());
+    expect(res.comments).toHaveLength(1);
+    expect(res.comments[0].prLevel).toBe(true);
+    expect(res.comments[0].path).toBe("");
+  });
+
+  it("keeps a path-less prLevelComment in the body channel", () => {
+    const raw = JSON.stringify({
+      summary: "",
+      approval: "COMMENT",
+      comments: [],
+      prLevelComments: [{ title: "Spans the whole change.", body: "b", severity: "major" }],
+    });
+    const res = parseReviewResponse(raw, ctx());
+    expect(res.comments[0].path).toBe("");
+    expect(res.comments[0].prLevel).toBe(true);
+  });
+
   it("ignores prLevelComments entries missing a title or body", () => {
     const raw = JSON.stringify({
       summary: "",
@@ -140,6 +208,39 @@ describe("parse: un-anchorable finding demotion", () => {
     expect(res.comments).toHaveLength(1);
     expect(res.comments[0].prLevel).toBeUndefined();
     expect(res.comments[0].line).toBe(3);
+  });
+
+  it("demotes a blocking finding that names a real file but no line", () => {
+    // A missing line used to drop the finding outright, even though the file it
+    // named was right there in the diff and can host a thread.
+    const raw = JSON.stringify({
+      summary: "",
+      approval: "REQUEST_CHANGES",
+      comments: [{ path: "src/a.ts", title: "No line given.", body: "body", severity: "major" }],
+    });
+    const res = parseReviewResponse(raw, ctx());
+    expect(res.comments).toHaveLength(1);
+    expect(res.comments[0].prLevel).toBe(true);
+    expect(res.comments[0].path).toBe("src/a.ts");
+    expect(res.comments[0].line).toBe(0);
+  });
+
+  it("still drops a minor finding with no line", () => {
+    const raw = JSON.stringify({
+      summary: "",
+      approval: "COMMENT",
+      comments: [{ path: "src/a.ts", title: "No line given.", body: "body", severity: "minor" }],
+    });
+    expect(parseReviewResponse(raw, ctx()).comments).toHaveLength(0);
+  });
+
+  it("drops a finding with no line whose file is not in the diff", () => {
+    const raw = JSON.stringify({
+      summary: "",
+      approval: "COMMENT",
+      comments: [{ path: "src/imaginary.ts", title: "T.", body: "body", severity: "major" }],
+    });
+    expect(parseReviewResponse(raw, ctx()).comments).toHaveLength(0);
   });
 });
 

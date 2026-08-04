@@ -16,6 +16,15 @@ export type DriftFinding = {
    *  fold in reviewer.ts carries this through to the finding, and the review
    *  body only gives high-confidence drift a prominent, uncollapsed section. */
   confidence: Confidence;
+  /** The one changed file this drift concerns, when there is one. Most drift is
+   *  about a specific file even though the *reasoning* spans description and
+   *  diff ("the README documents a command the compose change doesn't support"),
+   *  and a named file lets reviewer.ts fold the finding into a resolvable
+   *  file-scoped thread instead of permanent prose in the review body. Absent
+   *  when the drift genuinely spans several files or the change as a whole.
+   *  Always validated against the diff we showed the model — a hallucinated
+   *  filename drops the path, never the finding. */
+  path?: string;
 };
 
 export async function detectDescriptionDrift(opts: {
@@ -52,10 +61,13 @@ Respond with ONLY a JSON array (no prose, no code fences). Each entry:
   "level": "warning" | "info",
   "summary": "one-line summary",
   "details": "1-3 sentences with specifics referencing files/symbols",
-  "confidence": "high" | "medium" | "low"
+  "confidence": "high" | "medium" | "low",
+  "path": "OPTIONAL relative/path/to/file.ts"
 }
 
 Use "warning" only when the drift is meaningful: missing critical changes, contradictory claims, or unsupported features named. Use "info" for minor omissions. If the description matches the diff well, return an empty array [].
+
+"path" is the ONE changed file this drift is about, copied exactly from the diff above. Set it whenever the finding lands on a single file — "the README documents a command the compose change doesn't support" is about \`README.md\`, even though you reached it by reading two files. A finding with a path becomes a review thread on that file, which the author can reply to and resolve; a finding without one can only be printed in the review body, where it can never be dismissed. Omit "path" only when the drift genuinely spans several files or the change as a whole, and never guess — a file you can't name exactly is better left unset.
 
 "confidence" is how sure you are the drift is REAL, judged separately from how bad it would be. Use "high" ONLY when the description makes a concrete claim the diff plainly contradicts, and you verified both sides. Use "medium" when the reading depends on intent you can't see — an author's shorthand, an omission that may be deliberate, a description that's incomplete rather than wrong. Use "low" for a hypothesis worth raising but not standing behind. A description being terse or informal is NOT drift. Prefer "medium" when torn: a wrong high-confidence finding costs the reviewer more than a hedged one.
 
@@ -75,6 +87,14 @@ Be specific — name files and identifiers, don't say "various changes".`;
 
   const raw = await opts.ai.chat(opts.context, ask + scopeNote);
   const cleaned = raw.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
+  // A path only earns a file-scoped thread if it names a file whose diff we
+  // actually put in front of the model — so it excludes the unavailable set
+  // (config-ignored, past the file cap, dropped by the size budget) just as the
+  // scope note above does. A path the model could not have read is a guess, and
+  // anchoring a finding to the wrong file is worse than leaving it unanchored:
+  // the path is dropped, the finding is not.
+  const shownFiles = new Set(opts.context.files.map((f) => f.filename));
+  for (const f of unavailable) shownFiles.delete(f);
   try {
     const parsed = JSON.parse(cleaned);
     if (!Array.isArray(parsed)) return [];
@@ -84,6 +104,9 @@ Be specific — name files and identifiers, don't say "various changes".`;
         level: f.level === "info" ? "info" : "warning",
         summary: String(f.summary).slice(0, 200),
         details: String(f.details ?? "").slice(0, 600),
+        ...(typeof f.path === "string" && shownFiles.has(f.path.trim())
+          ? { path: f.path.trim() }
+          : {}),
         // Default to "medium", NOT the "high" that ReviewComment defaults to:
         // an omitted confidence here means the model didn't engage with the
         // question, and drift is the finding class least entitled to the
