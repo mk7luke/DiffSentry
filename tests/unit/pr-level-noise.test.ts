@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { formatReviewBody, reconcileApproval, isVisiblyActionable } from "../../src/review-body.js";
-import { titleSimilarity, isRepeatPrLevelFinding, prLevelRepeatKey } from "../../src/ai/parse.js";
+import { titleSimilarity, isRepeatPrLevelFinding, prLevelRepeatKey, prLevelRepeatKeysFor } from "../../src/ai/parse.js";
 import { detectDescriptionDrift, applyDriftToApproval, type DriftFinding } from "../../src/drift.js";
 import { GitHubClient } from "../../src/github.js";
 import type { Config, PRContext, ReviewComment, ReviewResult } from "../../src/types.js";
@@ -251,21 +251,54 @@ describe("titleSimilarity / isRepeatPrLevelFinding", () => {
     expect(isRepeatPrLevelFinding(reworded, prior)).toBe(true);
   });
 
-  it("collapses a repeat that changed scope between pushes", () => {
-    // Whether a finding names a file is a property of the run, not of the claim:
-    // drift and the model name one only when they can, so the same finding can
-    // arrive scoped on one push and unscoped on the next. Requiring the scopes to
-    // agree would reprint it every time it flipped — the exact noise this pass
-    // exists to stop. Matches in both directions.
+  it("keeps file-level and body-level findings in separate identity scopes", () => {
+    // An empty path must never act as a wildcard. Title similarity alone is not
+    // evidence of identity once the scopes disagree, and suppressing a real
+    // finding costs more than reprinting a duplicate one — the asymmetry
+    // PR_LEVEL_REPEAT_THRESHOLD is tuned around.
     const fileScopedPrior = [prLevelRepeatKey("src/a.ts", "Lead detail removes editable Qualification Long Form")];
     expect(
       isRepeatPrLevelFinding({ path: "", title: "Lead detail removes editable Qualification Long Form" }, fileScopedPrior),
-    ).toBe(true);
+    ).toBe(false);
 
     const unscopedPrior = [prLevelRepeatKey("", "Lead detail removes editable Qualification Long Form")];
     expect(
-      isRepeatPrLevelFinding({ path: "src/a.ts", title: "Lead detail removes editable Qualification Long Form" }, unscopedPrior),
-    ).toBe(true);
+      isRepeatPrLevelFinding({ path: "src/b.ts", title: "Lead detail removes editable Qualification Long Form" }, unscopedPrior),
+    ).toBe(false);
+  });
+});
+
+describe("prLevelRepeatKeysFor: scope flips dedup without a wildcard", () => {
+  const TITLE = "README still documents the old host path";
+
+  it("records a path-scoped finding under both its scoped and unscoped identity", () => {
+    expect(prLevelRepeatKeysFor({ path: "README.md", title: TITLE })).toEqual([
+      prLevelRepeatKey("README.md", TITLE),
+      prLevelRepeatKey("", TITLE),
+    ]);
+  });
+
+  it("records an unscoped finding under one identity only", () => {
+    expect(prLevelRepeatKeysFor({ path: "", title: TITLE })).toEqual([prLevelRepeatKey("", TITLE)]);
+  });
+
+  it("records nothing for a finding with no title", () => {
+    expect(prLevelRepeatKeysFor({ path: "README.md", title: undefined })).toEqual([]);
+  });
+
+  it("collapses the flip in both directions via the recorded keys", () => {
+    // Posted scoped on one push; the next push reports the same claim unscoped
+    // (drift named no file that time) — and vice versa. Both must dedup.
+    const postedScoped = prLevelRepeatKeysFor({ path: "README.md", title: TITLE });
+    expect(isRepeatPrLevelFinding({ path: "", title: `${TITLE} inside the DB container` }, postedScoped)).toBe(true);
+    expect(isRepeatPrLevelFinding({ path: "README.md", title: TITLE }, postedScoped)).toBe(true);
+  });
+
+  it("still does not suppress a distinct finding on a different file", () => {
+    // The property the wildcard broke: recording both identities must not let a
+    // finding about README.md swallow one about another file.
+    const postedScoped = prLevelRepeatKeysFor({ path: "README.md", title: TITLE });
+    expect(isRepeatPrLevelFinding({ path: "docs/setup.md", title: TITLE }, postedScoped)).toBe(false);
   });
 });
 

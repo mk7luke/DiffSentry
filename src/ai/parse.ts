@@ -199,20 +199,51 @@ export function prLevelRepeatKey(path: string, title: string): string {
 }
 
 /**
+ * Every identity a posted PR-level finding should be remembered under.
+ *
+ * Whether a finding names a file is a property of the run, not of the claim:
+ * drift and the model name one only when they can, so the same finding can
+ * arrive scoped on one push and unscoped on the next. A finding posted WITH a
+ * path is therefore also recorded unscoped, so its own later restatement
+ * collapses against it whichever way that push happens to land.
+ *
+ * This is what lets isRepeatPrLevelFinding keep the strict same-scope rule.
+ * Treating an empty path as a wildcard there would dedup the same flip, but it
+ * would also let one unscoped prior suppress unrelated file-scoped findings —
+ * trading a duplicate paragraph for a silently swallowed finding, which is the
+ * wrong side of the asymmetry PR_LEVEL_REPEAT_THRESHOLD is tuned around.
+ * Recording both keys proves the two identities belong to one finding we
+ * actually posted, instead of inferring it from title similarity alone.
+ *
+ * Costs one extra key per path-scoped finding against the caller's trailing
+ * window, which is sized in findings, not keys.
+ */
+export function prLevelRepeatKeysFor(c: { path: string; title?: string }): string[] {
+  const title = c.title?.trim();
+  if (!title) return [];
+  const keys = [prLevelRepeatKey(c.path, title)];
+  if (c.path) keys.push(prLevelRepeatKey("", title));
+  return keys;
+}
+
+/**
  * Whether a PR-level finding restates one already posted on a previous review.
  * Covers BOTH prLevel flavours — the caller filters on `prLevel`, so file-scoped
  * findings dedup here too and re-wordings don't stack duplicate threads in the
  * Files tab across pushes.
  *
- * Two DIFFERENT files never collapse: a finding on `src/a.ts` is not a repeat of
- * a same-sounding one on `src/b.ts`, however alike they read.
+ * `path` is part of a finding's identity, so comparison is same-scope only: a
+ * file-scoped finding matches only file-scoped priors on that same file, and an
+ * unscoped one only unscoped priors. Two findings that read alike about
+ * different code are different findings, and title similarity alone is not
+ * evidence of identity once the scopes disagree — an empty path must never act
+ * as a wildcard, or one generic unscoped prior would suppress unrelated
+ * file-scoped findings on every later push.
  *
- * An unscoped side, though, matches either way. Whether a finding carries a path
- * is a property of the run, not of the claim: drift and the model both name a
- * file only when they can, so the same finding can arrive scoped on one push and
- * unscoped on the next. Requiring the scopes to agree would let exactly those
- * re-scoped repeats through — which is the noise this function exists to stop —
- * so an empty path is treated as "any file" rather than as its own scope.
+ * A finding whose scope FLIPS between pushes still collapses, without weakening
+ * this rule: prLevelRepeatKeysFor records a path-scoped finding under both its
+ * scoped and unscoped identity, so the matching prior already exists whichever
+ * way the next push lands.
  */
 export function isRepeatPrLevelFinding(
   candidate: { path: string; title?: string },
@@ -223,8 +254,7 @@ export function isRepeatPrLevelFinding(
   return priorKeys.some((key) => {
     const tab = key.indexOf("\t");
     if (tab === -1) return false;
-    const priorPath = key.slice(0, tab);
-    if (priorPath && candidate.path && priorPath !== candidate.path) return false;
+    if (key.slice(0, tab) !== candidate.path) return false;
     return titleSimilarity(key.slice(tab + 1), title) >= PR_LEVEL_REPEAT_THRESHOLD;
   });
 }
