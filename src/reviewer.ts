@@ -1484,9 +1484,12 @@ export class Reviewer {
           // Trailing window, most-recent last: a PR-level finding that stopped
           // recurring 50 findings ago is not worth suppressing forever, and the
           // list is compared token-wise (not hashed), so it has to stay bounded.
-          // A path-scoped finding contributes two keys (see prLevelRepeatKeysFor)
-          // so it still dedups if the next push reports it unscoped, which is why
-          // the window is sized with room to spare.
+          //
+          // The bound counts KEYS, and a path-scoped finding contributes two
+          // (see prLevelRepeatKeysFor), so it is set at 2 × the intended
+          // 50-finding depth. That keeps the old retention floor intact for the
+          // worst case where every finding is path-scoped; anything less would
+          // quietly shorten the window that a purely body-level PR gets today.
           postedPrLevelKeys: Array.from(
             new Set([
               ...(priorState?.postedPrLevelKeys ?? []),
@@ -1494,7 +1497,7 @@ export class Reviewer {
                 .filter((c) => c.prLevel)
                 .flatMap((c) => prLevelRepeatKeysFor(c)),
             ]),
-          ).slice(-80),
+          ).slice(-100),
           filesProcessed: context.files.map((f) => f.filename),
           filesSkippedSimilar,
           filesSkippedTrivial,

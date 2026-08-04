@@ -215,8 +215,9 @@ export function prLevelRepeatKey(path: string, title: string): string {
  * Recording both keys proves the two identities belong to one finding we
  * actually posted, instead of inferring it from title similarity alone.
  *
- * Costs one extra key per path-scoped finding against the caller's trailing
- * window, which is sized in findings, not keys.
+ * Costs one extra key per path-scoped finding. The caller's trailing window is
+ * bounded in KEYS, so it must budget two per finding to keep its intended depth
+ * (see postedPrLevelKeys in reviewer.ts).
  */
 export function prLevelRepeatKeysFor(c: { path: string; title?: string }): string[] {
   const title = c.title?.trim();
