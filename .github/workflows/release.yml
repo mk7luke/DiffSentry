@@ -22,21 +22,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Calls the PR gate itself rather than restating part of it: lint, the strict
+  # tsc build, unit tests, all 17 smoke scripts, the SPA + demo builds, both
+  # Docker images, and actionlint. A tag can point at any commit — including one
+  # that never went through a PR — so the release path must not verify less than
+  # the merge path, and a hand-copied subset here would silently drift the first
+  # time a job is added to ci.yml.
   verify:
     name: Verify tagged commit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-node
-
-      - name: Build server
-        run: npm run build:server
-
-      - name: Unit tests
-        run: npm test
-
-      - name: Lint
-        run: npm run lint
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
 
   publish-image:
     name: Publish image to GHCR

@@ -8,6 +8,9 @@ on:
     branches: ["main"]
   pull_request:
   workflow_dispatch:
+  # Callable so release.yml can gate a tag on this exact set of jobs instead of
+  # restating a subset that would drift the first time a job is added here.
+  workflow_call:
 
 # Least privilege: nothing here writes to the repo. Jobs that need more (none
 # currently) must opt in explicitly at the job level.
@@ -15,11 +18,12 @@ permissions:
   contents: read
 
 # Superseded pushes to the same PR/branch are pointless work — cancel them.
-# `main` is exempt: post-merge runs are the record of what a commit did, so
-# they must each complete rather than cancel one another.
+# `main` and tags are exempt: post-merge runs are the record of what a commit
+# did, and a cancelled tag run would leave release.yml half-published.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: >-
+    ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   lint:

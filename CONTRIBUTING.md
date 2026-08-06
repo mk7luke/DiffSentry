@@ -137,9 +137,10 @@ Alongside it:
 - **Stale** (`stale.yml`), **Label PRs** (`labeler.yml`), and Dependabot
   (`.github/dependabot.yml`, grouped weekly across both lockfiles, Actions, and
   Docker base images) handle housekeeping.
-- **Release** (`release.yml`) — tag-only. Pushing a `v*` tag re-verifies the
-  commit, publishes the image to GHCR, and opens a *draft* GitHub Release for a
-  human to review and publish.
+- **Release** (`release.yml`) — tag-only. Pushing a `v*` tag re-runs the entire
+  CI gate above (it calls `ci.yml` as a reusable workflow, so the release path
+  can never verify less than the merge path), publishes the image to GHCR, and
+  opens a *draft* GitHub Release for a human to review and publish.
 
 ## Where the architecture lives
 
