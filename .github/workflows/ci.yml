@@ -244,10 +244,16 @@ jobs:
       [lint, build, test, smoke, web, docker, workflows, secret-scan, dependency-review]
     runs-on: ubuntu-latest
     steps:
+      # `skipped` is deliberately absent from this condition. `dependency-review`
+      # is PR-only, so on pushes, tags, and release's workflow_call it reports
+      # `skipped` — which must not fail the gate. `always()` on the job above is
+      # what lets this run at all in that case; without it the whole aggregate
+      # would itself be skipped the moment any need is.
       - name: Fail if any upstream job did not succeed
         if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: |
           echo "One or more CI jobs failed or were cancelled." >&2
+          echo "Results: ${{ toJSON(needs) }}" >&2
           exit 1
 
       - name: All green
