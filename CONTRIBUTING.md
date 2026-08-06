@@ -119,17 +119,24 @@ Every PR runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 | **Build (SPA)** | `web` typecheck, the normal SPA build, and the demo-mode build that `demo.diffsentry.app` ships from. |
 | **Docker images** | Builds `Dockerfile` and `Dockerfile.demo` (no push) so a broken image is caught at PR time rather than at deploy time. |
 | **Lint workflows** | `actionlint` over `.github/workflows/**` — catches a workflow that is malformed and therefore silently not running. |
+| **Secret scan** | TruffleHog over full history, reporting only *verified* (confirmed-live) credentials. Called from `ci.yml` as a reusable workflow. |
+| **Dependency review** | Blocks a PR that *introduces* a high/critical advisory. It diffs base against head, so the advisories already in the tree do not make it permanently red. PR-only; skipped (not failed) on pushes and tags. |
 | **CI passed** | Aggregate job. Point branch protection at this one name and jobs can be added above without re-editing the rule. |
 
-Alongside it:
+> **If a check is meant to block, it must be a job in `ci.yml`.** A standalone
+> workflow can only block when branch protection names it separately, which
+> defeats the single-required-check design. That is why `secret-scan.yml` and
+> `dependency-review.yml` are `workflow_call`-only and invoked from `ci.yml`
+> rather than triggered on their own.
+
+Not part of the gate, by design:
 
 - **CodeQL** (`codeql.yml`) — static analysis on PRs plus a weekly re-scan, so
-  code that has not changed is still re-checked against new queries.
-- **Dependency review** (`dependency-review.yml`) — blocks a PR that *introduces*
-  a high/critical advisory. It diffs base against head, so the advisories
-  already in the tree do not make it permanently red.
-- **Secret scan** (`secret-scan.yml`) — TruffleHog over full history, reporting
-  only *verified* (confirmed-live) credentials.
+  code that has not changed is still re-checked against new queries. Deliberately
+  outside the aggregate: `analyze` succeeds even when it finds something (results
+  go to the Security tab, and gating on them is a code-scanning rule rather than
+  a status check), so requiring it would cost every PR several minutes to assert
+  only that the scan ran.
 - **Dependency audit** (`audit.yml`) — weekly advisory `npm audit` report to the
   job summary. Deliberately not blocking.
 - **OSSF Scorecard** (`scorecard.yml`) — weekly supply-chain posture check.

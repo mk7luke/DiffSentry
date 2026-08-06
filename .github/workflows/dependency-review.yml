@@ -5,15 +5,15 @@ name: Dependency review
 # pre-existing advisories in the tree do not make this permanently red — only
 # regressions do. Pre-existing ones are tracked by the advisory audit
 # (audit.yml) and by Dependabot.
+# Called by ci.yml rather than triggered directly, so this check sits inside the
+# aggregate `CI passed` gate. Triggering on `pull_request` here as well would
+# both double-run it and leave it outside that gate — a check that reports but
+# cannot block.
 on:
-  pull_request:
+  workflow_call:
 
 permissions:
   contents: read
-
-concurrency:
-  group: dep-review-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   dependency-review:

@@ -208,12 +208,40 @@ jobs:
             --workdir /repo \
             rhysd/actionlint:latest -color
 
+  # The two security checks that are meant to *block* a merge are called from
+  # here rather than run as standalone workflows, so they land inside the
+  # aggregate gate below. A standalone workflow can only block if branch
+  # protection names it separately — which defeats the single-required-check
+  # design and is exactly the kind of gap that goes unnoticed.
+  #
+  # CodeQL is deliberately NOT here. `analyze` succeeds even when it finds
+  # something (results go to the Security tab; gating on them is a code-scanning
+  # rule, not a status check), so adding it would cost every PR several minutes
+  # to assert only "the scan ran".
+  secret-scan:
+    name: Secret scan
+    uses: ./.github/workflows/secret-scan.yml
+    permissions:
+      contents: read
+
+  dependency-review:
+    name: Dependency review
+    # PR-only: the action diffs the base ref's dependency graph against the
+    # head's, and a push or tag has no such pair. Skipped jobs report `skipped`,
+    # which the aggregate below treats as non-failing.
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/dependency-review.yml
+    permissions:
+      contents: read
+      pull-requests: write
+
   # Single aggregate check. Point branch protection at "CI passed" alone and
   # jobs can be added or renamed above without re-editing protection rules.
   ci-passed:
     name: CI passed
     if: always()
-    needs: [lint, build, test, smoke, web, docker, workflows]
+    needs:
+      [lint, build, test, smoke, web, docker, workflows, secret-scan, dependency-review]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any upstream job did not succeed
