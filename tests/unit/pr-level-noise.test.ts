@@ -621,6 +621,33 @@ describe("submitReview: file-level threads and superseded reviews", () => {
     expect(calls.createReview.mock.calls[0][0].comments).toHaveLength(1);
   });
 
+  it("keeps rejected file-level findings when the REST path degrades again on 422", async () => {
+    // The REST fallback's own 422 retry is the last channel a finding can reach.
+    // It rebuilds the body from `body` — which already carries the fallback
+    // section — not from `result.summary`, so file-scoped findings refused by
+    // createReviewComment survive the second degradation too.
+    const { octokit, calls } = fakeOctokit({
+      noGraphql: true,
+      createReviewComment: vi.fn().mockRejectedValue(new Error("file left the diff")),
+    });
+    calls.createReview
+      .mockRejectedValueOnce(Object.assign(new Error("422"), { status: 422 }))
+      .mockResolvedValue({});
+
+    await clientWith(octokit).submitReview(
+      1,
+      ctx(),
+      result({ comments: [fileFinding(), inlineFinding()] }),
+    );
+
+    expect(calls.createReview).toHaveBeenCalledTimes(2);
+    const degraded = calls.createReview.mock.calls[1][0].body;
+    expect(degraded).toContain("couldn't be attached to their file (1)");
+    expect(degraded).toContain("edit-mode fields were removed from the lead detail view");
+    // ...and the inline one it degraded for is there too.
+    expect(degraded).toContain("this branch drops the error without logging it");
+  });
+
   it("falls back to REST when GraphQL is unavailable entirely", async () => {
     const { octokit, calls } = fakeOctokit({ noGraphql: true });
     await clientWith(octokit).submitReview(1, ctx(), result({ comments: [fileFinding()] }));
