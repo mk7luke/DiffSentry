@@ -30,7 +30,7 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-node
 
       # Promoted from advisory to blocking: the codebase is at 0 ESLint errors
@@ -68,7 +68,7 @@ jobs:
     name: Build (server)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-node
 
       # `build:server` is `tsc`, so this is the strict-mode typecheck gate as
@@ -77,7 +77,7 @@ jobs:
         run: npm run build:server
 
       - name: Upload server build output
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist-server
           path: dist/
@@ -87,7 +87,7 @@ jobs:
     name: Unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-node
 
       - name: Vitest
@@ -114,7 +114,7 @@ jobs:
           - group: ui
             scripts: dashboard branding notifications learnings
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-node
 
       - name: Run smoke scripts
@@ -129,7 +129,7 @@ jobs:
     name: Build (SPA)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-node
         with:
           workspace: web
@@ -151,7 +151,7 @@ jobs:
         run: npm run build:web:demo
 
       - name: Upload SPA bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist-web
           path: web/dist/
@@ -161,16 +161,16 @@ jobs:
     name: Docker images
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # Build only — nothing is pushed on a PR. Publishing happens in
       # release.yml, on a version tag. The GitHub Actions cache keeps the
       # better-sqlite3 native compile from being paid on every run.
       - name: Build runtime image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -181,7 +181,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=runtime
 
       - name: Build demo image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.demo
@@ -195,7 +195,7 @@ jobs:
     name: Lint workflows
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # actionlint catches the failure mode CI cannot catch itself: a workflow
       # that is subtly malformed (bad `needs`, undefined matrix key, shell bugs
