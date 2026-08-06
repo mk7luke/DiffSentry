@@ -47,6 +47,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A review now posts as a single timeline entry with every thread under it.
+  File-scoped findings were posted through an endpoint that can't attach to a
+  review, so GitHub wrapped each one in its own review — and because they had to
+  go first, they stacked *above* the summary that counted them ("Actionable
+  comments posted: 5" with one thread beneath it). Threads are now opened on a
+  pending review and submitted together, so the body is also composed after every
+  thread's fate is known and a rejected finding can still be folded into it.
 - Findings that concern one file no longer land in the unresolvable "Issues not
   tied to a specific line" section. Description-drift findings and the model's
   own PR-level findings can now name the file they're about, and become

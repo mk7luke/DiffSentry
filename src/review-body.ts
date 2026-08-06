@@ -75,8 +75,8 @@ export function isNitpick(c: ReviewComment): boolean {
  *   one changed line — the model said so outright (a `prLevelComments` entry or
  *   a drift finding carrying a `path`), or it named a line we couldn't anchor to
  *   the diff (the demotion path in ai/parse.ts). GitHub can host these as real,
- *   resolvable file-scoped review threads (`subject_type: "file"`), so they are
- *   posted as threads rather than rendered into the review body.
+ *   resolvable file-scoped review threads (`subjectType: FILE`), so they are
+ *   posted as threads on the review rather than rendered into its body.
  * - BODY-level (`path` empty): no file to attach to at all — the diff versus the
  *   PR description, or a concern spanning the whole change. GitHub has nowhere
  *   to hang a thread, so these are the only findings that must live as prose in
