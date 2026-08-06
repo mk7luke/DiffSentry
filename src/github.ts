@@ -663,7 +663,12 @@ export class GitHubClient {
    * PENDING reviews are drafts visible only to their author, so they never show
    * up in `pulls.listReviews` and `retireSupersededReviews` can't see them — but
    * GitHub allows only one per author per PR, so a leftover would reject the
-   * next `addPullRequestReview`.
+   * next `addPullRequestReview` with "User can only have one pending review per
+   * pull request".
+   *
+   * That cap is also why `first:20` needs no pagination: the connection filtered
+   * to PENDING can only ever return our own single draft (other authors' drafts
+   * aren't visible to us), so 20 is already twentyfold headroom.
    */
   private async resolvePullRequestNode(
     octokit: Octokit,
@@ -772,6 +777,18 @@ export class GitHubClient {
           );
           unpostable.push(t.comment);
         }
+      }
+
+      // Some threads failing is the anchor case this fallback exists for: the
+      // file left the diff, the line moved. EVERY thread failing is not — that
+      // shape means auth, schema, or a rate limit surviving the retry wrapper,
+      // and folding the whole review into body prose would quietly downgrade a
+      // systemic failure into a review that looks fine. Bail instead, so the
+      // caller discards the draft and REST gets its own attempt at real threads.
+      if (threads.length > 0 && unpostable.length === threads.length) {
+        throw new Error(
+          `every review thread was rejected (${threads.length}); treating as a systemic failure`,
+        );
       }
 
       let body = result.summary;

@@ -555,13 +555,38 @@ describe("submitReview: file-level threads and superseded reviews", () => {
     // silent-loss failure #76 exists to prevent. Composing the body at submit
     // time is what makes this possible without posting the threads first.
     const { octokit, gql } = fakeOctokit({
-      addThread: vi.fn().mockRejectedValue(new Error("file is no longer in the diff")),
+      addThread: vi.fn(async (vars: any) => {
+        if (vars.path === "src/a.ts") throw new Error("file is no longer in the diff");
+      }),
     });
-    await clientWith(octokit).submitReview(1, ctx(), result({ comments: [fileFinding()] }));
+    await clientWith(octokit).submitReview(
+      1,
+      ctx(),
+      result({ comments: [fileFinding(), inlineFinding()] }),
+    );
 
     const body = gql.submitted[0].body;
     expect(body).toContain("couldn't be attached to their file (1)");
     expect(body).toContain("edit-mode fields were removed from the lead detail view");
+  });
+
+  it("treats EVERY thread failing as systemic and hands off to REST", async () => {
+    // Some threads failing is the anchor case. All of them failing is auth, a
+    // schema change, or a rate limit that outlived the retry wrapper — folding
+    // the whole review into body prose would dress a systemic failure up as a
+    // successful review.
+    const { octokit, calls, gql } = fakeOctokit({
+      addThread: vi.fn().mockRejectedValue(new Error("Resource not accessible by integration")),
+    });
+    await clientWith(octokit).submitReview(
+      1,
+      ctx(),
+      result({ comments: [fileFinding(), inlineFinding()] }),
+    );
+
+    expect(gql.submitted).toHaveLength(0);
+    expect(gql.discarded).toContain("RV_draft");
+    expect(calls.createReview).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a successful thread out of the body fallback", async () => {
