@@ -1,0 +1,55 @@
+version: 2
+
+# Grouping is the point of this file. Ungrouped, four ecosystems across two
+# lockfiles produce a steady drip of single-package PRs that nobody reviews.
+# Grouped, it is one PR per ecosystem per week for routine minor/patch bumps,
+# with majors broken out individually because those are the ones that need
+# actual reading.
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    groups:
+      # Majors are deliberately excluded from the group, so each still arrives
+      # as its own PR — those are the ones that need actual reading.
+      server-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: "/web"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "area:spa"]
+    groups:
+      spa-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "ci"]
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Watches the `FROM node:22-slim` / `nginx:alpine` base images in both
+  # Dockerfiles — base-image CVEs are the most common way a container that was
+  # never edited becomes vulnerable.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels: ["dependencies", "deployment"]

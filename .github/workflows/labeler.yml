@@ -1,0 +1,31 @@
+name: Label PRs
+
+# `pull_request_target` so PRs opened from forks also get labelled — the
+# default `GITHUB_TOKEN` on a fork `pull_request` event is read-only and
+# cannot add labels. This is the trigger's documented-safe use: the job never
+# checks out or executes PR-authored code, it only reads the changed-file list.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: labeler-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    name: Apply path labels
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/labeler@v5
+        with:
+          configuration-path: .github/labeler.yml
+          # Labels are additive hints, not state the bot owns: never strip a
+          # label a human deliberately applied.
+          sync-labels: false

@@ -1,0 +1,35 @@
+name: Dependency review
+
+# Blocks a PR that *introduces* a dependency with a known high/critical
+# advisory. It diffs the dependency graph between base and head, so the
+# pre-existing advisories in the tree do not make this permanently red — only
+# regressions do. Pre-existing ones are tracked by the advisory audit
+# (audit.yml) and by Dependabot.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dep-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-review:
+    name: Review dependency changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Needed for comment-summary-in-pr.
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependency review
+        uses: actions/dependency-review-action@v4
+        with:
+          # `moderate` would be red on routine transitive churn; `high` is the
+          # line worth stopping a merge for.
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure

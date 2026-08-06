@@ -1,0 +1,56 @@
+name: CodeQL
+
+# Static analysis for the server (TypeScript) and the SPA. Findings land in the
+# repo's Security → Code scanning tab, and appear inline on PRs that introduce
+# them. The weekly cron matters as much as the PR runs: it re-scans unchanged
+# code against newly published queries, so a vulnerability class discovered
+# after a merge still surfaces.
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    - cron: "27 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      # Required to upload the SARIF results to code scanning.
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["javascript-typescript"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # `security-and-quality` is a superset of the default security pack.
+          # For a tool whose whole job is reviewing other people's code, the
+          # extra quality queries are worth the longer run.
+          queries: security-and-quality
+          config-file: ./.github/codeql/codeql-config.yml
+
+      # No build step: CodeQL extracts JS/TS directly from source, and this
+      # repo has no transpile-to-analyse requirement.
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

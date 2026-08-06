@@ -1,0 +1,53 @@
+name: OSSF Scorecard
+
+# Supply-chain posture check for this public repo: unpinned actions, missing
+# branch protection, dangerous workflow triggers, token permissions, and so on.
+# Deliberately NOT wired to `pull_request` — it grades the repository, not a
+# diff, so gating merges on it would be meaningless noise. Results land in the
+# Security tab.
+on:
+  branch_protection_rule:
+  push:
+    branches: ["main"]
+  schedule:
+    - cron: "22 3 * * 1"
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      # Needed by the publish step's OIDC flow even when publishing is off.
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@v2.4.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Off by design: publishing pushes this repo's scorecard to the
+          # public OpenSSF API. Flip to true (and add the badge) only if that
+          # is a deliberate choice.
+          publish_results: false
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif

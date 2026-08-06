@@ -7,75 +7,50 @@ on:
   push:
     branches: ["main"]
   pull_request:
+  workflow_dispatch:
+
+# Least privilege: nothing here writes to the repo. Jobs that need more (none
+# currently) must opt in explicitly at the job level.
+permissions:
+  contents: read
+
+# Superseded pushes to the same PR/branch are pointless work — cancel them.
+# `main` is exempt: post-merge runs are the record of what a commit did, so
+# they must each complete rather than cancel one another.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  build-and-test:
-    name: Build & test (server)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build server
-        run: npm run build:server
-
-      - name: Unit tests
-        run: npm test
-
-      - name: Smoke — webhook signature contract
-        run: npm run smoke:signature
-
-      - name: Smoke — webhook pipeline
-        run: npm run smoke:webhooks
-
   lint:
-    name: Lint (advisory)
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      # Advisory on day one: lint must not gate merges yet, but its findings
-      # should be visible — not buried in raw logs. So we keep the job green
-      # (continue-on-error) and publish the full ESLint output to the job's
-      # Step Summary, with a clear pass/fail banner. Remove continue-on-error
-      # to start enforcing once the existing findings are burned down.
+      # Promoted from advisory to blocking: the codebase is at 0 ESLint errors
+      # (only `no-unused-vars` warnings remain), so enforcing now locks that in
+      # rather than letting errors creep back. Warnings are still reported in
+      # the summary for burn-down but do not fail the build.
       - name: ESLint
         id: eslint
         shell: bash
         # Explicit pipefail so the step outcome reflects ESLint's exit code,
-        # not tee's — keeping the pass/⚠️ banner below truthful. (GitHub's
-        # default bash already sets pipefail, but stating it makes the
-        # correctness of `steps.eslint.outcome` independent of that default.)
+        # not tee's. (GitHub's default bash already sets pipefail, but stating
+        # it makes `steps.eslint.outcome` correct independent of that default.)
         run: |
           set -o pipefail
           npm run lint 2>&1 | tee lint.log
-        continue-on-error: true
 
       - name: Publish lint results to job summary
         if: always()
         run: |
           {
-            echo "### ESLint — advisory (does not gate merges yet)"
+            echo "### ESLint"
             echo ""
             if [ "${{ steps.eslint.outcome }}" = "failure" ]; then
-              echo "⚠️ **ESLint reported errors.** Not blocking this merge, but please review."
+              echo "❌ **ESLint reported errors.** These block the merge."
             else
               echo "✅ **ESLint passed** (any warnings are listed below for burn-down)."
             fi
@@ -84,3 +59,164 @@ jobs:
             cat lint.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Build (server)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node
+
+      # `build:server` is `tsc`, so this is the strict-mode typecheck gate as
+      # well as the build — a type error here fails the PR.
+      - name: Compile TypeScript
+        run: npm run build:server
+
+      - name: Upload server build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-server
+          path: dist/
+          retention-days: 7
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node
+
+      - name: Vitest
+        run: npm test
+
+  smoke:
+    # The repo ships 17 hermetic smoke scripts (no network, no secrets, no API
+    # keys) that exercise whole subsystems end to end. Running them grouped
+    # rather than one-job-per-script keeps the runner-minute cost sane while
+    # still parallelising, and gives four legible failure buckets.
+    name: Smoke — ${{ matrix.group }}
+    runs-on: ubuntu-latest
+    strategy:
+      # One failing bucket should not mask the state of the other three.
+      fail-fast: false
+      matrix:
+        include:
+          - group: webhooks
+            scripts: signature webhooks config
+          - group: storage
+            scripts: dao migrate queue durable cost
+          - group: api
+            scripts: api rbac tokens actions settings
+          - group: ui
+            scripts: dashboard branding notifications learnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node
+
+      - name: Run smoke scripts
+        run: |
+          for s in ${{ matrix.scripts }}; do
+            echo "::group::smoke:$s"
+            npm run "smoke:$s"
+            echo "::endgroup::"
+          done
+
+  web:
+    name: Build (SPA)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node
+        with:
+          workspace: web
+
+      # `web run build` is `tsc --noEmit && vite build`, so this covers the
+      # SPA typecheck too. Run the explicit typecheck first anyway: a type
+      # error then surfaces as its own failed step instead of being buried in
+      # bundler output.
+      - name: Typecheck SPA
+        run: npm --prefix web run typecheck
+
+      - name: Build SPA
+        run: npm --prefix web run build
+
+      # demo.diffsentry.app ships from this build path. It is a distinct Vite
+      # entry (VITE_FORCE_DEMO forces demo mode, no service worker), so a
+      # regression here would otherwise only be caught at deploy time.
+      - name: Build SPA (demo mode)
+        run: npm run build:web:demo
+
+      - name: Upload SPA bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-web
+          path: web/dist/
+          retention-days: 7
+
+  docker:
+    name: Docker images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build only — nothing is pushed on a PR. Publishing happens in
+      # release.yml, on a version tag. The GitHub Actions cache keeps the
+      # better-sqlite3 native compile from being paid on every run.
+      - name: Build runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          load: false
+          tags: diffsentry:ci
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,mode=max,scope=runtime
+
+      - name: Build demo image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.demo
+          push: false
+          load: false
+          tags: diffsentry-demo:ci
+          cache-from: type=gha,scope=demo
+          cache-to: type=gha,mode=max,scope=demo
+
+  workflows:
+    name: Lint workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # actionlint catches the failure mode CI cannot catch itself: a workflow
+      # that is subtly malformed (bad `needs`, undefined matrix key, shell bugs
+      # via shellcheck) and therefore silently never runs the check you believe
+      # it is running.
+      - name: actionlint
+        run: |
+          docker run --rm \
+            -v "$PWD":/repo \
+            --workdir /repo \
+            rhysd/actionlint:latest -color
+
+  # Single aggregate check. Point branch protection at "CI passed" alone and
+  # jobs can be added or renamed above without re-editing protection rules.
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs: [lint, build, test, smoke, web, docker, workflows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any upstream job did not succeed
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "One or more CI jobs failed or were cancelled." >&2
+          exit 1
+
+      - name: All green
+        run: echo "All CI jobs succeeded."

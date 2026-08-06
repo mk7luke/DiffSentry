@@ -1,0 +1,77 @@
+# Path → label rules for actions/labeler (v5 syntax). Purely for triage: these
+# labels make it possible to tell at a glance whether a PR touches the review
+# engine, the dashboard, or just docs.
+
+area:reviewer:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/reviewer.ts"
+          - "src/review-body.ts"
+          - "src/ai/**"
+          - "src/prompts/**"
+
+area:webhooks:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/webhook*"
+          - "src/server.ts"
+          - "src/queue/**"
+
+area:storage:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/storage/**"
+          - "src/migrations/**"
+
+area:dashboard:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/dashboard/**"
+          - "src/api/**"
+
+area:spa:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "web/**"
+
+area:config:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".diffsentry.yaml"
+          - ".diffsentry.example.yaml"
+          - "src/config*"
+          - ".env.example"
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "tests/**"
+          - "scripts/smoke-*.ts"
+          - "vitest.config.ts"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+          - "eslint.config.mjs"
+
+deployment:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "Dockerfile*"
+          - "docker-compose.yml"
+          - "render.yaml"
+          - "deploy/**"
+          - ".dockerignore"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - "docs/**"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/package.json"
+          - "**/package-lock.json"

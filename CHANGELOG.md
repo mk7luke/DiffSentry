@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- CI/CD build-out: the PR gate now covers unit tests, the strict `tsc` build,
+  all 17 smoke scripts, the SPA + demo-mode builds, both Docker images, and
+  `actionlint`, behind a single aggregate `CI passed` check. Adds CodeQL,
+  dependency review, TruffleHog secret scanning, a weekly advisory `npm audit`,
+  OSSF Scorecard, Dependabot, PR labelling, stale handling, `CODEOWNERS`, and a
+  tag-triggered release pipeline that publishes to GHCR and drafts the release.
 - Email notification channel: configure SMTP from the dashboard, not just env (#42).
 - Ops Console — a live, filterable activity stream (SPA + `/api/v1/activity`) (#41).
 - Responsive command-center shell and an installable, offline-capable PWA (#40).

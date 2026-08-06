@@ -1,0 +1,34 @@
+name: Set up Node and install deps
+description: >-
+  Checkout-agnostic Node setup used by every CI job: pins the Node major,
+  restores the npm cache keyed on the lockfile, and runs a clean install.
+  Centralised so the Node version is bumped in exactly one place.
+
+inputs:
+  node-version:
+    description: Node.js major version to install.
+    required: false
+    default: "22"
+  workspace:
+    description: >-
+      Directory to install in. "." installs the server deps (root
+      package-lock.json); "web" installs the SPA deps.
+    required: false
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js ${{ inputs.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+        # Cache on the lockfile of the workspace actually being installed, so
+        # the server and SPA installs never share (and invalidate) one key.
+        cache-dependency-path: ${{ inputs.workspace }}/package-lock.json
+
+    - name: Install dependencies (${{ inputs.workspace }})
+      shell: bash
+      working-directory: ${{ inputs.workspace }}
+      run: npm ci

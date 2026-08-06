@@ -1,0 +1,16 @@
+name: DiffSentry CodeQL config
+
+# Keep the scan on first-party source. Everything excluded below is either
+# generated, vendored, or deliberately-fake input that would otherwise produce
+# findings nobody can act on.
+paths-ignore:
+  # Build output (not committed, but present when a workflow runs after a build).
+  - dist
+  - web/dist
+  - web/dev-dist
+  - node_modules
+  - web/node_modules
+  # E2E fixtures: reference diffs and scenario payloads are intentionally
+  # "bad code" fed to the reviewer as test input, not code we ship.
+  - tests/e2e/reference
+  - tests/e2e/scenarios

@@ -1,0 +1,112 @@
+name: Release
+
+# Fires only on a pushed `v*` tag — nothing here runs on a normal PR or merge.
+# Publishing is therefore always an explicit, human-initiated act:
+#
+#   git tag -a v1.1.0 -m "v1.1.0" && git push origin v1.1.0
+#
+# It re-verifies the tagged commit from scratch (it does not trust that CI ran
+# on the branch), then publishes the container image to GHCR and drafts the
+# GitHub Release.
+# Tag-only, with no `workflow_dispatch`: dispatching this from a branch would
+# leave the semver tagging and `gh release create` with no tag to work from.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify tagged commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node
+
+      - name: Build server
+        run: npm run build:server
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Lint
+        run: npm run lint
+
+  publish-image:
+    name: Publish image to GHCR
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            # `latest` must not follow a pre-release (v1.2.0-rc1): anyone
+            # pulling :latest expects a stable build.
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+
+      # amd64 only. better-sqlite3 compiles a native binding from source, and
+      # doing that for arm64 under QEMU emulation turns a ~3 minute build into
+      # a ~30 minute one. Add `linux/arm64` here (ideally via a native arm64
+      # runner, not QEMU) if arm deployment targets appear.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,mode=max,scope=release
+
+  github-release:
+    name: Draft GitHub Release
+    needs: publish-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Created as a draft on purpose: the maintainer reads the generated notes
+      # against CHANGELOG.md and publishes by hand. An automated release is a
+      # lot harder to unsend than it is to click. `--generate-notes` works out
+      # the previous tag on its own.
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --draft \
+            --title "$TAG" \
+            --generate-notes

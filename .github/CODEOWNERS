@@ -1,0 +1,4 @@
+# Default owner for everything. On a single-maintainer repo this is a no-op for
+# the maintainer's own PRs (GitHub never requests review from the author) and
+# useful for outside contributions, which get a review request automatically.
+* @mk7luke

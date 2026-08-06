@@ -58,9 +58,19 @@ iterating on bot behavior against live PRs.
 
 ## Tests
 
-DiffSentry's test suite is a set of **smoke scripts** under `scripts/`, each run
-with `tsx` against a temporary SQLite database. They stand up the relevant
-surface end-to-end and assert on its behavior. Run them individually:
+There are two layers.
+
+**Unit tests** (`tests/unit/`, Vitest) run against the real source modules:
+
+```bash
+npm test            # single run
+npm run test:watch  # watch mode
+```
+
+**Smoke scripts** under `scripts/` are each run with `tsx` against a temporary
+SQLite database. They stand up the relevant surface end-to-end and assert on its
+behavior. All of them are hermetic — no network, no API keys, no secrets — so
+any of them can be run on a fresh clone. Run them individually:
 
 ```bash
 npm run smoke:dashboard        # dashboard routes end-to-end
@@ -84,12 +94,52 @@ npm run smoke:signature        # webhook signature verification
 Before opening a PR, at minimum:
 
 1. `npm run build` must pass (server **and** SPA compile).
-2. Run the `smoke:*` script(s) covering the area you changed.
+2. `npm test` must pass.
+3. `npm run lint` must pass.
+4. Run the `smoke:*` script(s) covering the area you changed.
+
+CI runs all of the above on every PR anyway (see below), so this is about a
+fast local signal rather than a second gate.
 
 There is also a real-PR end-to-end harness in `tests/e2e/` driven by
 `npm run e2e` (opens PRs on a sandbox repo and captures transcripts). It needs a
-configured sandbox + running bot, so it's not part of the quick local loop — see
-the README's "End-to-end test harness" section.
+configured sandbox + running bot, so it is not part of CI and not part of the
+quick local loop — see the README's "End-to-end test harness" section.
+
+## Continuous integration
+
+Every PR runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+
+| Job | What it gates |
+| --- | --- |
+| **Lint** | `npm run lint` — **blocking**. The tree is at 0 ESLint errors; warnings are printed to the job summary for burn-down but do not fail. |
+| **Build (server)** | `npm run build:server`, i.e. the strict-mode `tsc` typecheck. |
+| **Unit tests** | `npm test` (Vitest). |
+| **Smoke — ×4** | All 17 `smoke:*` scripts, split into `webhooks` / `storage` / `api` / `ui` buckets so a failure points at a subsystem. |
+| **Build (SPA)** | `web` typecheck, the normal SPA build, and the demo-mode build that `demo.diffsentry.app` ships from. |
+| **Docker images** | Builds `Dockerfile` and `Dockerfile.demo` (no push) so a broken image is caught at PR time rather than at deploy time. |
+| **Lint workflows** | `actionlint` over `.github/workflows/**` — catches a workflow that is malformed and therefore silently not running. |
+| **CI passed** | Aggregate job. Point branch protection at this one name and jobs can be added above without re-editing the rule. |
+
+Alongside it:
+
+- **CodeQL** (`codeql.yml`) — static analysis on PRs plus a weekly re-scan, so
+  code that has not changed is still re-checked against new queries.
+- **Dependency review** (`dependency-review.yml`) — blocks a PR that *introduces*
+  a high/critical advisory. It diffs base against head, so the advisories
+  already in the tree do not make it permanently red.
+- **Secret scan** (`secret-scan.yml`) — TruffleHog over full history, reporting
+  only *verified* (confirmed-live) credentials.
+- **Dependency audit** (`audit.yml`) — weekly advisory `npm audit` report to the
+  job summary. Deliberately not blocking.
+- **OSSF Scorecard** (`scorecard.yml`) — weekly supply-chain posture check.
+  Results go to the Security tab; publishing to the public OpenSSF API is off.
+- **Stale** (`stale.yml`), **Label PRs** (`labeler.yml`), and Dependabot
+  (`.github/dependabot.yml`, grouped weekly across both lockfiles, Actions, and
+  Docker base images) handle housekeeping.
+- **Release** (`release.yml`) — tag-only. Pushing a `v*` tag re-verifies the
+  commit, publishes the image to GHCR, and opens a *draft* GitHub Release for a
+  human to review and publish.
 
 ## Where the architecture lives
 

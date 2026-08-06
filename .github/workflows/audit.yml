@@ -1,0 +1,67 @@
+name: Dependency audit
+
+# Advisory, not a gate. The tree currently carries known high-severity
+# advisories (mostly transitive, mostly dev-only), so making `npm audit`
+# blocking would just mean a permanently red repo that everyone learns to
+# ignore. Instead this runs weekly and writes a readable report to the job
+# summary; PR-time regressions are the thing that actually blocks, and that is
+# dependency-review.yml's job.
+on:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+  # Re-run whenever the dependency set itself changes, so the report is fresh
+  # right when someone is looking at it.
+  pull_request:
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "web/package.json"
+      - "web/package-lock.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: npm audit (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # `npm audit` reads the lockfile and queries the registry; it needs no
+      # node_modules, so this deliberately skips the install entirely.
+      - name: Audit and report
+        shell: bash
+        run: |
+          report() {
+            local label="$1"; shift
+            local dir="$1"; shift
+            echo "### $label"
+            echo ""
+            echo '```'
+            # `|| true`: a non-zero exit just means "advisories exist", which
+            # is the normal state here and must not fail the job.
+            (cd "$dir" && npm audit "$@" 2>&1) || true
+            echo '```'
+            echo ""
+          }
+          {
+            echo "## Dependency audit — advisory"
+            echo ""
+            echo "Runtime advisories are the ones that reach production; dev-only"
+            echo "advisories affect the build host, not the deployed container."
+            echo ""
+            report "Server — runtime dependencies" "." --omit=dev
+            report "Server — all dependencies" "."
+            report "SPA — all dependencies" "web"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,55 @@
+name: Stale
+
+# Keeps the issue/PR list honest. Generous windows on purpose: this is a
+# low-traffic self-hosted project, and an aggressive stale bot on a small repo
+# closes real reports faster than it closes dead ones.
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stale:
+    name: Mark and close stale items
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/stale@v9
+        with:
+          days-before-issue-stale: 60
+          days-before-issue-close: 14
+          # PRs rot faster than issues: an open PR against a moving main is
+          # actively misleading, so it gets a shorter leash.
+          days-before-pr-stale: 30
+          days-before-pr-close: 10
+
+          stale-issue-label: stale
+          stale-pr-label: stale
+          stale-issue-message: >-
+            This issue has had no activity for 60 days and is now marked stale.
+            Comment (or remove the `stale` label) to keep it open — otherwise it
+            will close in 14 days. Closing is not a judgement on the report; it
+            just keeps the queue readable, and reopening is always fine.
+          stale-pr-message: >-
+            This PR has had no activity for 30 days and is now marked stale.
+            Push a commit or comment to keep it open — otherwise it will close
+            in 10 days. Reopen any time it is picked back up.
+          close-issue-message: >-
+            Closing after 14 further days of inactivity. Comment to reopen.
+          close-pr-message: >-
+            Closing after 10 further days of inactivity. Reopen when work resumes.
+
+          # Anything triaged as pinned/security/roadmap work is exempt — those
+          # are meant to sit open.
+          exempt-issue-labels: "pinned,security,roadmap,in-progress"
+          exempt-pr-labels: "pinned,security,in-progress,dependencies"
+          # Never touch anything attached to a milestone or assigned to someone.
+          exempt-all-milestones: true
+          exempt-all-assignees: true
+
+          ascending: true
