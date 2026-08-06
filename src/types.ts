@@ -319,7 +319,8 @@ export interface ReviewComment {
    *  in review-body.ts). Both the model and the drift check may name a file
    *  directly, so a path here is the norm rather than a demotion artefact:
    *   - path set   → posted as a resolvable file-scoped review thread
-   *                  (`subject_type: "file"`).
+   *                  (`subjectType: FILE`) on the same review as the inline
+   *                  findings.
    *   - path empty → no file to attach to, so it renders as prose in the review
    *                  body — the one channel a reader can't resolve or collapse,
    *                  which is why entry there additionally requires high

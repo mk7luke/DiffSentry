@@ -6,6 +6,11 @@ import { isFileLevelFinding, REVIEW_BODY_MARKER } from "./review-body.js";
 
 type Logger = typeof logger;
 
+/** A review thread to hang off a pending review. `FILE` findings name a file but
+ *  no line we could anchor to the diff, so GitHub scopes the thread to the whole
+ *  file instead of a diff line. */
+type DraftThread = { comment: ReviewComment; subjectType: "LINE" | "FILE" };
+
 /** Body a superseded COMMENTED review is rewritten to. Keeps the timeline entry
  *  honest (the review did happen) without leaving its full text competing with
  *  the current one. Carries no REVIEW_BODY_MARKER, so a later run doesn't
@@ -13,12 +18,12 @@ type Logger = typeof logger;
 const SUPERSEDED_REVIEW_STUB =
   "<sub>🛡️ This DiffSentry review has been superseded by a newer one. Its findings, if still present, appear there.</sub>";
 
-/** Findings GitHub refused as file-scoped threads, rendered into the review body
+/** Findings GitHub refused a review thread for, rendered into the review body
  *  so their substance still reaches the reviewer. Rare — the file usually left
  *  the diff mid-review. */
 function renderFileLevelFallbackSection(comments: ReviewComment[]): string {
   const blocks = comments
-    .map((c) => `**\`${c.path}\`**\n\n${c.body.trim()}`)
+    .map((c) => `**\`${c.path}${c.line > 0 ? `:${c.line}` : ""}\`**\n\n${c.body.trim()}`)
     .join("\n\n---\n\n");
   return [
     `### 🔎 Findings that couldn't be attached to their file (${comments.length})`,
@@ -653,19 +658,177 @@ export class GitHubClient {
   }
 
   /**
-   * Post file-scoped findings as their own resolvable review threads.
-   * Returns the findings GitHub refused, for the caller to fold back into the
-   * review body — most often because the file left the diff since the review
-   * started.
+   * Resolve the PR's GraphQL node id, plus any PENDING review we left behind.
+   *
+   * PENDING reviews are drafts visible only to their author, so they never show
+   * up in `pulls.listReviews` and `retireSupersededReviews` can't see them — but
+   * GitHub allows only one per author per PR, so a leftover would reject the
+   * next `addPullRequestReview` with "User can only have one pending review per
+   * pull request".
+   *
+   * That cap is also why `first:20` needs no pagination: the connection filtered
+   * to PENDING can only ever return our own single draft (other authors' drafts
+   * aren't visible to us), so 20 is already twentyfold headroom.
    */
-  private async postFileLevelComments(
+  private async resolvePullRequestNode(
     octokit: Octokit,
     context: PRContext,
-    comments: ReviewComment[],
+  ): Promise<{ pullRequestId: string; pendingReviewIds: string[] }> {
+    const res: any = await octokit.graphql(
+      `query($owner:String!,$repo:String!,$pr:Int!){
+         repository(owner:$owner,name:$repo){
+           pullRequest(number:$pr){
+             id
+             reviews(first:20,states:[PENDING]){ nodes { id } }
+           }
+         }
+       }`,
+      { owner: context.owner, repo: context.repo, pr: context.pullNumber },
+    );
+    const pr = res?.repository?.pullRequest;
+    if (!pr?.id) throw new Error("Could not resolve pull request node id");
+    return {
+      pullRequestId: pr.id,
+      pendingReviewIds: (pr.reviews?.nodes ?? []).map((n: any) => n?.id).filter(Boolean),
+    };
+  }
+
+  private async discardReview(octokit: Octokit, reviewId: string, log: Logger): Promise<void> {
+    try {
+      await octokit.graphql(
+        `mutation($id:ID!){ deletePullRequestReview(input:{pullRequestReviewId:$id}){ clientMutationId } }`,
+        { id: reviewId },
+      );
+    } catch (err) {
+      log.debug({ err, reviewId }, "Could not discard pending review");
+    }
+  }
+
+  /**
+   * Post the whole review — summary and every thread — as ONE timeline entry.
+   *
+   * This is why GraphQL is used here rather than REST. `pulls.createReviewComment`
+   * has no way to attach a comment to a review, so GitHub wraps each call in its
+   * own standalone review: N file-scoped findings became N separate "reviewed"
+   * entries, and because they had to be posted before `createReview` (to know
+   * which ones to fold into the body), they landed ABOVE the summary that
+   * counted them. A reader saw "Actionable comments posted: 5" with one thread
+   * under it and four stacked overhead.
+   *
+   * `addPullRequestReviewThread` takes both a `pullRequestReviewId` and a
+   * `subjectType` (LINE | FILE), so line-anchored and file-scoped threads can
+   * hang off the same PENDING review. Submitting last also means the body is
+   * composed after every thread's fate is known, so rejected findings can still
+   * be folded into it — no finding is lost between the two channels (the
+   * failure #76 set out to fix).
+   *
+   * Throws if the review could not be created or submitted, having first
+   * discarded the draft so the caller's fallback starts from a clean PR.
+   */
+  private async submitReviewAsSingleEntry(
+    octokit: Octokit,
+    context: PRContext,
+    result: ReviewResult,
+    threads: DraftThread[],
     log: Logger,
-  ): Promise<ReviewComment[]> {
+  ): Promise<void> {
+    const { pullRequestId, pendingReviewIds } = await this.resolvePullRequestNode(octokit, context);
+
+    for (const id of pendingReviewIds) {
+      log.warn({ reviewId: id }, "Discarding a leftover pending review before opening a new one");
+      await this.discardReview(octokit, id, log);
+    }
+
+    const created: any = await octokit.graphql(
+      `mutation($pr:ID!,$oid:GitObjectID){
+         addPullRequestReview(input:{pullRequestId:$pr,commitOID:$oid}){ pullRequestReview { id } }
+       }`,
+      { pr: pullRequestId, oid: context.headSha },
+    );
+    const reviewId: string | undefined = created?.addPullRequestReview?.pullRequestReview?.id;
+    if (!reviewId) throw new Error("addPullRequestReview returned no review id");
+
+    try {
+      const unpostable: ReviewComment[] = [];
+      for (const t of threads) {
+        const isLine = t.subjectType === "LINE";
+        try {
+          await octokit.graphql(
+            `mutation($review:ID!,$path:String!,$body:String!,$line:Int,$side:DiffSide,$subject:PullRequestReviewThreadSubjectType!){
+               addPullRequestReviewThread(input:{
+                 pullRequestReviewId:$review, path:$path, body:$body,
+                 line:$line, side:$side, subjectType:$subject
+               }){ clientMutationId }
+             }`,
+            {
+              review: reviewId,
+              path: t.comment.path,
+              body: t.comment.body,
+              line: isLine ? t.comment.line : null,
+              side: isLine ? t.comment.side : null,
+              subject: t.subjectType,
+            },
+          );
+        } catch (err) {
+          // One unanchorable thread must not cost the reader the finding.
+          log.warn(
+            { err, path: t.comment.path, line: t.comment.line, subjectType: t.subjectType },
+            "Review thread rejected; folding into review body",
+          );
+          unpostable.push(t.comment);
+        }
+      }
+
+      // Some threads failing is the anchor case this fallback exists for: the
+      // file left the diff, the line moved. EVERY thread failing is not — that
+      // shape means auth, schema, or a rate limit surviving the retry wrapper,
+      // and folding the whole review into body prose would quietly downgrade a
+      // systemic failure into a review that looks fine. Bail instead, so the
+      // caller discards the draft and REST gets its own attempt at real threads.
+      if (threads.length > 0 && unpostable.length === threads.length) {
+        throw new Error(
+          `every review thread was rejected (${threads.length}); treating as a systemic failure`,
+        );
+      }
+
+      let body = result.summary;
+      if (unpostable.length > 0) {
+        body += "\n\n" + renderFileLevelFallbackSection(unpostable);
+      }
+
+      await octokit.graphql(
+        `mutation($review:ID!,$event:PullRequestReviewEvent!,$body:String){
+           submitPullRequestReview(input:{pullRequestReviewId:$review,event:$event,body:$body}){ clientMutationId }
+         }`,
+        { review: reviewId, event: result.approval, body },
+      );
+      log.info(
+        { threads: threads.length - unpostable.length, unpostable: unpostable.length, event: result.approval },
+        "Review submitted",
+      );
+    } catch (err) {
+      // Never strand the draft: nobody else can see it, and it would block the
+      // next run — including the REST fallback's own review — from opening one.
+      await this.discardReview(octokit, reviewId, log);
+      throw err;
+    }
+  }
+
+  /**
+   * Pre-GraphQL posting path, kept as a fallback so a GraphQL outage or a
+   * revoked scope still gets the review onto the PR. Costs the single-entry
+   * layout: file-scoped findings become their own reviews again.
+   */
+  private async submitReviewViaRest(
+    octokit: Octokit,
+    context: PRContext,
+    result: ReviewResult,
+    inlineComments: ReviewComment[],
+    fileLevelComments: ReviewComment[],
+    log: Logger,
+  ): Promise<void> {
     const unpostable: ReviewComment[] = [];
-    for (const c of comments) {
+    for (const c of fileLevelComments) {
       try {
         await octokit.pulls.createReviewComment({
           owner: context.owner,
@@ -681,42 +844,10 @@ export class GitHubClient {
         unpostable.push(c);
       }
     }
-    return unpostable;
-  }
-
-  async submitReview(
-    installationId: number,
-    context: PRContext,
-    result: ReviewResult,
-    signal?: AbortSignal
-  ): Promise<void> {
-    const octokit = await this.getInstallationOctokit(installationId, signal);
-    const log = logger.child({ owner: context.owner, repo: context.repo, pr: context.pullNumber });
-
-    await this.retireSupersededReviews(octokit, context, log);
-
-    // Submit the new review
-    const validComments = result.comments.filter((c) => c.line > 0 && c.path);
-
-    // File-scoped findings: the model named a file but no line we could anchor
-    // to the diff. GitHub hosts these as real review threads via
-    // `subject_type: "file"` — resolvable, repliable, and collapsible like any
-    // inline comment — so post them as threads instead of as permanent prose in
-    // the review body. They go FIRST: any that GitHub rejects are folded back
-    // into the body below, so a finding is never silently lost between the two
-    // channels (the failure #76 set out to fix).
-    const fileLevelComments = result.comments.filter(isFileLevelFinding);
-    const unpostable = await this.postFileLevelComments(octokit, context, fileLevelComments, log);
 
     let body = result.summary;
     if (unpostable.length > 0) {
       body += "\n\n" + renderFileLevelFallbackSection(unpostable);
-    }
-
-    // GitHub rejects reviews with empty body and no comments (422)
-    if (!body && validComments.length === 0) {
-      log.warn("Skipping review submission: no summary and no comments");
-      return;
     }
 
     try {
@@ -727,7 +858,7 @@ export class GitHubClient {
         commit_id: context.headSha,
         event: result.approval,
         body,
-        comments: validComments.map((c) => ({
+        comments: inlineComments.map((c) => ({
           path: c.path,
           line: c.line,
           side: c.side,
@@ -735,14 +866,14 @@ export class GitHubClient {
         })),
       });
       log.info(
-        { comments: validComments.length, fileLevel: fileLevelComments.length - unpostable.length, event: result.approval },
-        "Review submitted"
+        { comments: inlineComments.length, fileLevel: fileLevelComments.length - unpostable.length, event: result.approval },
+        "Review submitted (REST fallback)",
       );
     } catch (err: any) {
       // If inline comments fail (line not in diff), fall back to a plain comment
-      if (err.status === 422 && validComments.length > 0) {
+      if (err.status === 422 && inlineComments.length > 0) {
         log.warn("Inline comments failed, falling back to summary-only review");
-        const commentBlock = validComments
+        const commentBlock = inlineComments
           .map((c) => `**${c.path}:${c.line}**\n${c.body}`)
           .join("\n\n---\n\n");
 
@@ -758,6 +889,47 @@ export class GitHubClient {
         throw err;
       }
     }
+  }
+
+  async submitReview(
+    installationId: number,
+    context: PRContext,
+    result: ReviewResult,
+    signal?: AbortSignal
+  ): Promise<void> {
+    const octokit = await this.getInstallationOctokit(installationId, signal);
+    const log = logger.child({ owner: context.owner, repo: context.repo, pr: context.pullNumber });
+
+    await this.retireSupersededReviews(octokit, context, log);
+
+    const inlineComments = result.comments.filter((c) => c.line > 0 && c.path);
+    // File-scoped findings: the model named a file but no line we could anchor
+    // to the diff. GitHub still hosts these as real review threads — resolvable,
+    // repliable, and collapsible like any inline comment — so they belong on the
+    // review rather than as permanent prose in its body.
+    const fileLevelComments = result.comments.filter(isFileLevelFinding);
+
+    // GitHub rejects reviews with empty body and no comments (422)
+    if (!result.summary && inlineComments.length === 0 && fileLevelComments.length === 0) {
+      log.warn("Skipping review submission: no summary and no comments");
+      return;
+    }
+
+    // File-scoped threads first: they speak to the file as a whole, so they read
+    // as context for the line-anchored findings that follow.
+    const threads: DraftThread[] = [
+      ...fileLevelComments.map((c) => ({ comment: c, subjectType: "FILE" as const })),
+      ...inlineComments.map((c) => ({ comment: c, subjectType: "LINE" as const })),
+    ];
+
+    try {
+      await this.submitReviewAsSingleEntry(octokit, context, result, threads, log);
+      return;
+    } catch (err) {
+      log.warn({ err }, "Single-entry review submission failed; falling back to REST");
+    }
+
+    await this.submitReviewViaRest(octokit, context, result, inlineComments, fileLevelComments, log);
   }
 
   async postComment(

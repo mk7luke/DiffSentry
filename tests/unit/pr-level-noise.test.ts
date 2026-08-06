@@ -418,7 +418,34 @@ describe("submitReview: file-level threads and superseded reviews", () => {
     };
   }
 
-  function fakeOctokit(over: { reviews?: any[]; createReviewComment?: any } = {}) {
+  /** Inline: anchored to a changed line, so it becomes a LINE-scoped thread. */
+  function inlineFinding(over: Partial<ReviewComment> = {}): ReviewComment {
+    return {
+      path: "src/b.ts",
+      line: 42,
+      side: "RIGHT",
+      body: "this branch drops the error without logging it",
+      type: "issue",
+      severity: "major",
+      ...over,
+    };
+  }
+
+  /**
+   * Stands in for both API surfaces. The GraphQL half routes by mutation name
+   * and records what it was asked to do, so a test can assert the shape of the
+   * single review rather than the sequence of REST calls that used to build it.
+   */
+  function fakeOctokit(
+    over: {
+      reviews?: any[];
+      createReviewComment?: any;
+      pendingReviewIds?: string[];
+      addThread?: any;
+      submitFails?: boolean;
+      noGraphql?: boolean;
+    } = {},
+  ) {
     const calls = {
       createReview: vi.fn().mockResolvedValue({}),
       createReviewComment: over.createReviewComment ?? vi.fn().mockResolvedValue({}),
@@ -426,11 +453,52 @@ describe("submitReview: file-level threads and superseded reviews", () => {
       updateReview: vi.fn().mockResolvedValue({}),
       listReviews: vi.fn(),
     };
+    const gql = {
+      threads: [] as any[],
+      submitted: [] as any[],
+      discarded: [] as string[],
+      created: 0,
+    };
+    const addThread = over.addThread ?? vi.fn().mockResolvedValue({});
+
+    const graphql = vi.fn(async (query: string, vars: any) => {
+      if (query.includes("addPullRequestReviewThread")) {
+        await addThread(vars);
+        gql.threads.push(vars);
+        return {};
+      }
+      if (query.includes("submitPullRequestReview")) {
+        if (over.submitFails) throw new Error("submit blew up");
+        gql.submitted.push(vars);
+        return {};
+      }
+      if (query.includes("deletePullRequestReview")) {
+        gql.discarded.push(vars.id);
+        return {};
+      }
+      if (query.includes("addPullRequestReview")) {
+        gql.created++;
+        return { addPullRequestReview: { pullRequestReview: { id: "RV_draft" } } };
+      }
+      if (query.includes("pullRequest(number:$pr)")) {
+        return {
+          repository: {
+            pullRequest: {
+              id: "PR_node",
+              reviews: { nodes: (over.pendingReviewIds ?? []).map((id) => ({ id })) },
+            },
+          },
+        };
+      }
+      throw new Error(`unexpected graphql query: ${query}`);
+    });
+
     const octokit: any = {
       pulls: calls,
       paginate: vi.fn().mockResolvedValue(over.reviews ?? []),
+      ...(over.noGraphql ? {} : { graphql }),
     };
-    return { octokit, calls };
+    return { octokit, calls, gql, addThread, graphql };
   }
 
   function clientWith(octokit: any): GitHubClient {
@@ -439,8 +507,149 @@ describe("submitReview: file-level threads and superseded reviews", () => {
     return client;
   }
 
-  it("posts a file-level finding as a resolvable file-scoped thread", async () => {
-    const { octokit, calls } = fakeOctokit();
+  it("hangs every finding off ONE review instead of one review per finding", async () => {
+    // The ordering bug: `pulls.createReviewComment` can't attach to a review, so
+    // GitHub wrapped each file-scoped finding in its own standalone review — and
+    // since those had to be posted first, they landed above the summary that
+    // counted them. Everything now shares a single pending review.
+    const { octokit, calls, gql } = fakeOctokit();
+    await clientWith(octokit).submitReview(
+      1,
+      ctx(),
+      result({ comments: [fileFinding(), inlineFinding()] }),
+    );
+
+    expect(gql.created).toBe(1);
+    expect(gql.threads).toHaveLength(2);
+    expect(gql.submitted).toHaveLength(1);
+    expect(gql.submitted[0]).toMatchObject({ review: "RV_draft", event: "COMMENT" });
+    // No standalone reviews, and no second review carrying the summary.
+    expect(calls.createReviewComment).not.toHaveBeenCalled();
+    expect(calls.createReview).not.toHaveBeenCalled();
+  });
+
+  it("scopes a pathless-line finding to the file and anchors an inline one to its line", async () => {
+    const { octokit, gql } = fakeOctokit();
+    await clientWith(octokit).submitReview(
+      1,
+      ctx(),
+      result({ comments: [fileFinding(), inlineFinding()] }),
+    );
+
+    expect(gql.threads[0]).toMatchObject({
+      path: "src/a.ts",
+      subject: "FILE",
+      line: null,
+      side: null,
+    });
+    expect(gql.threads[1]).toMatchObject({
+      path: "src/b.ts",
+      subject: "LINE",
+      line: 42,
+      side: "RIGHT",
+    });
+  });
+
+  it("folds a rejected thread back into the review body", async () => {
+    // A finding must never vanish between the thread and body channels — the
+    // silent-loss failure #76 exists to prevent. Composing the body at submit
+    // time is what makes this possible without posting the threads first.
+    const { octokit, gql } = fakeOctokit({
+      addThread: vi.fn(async (vars: any) => {
+        if (vars.path === "src/a.ts") throw new Error("file is no longer in the diff");
+      }),
+    });
+    await clientWith(octokit).submitReview(
+      1,
+      ctx(),
+      result({ comments: [fileFinding(), inlineFinding()] }),
+    );
+
+    const body = gql.submitted[0].body;
+    expect(body).toContain("couldn't be attached to their file (1)");
+    expect(body).toContain("edit-mode fields were removed from the lead detail view");
+  });
+
+  it("treats EVERY thread failing as systemic and hands off to REST", async () => {
+    // Some threads failing is the anchor case. All of them failing is auth, a
+    // schema change, or a rate limit that outlived the retry wrapper — folding
+    // the whole review into body prose would dress a systemic failure up as a
+    // successful review.
+    const { octokit, calls, gql } = fakeOctokit({
+      addThread: vi.fn().mockRejectedValue(new Error("Resource not accessible by integration")),
+    });
+    await clientWith(octokit).submitReview(
+      1,
+      ctx(),
+      result({ comments: [fileFinding(), inlineFinding()] }),
+    );
+
+    expect(gql.submitted).toHaveLength(0);
+    expect(gql.discarded).toContain("RV_draft");
+    expect(calls.createReview).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a successful thread out of the body fallback", async () => {
+    const { octokit, gql } = fakeOctokit();
+    await clientWith(octokit).submitReview(1, ctx(), result({ comments: [fileFinding()] }));
+    expect(gql.submitted[0].body).not.toContain("couldn't be attached");
+  });
+
+  it("discards a leftover pending review before opening a new one", async () => {
+    // PENDING reviews are drafts only their author can see, so listReviews never
+    // shows them to retireSupersededReviews — but GitHub allows one per author
+    // per PR, so a crashed earlier run would block every later review.
+    const { octokit, gql } = fakeOctokit({ pendingReviewIds: ["RV_stale"] });
+    await clientWith(octokit).submitReview(1, ctx(), result({ comments: [fileFinding()] }));
+
+    expect(gql.discarded).toContain("RV_stale");
+    expect(gql.submitted).toHaveLength(1);
+  });
+
+  it("discards the draft and falls back to REST when submission fails", async () => {
+    const { octokit, calls, gql } = fakeOctokit({ submitFails: true });
+    await clientWith(octokit).submitReview(
+      1,
+      ctx(),
+      result({ comments: [fileFinding(), inlineFinding()] }),
+    );
+
+    // The draft must go, or it blocks the fallback's own review.
+    expect(gql.discarded).toContain("RV_draft");
+    expect(calls.createReviewComment).toHaveBeenCalledTimes(1);
+    expect(calls.createReview).toHaveBeenCalledTimes(1);
+    expect(calls.createReview.mock.calls[0][0].comments).toHaveLength(1);
+  });
+
+  it("keeps rejected file-level findings when the REST path degrades again on 422", async () => {
+    // The REST fallback's own 422 retry is the last channel a finding can reach.
+    // It rebuilds the body from `body` — which already carries the fallback
+    // section — not from `result.summary`, so file-scoped findings refused by
+    // createReviewComment survive the second degradation too.
+    const { octokit, calls } = fakeOctokit({
+      noGraphql: true,
+      createReviewComment: vi.fn().mockRejectedValue(new Error("file left the diff")),
+    });
+    calls.createReview
+      .mockRejectedValueOnce(Object.assign(new Error("422"), { status: 422 }))
+      .mockResolvedValue({});
+
+    await clientWith(octokit).submitReview(
+      1,
+      ctx(),
+      result({ comments: [fileFinding(), inlineFinding()] }),
+    );
+
+    expect(calls.createReview).toHaveBeenCalledTimes(2);
+    const degraded = calls.createReview.mock.calls[1][0].body;
+    expect(degraded).toContain("couldn't be attached to their file (1)");
+    expect(degraded).toContain("edit-mode fields were removed from the lead detail view");
+    // ...and the inline one it degraded for is there too.
+    expect(degraded).toContain("this branch drops the error without logging it");
+  });
+
+  it("falls back to REST when GraphQL is unavailable entirely", async () => {
+    const { octokit, calls } = fakeOctokit({ noGraphql: true });
     await clientWith(octokit).submitReview(1, ctx(), result({ comments: [fileFinding()] }));
 
     expect(calls.createReviewComment).toHaveBeenCalledTimes(1);
@@ -449,21 +658,7 @@ describe("submitReview: file-level threads and superseded reviews", () => {
       subject_type: "file",
       commit_id: "deadbee",
     });
-    // Not duplicated into the review body.
-    expect(calls.createReview.mock.calls[0][0].body).not.toContain("couldn't be attached");
-  });
-
-  it("folds a rejected file-level finding back into the review body", async () => {
-    // A finding must never vanish between the thread and body channels — the
-    // silent-loss failure #76 exists to prevent.
-    const { octokit, calls } = fakeOctokit({
-      createReviewComment: vi.fn().mockRejectedValue(Object.assign(new Error("422"), { status: 422 })),
-    });
-    await clientWith(octokit).submitReview(1, ctx(), result({ comments: [fileFinding()] }));
-
-    const body = calls.createReview.mock.calls[0][0].body;
-    expect(body).toContain("couldn't be attached to their file (1)");
-    expect(body).toContain("edit-mode fields were removed from the lead detail view");
+    expect(calls.createReview).toHaveBeenCalledTimes(1);
   });
 
   it("dismisses a superseded CHANGES_REQUESTED review and stubs a COMMENTED one", async () => {
@@ -502,11 +697,11 @@ describe("submitReview: file-level threads and superseded reviews", () => {
   });
 
   it("still posts the review when retiring a stale one fails", async () => {
-    const { octokit, calls } = fakeOctokit({
+    const { octokit, calls, gql } = fakeOctokit({
       reviews: [{ id: 1, state: "COMMENTED", body: `ours${MARKER}` }],
     });
     calls.updateReview.mockRejectedValue(new Error("no permission"));
     await clientWith(octokit).submitReview(1, ctx(), result());
-    expect(calls.createReview).toHaveBeenCalledTimes(1);
+    expect(gql.submitted).toHaveLength(1);
   });
 });
