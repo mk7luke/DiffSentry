@@ -53,3 +53,11 @@ updates:
       day: monday
     open-pull-requests-limit: 3
     labels: ["dependencies", "deployment"]
+    # Node cuts a major every six months, but only the EVEN ones ever reach
+    # LTS — odd majors go end-of-life in about eight months and never receive
+    # a maintenance window. Dependabot has no notion of a release line, so it
+    # will happily propose one; without this it re-opens the same PR weekly.
+    # Enumerated because `ignore` matches version patterns, not parity.
+    ignore:
+      - dependency-name: "node"
+        versions: ["25.x", "27.x", "29.x", "31.x", "33.x"]
