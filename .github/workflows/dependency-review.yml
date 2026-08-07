@@ -24,10 +24,10 @@ jobs:
       # Needed for comment-summary-in-pr.
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Dependency review
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@v5
         with:
           # `moderate` would be red on routine transitive churn; `high` is the
           # line worth stopping a merge for.
