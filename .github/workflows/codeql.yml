@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           # `security-and-quality` is a superset of the default security pack.
@@ -51,6 +51,6 @@ jobs:
       # No build step: CodeQL extracts JS/TS directly from source, and this
       # repo has no transpile-to-analyse requirement.
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{ matrix.language }}"
