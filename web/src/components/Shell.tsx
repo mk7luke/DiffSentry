@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType, type MouseEvent, type ReactNode, type SVGProps } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../auth/useAuth";
 import { usePWA } from "../pwa/usePWA";

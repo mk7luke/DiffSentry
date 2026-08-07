@@ -1,5 +1,5 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
-import { Link, isRouteErrorResponse, useRouteError } from "react-router-dom";
+import { Link, isRouteErrorResponse, useRouteError } from "react-router";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { ApiError } from "../api/client";
 import { AlertIcon, LogoIcon } from "./icons";

@@ -2,7 +2,7 @@
 // riskLine(), hbar(), and donut() from src/dashboard/layout.ts.
 
 import { useId, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router";
 import type { DayBin } from "../lib/format";
 import type { Severity, SparklinePoint } from "../api/types";
 import { EmptyState } from "./states";

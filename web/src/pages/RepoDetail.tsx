@@ -1,4 +1,4 @@
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router";
 import { useRepoDetail } from "../api/hooks";
 import { useAuth } from "../auth/useAuth";
 import { Breadcrumbs } from "../components/Shell";

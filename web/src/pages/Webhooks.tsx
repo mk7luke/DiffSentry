@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router";
 import { useReplayWebhook, useWebhookDelivery, useWebhooks } from "../api/hooks";
 import { useAuth } from "../auth/useAuth";
 import { useToast } from "../realtime/toast";

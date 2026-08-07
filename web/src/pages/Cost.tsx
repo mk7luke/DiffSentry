@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { useCost, useSetBudget } from "../api/hooks";
 import { useAuth } from "../auth/useAuth";
 import { Breadcrumbs } from "../components/Shell";

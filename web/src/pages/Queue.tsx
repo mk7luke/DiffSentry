@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Breadcrumbs } from "../components/Shell";
 import { PageHeader } from "../components/primitives";
 import { ActionButton } from "../components/ActionButton";

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import { useAudit, useSetRole } from "../api/hooks";
 import { useAuth } from "../auth/useAuth";
 import { Breadcrumbs } from "../components/Shell";

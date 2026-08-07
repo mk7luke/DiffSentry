@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router";
 import { useFindings, usePRDiff, useTriageFinding } from "../api/hooks";
 import { Breadcrumbs } from "../components/Shell";
 import { PageHeader } from "../components/primitives";

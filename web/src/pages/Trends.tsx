@@ -1,4 +1,4 @@
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import { useTrends } from "../api/hooks";
 import { Breadcrumbs } from "../components/Shell";
 import { Card, Metric, PageHeader } from "../components/primitives";

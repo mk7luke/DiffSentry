@@ -1,4 +1,4 @@
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router";
 import { useRecurring } from "../api/hooks";
 import { Breadcrumbs } from "../components/Shell";
 import { Card, Chip, PageHeader } from "../components/primitives";

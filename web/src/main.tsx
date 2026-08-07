@@ -1,7 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { RouterProvider } from "react-router-dom";
+// `react-router/dom`, not the package root: the root ships a plain
+// RouterProvider, while the DOM build wraps navigation in flushSync so
+// form/fetcher submissions stay in sync with the DOM. This is the export the
+// old `react-router-dom` RouterProvider mapped to.
+import { RouterProvider } from "react-router/dom";
 import { router } from "./router";
 import { DEMO, DEMO_BASENAME, FORCE_DEMO, demoPathActive } from "./demo/mode";
 import { AuthProvider } from "./auth/useAuth";

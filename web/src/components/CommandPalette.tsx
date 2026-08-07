@@ -9,7 +9,7 @@ import {
   type ReactNode,
   type SVGProps,
 } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSearch } from "../api/hooks";
 import { apiSend, ApiError } from "../api/client";

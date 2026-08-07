@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { useAuth } from "../auth/useAuth";
 import { ActionButton } from "./ActionButton";
 import { GithubIcon } from "./icons";

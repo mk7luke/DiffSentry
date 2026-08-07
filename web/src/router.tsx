@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { createBrowserRouter, Link, Navigate } from "react-router-dom";
+import { createBrowserRouter, Link, Navigate } from "react-router";
 import { DEMO, DEMO_BASENAME } from "./demo/mode";
 import { Shell } from "./components/Shell";
 import { useAuth } from "./auth/useAuth";

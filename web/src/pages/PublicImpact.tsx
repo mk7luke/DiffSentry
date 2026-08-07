@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams } from "react-router";
 import { usePublicImpact } from "../api/hooks";
 import { QueryBoundary } from "../components/states";
 import { LogoIcon } from "../components/icons";

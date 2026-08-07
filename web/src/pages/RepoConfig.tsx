@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router";
 import yaml from "js-yaml";
 import { useRepoConfig, useUpdateRepoConfig } from "../api/hooks";
 import { useAuth } from "../auth/useAuth";

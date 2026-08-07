@@ -23,7 +23,7 @@
     "marked": "^18.0.8",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router-dom": "^6.28.0"
+    "react-router": "^8.3.0"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
