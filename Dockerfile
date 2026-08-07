@@ -1,5 +1,5 @@
 # ── Stage 1: build the Vite SPA (web/) ───────────────────────────────
-FROM node:22-slim AS web-builder
+FROM node:25-slim AS web-builder
 WORKDIR /web
 COPY web/package.json web/package-lock.json* ./
 RUN npm ci
@@ -8,7 +8,7 @@ RUN npm run build
 # → /web/dist (static SPA bundle)
 
 # ── Stage 2: build the TypeScript server (src/) ──────────────────────
-FROM node:22-slim AS builder
+FROM node:25-slim AS builder
 WORKDIR /app
 # better-sqlite3 needs build tools to compile its native binding.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -24,7 +24,7 @@ COPY src/ ./src/
 RUN npm run build:server
 
 # ── Stage 3: runtime (single container serves API + webhook + SPA) ───
-FROM node:22-slim
+FROM node:25-slim
 WORKDIR /app
 # Same build deps for the runtime install (better-sqlite3 is in dependencies).
 RUN apt-get update && apt-get install -y --no-install-recommends \
