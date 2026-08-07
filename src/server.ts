@@ -66,7 +66,7 @@ export function createServer(config: Config): CreatedServer {
   // when the dashboard is mounted and its catch-all would otherwise serve the
   // SPA shell there. Registered first so it precedes every SPA fallback below.
   if (!demoEnabled) {
-    app.get(["/demo", "/demo/*"], (_req, res) => {
+    app.get(["/demo", "/demo/*splat"], (_req, res) => {
       res.status(404).type("text/plain").send("Demo mode is disabled on this instance.");
     });
   }
@@ -342,7 +342,7 @@ export function createServer(config: Config): CreatedServer {
   // this guarantees the link works on a webhook-only or demo-only instance too.
   // React Router renders the public view; the no-auth read API supplies data.
   if (shareEnabled) {
-    app.get(["/share/impact", "/share/impact/*"], (_req, res, next) => {
+    app.get(["/share/impact", "/share/impact/*splat"], (_req, res, next) => {
       res.sendFile(path.join(webDist, "index.html"), (err) => {
         if (err) next();
       });
@@ -353,7 +353,10 @@ export function createServer(config: Config): CreatedServer {
   // webhook, health check, API, legacy dashboard, or static assets. Any other
   // GET returns the SPA shell; the React router takes over from there.
   if (process.env.ENABLE_DASHBOARD === "1") {
-    app.get("*", (req, res, next) => {
+    // `/{*splat}` — not `/*splat` — because the splat must be OPTIONAL: the
+    // bare `"*"` this replaces (Express 4) also matched `/`, and a required
+    // splat would stop serving the SPA shell at the root.
+    app.get("/{*splat}", (req, res, next) => {
       if (
         req.path.startsWith("/api") ||
         req.path.startsWith("/webhook") ||
@@ -371,7 +374,7 @@ export function createServer(config: Config): CreatedServer {
     // catch-all above isn't mounted). Serves the SPA shell for /demo and its
     // sub-routes so a deep link like /demo/repos/acme/checkout-api/pr/142 boots
     // the app; React Router + the demo data layer take over from there.
-    app.get(["/demo", "/demo/*"], (_req, res, next) => {
+    app.get(["/demo", "/demo/*splat"], (_req, res, next) => {
       res.sendFile(path.join(webDist, "index.html"), (err) => {
         if (err) next();
       });
