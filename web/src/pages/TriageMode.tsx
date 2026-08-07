@@ -417,7 +417,7 @@ function TriageCard({
 }: {
   finding: FindingExplorerRow;
   overlay?: TriageState;
-  cardRef: React.RefObject<HTMLElement>;
+  cardRef: React.RefObject<HTMLElement | null>;
   position: string;
 }) {
   const diffQuery = usePRDiff(finding.owner, finding.repo, finding.number);
