@@ -20,9 +20,11 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
 
-    "baseUrl": ".",
+    // TypeScript 7 removed `baseUrl`; `paths` targets are now resolved relative
+    // to this file, so they must carry an explicit `./`. Mirrors the `@` alias
+    // in vite.config.ts — keep the two in sync.
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src", "vite.config.ts"]
