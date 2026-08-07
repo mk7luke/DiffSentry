@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, type JSX } from "react";
 import type { JsonSchema } from "../api/types";
 import { emptyValueFor, humanizeKey } from "../lib/schema";
 
