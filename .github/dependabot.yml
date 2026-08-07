@@ -55,9 +55,22 @@ updates:
     labels: ["dependencies", "deployment"]
     # Node cuts a major every six months, but only the EVEN ones ever reach
     # LTS — odd majors go end-of-life in about eight months and never receive
-    # a maintenance window. Dependabot has no notion of a release line, so it
-    # will happily propose one; without this it re-opens the same PR weekly.
-    # Enumerated because `ignore` matches version patterns, not parity.
+    # a maintenance window, so a base image pinned to one silently stops
+    # getting security patches.
+    #
+    # Dependabot cannot express "even majors only": `ignore.versions` matches
+    # version patterns, and parity is not a pattern. An earlier attempt to
+    # enumerate the odd ones (`versions: ["25.x", ...]`) did NOT work — those
+    # patterns do not match Docker tags of the form `25-slim`, and Dependabot
+    # proposed node 25 again within a minute of that rule landing.
+    #
+    # So all node majors are held instead, and LTS moves are made by hand.
+    # `update-types` is matched structurally rather than by string, so unlike
+    # the enumeration it actually fires. Patch and minor tag updates still
+    # flow normally — this only holds the major.
+    #
+    # When bumping by hand: go to the next EVEN major, and move both
+    # Dockerfile (`node:NN-slim`) and Dockerfile.demo (`node:NN-alpine`).
     ignore:
       - dependency-name: "node"
-        versions: ["25.x", "27.x", "29.x", "31.x", "33.x"]
+        update-types: ["version-update:semver-major"]
