@@ -65,9 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   authoritative; only DiffSentry's own review verdict is re-derived.
 
   Resolving a thread by hand in the GitHub UI now clears the check too, via a
-  new `pull_request_review_thread` handler. **Existing installs must subscribe
-  to the "Pull request review thread" event** in the GitHub App's settings —
-  the other paths work without it.
+  new `pull_request_review_thread` handler. That event was missing from the
+  documented App setup, so check that "Pull request review thread" is ticked
+  under Permissions & events — if it already is, there's nothing to do, and
+  every other refresh path works without it regardless.
 
 - A review now posts as a single timeline entry with every thread under it.
   File-scoped findings were posted through an endpoint that can't attach to a
