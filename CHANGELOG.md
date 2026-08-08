@@ -53,6 +53,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `DiffSentry` commit status no longer stays red after its review threads
+  are resolved. That status was written once per review pass, so a
+  `REQUEST_CHANGES` verdict pinned it to `failure` on the head SHA and nothing
+  ever revised it — resolving threads doesn't trigger a new pass. `ship` then
+  read our own stale output back as a blocker, reporting "Unresolved review
+  threads: 0" and "🔴 Not ready" in the same comment. Once every
+  DiffSentry-authored thread is resolved, the status is flipped back to green —
+  on `ship`, on `resolve`, on push auto-resolve, and when a reply auto-resolves
+  the last open thread. Third-party checks and `DiffSentry / Pre-Merge` stay
+  authoritative; only DiffSentry's own review verdict is re-derived.
+
 - A review now posts as a single timeline entry with every thread under it.
   File-scoped findings were posted through an endpoint that can't attach to a
   review, so GitHub wrapped each one in its own review — and because they had to

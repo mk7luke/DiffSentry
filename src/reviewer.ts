@@ -3,7 +3,8 @@ import { Config, AIProvider, DiffBudgetConfig, FileChange, PRContext, PriorRevie
 import { buildProvider, ProviderSpec } from "./ai/provider-factory.js";
 import { FailoverProvider } from "./ai/failover.js";
 import { isAiTimeoutError } from "./ai/timeout.js";
-import { GitHubClient } from "./github.js";
+import { GitHubClient, REVIEW_STATUS_CONTEXT, isReviewFeedbackAddressed, type ReviewThreadSummary } from "./github.js";
+import { assessShipSignals, renderShipCheck, type CommitStatusLike } from "./ship-check.js";
 import { loadRepoConfig, mergeWithDefaults, shouldReviewPR, isPathIncluded } from "./repo-config.js";
 import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary, injectSummaryIntoPRBody } from "./walkthrough.js";
 import { parseCommand, formatHelpMessage, formatConfigMessage, formatUnknownCommandMessage } from "./commands.js";
@@ -447,9 +448,64 @@ export class Reviewer {
       const resolved = await this.github.resolveAddressedThreads(
         installationId, owner, repo, pullNumber, changedFiles
       );
-      if (resolved > 0) log.info({ resolved }, "Push auto-resolve: closed addressed threads");
+      if (resolved > 0) {
+        log.info({ resolved }, "Push auto-resolve: closed addressed threads");
+        await this.refreshReviewCommitStatus(installationId, owner, repo, pullNumber, { headSha: ctx.headSha });
+      }
     } catch (err) {
       log.warn({ err }, "Push auto-resolve failed");
+    }
+  }
+
+  // ─── Stale review-status refresh ─────────────────────────────
+  /**
+   * Re-derive the `DiffSentry` commit status from live thread state.
+   *
+   * That status is written once per review pass, so a REQUEST_CHANGES verdict
+   * pins it to `failure` on the head SHA. Resolving the threads that review
+   * opened doesn't trigger another pass, so the red X outlives the feedback it
+   * represents — blocking merges and, worse, showing up as a blocker in `ship`
+   * on the very same run that reports zero unresolved threads. Once every
+   * DiffSentry-authored thread is resolved, flip the status back to green.
+   *
+   * Deliberately gated on an existing failing status for this context: when a
+   * repo sets `reviews.commit_status: false` we never posted one, so there's
+   * nothing to find and this is a no-op — no config load needed.
+   *
+   * Best-effort; returns true only when a stale failure was actually cleared.
+   */
+  async refreshReviewCommitStatus(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    opts: { headSha?: string; threads?: ReviewThreadSummary } = {},
+  ): Promise<boolean> {
+    const log = logger.child({ owner, repo, pr: pullNumber });
+    try {
+      const headSha =
+        opts.headSha ?? (await this.github.getHeadSha(installationId, owner, repo, pullNumber));
+      if (!headSha) return false;
+
+      const state = await this.github.getCommitStatusState(
+        installationId, owner, repo, headSha, REVIEW_STATUS_CONTEXT,
+      );
+      if (state !== "failure" && state !== "error") return false;
+
+      const threads =
+        opts.threads ??
+        (await this.github.summarizeReviewThreads(installationId, owner, repo, pullNumber));
+      if (!isReviewFeedbackAddressed(threads)) return false;
+
+      await this.github.setCommitStatus(
+        installationId, owner, repo, headSha,
+        "success", "All review threads resolved", REVIEW_STATUS_CONTEXT,
+      );
+      log.info({ headSha, threads }, "Cleared stale failing review status — all threads resolved");
+      return true;
+    } catch (err) {
+      log.warn({ err }, "Failed to refresh review commit status");
+      return false;
     }
   }
 
@@ -493,6 +549,7 @@ export class Reviewer {
   /** Resolve all DiffSentry review threads on a PR (mirrors the `resolve` command). */
   async resolveThreads(installationId: number, owner: string, repo: string, pullNumber: number): Promise<void> {
     await this.github.resolveAllComments(installationId, owner, repo, pullNumber);
+    await this.refreshReviewCommitStatus(installationId, owner, repo, pullNumber);
   }
 
   /** Abort any in-flight review for a PR. Alias of handlePRClose semantics. */
@@ -2349,7 +2406,15 @@ Output ONLY valid JSON (no fences, no prose):
                   const ok = await this.github.resolveThreadById(
                     installationId, owner, repo, pullNumber, thread.threadId
                   );
-                  if (ok) log.info({ threadId: thread.threadId }, "Auto-resolved thread after acknowledged reply");
+                  if (ok) {
+                    log.info({ threadId: thread.threadId }, "Auto-resolved thread after acknowledged reply");
+                    // That may have been the last open thread — if so the
+                    // failing review status is now stale, so clear it here
+                    // rather than making the author run `ship` to notice.
+                    await this.refreshReviewCommitStatus(installationId, owner, repo, pullNumber, {
+                      headSha: context.headSha,
+                    });
+                  }
                 } else {
                   log.debug({ verdict }, "Judge declined to resolve thread");
                 }
@@ -2405,11 +2470,13 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
           const octokit = await this.github.getInstallationOctokit(installationId);
 
           // Fetch live state across surfaces in parallel
-          const [reviews, prComments, statusResp, ownerRules] = await Promise.all([
+          const [reviews, statusResp, ownerRules, threads] = await Promise.all([
             octokit.pulls.listReviews({ owner, repo, pull_number: pullNumber }),
-            octokit.pulls.listReviewComments({ owner, repo, pull_number: pullNumber, per_page: 100 }),
             octokit.repos.getCombinedStatusForRef({ owner, repo, ref: context.headSha }).catch(() => null as any),
             loadCodeowners(octokit, owner, repo, context.headSha).catch(() => []),
+            this.github
+              .summarizeReviewThreads(installationId, owner, repo, pullNumber)
+              .catch((): ReviewThreadSummary => ({ total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0 })),
           ]);
 
           // Latest bot review state
@@ -2418,33 +2485,20 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
             .find((r) => r.user?.type === "Bot" && r.user?.login?.toLowerCase().startsWith(this.config.botName.toLowerCase()));
           const reviewState = latestBotReview?.state ?? "PENDING";
 
-          // Open inline threads via GraphQL
-          let unresolvedThreads = 0;
-          try {
-            const q = `
-              query($owner: String!, $repo: String!, $pr: Int!) {
-                repository(owner: $owner, name: $repo) {
-                  pullRequest(number: $pr) {
-                    reviewThreads(first: 100) { nodes { isResolved } }
-                  }
-                }
-              }`;
-            const r: any = await octokit.graphql(q, { owner, repo, pr: pullNumber });
-            unresolvedThreads = (r?.repository?.pullRequest?.reviewThreads?.nodes ?? []).filter((t: any) => !t.isResolved).length;
-          } catch {
-            // best effort
+          const statuses = (statusResp?.data?.statuses ?? []) as CommitStatusLike[];
+          const signals = assessShipSignals({ reviewState, threads, statuses });
+
+          // Push the corrected verdict back to GitHub so the PR's check list
+          // goes green too — reporting it only in this comment would leave the
+          // merge button blocked by the same stale X we just discounted.
+          let statusRefreshed = false;
+          if (signals.staleFailing.length > 0) {
+            statusRefreshed = await this.refreshReviewCommitStatus(
+              installationId, owner, repo, pullNumber, { headSha: context.headSha, threads },
+            );
           }
 
-          const statuses = (statusResp?.data?.statuses ?? []) as Array<{ context: string; state: string; description?: string | null }>;
-          const failingChecks = statuses.filter((s) => s.state === "failure" || s.state === "error");
-          const pendingChecks = statuses.filter((s) => s.state === "pending");
-
-          const blockers: string[] = [];
-          const warnings: string[] = [];
-          if (reviewState === "CHANGES_REQUESTED") blockers.push("DiffSentry has requested changes (latest review).");
-          if (unresolvedThreads > 0) warnings.push(`${unresolvedThreads} unresolved review thread${unresolvedThreads === 1 ? "" : "s"}.`);
-          if (failingChecks.length > 0) blockers.push(`${failingChecks.length} failing commit status check${failingChecks.length === 1 ? "" : "s"}: ${failingChecks.map((s) => `\`${s.context}\``).join(", ")}.`);
-          if (pendingChecks.length > 0) warnings.push(`${pendingChecks.length} pending check${pendingChecks.length === 1 ? "" : "s"}: ${pendingChecks.map((s) => `\`${s.context}\``).join(", ")}.`);
+          const extraBlockers: string[] = [];
 
           // CODEOWNERS gate: if the repo has a CODEOWNERS file and any of
           // the touched files have owners, require at least one APPROVED
@@ -2462,7 +2516,7 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
                 .map((r) => r.user!.login.toLowerCase())
                 .filter((login) => ownerSet.has(login));
               if (ownerApprovals.length === 0) {
-                blockers.push(
+                extraBlockers.push(
                   `No CODEOWNERS approval yet — needs review from one of: ${owners
                     .slice(0, 5)
                     .map((o) => `@${o.login}`)
@@ -2472,38 +2526,15 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
             }
           }
 
-          const verdict =
-            blockers.length === 0
-              ? warnings.length === 0
-                ? "🟢 **Ready to ship.** All blockers clear, no warnings."
-                : "🟡 **Probably safe to ship**, but address the warnings first."
-              : "🔴 **Not ready.** Address the blockers below before merging.";
-
-          const lines: string[] = [];
-          lines.push(`# 🚀 Ship Check`);
-          lines.push("");
-          lines.push(verdict);
-          lines.push("");
-          lines.push(`| Surface | Status |`);
-          lines.push(`|---|---|`);
-          lines.push(`| DiffSentry review | \`${reviewState}\` |`);
-          lines.push(`| Unresolved review threads | ${unresolvedThreads} |`);
-          lines.push(`| Failing commit statuses | ${failingChecks.length} |`);
-          lines.push(`| Pending commit statuses | ${pendingChecks.length} |`);
-
-          if (blockers.length > 0) {
-            lines.push("");
-            lines.push("## Blockers");
-            blockers.forEach((b) => lines.push(`- ❌ ${b}`));
-          }
-          if (warnings.length > 0) {
-            lines.push("");
-            lines.push("## Warnings");
-            warnings.forEach((w) => lines.push(`- ⚠️ ${w}`));
-          }
-
           await reply(
-            lines.join("\n") + `\n\n<sub>Re-run with \`@${this.config.botName} ship\` after addressing.</sub>`,
+            renderShipCheck({
+              botName: this.config.botName,
+              reviewState,
+              threads,
+              signals,
+              statusRefreshed,
+              extraBlockers,
+            }),
           );
           break;
         }

@@ -6,6 +6,33 @@ import { isFileLevelFinding, REVIEW_BODY_MARKER } from "./review-body.js";
 
 type Logger = typeof logger;
 
+/** Commit-status context carrying DiffSentry's own review verdict. Distinct
+ *  from `DiffSentry / Pre-Merge`, which reports the pre-merge checks and is
+ *  driven by something other than review threads. */
+export const REVIEW_STATUS_CONTEXT = "DiffSentry";
+
+/** Resolution tallies for a PR's review threads, split by author so callers can
+ *  reason about DiffSentry's own feedback independently of humans'. */
+export interface ReviewThreadSummary {
+  total: number;
+  unresolved: number;
+  /** Threads opened by DiffSentry. */
+  botTotal: number;
+  botUnresolved: number;
+}
+
+/**
+ * Whether DiffSentry's review feedback has been fully addressed — it opened at
+ * least one thread and every one of them is now resolved.
+ *
+ * The `botTotal > 0` half matters: a PR DiffSentry never commented on also has
+ * zero unresolved bot threads, and treating that as "addressed" would clear
+ * signals that were never about threads in the first place.
+ */
+export function isReviewFeedbackAddressed(threads: ReviewThreadSummary): boolean {
+  return threads.botTotal > 0 && threads.botUnresolved === 0;
+}
+
 /** A review thread to hang off a pending review. `FILE` findings name a file but
  *  no line we could anchor to the diff, so GitHub scopes the thread to the whole
  *  file instead of a diff line. */
@@ -1262,6 +1289,77 @@ export class GitHubClient {
   }
 
   /**
+   * Tally the PR's review threads by resolution state and author. Used to tell
+   * "DiffSentry raised concerns and they're all addressed" apart from
+   * "DiffSentry never raised any" — the two look identical if you only count
+   * unresolved threads.
+   */
+  async summarizeReviewThreads(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    signal?: AbortSignal
+  ): Promise<ReviewThreadSummary> {
+    const octokit = await this.getInstallationOctokit(installationId, signal);
+    const botLogin = `${this.config.botName}[bot]`.toLowerCase();
+    const threads = await this.fetchAllReviewThreads(octokit, owner, repo, pullNumber);
+
+    const summary: ReviewThreadSummary = { total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0 };
+    for (const thread of threads) {
+      const ours = isOurBotThread(thread, botLogin);
+      summary.total++;
+      if (ours) summary.botTotal++;
+      if (!thread.isResolved) {
+        summary.unresolved++;
+        if (ours) summary.botUnresolved++;
+      }
+    }
+    return summary;
+  }
+
+  /**
+   * Current state of one commit-status context on a SHA, or null when we've
+   * never posted that context (or the lookup failed).
+   */
+  async getCommitStatusState(
+    installationId: number,
+    owner: string,
+    repo: string,
+    sha: string,
+    context: string,
+    signal?: AbortSignal
+  ): Promise<string | null> {
+    const octokit = await this.getInstallationOctokit(installationId, signal);
+    try {
+      const resp = await octokit.repos.getCombinedStatusForRef({ owner, repo, ref: sha });
+      // getCombinedStatusForRef already collapses to the latest status per context.
+      return resp.data.statuses.find((s) => s.context === context)?.state ?? null;
+    } catch (err) {
+      logger.warn({ err, owner, repo, sha, context }, "Failed to read commit status");
+      return null;
+    }
+  }
+
+  /** Head SHA of a PR, without paying for the full `getPRContext` file fetch. */
+  async getHeadSha(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    signal?: AbortSignal
+  ): Promise<string | null> {
+    const octokit = await this.getInstallationOctokit(installationId, signal);
+    try {
+      const resp = await octokit.pulls.get({ owner, repo, pull_number: pullNumber });
+      return resp.data.head.sha;
+    } catch (err) {
+      logger.warn({ err, owner, repo, pr: pullNumber }, "Failed to read PR head SHA");
+      return null;
+    }
+  }
+
+  /**
    * Resolve a single review thread by its node id. Returns true on success.
    */
   async resolveThreadById(
@@ -1406,7 +1504,7 @@ export class GitHubClient {
     sha: string,
     state: "pending" | "success" | "failure" | "error",
     description: string,
-    context: string = "DiffSentry",
+    context: string = REVIEW_STATUS_CONTEXT,
     signal?: AbortSignal
   ): Promise<void> {
     const octokit = await this.getInstallationOctokit(installationId, signal);
