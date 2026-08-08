@@ -209,3 +209,83 @@ describe("webhook gate — review thread replies", () => {
     expect(handled).toEqual([]);
   });
 });
+
+describe("webhook gate — review thread resolution", () => {
+  /** Deps that record every refreshReviewCommitStatus call. */
+  function makeRefreshDeps() {
+    const refreshed: Array<{ owner: string; repo: string; pr: number }> = [];
+    const deps = makeDeps();
+    (deps.reviewer as any).refreshReviewCommitStatus = async (
+      _i: number, owner: string, repo: string, pr: number,
+    ) => {
+      refreshed.push({ owner, repo, pr });
+      return true;
+    };
+    return { deps, refreshed };
+  }
+
+  function resolvedPayload(over: Record<string, unknown> = {}): any {
+    return {
+      action: "resolved",
+      installation: { id: 1 },
+      repository: { owner: { login: "acme" }, name: "app" },
+      pull_request: { number: 7 },
+      thread: { node_id: "PRRT_x" },
+      ...over,
+    };
+  }
+
+  it("refreshes the review status when a human resolves a thread", async () => {
+    // The gap this closes: clicking "Resolve conversation" in the GitHub UI is
+    // the only way to clear a thread that fires no other event we listen to.
+    const { deps, refreshed } = makeRefreshDeps();
+    const res = await dispatchWebhookEvent(deps, "pull_request_review_thread", resolvedPayload());
+    await settle();
+    expect(res.status).toBe(202);
+    expect(refreshed).toEqual([{ owner: "acme", repo: "app", pr: 7 }]);
+  });
+
+  it("ignores un-resolution rather than inventing a failing status", async () => {
+    // The refresh only ever clears a failure DiffSentry wrote; re-opening a
+    // thread is not grounds for writing one no review pass produced.
+    const { deps, refreshed } = makeRefreshDeps();
+    const res = await dispatchWebhookEvent(
+      deps, "pull_request_review_thread", resolvedPayload({ action: "unresolved" }),
+    );
+    await settle();
+    expect(res.status).toBe(200);
+    expect(refreshed).toEqual([]);
+  });
+
+  it("ignores a payload with no installation", async () => {
+    const { deps, refreshed } = makeRefreshDeps();
+    const res = await dispatchWebhookEvent(
+      deps, "pull_request_review_thread", resolvedPayload({ installation: undefined }),
+    );
+    await settle();
+    expect(res.status).toBe(200);
+    expect(refreshed).toEqual([]);
+  });
+
+  it("ignores a payload with no PR number", async () => {
+    const { deps, refreshed } = makeRefreshDeps();
+    const res = await dispatchWebhookEvent(
+      deps, "pull_request_review_thread", resolvedPayload({ pull_request: {} }),
+    );
+    await settle();
+    expect(res.status).toBe(200);
+    expect(refreshed).toEqual([]);
+  });
+
+  it("still answers 202 when the refresh itself fails", async () => {
+    // Fire-and-forget: a GitHub outage must not turn into a webhook 5xx and a
+    // GitHub redelivery storm.
+    const deps = makeDeps();
+    (deps.reviewer as any).refreshReviewCommitStatus = async () => {
+      throw new Error("503");
+    };
+    const res = await dispatchWebhookEvent(deps, "pull_request_review_thread", resolvedPayload());
+    await settle();
+    expect(res.status).toBe(202);
+  });
+});

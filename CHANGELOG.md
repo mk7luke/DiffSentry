@@ -64,6 +64,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the last open thread. Third-party checks and `DiffSentry / Pre-Merge` stay
   authoritative; only DiffSentry's own review verdict is re-derived.
 
+  Resolving a thread by hand in the GitHub UI now clears the check too, via a
+  new `pull_request_review_thread` handler. **Existing installs must subscribe
+  to the "Pull request review thread" event** in the GitHub App's settings —
+  the other paths work without it.
+
 - A review now posts as a single timeline entry with every thread under it.
   File-scoped findings were posted through an endpoint that can't attach to a
   review, so GitHub wrapped each one in its own review — and because they had to

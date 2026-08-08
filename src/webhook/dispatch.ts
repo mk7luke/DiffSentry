@@ -48,6 +48,12 @@ export interface WebhookReviewer {
     mode: "full" | "incremental",
   ): Promise<void>;
   autoResolveOnPush(installationId: number, owner: string, repo: string, pullNumber: number): Promise<void>;
+  refreshReviewCommitStatus(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+  ): Promise<boolean>;
   handlePRClose(owner: string, repo: string, pullNumber: number): void;
   handleIssueOpened(installationId: number, owner: string, repo: string, issueNumber: number): Promise<void>;
   handleComment(
@@ -426,6 +432,39 @@ export async function dispatchWebhookEvent(
         logger.error({ err, owner, repo, pr: pullNumber }, "Background review comment handling failed");
       });
     return { status: 202, body: { status: "accepted", implicit: isImplicitReply } };
+  }
+
+  // ─── PR Review Thread Events (manual Resolve conversation) ─
+  //
+  // The only signal GitHub gives us when a human clicks "Resolve conversation"
+  // in the UI. Without it, resolving DiffSentry's last open thread by hand
+  // leaves its `failure` commit status standing until the next push, `resolve`,
+  // or `ship` — the status is only ever written by a review pass, and nothing
+  // re-runs one on resolution.
+  //
+  // Only `resolved` is acted on. The refresh is deliberately one-directional:
+  // it clears a failure DiffSentry itself wrote, and re-opening a thread is not
+  // grounds for writing a *new* failure that no review pass ever produced.
+  // A re-opened thread surfaces in `ship` and in the next review either way.
+  if (event === "pull_request_review_thread" && payload.action === "resolved") {
+    const owner = payload.repository?.owner?.login;
+    const repo = payload.repository?.name;
+    const pullNumber = payload.pull_request?.number;
+    const installationId = payload.installation?.id;
+
+    if (!installationId || !owner || !repo || typeof pullNumber !== "number") {
+      return { status: 200, body: { status: "ignored" } };
+    }
+
+    // Fires for DiffSentry's own resolutions too, which the in-process paths
+    // already handle. Harmless: the refresh short-circuits on a status that
+    // isn't failing, and setting a commit status raises no thread event, so
+    // there's no loop to guard against.
+    logger.info({ owner, repo, pr: pullNumber }, "Review thread resolved, refreshing review status");
+    reviewer.refreshReviewCommitStatus(installationId, owner, repo, pullNumber).catch((err) => {
+      logger.error({ err, owner, repo, pr: pullNumber }, "Review status refresh failed");
+    });
+    return { status: 202, body: { status: "accepted" } };
   }
 
   return { status: 200, body: { status: "ignored" } };

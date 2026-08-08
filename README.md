@@ -327,7 +327,7 @@ with **`DISABLE_DEMO=1`**, after which `/demo` returns `404`.
    - Contents: Read & write
    - Issues: Read & write
    - Commit statuses: Read & write
-5. **Subscribe to events**: Pull request, **Issues**, Issue comment, Pull request review comment.
+5. **Subscribe to events**: Pull request, **Issues**, Issue comment, Pull request review comment, **Pull request review thread**.
 6. Create the App, note the App ID, generate a private key (`.pem`).
 
 ### 2. Install the App
@@ -659,6 +659,7 @@ GitHub webhook
 | `issue_comment` | `created` (on an issue) | `@bot` issue commands (summary / plan / chat / pause / resume / learn) |
 | `issue_comment` | `edited` | Finishing-Touches checkbox click handler |
 | `pull_request_review_comment` | `created` | `@bot` chat commands on review threads |
+| `pull_request_review_thread` | `resolved` | Clear the stale `DiffSentry` commit status once every thread it opened is resolved |
 
 ## Environment variables
 

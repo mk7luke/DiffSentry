@@ -21,7 +21,7 @@ account with admin access to one repo.
 - **Repository permissions:** Pull requests **Read & write**, Contents
   **Read & write**, Issues **Read & write**, Commit statuses **Read & write**.
 - **Subscribe to events:** Pull request, Issues, Issue comment, Pull request
-  review comment.
+  review comment, Pull request review thread.
 
 Click **Create**. Then on the App page:
 
