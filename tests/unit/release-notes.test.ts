@@ -87,6 +87,16 @@ describe("sanitiseReleaseNotes", () => {
     expect(out).toContain("Then re-run, the check clears.");
   });
 
+  it("keeps the space before an inline code span", () => {
+    // The original bug, called out by name because it is easy to reintroduce.
+    // A prose segment ends where a code span begins, which is usually mid-line,
+    // so trimming each segment with `$` under /m treated that as end-of-line
+    // and ate the space: "Set `flag`" came out as "Set`flag`".
+    expect(sanitiseReleaseNotes("Set `flag` to restore the old behaviour.")).toBe(
+      "Set `flag` to restore the old behaviour.",
+    );
+  });
+
   it("protects an inline span that wraps across a line", () => {
     // Legal CommonMark: a code span may contain a newline. The first version of
     // CODE_SEGMENT required the span to close on its own line, so this was
