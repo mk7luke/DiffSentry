@@ -559,6 +559,13 @@ export class Reviewer {
       // `isReviewFeedbackAddressed` instead would also refuse to clear while an
       // unresolved *nitpick* is open, which would make the documented rule
       // ("minor and trivial never block") false via this path.
+      //
+      // Known hole, accepted: on a PR whose failure came from a PR-level finding
+      // AND which later acquired thread-bearing findings, `botTotal > 0` and this
+      // guard stops applying — so resolving those threads clears a red the
+      // PR-level finding still justifies. Closing it would mean reading the last
+      // verdict here, which is exactly the staleness the sync exists to clear.
+      // A fresh review pass corrects it, since that path does pass `approval`.
       if (target.state === "success" && threads.botTotal === 0) {
         // info, not debug: the other branch info-logs a successful sync, and an
         // operator chasing a stuck red check needs to see the deliberate
@@ -588,13 +595,15 @@ export class Reviewer {
    * whole change fixes, and duplicated logic is duplicated risk of that
    * regression coming back in only one of the two spots.
    *
-   * When the thread fetch fails we must not guess in either direction. With a
-   * verdict in hand (final-verdict path) we fall back to the verdict alone,
-   * which is what this status meant before threads gated it. With no verdict
-   * (empty-diff path) there is nothing to fall back to, so we write nothing and
-   * leave whatever status is already on the SHA standing — an all-zero summary
-   * there would resolve to `success` and green a PR with open criticals on a
-   * network blip, which is the reported bug by another route.
+   * When the thread fetch fails we write nothing at all, whether or not a
+   * verdict is in hand. Falling back to the verdict looks safe for
+   * `REQUEST_CHANGES` but is wrong for `APPROVE`/`COMMENT`: a pass that has just
+   * posted blocking threads would resolve to `success` off an all-zero summary
+   * and green the PR beside its own open criticals — the reported bug by
+   * another route. Leaving the SHA's existing status untouched fails closed
+   * instead: the `pending` this pass wrote on entry keeps the merge blocked, and
+   * `syncReviewCommitStatus` converges on the next thread event, `ship`, or push
+   * auto-resolve, since `pending` is not `null` and so passes its guard.
    *
    * `onStatusError` lets each call site keep its own `setCommitStatus` failure
    * handling — the empty-diff site swallows silently, the final-verdict site
@@ -618,18 +627,22 @@ export class Reviewer {
     const log = logger.child({ owner, repo, pr: pullNumber });
     const liveThreads = await this.github
       .summarizeReviewThreads(installationId, owner, repo, pullNumber, signal)
-      .catch(() => null);
+      .catch((err) => {
+        // Log the cause here: the caller only sees `null`, and without this a
+        // flaky GraphQL outage is indistinguishable from a PR that genuinely
+        // has no threads.
+        log.warn({ err, headSha }, "Failed to read review threads for the commit status");
+        return null;
+      });
 
-    if (!liveThreads && !opts.approval) {
-      log.warn({ headSha }, "Thread fetch failed and no verdict to fall back on — leaving commit status unchanged");
+    if (!liveThreads) {
+      log.warn({ headSha }, "Thread read failed — leaving the commit status unchanged rather than guessing");
       return;
     }
 
-    // A null summary only reaches here alongside a verdict; the all-zero stand-in
-    // makes `resolveReviewStatus` decide on that verdict alone.
     const status = resolveReviewStatus({
       approval: opts.approval,
-      threads: liveThreads ?? { total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0 },
+      threads: liveThreads,
       successDescription: opts.successDescription,
       gate: opts.gate,
     });
@@ -851,7 +864,7 @@ export class Reviewer {
       if (repoConfig.reviews?.commit_status !== false) {
         await this.github.setCommitStatus(
           installationId, owner, repo, context.headSha,
-          "pending", "Review in progress...", "DiffSentry", signal
+          "pending", "Review in progress...", REVIEW_STATUS_CONTEXT, signal
         ).catch((err) => log.warn({ err }, "Failed to set pending commit status"));
       }
 

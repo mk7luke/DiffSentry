@@ -150,9 +150,12 @@ describe("Reviewer.writeReviewStatus (wiring)", () => {
     expect(setCommitStatus).not.toHaveBeenCalled();
   });
 
-  it("falls back to the verdict when the thread fetch rejects mid-review", async () => {
-    // The final-verdict path has a verdict to stand on — what this status meant
-    // before threads gated it — so it still writes rather than going silent.
+  it("writes nothing when the thread fetch rejects even with a verdict in hand", async () => {
+    // Falling back to the verdict looks safe but greens the wrong case: a pass
+    // that just posted blocking threads and returns COMMENT would resolve to
+    // `success` off an all-zero stand-in, putting a green check beside its own
+    // open criticals. Leaving the SHA alone fails closed — the `pending` written
+    // on entry keeps the merge blocked until a sync converges.
     const setCommitStatus = vi.fn().mockResolvedValue(undefined);
     const reviewer = reviewerWith({
       summarizeReviewThreads: vi.fn().mockRejectedValue(new Error("boom")),
@@ -161,12 +164,10 @@ describe("Reviewer.writeReviewStatus (wiring)", () => {
 
     await reviewer.writeReviewStatus(
       1, "o", "r", "sha1", 7,
-      { approval: "REQUEST_CHANGES", successDescription: "Review complete with comments" },
+      { approval: "COMMENT", successDescription: "Review complete with comments" },
       undefined, () => {},
     );
 
-    expect(setCommitStatus).toHaveBeenCalledWith(
-      1, "o", "r", "sha1", "failure", "Changes requested", REVIEW_STATUS_CONTEXT, undefined,
-    );
+    expect(setCommitStatus).not.toHaveBeenCalled();
   });
 });
