@@ -211,11 +211,11 @@ describe("webhook gate — review thread replies", () => {
 });
 
 describe("webhook gate — review thread resolution", () => {
-  /** Deps that record every refreshReviewCommitStatus call. */
+  /** Deps that record every syncReviewCommitStatus call. */
   function makeRefreshDeps() {
     const refreshed: Array<{ owner: string; repo: string; pr: number }> = [];
     const deps = makeDeps();
-    (deps.reviewer as any).refreshReviewCommitStatus = async (
+    (deps.reviewer as any).syncReviewCommitStatus = async (
       _i: number, owner: string, repo: string, pr: number,
     ) => {
       refreshed.push({ owner, repo, pr });
@@ -281,7 +281,7 @@ describe("webhook gate — review thread resolution", () => {
     // Fire-and-forget: a GitHub outage must not turn into a webhook 5xx and a
     // GitHub redelivery storm.
     const deps = makeDeps();
-    (deps.reviewer as any).refreshReviewCommitStatus = async () => {
+    (deps.reviewer as any).syncReviewCommitStatus = async () => {
       throw new Error("503");
     };
     const res = await dispatchWebhookEvent(deps, "pull_request_review_thread", resolvedPayload());

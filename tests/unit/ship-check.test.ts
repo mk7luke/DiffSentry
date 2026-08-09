@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { GitHubClient, isReviewFeedbackAddressed, type ReviewThreadSummary } from "../../src/github.js";
 import { assessShipSignals, renderShipCheck, resolveReviewStatus, type CommitStatusLike } from "../../src/ship-check.js";
-import { Reviewer } from "../../src/reviewer.js";
 
 const BOT = "diffsentry";
 
@@ -212,78 +211,9 @@ describe("GitHubClient.summarizeReviewThreads", () => {
   });
 });
 
-describe("Reviewer.refreshReviewCommitStatus", () => {
-  function reviewerWith(github: Record<string, unknown>) {
-    // Bypass the constructor: it builds real AI providers and a GitHub client,
-    // none of which this method touches.
-    const reviewer = Object.create(Reviewer.prototype) as Reviewer;
-    (reviewer as unknown as { github: unknown }).github = github;
-    return reviewer;
-  }
-
-  const base = () => ({
-    getHeadSha: vi.fn().mockResolvedValue("abc123"),
-    getCommitStatusState: vi.fn().mockResolvedValue("failure"),
-    summarizeReviewThreads: vi.fn().mockResolvedValue(ALL_ADDRESSED),
-    setCommitStatus: vi.fn().mockResolvedValue(undefined),
-  });
-
-  it("flips a stale failing status back to success", async () => {
-    const github = base();
-    const refreshed = await reviewerWith(github).refreshReviewCommitStatus(1, "o", "r", 7);
-
-    expect(refreshed).toBe(true);
-    expect(github.setCommitStatus).toHaveBeenCalledWith(
-      1, "o", "r", "abc123", "success", "All review threads resolved", "DiffSentry",
-    );
-  });
-
-  it("leaves the status alone while a DiffSentry thread is unresolved", async () => {
-    const github = base();
-    github.summarizeReviewThreads.mockResolvedValue(threads({ total: 1, unresolved: 1, botTotal: 1, botUnresolved: 1 }));
-
-    expect(await reviewerWith(github).refreshReviewCommitStatus(1, "o", "r", 7)).toBe(false);
-    expect(github.setCommitStatus).not.toHaveBeenCalled();
-  });
-
-  it("does nothing when the status is already green", async () => {
-    const github = base();
-    github.getCommitStatusState.mockResolvedValue("success");
-
-    expect(await reviewerWith(github).refreshReviewCommitStatus(1, "o", "r", 7)).toBe(false);
-    expect(github.summarizeReviewThreads).not.toHaveBeenCalled();
-    expect(github.setCommitStatus).not.toHaveBeenCalled();
-  });
-
-  it("does nothing when we never posted the status at all", async () => {
-    // How `reviews.commit_status: false` is honoured without loading config.
-    const github = base();
-    github.getCommitStatusState.mockResolvedValue(null);
-
-    expect(await reviewerWith(github).refreshReviewCommitStatus(1, "o", "r", 7)).toBe(false);
-    expect(github.setCommitStatus).not.toHaveBeenCalled();
-  });
-
-  it("reuses a caller-supplied head SHA and thread summary", async () => {
-    const github = base();
-    const refreshed = await reviewerWith(github).refreshReviewCommitStatus(1, "o", "r", 7, {
-      headSha: "deadbee",
-      threads: ALL_ADDRESSED,
-    });
-
-    expect(refreshed).toBe(true);
-    expect(github.getHeadSha).not.toHaveBeenCalled();
-    expect(github.summarizeReviewThreads).not.toHaveBeenCalled();
-    expect(github.getCommitStatusState).toHaveBeenCalledWith(1, "o", "r", "deadbee", "DiffSentry");
-  });
-
-  it("swallows GitHub failures rather than breaking the caller", async () => {
-    const github = base();
-    github.setCommitStatus.mockRejectedValue(new Error("403"));
-
-    await expect(reviewerWith(github).refreshReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(false);
-  });
-});
+// Reviewer.syncReviewCommitStatus (formerly refreshReviewCommitStatus) has its
+// own dedicated coverage in tests/unit/status-sync.test.ts, including the
+// bidirectional cases the old one-directional method couldn't reach.
 
 describe("resolveReviewStatus", () => {
   const clean = threads({ total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0 });

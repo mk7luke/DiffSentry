@@ -3,7 +3,7 @@ import { Config, AIProvider, DiffBudgetConfig, FileChange, PRContext, PriorRevie
 import { buildProvider, ProviderSpec } from "./ai/provider-factory.js";
 import { FailoverProvider } from "./ai/failover.js";
 import { isAiTimeoutError } from "./ai/timeout.js";
-import { GitHubClient, REVIEW_STATUS_CONTEXT, isReviewFeedbackAddressed, type ReviewThreadSummary } from "./github.js";
+import { GitHubClient, REVIEW_STATUS_CONTEXT, type ReviewThreadSummary } from "./github.js";
 import { assessShipSignals, renderShipCheck, resolveReviewStatus, type CommitStatusLike, type ThreadGate } from "./ship-check.js";
 import { loadRepoConfig, mergeWithDefaults, shouldReviewPR, isPathIncluded } from "./repo-config.js";
 import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary, injectSummaryIntoPRBody } from "./walkthrough.js";
@@ -450,7 +450,7 @@ export class Reviewer {
       );
       if (resolved > 0) {
         log.info({ resolved }, "Push auto-resolve: closed addressed threads");
-        await this.refreshReviewCommitStatus(installationId, owner, repo, pullNumber, { headSha: ctx.headSha });
+        await this.syncReviewCommitStatus(installationId, owner, repo, pullNumber, { headSha: ctx.headSha });
       }
     } catch (err) {
       log.warn({ err }, "Push auto-resolve failed");
@@ -459,27 +459,29 @@ export class Reviewer {
 
   // ─── Stale review-status refresh ─────────────────────────────
   /**
-   * Re-derive the `DiffSentry` commit status from live thread state.
+   * Bring the `DiffSentry` commit status in line with the PR's live review
+   * threads, in whichever direction that requires.
    *
-   * That status is written once per review pass, so a REQUEST_CHANGES verdict
-   * pins it to `failure` on the head SHA. Resolving the threads that review
-   * opened doesn't trigger another pass, so the red X outlives the feedback it
-   * represents — blocking merges and, worse, showing up as a blocker in `ship`
-   * on the very same run that reports zero unresolved threads. Once every
-   * DiffSentry-authored thread is resolved, flip the status back to green.
+   * The status is only ever written by a review pass, and resolving a thread
+   * doesn't trigger one — so without this the check drifts out of date the
+   * moment the threads move. It used to drift in one direction only: it could
+   * clear a failure it had written, but nothing could re-red a green check, so
+   * `ship` reported open blocking threads and a passing check in the same
+   * breath.
    *
-   * Deliberately gated on an existing failing status for this context: when a
-   * repo sets `reviews.commit_status: false` we never posted one, so there's
-   * nothing to find and this is a no-op — no config load needed.
+   * A `null` current state means we've never posted this context on this SHA —
+   * either no review pass has run, or the repo set `reviews.commit_status:
+   * false`. Both are a no-op, which is how the config is honoured here without
+   * a config read.
    *
-   * Best-effort; returns true only when a stale failure was actually cleared.
+   * Best-effort; returns true only when the status was actually changed.
    */
-  async refreshReviewCommitStatus(
+  async syncReviewCommitStatus(
     installationId: number,
     owner: string,
     repo: string,
     pullNumber: number,
-    opts: { headSha?: string; threads?: ReviewThreadSummary } = {},
+    opts: { headSha?: string; threads?: ReviewThreadSummary; gate?: ThreadGate } = {},
   ): Promise<boolean> {
     const log = logger.child({ owner, repo, pr: pullNumber });
     try {
@@ -487,24 +489,33 @@ export class Reviewer {
         opts.headSha ?? (await this.github.getHeadSha(installationId, owner, repo, pullNumber));
       if (!headSha) return false;
 
-      const state = await this.github.getCommitStatusState(
+      const current = await this.github.getCommitStatusState(
         installationId, owner, repo, headSha, REVIEW_STATUS_CONTEXT,
       );
-      if (state !== "failure" && state !== "error") return false;
+      if (current === null) return false;
 
       const threads =
         opts.threads ??
         (await this.github.summarizeReviewThreads(installationId, owner, repo, pullNumber));
-      if (!isReviewFeedbackAddressed(threads)) return false;
+
+      // No approval: this path has no verdict of its own, and re-deriving one
+      // from the last review would resurrect a REQUEST_CHANGES whose threads are
+      // now resolved — the exact staleness this is here to clear.
+      const target = resolveReviewStatus({
+        threads,
+        successDescription: "All review threads resolved",
+        gate: opts.gate,
+      });
+      if (target.state === current) return false;
 
       await this.github.setCommitStatus(
         installationId, owner, repo, headSha,
-        "success", "All review threads resolved", REVIEW_STATUS_CONTEXT,
+        target.state, target.description, REVIEW_STATUS_CONTEXT,
       );
-      log.info({ headSha, threads }, "Cleared stale failing review status — all threads resolved");
+      log.info({ headSha, threads, from: current, to: target.state }, "Synced review commit status");
       return true;
     } catch (err) {
-      log.warn({ err }, "Failed to refresh review commit status");
+      log.warn({ err }, "Failed to sync review commit status");
       return false;
     }
   }
@@ -596,7 +607,7 @@ export class Reviewer {
   /** Resolve all DiffSentry review threads on a PR (mirrors the `resolve` command). */
   async resolveThreads(installationId: number, owner: string, repo: string, pullNumber: number): Promise<void> {
     await this.github.resolveAllComments(installationId, owner, repo, pullNumber);
-    await this.refreshReviewCommitStatus(installationId, owner, repo, pullNumber);
+    await this.syncReviewCommitStatus(installationId, owner, repo, pullNumber);
   }
 
   /** Abort any in-flight review for a PR. Alias of handlePRClose semantics. */
@@ -2466,7 +2477,7 @@ Output ONLY valid JSON (no fences, no prose):
                     // That may have been the last open thread — if so the
                     // failing review status is now stale, so clear it here
                     // rather than making the author run `ship` to notice.
-                    await this.refreshReviewCommitStatus(installationId, owner, repo, pullNumber, {
+                    await this.syncReviewCommitStatus(installationId, owner, repo, pullNumber, {
                       headSha: context.headSha,
                     });
                   }
@@ -2556,7 +2567,7 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
           // merge button blocked by the same stale X we just discounted.
           let statusRefreshed = false;
           if (signals.staleFailing.length > 0) {
-            statusRefreshed = await this.refreshReviewCommitStatus(
+            statusRefreshed = await this.syncReviewCommitStatus(
               installationId, owner, repo, pullNumber, { headSha: context.headSha, threads },
             );
           }

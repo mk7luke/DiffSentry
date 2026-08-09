@@ -48,7 +48,7 @@ export interface WebhookReviewer {
     mode: "full" | "incremental",
   ): Promise<void>;
   autoResolveOnPush(installationId: number, owner: string, repo: string, pullNumber: number): Promise<void>;
-  refreshReviewCommitStatus(
+  syncReviewCommitStatus(
     installationId: number,
     owner: string,
     repo: string,
@@ -461,7 +461,7 @@ export async function dispatchWebhookEvent(
     // isn't failing, and setting a commit status raises no thread event, so
     // there's no loop to guard against.
     logger.info({ owner, repo, pr: pullNumber }, "Review thread resolved, refreshing review status");
-    reviewer.refreshReviewCommitStatus(installationId, owner, repo, pullNumber).catch((err) => {
+    reviewer.syncReviewCommitStatus(installationId, owner, repo, pullNumber).catch((err) => {
       logger.error({ err, owner, repo, pr: pullNumber }, "Review status refresh failed");
     });
     return { status: 202, body: { status: "accepted" } };
