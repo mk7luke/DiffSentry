@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { Reviewer } from "../../src/reviewer.js";
 import type { ReviewThreadSummary } from "../../src/github.js";
+import { assessShipSignals } from "../../src/ship-check.js";
 
 function threads(over: Partial<ReviewThreadSummary> = {}): ReviewThreadSummary {
   return { total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0, ...over };
@@ -129,6 +130,35 @@ describe("syncReviewCommitStatus", () => {
     });
     await expect(reviewer.syncReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(false);
     expect(setCommitStatus).not.toHaveBeenCalled();
+  });
+
+  // `ship` decides whether a failing DiffSentry check is stale via
+  // assessShipSignals, then asks the sync to actually clear it. If those two
+  // predicates ever disagree, `ship` reports the check as cleared while it stays
+  // red (or lists it as a blocker right after greening it) — the exact
+  // incoherence this whole change set out to remove. They live in two files with
+  // nothing else tying them together, so pin the invariant.
+  it("agrees with assessShipSignals about which failures are clearable", async () => {
+    const matrix = [
+      { botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0 }, // PR-level finding only
+      { botTotal: 2, botUnresolved: 0, botUnresolvedBlocking: 0 }, // all resolved
+      { botTotal: 2, botUnresolved: 1, botUnresolvedBlocking: 0 }, // nitpick open
+      { botTotal: 2, botUnresolved: 1, botUnresolvedBlocking: 1 }, // blocking open
+      { botTotal: 3, botUnresolved: 3, botUnresolvedBlocking: 2 }, // mixed
+    ];
+
+    for (const over of matrix) {
+      const t = threads({ total: over.botTotal, unresolved: over.botUnresolved, ...over });
+      const failing = { context: "DiffSentry", state: "failure" };
+
+      const shipSaysStale =
+        assessShipSignals({ reviewState: "COMMENTED", threads: t, statuses: [failing] }).staleFailing.length > 0;
+
+      const { reviewer } = reviewerWith({ currentState: "failure", threads: t });
+      const syncCleared = await reviewer.syncReviewCommitStatus(1, "o", "r", 7);
+
+      expect({ ...over, stale: shipSaysStale }).toEqual({ ...over, stale: syncCleared });
+    }
   });
 
   it("reuses a caller-supplied head SHA and thread summary", async () => {
