@@ -4,7 +4,7 @@ import { buildProvider, ProviderSpec } from "./ai/provider-factory.js";
 import { FailoverProvider } from "./ai/failover.js";
 import { isAiTimeoutError } from "./ai/timeout.js";
 import { GitHubClient, REVIEW_STATUS_CONTEXT, isReviewFeedbackAddressed, type ReviewThreadSummary } from "./github.js";
-import { assessShipSignals, renderShipCheck, type CommitStatusLike } from "./ship-check.js";
+import { assessShipSignals, renderShipCheck, resolveReviewStatus, type CommitStatusLike } from "./ship-check.js";
 import { loadRepoConfig, mergeWithDefaults, shouldReviewPR, isPathIncluded } from "./repo-config.js";
 import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary, injectSummaryIntoPRBody } from "./walkthrough.js";
 import { parseCommand, formatHelpMessage, formatConfigMessage, formatUnknownCommandMessage } from "./commands.js";
@@ -834,9 +834,24 @@ export class Reviewer {
         }
 
         if (repoConfig.reviews?.commit_status !== false) {
+          // A "Merge branch 'main' into …" commit produces an empty incremental
+          // diff, which is not the same thing as an addressed review. Writing an
+          // unconditional `success` here let a branch update erase a real
+          // failure, so the status is re-derived from the PR's live threads
+          // instead of assumed green.
+          const liveThreads = await this.github
+            .summarizeReviewThreads(installationId, owner, repo, pullNumber, signal)
+            .catch((): ReviewThreadSummary => ({
+              total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0,
+            }));
+          const status = resolveReviewStatus({
+            threads: liveThreads,
+            successDescription: "No reviewable files",
+            gate: repoConfig.reviews?.thread_gate,
+          });
           await this.github.setCommitStatus(
             installationId, owner, repo, context.headSha,
-            "success", "No reviewable files", "DiffSentry", signal
+            status.state, status.description, REVIEW_STATUS_CONTEXT, signal
           ).catch(() => {});
         }
         return;
@@ -1899,22 +1914,25 @@ export class Reviewer {
         log.warn({ err }, "Failed to update status comment");
       }
 
-      // Set final commit status
+      // Set final commit status. Read the threads *now*, after this pass has
+      // posted its own and after push auto-resolve has run, so the count
+      // reflects the PR's true end state rather than its state on entry.
       if (repoConfig.reviews?.commit_status !== false) {
-        const statusMap = {
-          APPROVE: "success" as const,
-          COMMENT: "success" as const,
-          REQUEST_CHANGES: "failure" as const,
-        };
+        const liveThreads = await this.github
+          .summarizeReviewThreads(installationId, owner, repo, pullNumber, signal)
+          .catch((): ReviewThreadSummary => ({
+            total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0,
+          }));
+        const status = resolveReviewStatus({
+          approval: reviewResult.approval,
+          threads: liveThreads,
+          successDescription:
+            reviewResult.approval === "APPROVE" ? "Looks good!" : "Review complete with comments",
+          gate: repoConfig.reviews?.thread_gate,
+        });
         await this.github.setCommitStatus(
           installationId, owner, repo, context.headSha,
-          statusMap[reviewResult.approval],
-          reviewResult.approval === "APPROVE"
-            ? "Looks good!"
-            : reviewResult.approval === "REQUEST_CHANGES"
-            ? "Changes requested"
-            : "Review complete with comments",
-          "DiffSentry", signal
+          status.state, status.description, REVIEW_STATUS_CONTEXT, signal
         ).catch((err) => log.warn({ err }, "Failed to set commit status"));
       }
 
