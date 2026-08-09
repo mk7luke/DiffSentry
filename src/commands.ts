@@ -288,7 +288,7 @@ short form is a convenience that other bots on this repo may also claim.
 | \`/timeline\` | Chronological event timeline for this PR |
 | \`/bench\` | Generate a micro-benchmark for the most performance-sensitive change |
 | \`/changelog\` | Keep-a-Changelog format entry for this PR |
-| \`/release-notes\` | Marketing-speak release notes for this PR |
+| \`/release-notes\` | User-facing release notes for this PR |
 | \`/diff <PR-number>\` | Compare this PR with another for file overlap |
 | \`/rewrite\` | AI-suggested replacement for the PR title + description |
 

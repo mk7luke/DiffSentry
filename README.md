@@ -207,7 +207,7 @@ Everything below documents DiffSentry in full. Jump to a section:
 | `@bot timeline` | Chronological event timeline for this PR |
 | `@bot bench` | Generate a micro-benchmark for the most performance-sensitive change |
 | `@bot changelog` | Keep-a-Changelog format entry for this PR |
-| `@bot release-notes` | Marketing-speak release notes for this PR |
+| `@bot release-notes` | User-facing release notes for this PR |
 | `@bot diff <PR-number>` | Compare this PR with another for file overlap |
 | `@bot rewrite` | AI-rewritten title + description, applied to the PR via API |
 | `@bot help` | List every command |
