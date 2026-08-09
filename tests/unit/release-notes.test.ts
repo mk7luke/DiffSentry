@@ -96,6 +96,18 @@ describe("sanitiseReleaseNotes", () => {
     expect(sanitiseReleaseNotes(input)).toBe(input);
   });
 
+  it("protects a language-tagged fence byte for byte", () => {
+    // An info string on the opener is the common case, so pin it explicitly:
+    // every class of character the sanitiser rewrites has to survive inside
+    // the block while the prose on both sides is still cleaned.
+    const fence = ['```yaml', 'reviews:', '  gate: "off"  # — em dash, “curly”, ✨ emoji', "```"].join("\n");
+    const out = sanitiseReleaseNotes(`Prose with — a dash.\n${fence}\nMore — prose.`);
+
+    expect(out).toContain(fence);
+    expect(out).toContain("Prose with, a dash.");
+    expect(out).toContain("More, prose.");
+  });
+
   it("protects a fence that is never closed", () => {
     // CommonMark runs an unterminated fence to the end of the document, so the
     // em dash below is code, not prose.
