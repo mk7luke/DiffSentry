@@ -31,7 +31,7 @@ export async function findPriorBotThreadsForPaths(opts: {
   const scan = opts.scanLastN ?? 25;
   const pathSet = new Set(opts.paths);
 
-  let prs: Awaited<ReturnType<typeof opts.octokit.pulls.list>>["data"] = [];
+  let prs: Awaited<ReturnType<typeof opts.octokit.pulls.list>>["data"];
   try {
     const res = await opts.octokit.pulls.list({
       owner: opts.owner,
@@ -51,7 +51,7 @@ export async function findPriorBotThreadsForPaths(opts: {
     if (pr.number === opts.currentPrNumber) continue;
     if (!pr.merged_at) continue; // only merged PRs are useful as memory
 
-    let comments: Awaited<ReturnType<typeof opts.octokit.pulls.listReviewComments>>["data"] = [];
+    let comments: Awaited<ReturnType<typeof opts.octokit.pulls.listReviewComments>>["data"];
     try {
       const r = await opts.octokit.pulls.listReviewComments({
         owner: opts.owner,

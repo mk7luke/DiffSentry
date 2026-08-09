@@ -225,7 +225,7 @@ function parseVerdicts(raw: string, count: number): Verdict[] | null {
     cleaned = fenced[1].trim();
   }
 
-  let parsed: unknown = null;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(cleaned);
   } catch {

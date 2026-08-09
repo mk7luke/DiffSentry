@@ -239,7 +239,7 @@ export async function autofix(
   logger.info({ pr: context.pullNumber }, "Auto-fixing review comments for PR");
 
   // Fetch unresolved review comments
-  let comments: { path: string; body: string; line: number | null }[] = [];
+  let comments: { path: string; body: string; line: number | null }[];
   try {
     const { data } = await octokit.pulls.listReviewComments({
       owner: context.owner,

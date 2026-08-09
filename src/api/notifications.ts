@@ -196,7 +196,7 @@ function validateCondition(raw: unknown): { condition: Record<string, unknown> }
 
 /** Shape a channel row for the API (config redacted; enabled as boolean). */
 function publicChannel(row: NotificationChannelRow): Record<string, unknown> {
-  let config: Record<string, unknown> = {};
+  let config: Record<string, unknown>;
   try {
     config = row.config_json ? (JSON.parse(row.config_json) as Record<string, unknown>) : {};
   } catch {
@@ -214,7 +214,7 @@ function publicChannel(row: NotificationChannelRow): Record<string, unknown> {
 }
 
 function publicRule(row: AlertRuleRow): Record<string, unknown> {
-  let condition: Record<string, unknown> = {};
+  let condition: Record<string, unknown>;
   try {
     condition = row.condition_json ? (JSON.parse(row.condition_json) as Record<string, unknown>) : {};
   } catch {
@@ -327,7 +327,7 @@ export function registerNotificationRoutes(router: Router, deps: NotificationDep
     if (body.config !== undefined) {
       // Parse the stored config so the validator can carry an unchanged SMTP
       // password forward when the caller edits other fields (email channels).
-      let existingConfig: Record<string, unknown> = {};
+      let existingConfig: Record<string, unknown>;
       try {
         existingConfig = existing.config_json ? (JSON.parse(existing.config_json) as Record<string, unknown>) : {};
       } catch {

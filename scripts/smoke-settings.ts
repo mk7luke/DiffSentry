@@ -115,7 +115,7 @@ async function main() {
           res.on("data", (c) => chunks.push(c));
           res.on("end", () => {
             const text = Buffer.concat(chunks).toString("utf8");
-            let json: unknown = null;
+            let json: unknown;
             try {
               json = text ? JSON.parse(text) : null;
             } catch {

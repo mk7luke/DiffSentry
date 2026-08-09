@@ -213,11 +213,11 @@ export function createServer(config: Config): CreatedServer {
 
     // Parse defensively: a rejected (bad-signature) delivery may still be JSON,
     // and we record it anyway so the deliveries view surfaces rejected hits too.
-    let payload: any = null;
+    let payload: any;
     // What we persist: the parsed payload on success, or the raw UTF-8 body
     // wrapped on parse failure — so a malformed delivery is still inspectable
     // rather than stored as a bare `null`.
-    let payloadForStorage: unknown = null;
+    let payloadForStorage: unknown;
     try {
       payload = JSON.parse(body.toString());
       payloadForStorage = payload;

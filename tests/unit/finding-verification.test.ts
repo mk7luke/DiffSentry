@@ -51,7 +51,7 @@ function diffOfExactLength(chars: number): string {
   let n = 0;
   for (;;) {
     const line = `\n+L${++n} ${"a".repeat(40)}`;
-    if (len + line.length > chars) { n--; break; }
+    if (len + line.length > chars) { break; }
     parts.push(line);
     len += line.length;
   }

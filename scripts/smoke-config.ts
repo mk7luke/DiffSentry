@@ -246,7 +246,7 @@ async function main() {
           res.on("end", () => {
             finish(() => {
               const text = Buffer.concat(chunks).toString("utf8");
-              let json: any = null;
+              let json: any;
               try {
                 json = text ? JSON.parse(text) : null;
               } catch {

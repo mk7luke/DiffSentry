@@ -78,7 +78,7 @@ async function main() {
     const chunks: Buffer[] = [];
     req.on("data", (c) => chunks.push(c));
     req.on("end", () => {
-      let body: any = null;
+      let body: any;
       try {
         body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
       } catch {
@@ -132,7 +132,7 @@ async function main() {
         res.on("data", (c) => chunks.push(c));
         res.on("end", () => {
           const text = Buffer.concat(chunks).toString("utf8");
-          let json: any = null;
+          let json: any;
           try {
             json = text ? JSON.parse(text) : null;
           } catch {
