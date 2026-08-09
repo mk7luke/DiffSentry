@@ -15,6 +15,17 @@ function reviewerWith(opts: { currentState: string | null; threads: ReviewThread
     getCommitStatusState: vi.fn().mockResolvedValue(opts.currentState),
     summarizeReviewThreads: vi.fn().mockResolvedValue(opts.threads),
     setCommitStatus,
+    // Every call that omits `gate` loads it from repo config, so the default
+    // fixture has to serve that path — otherwise the missing method throws,
+    // gets swallowed into the documented default, and the suite passes for the
+    // wrong reason: a regression that stopped loading the gate would be
+    // invisible to all but the one dedicated config test. Empty config ⇒ no
+    // `thread_gate` key ⇒ `undefined` ⇒ the default gate, via the real path.
+    getInstallationOctokit: vi.fn().mockResolvedValue({
+      repos: {
+        getContent: vi.fn().mockResolvedValue({ data: { type: "file", content: "" } }),
+      },
+    }),
   };
   const reviewer = Object.create(Reviewer.prototype) as Reviewer;
   (reviewer as any).github = github;
