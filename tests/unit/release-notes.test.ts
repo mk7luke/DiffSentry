@@ -137,6 +137,35 @@ describe("sanitiseReleaseNotes", () => {
     expect(sanitiseReleaseNotes(input)).toBe(input);
   });
 
+  it("drops a title the model wrote for itself", () => {
+    // The reply wrapper supplies "# Release Notes", so one from the model
+    // renders as a second identical heading.
+    const out = sanitiseReleaseNotes("# Release Notes\n\n### Improvements\n\n- Something changed.");
+
+    expect(out).toBe("### Improvements\n\n- Something changed.");
+    expect(out).not.toContain("Release Notes");
+  });
+
+  it("drops a self-title in its other shapes", () => {
+    for (const title of ["# Release Notes", "## Release Notes", "# 📣 Release Notes", "#  release notes  "]) {
+      const out = sanitiseReleaseNotes(`${title}\n\n### Bug fixes\n\n- Fixed a thing.`);
+      expect(out, title).toBe("### Bug fixes\n\n- Fixed a thing.");
+    }
+  });
+
+  it("keeps a leading heading that carries real content", () => {
+    // Only a duplicate title is dropped. Anything else is the model's content.
+    const input = "# Upgrade notes\n\n### Breaking changes\n\n- Set `gate: off`.";
+
+    expect(sanitiseReleaseNotes(input)).toBe(input);
+  });
+
+  it("keeps a Release Notes heading that is not the first thing", () => {
+    const input = "### Improvements\n\n- Something changed.\n\n## Release Notes archive";
+
+    expect(sanitiseReleaseNotes(input)).toBe(input);
+  });
+
   it("leaves already-clean notes untouched apart from trimming", () => {
     const clean = [
       "### Bug fixes",

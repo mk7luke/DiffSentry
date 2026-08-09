@@ -20,6 +20,8 @@ export const RELEASE_NOTES_PROMPT = `Write release notes for this PR, in the voi
 
 Audience: the people who use this software. They are not marketers and they are not on your team, so they know the product but not the codebase. Write the way curl, ripgrep, Django and the GitHub changelog write: plain, specific, and concrete about what changed.
 
+Do not write a title. The comment you are filling in already has a "Release Notes" heading above your text, so start directly with the first section heading below. A title of your own would render as a second one.
+
 Format:
 
 ### New features
@@ -139,11 +141,31 @@ function sanitiseProse(text: string): string {
 }
 
 /**
+ * A "Release Notes" title the model wrote for itself, at the very top.
+ *
+ * The reply wrapper already supplies the heading, so one from the model renders
+ * as a second identical title. The prompt asks it not to; this is the half that
+ * does not depend on the model complying.
+ *
+ * Matched narrowly on purpose. Only a leading `#` or `##` whose text is some
+ * form of "release notes" is dropped, so a heading carrying real content is
+ * never mistaken for a duplicate title.
+ *
+ * `[^\n\w]*` absorbs an emoji or stray punctuation between the hashes and the
+ * words. This runs before EMOJI does, so "# 📣 Release Notes" has to match here
+ * with the emoji still attached.
+ */
+const SELF_TITLE = /^\s*#{1,2}[^\n\w]*release\s+notes[^\n\w]*(?:\n|$)/i;
+
+/**
  * Strips the banned characters from model-written release notes, leaving code
  * spans untouched: a fenced block may legitimately contain any of them, and
  * rewriting a quote inside a snippet turns working code into broken code.
  */
-export function sanitiseReleaseNotes(raw: string): string {
+export function sanitiseReleaseNotes(input: string): string {
+  // Before segmenting: a leading title cannot be inside a fence, because a doc
+  // that opens with a fence starts with backticks rather than a heading.
+  const raw = input.replace(SELF_TITLE, "");
   let out = "";
   let cursor = 0;
 
