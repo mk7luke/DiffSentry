@@ -415,6 +415,8 @@ DiffSentry is an AI PR-review bot. Its per-repo config supports:
     profile: chill | assertive
     request_changes_workflow: bool
     high_level_summary: bool
+    commit_status: bool                    # write the `DiffSentry` check at all
+    thread_gate: blocking | off            # default blocking; see below
     walkthrough: { enabled, collapse, changed_files_summary,
                    sequence_diagrams, estimate_effort,
                    suggested_labels, suggested_reviewers, poem }
@@ -449,6 +451,18 @@ DiffSentry is an AI PR-review bot. Its per-repo config supports:
       max_escalation: int                  # cap on net escalation per finding
   chat:   { auto_reply: bool }
   issues: { auto_summary: { enabled, on_edit }, chat: { auto_reply } }
+
+Thread gate notes:
+  - `thread_gate: blocking` (the default) fails the `DiffSentry` check while any
+    `critical` or `major` review thread is unresolved, and clears it once they
+    are resolved. `minor` and `trivial` findings never block.
+  - The check is a live view of the PR's open blocking findings, not a record of
+    the last review's verdict: a branch-update merge commit no longer turns it
+    green, and `@diffsentry ship` can move it in either direction.
+  - Review threads posted before this feature shipped carry no severity marker
+    and count as blocking, so they gate until resolved.
+  - `thread_gate: off` restores verdict-only behaviour. `commit_status: false`
+    remains a hard off-switch for all status writes and takes precedence.
 
 Anti-pattern regex notes:
   - Tested against ADDED lines only, multiline=false.
