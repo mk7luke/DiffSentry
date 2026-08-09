@@ -4,7 +4,7 @@ import { buildProvider, ProviderSpec } from "./ai/provider-factory.js";
 import { FailoverProvider } from "./ai/failover.js";
 import { isAiTimeoutError } from "./ai/timeout.js";
 import { GitHubClient, REVIEW_STATUS_CONTEXT, isReviewFeedbackAddressed, type ReviewThreadSummary } from "./github.js";
-import { assessShipSignals, renderShipCheck, resolveReviewStatus, type CommitStatusLike } from "./ship-check.js";
+import { assessShipSignals, renderShipCheck, resolveReviewStatus, type CommitStatusLike, type ThreadGate } from "./ship-check.js";
 import { loadRepoConfig, mergeWithDefaults, shouldReviewPR, isPathIncluded } from "./repo-config.js";
 import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary, injectSummaryIntoPRBody } from "./walkthrough.js";
 import { parseCommand, formatHelpMessage, formatConfigMessage, formatUnknownCommandMessage } from "./commands.js";
@@ -509,6 +509,53 @@ export class Reviewer {
     }
   }
 
+  /**
+   * Shared plumbing for the two places a review pass writes the
+   * `DiffSentry` commit status (the empty-diff early-return and the final
+   * verdict): fetch live threads, run them through `resolveReviewStatus`,
+   * and write the result. Extracted so the two sites can't drift back apart
+   * — the empty-diff path hard-coding `success` is exactly the bug this
+   * whole change fixes, and duplicated logic is duplicated risk of that
+   * regression coming back in only one of the two spots.
+   *
+   * The thread fetch degrades to an all-zero summary on failure so a
+   * thread-fetch error never reds a PR on a guess. `onStatusError` lets each
+   * call site keep its own `setCommitStatus` failure handling — the
+   * empty-diff site swallows silently, the final-verdict site logs — an
+   * asymmetry that predates this extraction and isn't this method's call to
+   * change.
+   */
+  private async writeReviewStatus(
+    installationId: number,
+    owner: string,
+    repo: string,
+    headSha: string,
+    pullNumber: number,
+    opts: {
+      approval?: "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
+      successDescription: string;
+      gate?: ThreadGate;
+    },
+    signal: AbortSignal | undefined,
+    onStatusError: (err: unknown) => void,
+  ): Promise<void> {
+    const liveThreads = await this.github
+      .summarizeReviewThreads(installationId, owner, repo, pullNumber, signal)
+      .catch((): ReviewThreadSummary => ({
+        total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0,
+      }));
+    const status = resolveReviewStatus({
+      approval: opts.approval,
+      threads: liveThreads,
+      successDescription: opts.successDescription,
+      gate: opts.gate,
+    });
+    await this.github.setCommitStatus(
+      installationId, owner, repo, headSha,
+      status.state, status.description, REVIEW_STATUS_CONTEXT, signal
+    ).catch(onStatusError);
+  }
+
   // ─── Abort on PR Close ───────────────────────────────────────
   handlePRClose(owner: string, repo: string, pullNumber: number): void {
     const key = prKey(owner, repo, pullNumber);
@@ -839,20 +886,12 @@ export class Reviewer {
           // unconditional `success` here let a branch update erase a real
           // failure, so the status is re-derived from the PR's live threads
           // instead of assumed green.
-          const liveThreads = await this.github
-            .summarizeReviewThreads(installationId, owner, repo, pullNumber, signal)
-            .catch((): ReviewThreadSummary => ({
-              total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0,
-            }));
-          const status = resolveReviewStatus({
-            threads: liveThreads,
-            successDescription: "No reviewable files",
-            gate: repoConfig.reviews?.thread_gate,
-          });
-          await this.github.setCommitStatus(
-            installationId, owner, repo, context.headSha,
-            status.state, status.description, REVIEW_STATUS_CONTEXT, signal
-          ).catch(() => {});
+          await this.writeReviewStatus(
+            installationId, owner, repo, context.headSha, pullNumber,
+            { successDescription: "No reviewable files", gate: repoConfig.reviews?.thread_gate },
+            signal,
+            () => {},
+          );
         }
         return;
       }
@@ -1915,25 +1954,23 @@ export class Reviewer {
       }
 
       // Set final commit status. Read the threads *now*, after this pass has
-      // posted its own and after push auto-resolve has run, so the count
-      // reflects the PR's true end state rather than its state on entry.
+      // posted its own — that ordering is guaranteed. `autoResolveOnPush` is
+      // dispatched fire-and-forget and runs concurrently rather than joined,
+      // so it usually — but not certainly — has also landed by this point;
+      // when it hasn't, it calls its own status sync and self-heals, so a
+      // narrow miss here doesn't leave the status stuck wrong.
       if (repoConfig.reviews?.commit_status !== false) {
-        const liveThreads = await this.github
-          .summarizeReviewThreads(installationId, owner, repo, pullNumber, signal)
-          .catch((): ReviewThreadSummary => ({
-            total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0,
-          }));
-        const status = resolveReviewStatus({
-          approval: reviewResult.approval,
-          threads: liveThreads,
-          successDescription:
-            reviewResult.approval === "APPROVE" ? "Looks good!" : "Review complete with comments",
-          gate: repoConfig.reviews?.thread_gate,
-        });
-        await this.github.setCommitStatus(
-          installationId, owner, repo, context.headSha,
-          status.state, status.description, REVIEW_STATUS_CONTEXT, signal
-        ).catch((err) => log.warn({ err }, "Failed to set commit status"));
+        await this.writeReviewStatus(
+          installationId, owner, repo, context.headSha, pullNumber,
+          {
+            approval: reviewResult.approval,
+            successDescription:
+              reviewResult.approval === "APPROVE" ? "Looks good!" : "Review complete with comments",
+            gate: repoConfig.reviews?.thread_gate,
+          },
+          signal,
+          (err) => log.warn({ err }, "Failed to set commit status"),
+        );
       }
 
       // Track review count for auto-pause
