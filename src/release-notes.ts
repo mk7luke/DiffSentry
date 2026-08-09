@@ -140,22 +140,34 @@ function sanitiseProse(text: string): string {
   );
 }
 
+/** A heading of any level at the very top of the text, plus its own line. */
+const LEADING_HEADING = /^\s*(#{1,6})([^\n]*)(?:\n|$)/;
+
 /**
- * A "Release Notes" title the model wrote for itself, at the very top.
+ * Drops a "Release Notes" title the model wrote for itself.
  *
  * The reply wrapper already supplies the heading, so one from the model renders
  * as a second identical title. The prompt asks it not to; this is the half that
  * does not depend on the model complying.
  *
- * Matched narrowly on purpose. Only a leading `#` or `##` whose text is some
- * form of "release notes" is dropped, so a heading carrying real content is
- * never mistaken for a duplicate title.
+ * Comparison is on the heading text reduced to letters and digits, rather than
+ * a regex over the decoration. Emoji, bold markers, a trailing colon, odd
+ * spacing and separators like "Release-Notes" all collapse to the same string,
+ * so one rule covers them instead of a pattern that grows an alternative every
+ * time the model finds a new way to write it. This runs before EMOJI, so the
+ * emoji in "# 📣 Release Notes" is still attached at this point.
  *
- * `[^\n\w]*` absorbs an emoji or stray punctuation between the hashes and the
- * words. This runs before EMOJI does, so "# 📣 Release Notes" has to match here
- * with the emoji still attached.
+ * Still narrow in what it removes: only an exact "releasenotes" match goes.
+ * "# Upgrade notes" and "# Release notes for v2.0" both carry content beyond
+ * the bare title and are kept.
  */
-const SELF_TITLE = /^\s*#{1,2}[^\n\w]*release\s+notes[^\n\w]*(?:\n|$)/i;
+function dropSelfTitle(text: string): string {
+  const heading = LEADING_HEADING.exec(text);
+  if (!heading) return text;
+
+  const words = heading[2].replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return words === "releasenotes" ? text.slice(heading[0].length) : text;
+}
 
 /**
  * Strips the banned characters from model-written release notes, leaving code
@@ -165,7 +177,7 @@ const SELF_TITLE = /^\s*#{1,2}[^\n\w]*release\s+notes[^\n\w]*(?:\n|$)/i;
 export function sanitiseReleaseNotes(input: string): string {
   // Before segmenting: a leading title cannot be inside a fence, because a doc
   // that opens with a fence starts with backticks rather than a heading.
-  const raw = input.replace(SELF_TITLE, "");
+  const raw = dropSelfTitle(input);
   let out = "";
   let cursor = 0;
 

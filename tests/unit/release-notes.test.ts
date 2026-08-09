@@ -146,10 +146,44 @@ describe("sanitiseReleaseNotes", () => {
     expect(out).not.toContain("Release Notes");
   });
 
-  it("drops a self-title in its other shapes", () => {
-    for (const title of ["# Release Notes", "## Release Notes", "# 📣 Release Notes", "#  release notes  "]) {
+  it("drops a self-title however the model decorates it", () => {
+    // Comparison is on letters and digits only, so each of these collapses to
+    // the same "releasenotes" and none of them needs its own rule.
+    const titles = [
+      "# Release Notes",
+      "## Release Notes",
+      "### Release Notes",
+      "#Release Notes",
+      "#   Release   Notes   ",
+      "# release notes",
+      "# Release Notes:",
+      "# **Release Notes**",
+      "# 📣 Release Notes",
+      "# 📣Release Notes",
+      "#📣 Release Notes",
+      "# ✨ 📣 Release Notes",
+      "# 🛠️ Release Notes",
+      "# 👩‍💻 Release Notes",
+      "# Release Notes 🚀",
+      "# 📣 **Release Notes** 🚀",
+      // Separators that are not whitespace. These survived the first version,
+      // which required `release\s+notes`.
+      "# Release-Notes",
+      "# Release_Notes",
+      "# Release — Notes",
+    ];
+
+    for (const title of titles) {
       const out = sanitiseReleaseNotes(`${title}\n\n### Bug fixes\n\n- Fixed a thing.`);
       expect(out, title).toBe("### Bug fixes\n\n- Fixed a thing.");
+    }
+  });
+
+  it("keeps a leading heading that only looks like the title", () => {
+    // Anything beyond the bare words is content, so it stays.
+    for (const title of ["# Upgrade notes", "# Release notes for v2.0", "# Notes", "# Release"]) {
+      const input = `${title}\n\n### Bug fixes\n\n- Fixed a thing.`;
+      expect(sanitiseReleaseNotes(input), title).toBe(input);
     }
   });
 
