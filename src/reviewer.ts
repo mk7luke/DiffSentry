@@ -500,7 +500,13 @@ export class Reviewer {
     try {
       const octokit = await this.github.getInstallationOctokit(installationId);
       const cfg = mergeWithDefaults(await loadRepoConfig(octokit, owner, repo, "HEAD"));
-      return cfg.reviews?.thread_gate;
+      // Normalised here, not returned raw: this is the other point config
+      // enters (ship normalises its own copy). loadRepoConfig does no schema
+      // validation, and the downstream reads default with opposite polarity —
+      // `resolveReviewStatus` asks `=== "blocking"` — so a typo like `blockign`
+      // arriving raw would silently disable the gate on the webhook path, the
+      // most frequent trigger of all.
+      return cfg.reviews?.thread_gate === "off" ? "off" : "blocking";
     } catch (err) {
       // Silent fallback would make a mis-set gate indistinguishable from an
       // unreachable config, so leave a trace even though the fallback is safe.

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { Reviewer } from "../../src/reviewer.js";
 import type { ReviewThreadSummary } from "../../src/github.js";
-import { assessShipSignals } from "../../src/ship-check.js";
+import { assessShipSignals, renderShipCheck } from "../../src/ship-check.js";
 
 function threads(over: Partial<ReviewThreadSummary> = {}): ReviewThreadSummary {
   return { total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0, ...over };
@@ -172,8 +172,51 @@ describe("syncReviewCommitStatus", () => {
         const syncCleared = await reviewer.syncReviewCommitStatus(1, "o", "r", 7, { gate });
 
         expect({ gate, ...over, stale: shipSaysStale }).toEqual({ gate, ...over, stale: syncCleared });
+
+        // The other direction: from green, the sync must red exactly when ship
+        // would call the threads blocking. Covering only the clearing direction
+        // would let the two drift apart on reding and nothing would notice.
+        const shipSaysBlocked =
+          renderShipCheck({
+            botName: "diffsentry", reviewState: "COMMENTED", threads: t,
+            signals: assessShipSignals({ reviewState: "COMMENTED", threads: t, statuses: [], gate }),
+            statusRefreshed: false, gate,
+          }).includes("unresolved blocking finding");
+
+        const { reviewer: r2, setCommitStatus: wrote } = reviewerWith({ currentState: "success", threads: t });
+        await r2.syncReviewCommitStatus(1, "o", "r", 7, { gate });
+        const syncRedded = wrote.mock.calls.some((c: unknown[]) => c[4] === "failure");
+
+        expect({ gate, ...over, blocked: shipSaysBlocked }).toEqual({ gate, ...over, blocked: syncRedded });
       }
     }
+  });
+
+  it("normalises an invalid thread_gate value to the default gate", async () => {
+    // loadRepoConfig does no schema validation, and resolveReviewStatus asks
+    // `=== "blocking"` while triage/render ask `=== "off"`. A raw `blockign`
+    // would disable the gate here while leaving it on everywhere else — so the
+    // sync path has to normalise, not just `ship`.
+    const { reviewer, setCommitStatus } = reviewerWith({
+      currentState: "success",
+      threads: threads({ botTotal: 1, botUnresolved: 1, botUnresolvedBlocking: 1 }),
+    });
+    (reviewer as any).github.getInstallationOctokit = vi.fn().mockResolvedValue({
+      repos: {
+        getContent: vi.fn().mockResolvedValue({
+          data: {
+            type: "file",
+            content: Buffer.from("reviews:\n  thread_gate: blockign\n", "utf-8").toString("base64"),
+          },
+        }),
+      },
+    });
+
+    // Garbage must not read as "off" — the blocking thread still reds the check.
+    await expect(reviewer.syncReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(true);
+    expect(setCommitStatus).toHaveBeenCalledWith(
+      1, "o", "r", "abc123", "failure", "1 unresolved blocking finding", "DiffSentry",
+    );
   });
 
   it("treats an existing error state like a failure", async () => {
