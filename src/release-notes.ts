@@ -82,8 +82,29 @@ const KEEP_PICTOGRAPHS = new Set(["©", "®", "™"]);
 const EMOJI =
   /\p{Extended_Pictographic}|[\u{1F3FB}-\u{1F3FF}\u{1F1E6}-\u{1F1FF}]|\u{FE0F}|\u{20E3}|\u{200D}/gu;
 
-/** Fenced blocks first, then inline spans, so a fence is never split mid-way. */
-const CODE_SEGMENT = /```[\s\S]*?```|`[^`\n]*`/g;
+/**
+ * Everything the renderer will show as code, so sanitising can skip it.
+ *
+ * Fences come first so an inline span never claims part of one. The three
+ * alternatives, in order:
+ *
+ * 1. A closed fence. The closer must sit at the start of a line and carry no
+ *    info string, matching CommonMark. Accepting ``` ```yaml ``` as a closer
+ *    would let a stray opener pair with the *next* block's opener.
+ * 2. An unclosed fence, which CommonMark runs to the end of the document.
+ *    Without this an unterminated block gets no protection at all.
+ * 3. An inline span. It may wrap across a line, which is legal, but a blank
+ *    line ends the paragraph and so cannot appear inside one. That guard is
+ *    what stops a single stray backtick from swallowing the rest of the notes.
+ */
+const CODE_SEGMENT = new RegExp(
+  [
+    "^ {0,3}```[^\\n]*\\n[\\s\\S]*?^ {0,3}```[ \\t]*$",
+    "^ {0,3}```[\\s\\S]*$",
+    "`(?:[^`\\n]|\\n(?![ \\t]*\\n))*`",
+  ].join("|"),
+  "gm",
+);
 
 /**
  * Applies the mechanical half of the house style to one run of prose.

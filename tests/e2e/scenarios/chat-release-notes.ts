@@ -2,7 +2,7 @@ import type { Scenario } from "../types.js";
 
 export const scenario: Scenario = {
   name: "chat-release-notes",
-  description: "@diffsentry release-notes should reply with a Release Notes section.",
+  description: "@diffsentry release-notes should reply with a `# Release Notes` heading.",
   prTitle: "Faster login: parallel session fetch",
   prBody: "Logs the user in faster by parallelising the session fetch.",
   files: [

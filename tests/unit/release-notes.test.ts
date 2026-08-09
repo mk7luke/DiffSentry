@@ -87,6 +87,44 @@ describe("sanitiseReleaseNotes", () => {
     expect(out).toContain("Then re-run, the check clears.");
   });
 
+  it("protects an inline span that wraps across a line", () => {
+    // Legal CommonMark: a code span may contain a newline. The first version of
+    // CODE_SEGMENT required the span to close on its own line, so this was
+    // treated as prose and the quotes and spacing inside it were rewritten.
+    const input = 'Run `printf “hi”\n  --flag` to test';
+
+    expect(sanitiseReleaseNotes(input)).toBe(input);
+  });
+
+  it("protects a fence that is never closed", () => {
+    // CommonMark runs an unterminated fence to the end of the document, so the
+    // em dash below is code, not prose.
+    const input = ["```yaml", "reviews:", "  gate: off # — stays", ""].join("\n");
+
+    expect(sanitiseReleaseNotes(input)).toContain("  gate: off # — stays");
+  });
+
+  it("does not let a stray backtick swallow the rest of the notes", () => {
+    // A blank line ends the paragraph, so it cannot sit inside a code span.
+    // Without that guard the lone backtick pairs with the one two paragraphs
+    // down and everything between escapes sanitisation.
+    const out = sanitiseReleaseNotes(
+      ["A stray ` backtick", "", "Then — a dash", "", "And `code` here"].join("\n"),
+    );
+
+    expect(out).toContain("Then, a dash");
+    expect(out).toContain("`code`");
+  });
+
+  it("does not let a stray fence opener pair with the next block's opener", () => {
+    // "```yaml" carries an info string, so CommonMark will not accept it as a
+    // closer. The stray opener therefore runs on, and the dash between them is
+    // code as far as the renderer is concerned.
+    const input = ["Run ``` odd", "prose with — a dash", "```yaml", 'k: "v"', "```"].join("\n");
+
+    expect(sanitiseReleaseNotes(input)).toBe(input);
+  });
+
   it("leaves already-clean notes untouched apart from trimming", () => {
     const clean = [
       "### Bug fixes",
