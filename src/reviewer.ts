@@ -2634,7 +2634,14 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
           // sync clears the check, so triage that still called blocking threads
           // real would print a failing check in the comment that just greened
           // it. Passing it explicitly also spares the sync its own config load.
-          const gate = repoConfig.reviews?.thread_gate ?? "blocking";
+          // Normalised at the one point the config value enters, because the
+          // downstream reads default with opposite polarity — resolveReviewStatus
+          // asks `=== "blocking"`, triage and render ask `=== "off"`. For the two
+          // legal values those are complements, but loadRepoConfig does no schema
+          // validation (it yaml.loads and casts), so a typo like `blockign` would
+          // read as off to one and on to the others, printing a failing check in
+          // the comment that just greened it.
+          const gate: ThreadGate = repoConfig.reviews?.thread_gate === "off" ? "off" : "blocking";
           const signals = assessShipSignals({ reviewState, threads, statuses, gate });
 
           // Push the corrected verdict back to GitHub so the PR's check list

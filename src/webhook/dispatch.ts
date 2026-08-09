@@ -463,9 +463,9 @@ export async function dispatchWebhookEvent(
     }
 
     // Fires for DiffSentry's own resolutions too, which the in-process paths
-    // already handle. Harmless: the refresh short-circuits on a status that
-    // isn't failing, and setting a commit status raises no thread event, so
-    // there's no loop to guard against.
+    // already handle. Harmless: the sync short-circuits when the status it would
+    // write already matches the one on the SHA, and setting a commit status
+    // raises no thread event, so there's no loop to guard against.
     logger.info({ owner, repo, pr: pullNumber, action: payload.action }, "Review thread resolution changed, syncing review status");
     reviewer.syncReviewCommitStatus(installationId, owner, repo, pullNumber).catch((err) => {
       logger.error({ err, owner, repo, pr: pullNumber }, "Review status sync failed");

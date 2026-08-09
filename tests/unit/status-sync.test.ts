@@ -165,6 +165,20 @@ describe("syncReviewCommitStatus", () => {
     }
   });
 
+  it("treats an existing error state like a failure", async () => {
+    // getCommitStatusState returns whatever GitHub has, and `error` is a legal
+    // state DiffSentry itself never writes but a re-run or an external tool can
+    // leave behind. It must not read as "already matching" and strand the check.
+    const { reviewer, setCommitStatus } = reviewerWith({
+      currentState: "error",
+      threads: threads({ botTotal: 2, botUnresolved: 0, botUnresolvedBlocking: 0 }),
+    });
+    await expect(reviewer.syncReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(true);
+    expect(setCommitStatus).toHaveBeenCalledWith(
+      1, "o", "r", "abc123", "success", "All review threads resolved", "DiffSentry",
+    );
+  });
+
   it("honours reviews.thread_gate from repo config when the caller supplies none", async () => {
     // The webhook can't pass a gate — its interface has no opts parameter — so
     // the sync must load it. Without this, `thread_gate: off` is silently
