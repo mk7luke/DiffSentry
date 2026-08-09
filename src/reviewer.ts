@@ -2629,7 +2629,13 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
           const reviewState = latestBotReview?.state ?? "PENDING";
 
           const statuses = (statusResp?.data?.statuses ?? []) as CommitStatusLike[];
-          const signals = assessShipSignals({ reviewState, threads, statuses });
+          // Resolved to a concrete value once, then handed to all three of the
+          // triage, the render, and the sync. They must agree: under `off` the
+          // sync clears the check, so triage that still called blocking threads
+          // real would print a failing check in the comment that just greened
+          // it. Passing it explicitly also spares the sync its own config load.
+          const gate = repoConfig.reviews?.thread_gate ?? "blocking";
+          const signals = assessShipSignals({ reviewState, threads, statuses, gate });
 
           // Push the corrected verdict back to GitHub so the PR's check list
           // matches this comment — reporting a disagreement here while leaving
@@ -2639,7 +2645,7 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
           // status already matches.
           const statusRefreshed = await this.syncReviewCommitStatus(
             installationId, owner, repo, pullNumber,
-            { headSha: context.headSha, threads, gate: repoConfig.reviews?.thread_gate },
+            { headSha: context.headSha, threads, gate },
           );
 
           const extraBlockers: string[] = [];
@@ -2678,6 +2684,7 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
               signals,
               statusRefreshed,
               extraBlockers,
+              gate,
             }),
           );
           break;

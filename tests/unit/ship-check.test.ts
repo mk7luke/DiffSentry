@@ -335,6 +335,24 @@ describe("renderShipCheck — blocking threads", () => {
     expect(body).toContain("2 unresolved review threads");
   });
 
+  it("does not file blocking findings as blockers when the gate is off", () => {
+    // With thread_gate: off the sync clears the check, so calling these blockers
+    // would contradict the very check this comment reports on. They stay visible
+    // as warnings.
+    const t = threads({ total: 3, unresolved: 3, botTotal: 3, botUnresolved: 3, botUnresolvedBlocking: 2 });
+    const body = renderShipCheck({
+      ...base,
+      threads: t,
+      signals: assessShipSignals({ reviewState: "COMMENTED", threads: t, statuses: [], gate: "off" }),
+      gate: "off",
+    });
+
+    expect(body).not.toContain("## Blockers");
+    expect(body).not.toContain("unresolved blocking finding");
+    expect(body).toContain("🟡 **Probably safe to ship**");
+    expect(body).toContain("3 unresolved review threads.");
+  });
+
   it("shows the blocking breakdown in the status table", () => {
     const t = threads({ total: 3, unresolved: 3, botTotal: 3, botUnresolved: 3, botUnresolvedBlocking: 2 });
     const body = renderShipCheck({

@@ -147,18 +147,46 @@ describe("syncReviewCommitStatus", () => {
       { botTotal: 3, botUnresolved: 3, botUnresolvedBlocking: 2 }, // mixed
     ];
 
-    for (const over of matrix) {
-      const t = threads({ total: over.botTotal, unresolved: over.botUnresolved, ...over });
-      const failing = { context: "DiffSentry", state: "failure" };
+    // Both gates, because they diverge differently: under `off` the sync ignores
+    // blocking threads and clears, so triage must too.
+    for (const gate of ["blocking", "off"] as const) {
+      for (const over of matrix) {
+        const t = threads({ total: over.botTotal, unresolved: over.botUnresolved, ...over });
+        const failing = { context: "DiffSentry", state: "failure" };
 
-      const shipSaysStale =
-        assessShipSignals({ reviewState: "COMMENTED", threads: t, statuses: [failing] }).staleFailing.length > 0;
+        const shipSaysStale =
+          assessShipSignals({ reviewState: "COMMENTED", threads: t, statuses: [failing], gate }).staleFailing.length > 0;
 
-      const { reviewer } = reviewerWith({ currentState: "failure", threads: t });
-      const syncCleared = await reviewer.syncReviewCommitStatus(1, "o", "r", 7);
+        const { reviewer } = reviewerWith({ currentState: "failure", threads: t });
+        const syncCleared = await reviewer.syncReviewCommitStatus(1, "o", "r", 7, { gate });
 
-      expect({ ...over, stale: shipSaysStale }).toEqual({ ...over, stale: syncCleared });
+        expect({ gate, ...over, stale: shipSaysStale }).toEqual({ gate, ...over, stale: syncCleared });
+      }
     }
+  });
+
+  it("honours reviews.thread_gate from repo config when the caller supplies none", async () => {
+    // The webhook can't pass a gate — its interface has no opts parameter — so
+    // the sync must load it. Without this, `thread_gate: off` is silently
+    // ignored on the most frequent trigger.
+    const { reviewer, setCommitStatus } = reviewerWith({
+      currentState: "success",
+      threads: threads({ botTotal: 2, botUnresolved: 2, botUnresolvedBlocking: 2 }),
+    });
+    (reviewer as any).github.getInstallationOctokit = vi.fn().mockResolvedValue({
+      repos: {
+        getContent: vi.fn().mockResolvedValue({
+          data: {
+            type: "file",
+            content: Buffer.from("reviews:\n  thread_gate: off\n", "utf-8").toString("base64"),
+          },
+        }),
+      },
+    });
+
+    // Gate off ⇒ blocking threads don't count ⇒ green stays green.
+    await expect(reviewer.syncReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(false);
+    expect(setCommitStatus).not.toHaveBeenCalled();
   });
 
   it("reuses a caller-supplied head SHA and thread summary", async () => {

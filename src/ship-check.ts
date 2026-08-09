@@ -37,6 +37,8 @@ export function assessShipSignals(input: {
   reviewState: string;
   threads: ReviewThreadSummary;
   statuses: CommitStatusLike[];
+  /** The repo's `reviews.thread_gate`. Must match what the sync will use. */
+  gate?: ThreadGate;
 }): ShipSignals {
   const reviewFeedbackAddressed = isReviewFeedbackAddressed(input.threads);
   // A failing status is stale exactly when `syncReviewCommitStatus` would clear
@@ -47,7 +49,12 @@ export function assessShipSignals(input: {
   //
   // Deliberately not `reviewFeedbackAddressed` — that also requires every
   // nitpick to be resolved, and nitpicks never block.
-  const nothingBlocking = input.threads.botUnresolvedBlocking === 0;
+  //
+  // The gate has to be read here too: with `thread_gate: off` the sync ignores
+  // blocking threads entirely and will clear the status, so `ship` must agree or
+  // it reports a failing check in the same comment that just greened it.
+  const nothingBlocking =
+    (input.gate ?? "blocking") === "off" || input.threads.botUnresolvedBlocking === 0;
   const isStale = (s: CommitStatusLike) =>
     nothingBlocking && input.threads.botTotal > 0 && s.context === REVIEW_STATUS_CONTEXT;
   const allFailing = input.statuses.filter((s) => s.state === "failure" || s.state === "error");
@@ -71,6 +78,8 @@ export function renderShipCheck(input: {
   statusRefreshed: boolean;
   /** Blockers computed outside the signal triage, e.g. the CODEOWNERS gate. */
   extraBlockers?: string[];
+  /** The repo's `reviews.thread_gate`. Must match what `assessShipSignals` saw. */
+  gate?: ThreadGate;
 }): string {
   const { botName, reviewState, threads, signals, statusRefreshed } = input;
   const { failingChecks, staleFailing, pendingChecks, staleReviewState } = signals;
@@ -86,7 +95,12 @@ export function renderShipCheck(input: {
   // Blocking findings gate the merge; nitpicks are worth naming but not worth
   // blocking on. Splitting them is what keeps the verdict honest — three open
   // criticals used to render the same amber as three open nitpicks.
-  const blockingThreads = threads.botUnresolvedBlocking;
+  //
+  // Under `thread_gate: off` nothing here blocks: the commit status ignores
+  // threads, so calling them blockers would contradict the check this same
+  // comment reports on. They stay visible as warnings.
+  const gateOn = (input.gate ?? "blocking") !== "off";
+  const blockingThreads = gateOn ? threads.botUnresolvedBlocking : 0;
   if (blockingThreads > 0) {
     blockers.push(`${blockingThreads} unresolved blocking finding${blockingThreads === 1 ? "" : "s"}.`);
   }
