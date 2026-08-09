@@ -299,8 +299,17 @@ describe("resolveReviewStatus", () => {
 
   it("pluralises the blocking description", () => {
     const many = threads({ botTotal: 3, botUnresolved: 3, botUnresolvedBlocking: 3 });
-    expect(resolveReviewStatus({ threads: many, successDescription: "ok" }).description)
-      .toBe("3 unresolved blocking findings");
+    const r = resolveReviewStatus({ threads: many, successDescription: "ok" });
+    expect(r.state).toBe("failure");
+    expect(r.description).toBe("3 unresolved blocking findings");
+  });
+
+  it("ranks an unresolved blocking thread above the REQUEST_CHANGES verdict", () => {
+    // Both rules fire at once. Only correct precedence produces the blocking
+    // description — swap the two `if` blocks and this is the test that catches it.
+    const r = resolveReviewStatus({ approval: "REQUEST_CHANGES", threads: oneBlocking, successDescription: "ok" });
+    expect(r.state).toBe("failure");
+    expect(r.description).toBe("1 unresolved blocking finding");
   });
 
   it("stays green when only nitpicks are open", () => {
@@ -332,6 +341,14 @@ describe("resolveReviewStatus", () => {
   it("still honours REQUEST_CHANGES when the gate is off", () => {
     const r = resolveReviewStatus({ approval: "REQUEST_CHANGES", threads: clean, successDescription: "ok", gate: "off" });
     expect(r.state).toBe("failure");
+  });
+
+  it("suppresses the blocking rule but not REQUEST_CHANGES when the gate is off and threads are open", () => {
+    // gate: "off" must silence only the blocking-threads rule — the verdict
+    // rule underneath it still has to fire, with its own description.
+    const r = resolveReviewStatus({ approval: "REQUEST_CHANGES", threads: oneBlocking, successDescription: "ok", gate: "off" });
+    expect(r.state).toBe("failure");
+    expect(r.description).toBe("Changes requested");
   });
 
   it("defaults to the blocking gate when none is given", () => {
