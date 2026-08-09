@@ -146,3 +146,37 @@ export function renderShipCheck(input: {
 
   return lines.join("\n") + `\n\n<sub>Re-run with \`@${botName} ship\` after addressing.</sub>`;
 }
+
+/** How unresolved DiffSentry threads affect the `DiffSentry` commit status. */
+export type ThreadGate = "blocking" | "off";
+
+/**
+ * The single decision point for the `DiffSentry` commit status.
+ *
+ * Before this existed the rule was spread across three call sites that each got
+ * it slightly differently — most visibly the empty-diff path, which hard-coded
+ * `success` and so let a "Merge branch 'main'…" commit erase a real failure.
+ *
+ * Unresolved *blocking* findings outrank the review verdict: a `COMMENTED`
+ * review that opened a `critical` thread is a failure until that thread is
+ * resolved. Nitpicks never gate — see `isBlockingSeverity`.
+ */
+export function resolveReviewStatus(input: {
+  approval?: "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
+  threads: ReviewThreadSummary;
+  /** Description used when nothing blocks, e.g. "No reviewable files". */
+  successDescription: string;
+  gate?: ThreadGate;
+}): { state: "success" | "failure"; description: string } {
+  const blocking = input.threads.botUnresolvedBlocking;
+  if ((input.gate ?? "blocking") === "blocking" && blocking > 0) {
+    return {
+      state: "failure",
+      description: `${blocking} unresolved blocking finding${blocking === 1 ? "" : "s"}`,
+    };
+  }
+  if (input.approval === "REQUEST_CHANGES") {
+    return { state: "failure", description: "Changes requested" };
+  }
+  return { state: "success", description: input.successDescription };
+}

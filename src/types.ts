@@ -101,6 +101,12 @@ export interface ReviewsConfig {
   auto_apply_labels?: boolean;
   auto_assign_reviewers?: boolean;
   commit_status?: boolean;
+  /**
+   * Whether unresolved blocking DiffSentry findings gate the `DiffSentry`
+   * commit status. "blocking" (default) fails the check while a critical or
+   * major thread is open; "off" restores verdict-only behaviour.
+   */
+  thread_gate?: "blocking" | "off";
   abort_on_close?: boolean;
   path_filters?: string[];
   path_instructions?: PathInstruction[];

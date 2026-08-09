@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { GitHubClient, isReviewFeedbackAddressed, type ReviewThreadSummary } from "../../src/github.js";
-import { assessShipSignals, renderShipCheck, type CommitStatusLike } from "../../src/ship-check.js";
+import { assessShipSignals, renderShipCheck, resolveReviewStatus, type CommitStatusLike } from "../../src/ship-check.js";
 import { Reviewer } from "../../src/reviewer.js";
 
 const BOT = "diffsentry";
@@ -282,5 +282,59 @@ describe("Reviewer.refreshReviewCommitStatus", () => {
     github.setCommitStatus.mockRejectedValue(new Error("403"));
 
     await expect(reviewerWith(github).refreshReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(false);
+  });
+});
+
+describe("resolveReviewStatus", () => {
+  const clean = threads({ total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0 });
+  const oneBlocking = threads({ total: 1, unresolved: 1, botTotal: 1, botUnresolved: 1, botUnresolvedBlocking: 1 });
+  const onlyNits = threads({ total: 3, unresolved: 3, botTotal: 3, botUnresolved: 3, botUnresolvedBlocking: 0 });
+
+  it("fails on an unresolved blocking thread even when the review only commented", () => {
+    // The reported bug: COMMENTED + open threads used to be green.
+    const r = resolveReviewStatus({ approval: "COMMENT", threads: oneBlocking, successDescription: "ok" });
+    expect(r.state).toBe("failure");
+    expect(r.description).toBe("1 unresolved blocking finding");
+  });
+
+  it("pluralises the blocking description", () => {
+    const many = threads({ botTotal: 3, botUnresolved: 3, botUnresolvedBlocking: 3 });
+    expect(resolveReviewStatus({ threads: many, successDescription: "ok" }).description)
+      .toBe("3 unresolved blocking findings");
+  });
+
+  it("stays green when only nitpicks are open", () => {
+    const r = resolveReviewStatus({ approval: "COMMENT", threads: onlyNits, successDescription: "Review complete with comments" });
+    expect(r.state).toBe("success");
+    expect(r.description).toBe("Review complete with comments");
+  });
+
+  it("still fails on REQUEST_CHANGES with no open threads", () => {
+    const r = resolveReviewStatus({ approval: "REQUEST_CHANGES", threads: clean, successDescription: "ok" });
+    expect(r.state).toBe("failure");
+    expect(r.description).toBe("Changes requested");
+  });
+
+  it("uses the caller's success description when nothing blocks", () => {
+    const r = resolveReviewStatus({ threads: clean, successDescription: "No reviewable files" });
+    expect(r).toEqual({ state: "success", description: "No reviewable files" });
+  });
+
+  it("works with no approval at all (the empty-diff path has no verdict)", () => {
+    expect(resolveReviewStatus({ threads: oneBlocking, successDescription: "No reviewable files" }).state).toBe("failure");
+  });
+
+  it("ignores threads entirely when the gate is off", () => {
+    const r = resolveReviewStatus({ approval: "COMMENT", threads: oneBlocking, successDescription: "ok", gate: "off" });
+    expect(r).toEqual({ state: "success", description: "ok" });
+  });
+
+  it("still honours REQUEST_CHANGES when the gate is off", () => {
+    const r = resolveReviewStatus({ approval: "REQUEST_CHANGES", threads: clean, successDescription: "ok", gate: "off" });
+    expect(r.state).toBe("failure");
+  });
+
+  it("defaults to the blocking gate when none is given", () => {
+    expect(resolveReviewStatus({ threads: oneBlocking, successDescription: "ok" }).state).toBe("failure");
   });
 });
