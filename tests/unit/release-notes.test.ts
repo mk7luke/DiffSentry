@@ -223,10 +223,32 @@ describe("sanitiseReleaseNotes", () => {
   });
 
   it("keeps a leading heading that only looks like the title", () => {
-    // Anything beyond the bare words is content, so it stays.
-    for (const title of ["# Upgrade notes", "# Release notes for v2.0", "# Notes", "# Release"]) {
+    // Anything beyond the bare words is content, so it stays. A version or a
+    // qualifier survives normalisation as a letter or digit, which is what
+    // stops it collapsing to a bare "releasenotes".
+    const titles = [
+      "# Upgrade notes",
+      "# Release notes for v2.0",
+      "# Notes",
+      "# Release",
+      "# Release Notes v2",
+      "# Release Notes v2.0",
+      "# Release Notes 2",
+      "# Release Notes (beta)",
+    ];
+
+    for (const title of titles) {
       const input = `${title}\n\n### Bug fixes\n\n- Fixed a thing.`;
       expect(sanitiseReleaseNotes(input), title).toBe(input);
+    }
+  });
+
+  it("drops a bare title whatever punctuation trails it", () => {
+    // Reducing to letters and digits means the rule does not depend on
+    // enumerating decoration, so a character nobody thought of still matches.
+    for (const title of ["# Release Notes!", "# Release Notes…", "# Release/Notes", "# Release Notes ~"]) {
+      const out = sanitiseReleaseNotes(`${title}\n\n### Bug fixes\n\n- Fixed a thing.`);
+      expect(out, title).toBe("### Bug fixes\n\n- Fixed a thing.");
     }
   });
 
