@@ -2476,7 +2476,15 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
             loadCodeowners(octokit, owner, repo, context.headSha).catch(() => []),
             this.github
               .summarizeReviewThreads(installationId, owner, repo, pullNumber)
-              .catch((): ReviewThreadSummary => ({ total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0 })),
+              .catch(
+                (): ReviewThreadSummary => ({
+                  total: 0,
+                  unresolved: 0,
+                  botTotal: 0,
+                  botUnresolved: 0,
+                  botUnresolvedBlocking: 0,
+                })
+              ),
           ]);
 
           // Latest bot review state

@@ -3,6 +3,7 @@ import { Octokit } from "@octokit/rest";
 import { Config, FileChange, PRContext, ReviewComment, ReviewResult, IssueContext, IssueComment } from "./types.js";
 import { logger } from "./logger.js";
 import { isFileLevelFinding, REVIEW_BODY_MARKER } from "./review-body.js";
+import { parseThreadSeverity, isBlockingSeverity } from "./thread-severity.js";
 
 type Logger = typeof logger;
 
@@ -19,6 +20,12 @@ export interface ReviewThreadSummary {
   /** Threads opened by DiffSentry. */
   botTotal: number;
   botUnresolved: number;
+  /**
+   * Unresolved DiffSentry threads whose finding is severe enough to gate the
+   * commit status — `critical`, `major`, or (fail-safe) unreadable severity.
+   * Always `<= botUnresolved`.
+   */
+  botUnresolvedBlocking: number;
 }
 
 /**
@@ -320,6 +327,24 @@ function isOurBotThread(thread: any, botLogin: string): boolean {
   // Exact match against our app login first; fall back to suffix so older
   // deployments under a different bot name can still self-resolve their threads.
   return login === botLogin || login.endsWith("[bot]");
+}
+
+/**
+ * Unresolved bot threads that gate the commit status.
+ *
+ * Exported for testing: the rule (which severities block, and that an
+ * unreadable one blocks) is the whole point of the gate and deserves coverage
+ * without standing up a GitHub client.
+ */
+export function countBlockingThreads(threads: any[], botLogin: string): number {
+  let n = 0;
+  for (const t of threads) {
+    if (t.isResolved) continue;
+    if (!isOurBotThread(t, botLogin)) continue;
+    const body = t.comments?.nodes?.[0]?.body ?? "";
+    if (isBlockingSeverity(parseThreadSeverity(body))) n++;
+  }
+  return n;
 }
 
 export class GitHubClient {
@@ -1305,7 +1330,9 @@ export class GitHubClient {
     const botLogin = `${this.config.botName}[bot]`.toLowerCase();
     const threads = await this.fetchAllReviewThreads(octokit, owner, repo, pullNumber);
 
-    const summary: ReviewThreadSummary = { total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0 };
+    const summary: ReviewThreadSummary = {
+      total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0,
+    };
     for (const thread of threads) {
       const ours = isOurBotThread(thread, botLogin);
       summary.total++;
@@ -1315,6 +1342,7 @@ export class GitHubClient {
         if (ours) summary.botUnresolved++;
       }
     }
+    summary.botUnresolvedBlocking = countBlockingThreads(threads, botLogin);
     return summary;
   }
 
@@ -1429,7 +1457,7 @@ export class GitHubClient {
   ): Promise<any[]> {
     const commentsBlock = includeAllComments
       ? `comments(first: 100) { nodes { databaseId body author { login __typename } } }`
-      : `comments(first: 1) { nodes { author { login __typename } } }`;
+      : `comments(first: 1) { nodes { body author { login __typename } } }`;
     const query = `
       query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
         repository(owner: $owner, name: $repo) {

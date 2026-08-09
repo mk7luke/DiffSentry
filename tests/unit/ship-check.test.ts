@@ -6,7 +6,7 @@ import { Reviewer } from "../../src/reviewer.js";
 const BOT = "diffsentry";
 
 function threads(over: Partial<ReviewThreadSummary> = {}): ReviewThreadSummary {
-  return { total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, ...over };
+  return { total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0, ...over };
 }
 
 /** The reported bug: DiffSentry opened threads, they all got resolved, and the
@@ -189,7 +189,7 @@ describe("GitHubClient.summarizeReviewThreads", () => {
         node({ resolved: false, author: "diffsentry[bot]" }),
         node({ resolved: false, author: "luke", type: "User" }),
       ]),
-    ).toEqual({ total: 3, unresolved: 2, botTotal: 2, botUnresolved: 1 });
+    ).toEqual({ total: 3, unresolved: 2, botTotal: 2, botUnresolved: 1, botUnresolvedBlocking: 1 });
   });
 
   it("reports zero bot threads on a PR DiffSentry never commented on", async () => {
@@ -198,6 +198,7 @@ describe("GitHubClient.summarizeReviewThreads", () => {
       unresolved: 1,
       botTotal: 0,
       botUnresolved: 0,
+      botUnresolvedBlocking: 0,
     });
   });
 
@@ -206,7 +207,7 @@ describe("GitHubClient.summarizeReviewThreads", () => {
       node({ resolved: true, author: "diffsentry[bot]" }),
       node({ resolved: true, author: "diffsentry[bot]" }),
     ]);
-    expect(summary).toEqual({ total: 2, unresolved: 0, botTotal: 2, botUnresolved: 0 });
+    expect(summary).toEqual({ total: 2, unresolved: 0, botTotal: 2, botUnresolved: 0, botUnresolvedBlocking: 0 });
     expect(isReviewFeedbackAddressed(summary)).toBe(true);
   });
 });
