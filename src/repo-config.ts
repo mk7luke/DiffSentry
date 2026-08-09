@@ -44,6 +44,9 @@ const DEFAULT_CONFIG: RepoConfig = {
       auto_reply: true,
     },
   },
+  release_notes: {
+    auto: false,
+  },
 };
 
 export async function loadRepoConfig(
@@ -123,6 +126,10 @@ export function mergeWithDefaults(config: RepoConfig): RepoConfig {
         ...DEFAULT_CONFIG.issues!.chat,
         ...config.issues?.chat,
       },
+    },
+    release_notes: {
+      ...DEFAULT_CONFIG.release_notes,
+      ...config.release_notes,
     },
   };
 }

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Release notes can now post themselves. Set `release_notes.auto: true` in
+  `.diffsentry.yaml` and DiffSentry drafts the same notes `@diffsentry
+  release-notes` produces, once every check on the PR's head commit has passed,
+  with no comment needed. Check runs and legacy commit statuses both count;
+  DiffSentry's own `DiffSentry` and `DiffSentry / Pre-Merge` checks do not, so
+  open findings do not hold the notes back. One comment per PR, rewritten in
+  place when a later push goes green. Off by default.
+  - **Action required for existing installs:** the App must be subscribed to
+    the **Check suite** and **Status** webhook events and hold the
+    **Checks: Read** permission. Events an App is not subscribed to are never
+    delivered, so without this the feature is silent.
+
 ### Fixed
 
 - The `DiffSentry` check no longer flips to passing when a branch-update merge

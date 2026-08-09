@@ -31,6 +31,13 @@ import { loadCodeowners, ownersForFiles } from "./codeowners.js";
 import { findPriorBotThreadsForPaths, renderPriorDiscussionsBlock, diffWithOtherPR, renderDiffPRReply } from "./cross-pr.js";
 import { renderStickyStatus, STICKY_MARKER } from "./sticky-status.js";
 import { RELEASE_NOTES_PROMPT, sanitiseReleaseNotes } from "./release-notes.js";
+import { assessChecks } from "./checks-state.js";
+import {
+  AUTO_RELEASE_NOTES_MARKER,
+  describesHead,
+  isAutoReleaseNotesEnabled,
+  renderAutoReleaseNotes,
+} from "./auto-release-notes.js";
 import { recordRepo, recordPR, recordReview, recordFindings, recordPatternHits, recordIssue, recordIssueAction, getSuppressedFingerprints, listCustomRulesForRepo, deleteReviewJob, getWalkthroughState, saveWalkthroughState } from "./storage/dao.js";
 import { runSafetyScanners } from "./safety-scanner.js";
 import { runPatternChecks } from "./pattern-checks.js";
@@ -304,6 +311,13 @@ const ISSUE_TIPS_MARKER = "<!-- DiffSentry Issue Tips -->";
 function prKey(owner: string, repo: string, pullNumber: number): string {
   return `${owner}/${repo}#${pullNumber}`;
 }
+
+/**
+ * PRs currently having automatic release notes drafted, keyed by PR and head
+ * SHA. See `maybePostAutoReleaseNotes` for why an in-memory set is the right
+ * half of the idempotency guard and what the other half is.
+ */
+const autoReleaseNotesInFlight = new Set<string>();
 
 function issueKey(owner: string, repo: string, issueNumber: number): string {
   return `issue:${owner}/${repo}#${issueNumber}`;
@@ -584,6 +598,130 @@ export class Reviewer {
     } catch (err) {
       log.warn({ err }, "Failed to sync review commit status");
       return false;
+    }
+  }
+
+  // ─── Automatic release notes on a green PR ───────────────────────────
+  /**
+   * Entry point for the `check_suite` and `status` webhooks.
+   *
+   * The events name a commit, not a pull request: `status` carries no PR
+   * reference at all, and a `check_suite` one is empty for forks. So the commit
+   * is resolved to the open, non-draft PRs it heads, and each is considered
+   * separately. Usually that is one PR and often none: a push to a branch with
+   * no PR open still runs CI, and there is nothing to write notes on.
+   */
+  async handleChecksCompleted(
+    installationId: number,
+    owner: string,
+    repo: string,
+    headSha: string,
+  ): Promise<void> {
+    const pullNumbers = await this.github.findOpenPRsForHeadSha(installationId, owner, repo, headSha);
+    if (pullNumbers.length === 0) {
+      logger.debug({ owner, repo, sha: headSha }, "No open PR heads this commit, skipping release notes");
+      return;
+    }
+    for (const pullNumber of pullNumbers) {
+      await runWithCostContext(
+        { owner, repo, number: pullNumber, kind: "chat" },
+        () => this.maybePostAutoReleaseNotes(installationId, owner, repo, pullNumber, headSha),
+      );
+    }
+  }
+
+  /**
+   * Draft and post release notes for a PR whose checks have all gone green,
+   * unless something says not to.
+   *
+   * The gates are ordered by cost, cheapest first, because most deliveries fail
+   * one of them and the last two steps are a full file fetch and a model call.
+   *
+   * Idempotency is the real work here, and it takes two guards because the two
+   * failure modes are different shapes. Several suites finishing seconds apart
+   * each satisfy "everything is green" independently, and the model call
+   * between the decision and the post is long enough that a second delivery
+   * lands inside it. So the in-memory set is claimed synchronously, before the
+   * first await, and covers overlapping deliveries. It does not survive a
+   * restart or a redelivery an hour later, which is what the head marker on the
+   * comment is for: it is read back from GitHub, so it holds across process
+   * lifetimes and across replicas.
+   *
+   * What neither guard covers is two replicas passing the comment check in the
+   * same instant, which would post twice. That is accepted rather than solved:
+   * closing it means a lock in a database this app is designed to run without
+   * (`DB_PATH` empty is a supported configuration), to prevent a duplicate
+   * comment in a window measured in milliseconds.
+   *
+   * A later push rewrites the same comment rather than adding one. A new head
+   * is genuinely a new set of notes, but a long-lived branch can take twenty
+   * pushes, and twenty stacked release-note comments is spam. One comment,
+   * always current, is the version of this that stays welcome.
+   */
+  private async maybePostAutoReleaseNotes(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    headSha: string,
+  ): Promise<void> {
+    const log = logger.child({ owner, repo, pr: pullNumber, sha: headSha });
+    const key = `${prKey(owner, repo, pullNumber)}@${headSha}`;
+
+    if (autoReleaseNotesInFlight.has(key)) {
+      log.debug("Automatic release notes already in flight for this commit");
+      return;
+    }
+    autoReleaseNotesInFlight.add(key);
+
+    try {
+      const octokit = await this.github.getInstallationOctokit(installationId);
+
+      // Config comes from the default branch, as everywhere else in the app.
+      // Worth knowing when testing this: adding `release_notes.auto` in the PR
+      // being tested does not switch it on for that PR. It takes effect once
+      // merged.
+      const repoConfig = mergeWithDefaults(await loadRepoConfig(octokit, owner, repo, "HEAD"));
+      if (!isAutoReleaseNotesEnabled(repoConfig)) {
+        log.debug("Automatic release notes not enabled for this repo");
+        return;
+      }
+
+      const existing = await this.github.findCommentByMarker(
+        installationId, owner, repo, pullNumber, AUTO_RELEASE_NOTES_MARKER,
+      );
+      if (describesHead(existing?.body, headSha)) {
+        log.debug("Release notes for this commit are already posted");
+        return;
+      }
+
+      const signals = await this.github.getCheckSignals(installationId, owner, repo, headSha);
+      const verdict = assessChecks(signals);
+      if (verdict.state !== "passed") {
+        log.debug({ verdict }, "Checks are not all green, holding release notes");
+        return;
+      }
+
+      const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
+      // A push during the checks means those green checks describe a commit
+      // that is no longer the PR. Its own suites will report in a moment.
+      if (context.headSha !== headSha) {
+        log.info({ currentHead: context.headSha }, "PR moved on since the checks passed, skipping");
+        return;
+      }
+
+      log.info({ checks: verdict.counted }, "All checks passed, drafting release notes");
+      const response = await this.ai.chat(context, RELEASE_NOTES_PROMPT, repoConfig);
+      await this.github.upsertComment(
+        installationId, owner, repo, pullNumber,
+        renderAutoReleaseNotes({ notes: response, headSha, botName: this.config.botName }),
+        AUTO_RELEASE_NOTES_MARKER,
+      );
+      log.info("Posted automatic release notes");
+    } catch (err) {
+      log.warn({ err }, "Failed to post automatic release notes");
+    } finally {
+      autoReleaseNotesInFlight.delete(key);
     }
   }
 

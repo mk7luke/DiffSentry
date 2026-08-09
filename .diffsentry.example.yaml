@@ -177,3 +177,21 @@ issues:
     on_edit: false  # Re-run summary when the issue body is edited (off by default — noisy)
   chat:
     auto_reply: true  # Respond to @mentions on issues with grounded answers
+
+# Automatic release notes. Off by default. With `auto: true`, DiffSentry drafts
+# the same notes `@bot release-notes` produces and posts them on its own, once
+# every check on the PR's head commit has passed.
+#
+# "Every check" means the repo's own CI: check runs and legacy commit statuses
+# are both counted, and DiffSentry's own `DiffSentry` and `DiffSentry / Pre-Merge`
+# checks are excluded. Notes are about what the PR does, not whether it is
+# approved, so open findings do not hold them back. A PR with no CI at all
+# never triggers: there is nothing to have passed.
+#
+# One comment per PR, rewritten in place when a later push goes green, so a
+# long-lived branch does not collect a stack of them.
+#
+# Needs the App subscribed to the Check suite and Status webhook events, and
+# holding the Checks: Read permission. See the README setup section.
+release_notes:
+  auto: false

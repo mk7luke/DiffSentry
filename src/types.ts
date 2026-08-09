@@ -70,6 +70,21 @@ export interface RepoConfig {
   reviews?: ReviewsConfig;
   chat?: ChatConfig;
   issues?: IssuesConfig;
+  release_notes?: ReleaseNotesConfig;
+}
+
+// ─── Release notes ─────────────────────────────────────────────
+export interface ReleaseNotesConfig {
+  /**
+   * Default false. Post release notes automatically once every check on the
+   * PR's head commit has passed, with no `@bot release-notes` needed.
+   *
+   * Opt-in rather than on, because it spends model budget on every PR that
+   * goes green and leaves a comment nobody asked for. Read through
+   * `isAutoReleaseNotesEnabled`, which normalises it: nothing validates this
+   * value at runtime, so it arrives as whatever was typed in the YAML.
+   */
+  auto?: boolean;
 }
 
 // ─── Issues config (mirrors PR `reviews`/`chat` shape) ────────

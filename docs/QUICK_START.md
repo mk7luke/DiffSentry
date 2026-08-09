@@ -19,9 +19,10 @@ account with admin access to one repo.
   or `ngrok http 3005`) and use the public URL it prints, with `/webhook` appended.
 - **Webhook secret** — generate one and keep it: `openssl rand -hex 20`.
 - **Repository permissions:** Pull requests **Read & write**, Contents
-  **Read & write**, Issues **Read & write**, Commit statuses **Read & write**.
+  **Read & write**, Issues **Read & write**, Commit statuses **Read & write**,
+  Checks **Read**.
 - **Subscribe to events:** Pull request, Issues, Issue comment, Pull request
-  review comment, Pull request review thread.
+  review comment, Pull request review thread, Check suite, Status.
 
 Click **Create**. Then on the App page:
 

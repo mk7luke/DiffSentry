@@ -5,6 +5,7 @@ import { runReviewJob } from "../realtime/jobs.js";
 import { isPauseAll, isAutoReviewEnabled } from "../settings/overrides.js";
 import { addressesBot, SlashOptions } from "../slash-commands.js";
 import { resolvesToSlashCommand } from "../commands.js";
+import { isDiffSentryCheck } from "../checks-state.js";
 
 /**
  * Whether an automatic (webhook-triggered) review should be queued for a repo,
@@ -72,6 +73,12 @@ export interface WebhookReviewer {
     issueOrPRNumber: number,
     commentBody: string,
     commentId: number,
+  ): Promise<void>;
+  handleChecksCompleted(
+    installationId: number,
+    owner: string,
+    repo: string,
+    headSha: string,
   ): Promise<void>;
   getInstallationOctokit(installationId: number): Promise<import("@octokit/rest").Octokit>;
 }
@@ -469,6 +476,49 @@ export async function dispatchWebhookEvent(
     logger.info({ owner, repo, pr: pullNumber, action: payload.action }, "Review thread resolution changed, syncing review status");
     reviewer.syncReviewCommitStatus(installationId, owner, repo, pullNumber).catch((err) => {
       logger.error({ err, owner, repo, pr: pullNumber }, "Review status sync failed");
+    });
+    return { status: 202, body: { status: "accepted" } };
+  }
+
+  // ─── Check Completion (automatic release notes) ──────────
+  //
+  // Two events, because GitHub reports results in two systems: modern
+  // integrations write check runs, which roll up into a check suite, and older
+  // ones write commit statuses. Subscribing to `check_run` as well would add
+  // nothing, since a completed run always completes its suite too, and would
+  // multiply the deliveries by the number of jobs in the matrix.
+  //
+  // Neither payload is trusted for the verdict. A completed suite is one suite
+  // of however many the PR has, so all that is taken from it is the head SHA;
+  // the aggregate state for that commit is re-read downstream.
+  if (event === "check_suite" || event === "status") {
+    const owner = payload.repository?.owner?.login;
+    const repo = payload.repository?.name;
+    const installationId = payload.installation?.id;
+    const headSha = event === "check_suite" ? payload.check_suite?.head_sha : payload.sha;
+
+    if (!installationId || !owner || !repo || typeof headSha !== "string") {
+      return { status: 200, body: { status: "ignored" } };
+    }
+
+    // `requested` and `rerequested` mean a suite has started, which is the
+    // opposite of the signal being waited on.
+    if (event === "check_suite" && payload.action !== "completed") {
+      return { status: 200, body: { status: "ignored" } };
+    }
+
+    // A pending status cannot be the one that turns a PR green. Neither can
+    // DiffSentry's own, which is excluded from the verdict on purpose (see
+    // `isDiffSentryCheck`). Since resolving a thread makes the app write
+    // that status, dropping it here is also what stops the app re-reading every
+    // check on a commit in response to an event it raised itself.
+    if (event === "status" && (payload.state === "pending" || isDiffSentryCheck(payload.context ?? ""))) {
+      return { status: 200, body: { status: "ignored" } };
+    }
+
+    logger.info({ owner, repo, sha: headSha, event }, "Checks completed, evaluating automatic release notes");
+    reviewer.handleChecksCompleted(installationId, owner, repo, headSha).catch((err) => {
+      logger.error({ err, owner, repo, sha: headSha }, "Automatic release notes failed");
     });
     return { status: 202, body: { status: "accepted" } };
   }

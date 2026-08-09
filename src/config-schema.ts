@@ -222,6 +222,17 @@ export const REPO_CONFIG_SCHEMA: JsonSchema = {
       },
     },
 
+    release_notes: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        auto: {
+          type: "boolean",
+          description: "Post release notes automatically once every check on the head commit passes (default false).",
+        },
+      },
+    },
+
     issues: {
       type: "object",
       additionalProperties: false,

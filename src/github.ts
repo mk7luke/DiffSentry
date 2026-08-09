@@ -1380,6 +1380,88 @@ export class GitHubClient {
     }
   }
 
+  /**
+   * Every check signal GitHub holds for a SHA: modern check runs and legacy
+   * commit statuses, both raw.
+   *
+   * Two calls rather than one because GitHub keeps the two systems apart and a
+   * PR routinely uses both: Actions and CodeQL write check runs, a Jenkins or
+   * a deploy bot writes statuses. Judging green off either list alone silently
+   * ignores half the PR's CI. Deciding what the two lists add up to is
+   * `assessChecks`; this only fetches.
+   *
+   * `checks.listForRef` defaults to `filter=latest`, so a re-run replaces its
+   * predecessor rather than appearing beside it, and
+   * `getCombinedStatusForRef` already collapses to the latest per context.
+   *
+   * Never throws: a failed read returns empty lists, which downstream reads as
+   * "no checks" rather than "everything passed".
+   */
+  async getCheckSignals(
+    installationId: number,
+    owner: string,
+    repo: string,
+    sha: string,
+    signal?: AbortSignal
+  ): Promise<{
+    statuses: { context: string; state: string }[];
+    checkRuns: { name: string; status: string; conclusion: string | null }[];
+  }> {
+    const octokit = await this.getInstallationOctokit(installationId, signal);
+    try {
+      const [combined, runs] = await Promise.all([
+        octokit.repos.getCombinedStatusForRef({ owner, repo, ref: sha }),
+        octokit.paginate(octokit.checks.listForRef, { owner, repo, ref: sha, per_page: 100 }),
+      ]);
+      return {
+        statuses: combined.data.statuses.map((s) => ({ context: s.context, state: s.state })),
+        checkRuns: runs.map((r) => ({ name: r.name, status: r.status, conclusion: r.conclusion ?? null })),
+      };
+    } catch (err) {
+      logger.warn({ err, owner, repo, sha }, "Failed to read check signals");
+      return { statuses: [], checkRuns: [] };
+    }
+  }
+
+  /**
+   * Open, non-draft PRs whose head is this exact commit.
+   *
+   * Both check-completion events need this lookup. A `check_suite` payload does
+   * carry a `pull_requests` array, but it is empty for pull requests from forks
+   * and it says nothing about draft state, and the `status` event carries no PR
+   * reference whatsoever, so trusting the payload would mean two code paths
+   * that disagree about which PRs exist. One lookup for both is cheaper to
+   * reason about than a fast path that is wrong for forks.
+   *
+   * The head filter is the important half. `listPullRequestsAssociatedWithCommit`
+   * returns every open PR containing the commit, including ones where it is an
+   * ancestor rather than the tip, and a suite that passed on a commit three
+   * pushes back is not evidence about the PR as it stands now.
+   */
+  async findOpenPRsForHeadSha(
+    installationId: number,
+    owner: string,
+    repo: string,
+    sha: string,
+    signal?: AbortSignal
+  ): Promise<number[]> {
+    const octokit = await this.getInstallationOctokit(installationId, signal);
+    try {
+      const prs = await octokit.paginate(octokit.repos.listPullRequestsAssociatedWithCommit, {
+        owner,
+        repo,
+        commit_sha: sha,
+        per_page: 100,
+      });
+      return prs
+        .filter((pr) => pr.state === "open" && !pr.draft && pr.head?.sha === sha)
+        .map((pr) => pr.number);
+    } catch (err) {
+      logger.warn({ err, owner, repo, sha }, "Failed to find PRs for head SHA");
+      return [];
+    }
+  }
+
   /** Head SHA of a PR, without paying for the full `getPRContext` file fetch. */
   async getHeadSha(
     installationId: number,

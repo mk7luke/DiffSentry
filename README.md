@@ -207,7 +207,7 @@ Everything below documents DiffSentry in full. Jump to a section:
 | `@bot timeline` | Chronological event timeline for this PR |
 | `@bot bench` | Generate a micro-benchmark for the most performance-sensitive change |
 | `@bot changelog` | Keep-a-Changelog format entry for this PR |
-| `@bot release-notes` | User-facing release notes for this PR |
+| `@bot release-notes` | User-facing release notes for this PR (or post them [automatically](#automatic-release-notes-on-a-green-pr)) |
 | `@bot diff <PR-number>` | Compare this PR with another for file overlap |
 | `@bot rewrite` | AI-rewritten title + description, applied to the PR via API |
 | `@bot help` | List every command |
@@ -327,7 +327,8 @@ with **`DISABLE_DEMO=1`**, after which `/demo` returns `404`.
    - Contents: Read & write
    - Issues: Read & write
    - Commit statuses: Read & write
-5. **Subscribe to events**: Pull request, **Issues**, Issue comment, Pull request review comment, **Pull request review thread**.
+   - Checks: Read
+5. **Subscribe to events**: Pull request, **Issues**, Issue comment, Pull request review comment, **Pull request review thread**, **Check suite**, **Status**.
 6. Create the App, note the App ID, generate a private key (`.pem`).
 
 ### 2. Install the App
@@ -367,6 +368,40 @@ your default branch is authoritative for *every* PR — including PRs opened
 from stale or feature branches that don't contain it. A `.diffsentry.yaml`
 that exists only on a PR branch is ignored; merge it to the default branch
 to make it take effect.
+
+### Automatic release notes on a green PR
+
+Off by default. Turn it on and DiffSentry posts release notes without being
+asked, once every check on the PR's head commit has passed:
+
+```yaml
+release_notes:
+  auto: true
+```
+
+The notes are the ones `@bot release-notes` writes: same prompt, same
+sanitiser, same heading. Only the trigger differs.
+
+- **"Every check" means the repo's own CI.** Check runs and legacy commit
+  statuses are both counted, because a PR routinely has some of each and
+  reading only one list ignores half the pipeline. `neutral` and `skipped`
+  count as passes, matching branch protection.
+- **DiffSentry's own checks are excluded.** `DiffSentry` and
+  `DiffSentry / Pre-Merge` do not count toward the verdict. Release notes
+  describe what a PR does, not whether it is approved, so open findings do not
+  hold them back. Since the `DiffSentry` check goes red while a critical
+  or major finding is unresolved, counting it would mean notes never arrive on
+  the PRs most likely to need them.
+- **A PR with no CI never triggers.** Nothing passed, so nothing fires.
+- **One comment per PR.** A later push that goes green rewrites it in place
+  rather than stacking a second one, and re-deliveries of the same event are
+  no-ops.
+- Only open, non-draft PRs.
+
+Needs the App subscribed to the **Check suite** and **Status** events and
+holding the **Checks: Read** permission. Existing installs have to add these
+by hand; see [Setup](#setup). Webhooks an App is not subscribed to are never
+delivered, so without that step the feature is silent rather than broken.
 
 ### Context-aware severity calibration
 
@@ -674,6 +709,8 @@ GitHub webhook
 | `issue_comment` | `edited` | Finishing-Touches checkbox click handler |
 | `pull_request_review_comment` | `created` | `@bot` chat commands on review threads |
 | `pull_request_review_thread` | `resolved` | Clear the stale `DiffSentry` commit status once every thread it opened is resolved |
+| `check_suite` | `completed` | Re-read every check on the head commit; post release notes if they have all passed and `release_notes.auto` is on |
+| `status` | any non-pending | Same, for repos whose CI writes legacy commit statuses rather than check runs |
 
 ## Environment variables
 
