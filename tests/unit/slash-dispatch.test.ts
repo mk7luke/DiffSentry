@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it, beforeEach } from "vitest";
+import { afterAll, describe, expect, it, beforeEach, vi } from "vitest";
 
 // Persistence off before dispatch's recordEvent import chain runs.
 const ORIGINAL_DB_PATH = process.env.DB_PATH;
@@ -211,11 +211,11 @@ describe("webhook gate — review thread replies", () => {
 });
 
 describe("webhook gate — review thread resolution", () => {
-  /** Deps that record every refreshReviewCommitStatus call. */
+  /** Deps that record every syncReviewCommitStatus call. */
   function makeRefreshDeps() {
     const refreshed: Array<{ owner: string; repo: string; pr: number }> = [];
     const deps = makeDeps();
-    (deps.reviewer as any).refreshReviewCommitStatus = async (
+    (deps.reviewer as any).syncReviewCommitStatus = async (
       _i: number, owner: string, repo: string, pr: number,
     ) => {
       refreshed.push({ owner, repo, pr });
@@ -245,18 +245,6 @@ describe("webhook gate — review thread resolution", () => {
     expect(refreshed).toEqual([{ owner: "acme", repo: "app", pr: 7 }]);
   });
 
-  it("ignores un-resolution rather than inventing a failing status", async () => {
-    // The refresh only ever clears a failure DiffSentry wrote; re-opening a
-    // thread is not grounds for writing one no review pass produced.
-    const { deps, refreshed } = makeRefreshDeps();
-    const res = await dispatchWebhookEvent(
-      deps, "pull_request_review_thread", resolvedPayload({ action: "unresolved" }),
-    );
-    await settle();
-    expect(res.status).toBe(200);
-    expect(refreshed).toEqual([]);
-  });
-
   it("ignores a payload with no installation", async () => {
     const { deps, refreshed } = makeRefreshDeps();
     const res = await dispatchWebhookEvent(
@@ -281,11 +269,56 @@ describe("webhook gate — review thread resolution", () => {
     // Fire-and-forget: a GitHub outage must not turn into a webhook 5xx and a
     // GitHub redelivery storm.
     const deps = makeDeps();
-    (deps.reviewer as any).refreshReviewCommitStatus = async () => {
+    (deps.reviewer as any).syncReviewCommitStatus = async () => {
       throw new Error("503");
     };
     const res = await dispatchWebhookEvent(deps, "pull_request_review_thread", resolvedPayload());
     await settle();
     expect(res.status).toBe(202);
+  });
+});
+
+function threadPayload(action: string): any {
+  return {
+    action,
+    installation: { id: 1 },
+    repository: { owner: { login: "acme" }, name: "app" },
+    pull_request: { number: 7 },
+  };
+}
+
+describe("pull_request_review_thread", () => {
+  it("syncs the status when a thread is re-opened", async () => {
+    // The direction the old handler ignored on purpose. Now that the status is
+    // derived from live threads, re-opening one must be able to red the check.
+    const syncReviewCommitStatus = vi.fn().mockResolvedValue(true);
+    const deps = makeDeps({ reviewer: { syncReviewCommitStatus } as any });
+
+    const res = await dispatchWebhookEvent(deps, "pull_request_review_thread", threadPayload("unresolved"));
+    await settle();
+
+    expect(res.status).toBe(202);
+    expect(syncReviewCommitStatus).toHaveBeenCalledWith(1, "acme", "app", 7);
+  });
+
+  it("still syncs when a thread is resolved", async () => {
+    const syncReviewCommitStatus = vi.fn().mockResolvedValue(true);
+    const deps = makeDeps({ reviewer: { syncReviewCommitStatus } as any });
+
+    await dispatchWebhookEvent(deps, "pull_request_review_thread", threadPayload("resolved"));
+    await settle();
+
+    expect(syncReviewCommitStatus).toHaveBeenCalledWith(1, "acme", "app", 7);
+  });
+
+  it("ignores other thread actions", async () => {
+    const syncReviewCommitStatus = vi.fn();
+    const deps = makeDeps({ reviewer: { syncReviewCommitStatus } as any });
+
+    const res = await dispatchWebhookEvent(deps, "pull_request_review_thread", threadPayload("edited"));
+    await settle();
+
+    expect(res.status).toBe(200);
+    expect(syncReviewCommitStatus).not.toHaveBeenCalled();
   });
 });

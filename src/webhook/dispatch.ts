@@ -48,7 +48,7 @@ export interface WebhookReviewer {
     mode: "full" | "incremental",
   ): Promise<void>;
   autoResolveOnPush(installationId: number, owner: string, repo: string, pullNumber: number): Promise<void>;
-  refreshReviewCommitStatus(
+  syncReviewCommitStatus(
     installationId: number,
     owner: string,
     repo: string,
@@ -442,11 +442,17 @@ export async function dispatchWebhookEvent(
   // or `ship` — the status is only ever written by a review pass, and nothing
   // re-runs one on resolution.
   //
-  // Only `resolved` is acted on. The refresh is deliberately one-directional:
-  // it clears a failure DiffSentry itself wrote, and re-opening a thread is not
-  // grounds for writing a *new* failure that no review pass ever produced.
-  // A re-opened thread surfaces in `ship` and in the next review either way.
-  if (event === "pull_request_review_thread" && payload.action === "resolved") {
+  // Only resolution-state changes are acted on, in both directions. This used
+  // to be one-directional on the grounds that "re-opening a thread is not
+  // grounds for writing a new failure that no review pass ever produced" — but
+  // the status is now *derived* from live threads rather than recorded once by
+  // a review pass, so a re-opened blocking thread is exactly grounds for a
+  // failure. Setting a commit status raises no thread event, so there is still
+  // no loop to guard against.
+  if (
+    event === "pull_request_review_thread" &&
+    (payload.action === "resolved" || payload.action === "unresolved")
+  ) {
     const owner = payload.repository?.owner?.login;
     const repo = payload.repository?.name;
     const pullNumber = payload.pull_request?.number;
@@ -457,12 +463,12 @@ export async function dispatchWebhookEvent(
     }
 
     // Fires for DiffSentry's own resolutions too, which the in-process paths
-    // already handle. Harmless: the refresh short-circuits on a status that
-    // isn't failing, and setting a commit status raises no thread event, so
-    // there's no loop to guard against.
-    logger.info({ owner, repo, pr: pullNumber }, "Review thread resolved, refreshing review status");
-    reviewer.refreshReviewCommitStatus(installationId, owner, repo, pullNumber).catch((err) => {
-      logger.error({ err, owner, repo, pr: pullNumber }, "Review status refresh failed");
+    // already handle. Harmless: the sync short-circuits when the status it would
+    // write already matches the one on the SHA, and setting a commit status
+    // raises no thread event, so there's no loop to guard against.
+    logger.info({ owner, repo, pr: pullNumber, action: payload.action }, "Review thread resolution changed, syncing review status");
+    reviewer.syncReviewCommitStatus(installationId, owner, repo, pullNumber).catch((err) => {
+      logger.error({ err, owner, repo, pr: pullNumber }, "Review status sync failed");
     });
     return { status: 202, body: { status: "accepted" } };
   }

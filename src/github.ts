@@ -3,6 +3,7 @@ import { Octokit } from "@octokit/rest";
 import { Config, FileChange, PRContext, ReviewComment, ReviewResult, IssueContext, IssueComment } from "./types.js";
 import { logger } from "./logger.js";
 import { isFileLevelFinding, REVIEW_BODY_MARKER } from "./review-body.js";
+import { parseThreadSeverity, isBlockingSeverity, isDiffSentryComment } from "./thread-severity.js";
 
 type Logger = typeof logger;
 
@@ -19,6 +20,12 @@ export interface ReviewThreadSummary {
   /** Threads opened by DiffSentry. */
   botTotal: number;
   botUnresolved: number;
+  /**
+   * Unresolved DiffSentry threads whose finding is severe enough to gate the
+   * commit status — `critical`, `major`, or (fail-safe) unreadable severity.
+   * Always `<= botUnresolved`.
+   */
+  botUnresolvedBlocking: number;
 }
 
 /**
@@ -320,6 +327,35 @@ function isOurBotThread(thread: any, botLogin: string): boolean {
   // Exact match against our app login first; fall back to suffix so older
   // deployments under a different bot name can still self-resolve their threads.
   return login === botLogin || login.endsWith("[bot]");
+}
+
+/**
+ * Unresolved bot threads that gate the commit status.
+ *
+ * Exported for testing: the rule (which severities block, and that an
+ * unreadable one blocks) is the whole point of the gate and deserves coverage
+ * without standing up a GitHub client.
+ *
+ * A readable severity settles it. An unreadable one only counts when the body
+ * carries DiffSentry's own footer: `isOurBotThread` deliberately matches any
+ * `*[bot]` login so old deployments can self-resolve, which was harmless when
+ * the count only fed a number in a comment — but now that it gates a commit
+ * status, a second review bot's inline comment would otherwise red the
+ * `DiffSentry` check for a finding DiffSentry never made. Every pre-marker
+ * DiffSentry thread carries the footer, so legacy threads still count.
+ */
+export function countBlockingThreads(threads: any[], botLogin: string): number {
+  let n = 0;
+  for (const t of threads) {
+    if (t.isResolved) continue;
+    if (!isOurBotThread(t, botLogin)) continue;
+    const body = t.comments?.nodes?.[0]?.body ?? "";
+    const severity = parseThreadSeverity(body);
+    if (!isBlockingSeverity(severity)) continue;
+    if (severity === undefined && !isDiffSentryComment(body)) continue;
+    n++;
+  }
+  return n;
 }
 
 export class GitHubClient {
@@ -1305,7 +1341,9 @@ export class GitHubClient {
     const botLogin = `${this.config.botName}[bot]`.toLowerCase();
     const threads = await this.fetchAllReviewThreads(octokit, owner, repo, pullNumber);
 
-    const summary: ReviewThreadSummary = { total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0 };
+    const summary: ReviewThreadSummary = {
+      total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0,
+    };
     for (const thread of threads) {
       const ours = isOurBotThread(thread, botLogin);
       summary.total++;
@@ -1315,6 +1353,7 @@ export class GitHubClient {
         if (ours) summary.botUnresolved++;
       }
     }
+    summary.botUnresolvedBlocking = countBlockingThreads(threads, botLogin);
     return summary;
   }
 
@@ -1429,7 +1468,7 @@ export class GitHubClient {
   ): Promise<any[]> {
     const commentsBlock = includeAllComments
       ? `comments(first: 100) { nodes { databaseId body author { login __typename } } }`
-      : `comments(first: 1) { nodes { author { login __typename } } }`;
+      : `comments(first: 1) { nodes { body author { login __typename } } }`;
     const query = `
       query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
         repository(owner: $owner, name: $repo) {

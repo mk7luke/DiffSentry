@@ -37,9 +37,26 @@ export function assessShipSignals(input: {
   reviewState: string;
   threads: ReviewThreadSummary;
   statuses: CommitStatusLike[];
+  /** The repo's `reviews.thread_gate`. Must match what the sync will use. */
+  gate?: ThreadGate;
 }): ShipSignals {
   const reviewFeedbackAddressed = isReviewFeedbackAddressed(input.threads);
-  const isStale = (s: CommitStatusLike) => reviewFeedbackAddressed && s.context === REVIEW_STATUS_CONTEXT;
+  // A failing status is stale exactly when `syncReviewCommitStatus` would clear
+  // it — no blocking thread left, and DiffSentry opened at least one thread that
+  // could account for the failure in the first place. These two predicates must
+  // stay in lockstep: if `ship` calls a status stale that the sync then refuses
+  // to clear, `ship` reports green while the check stays red.
+  //
+  // Deliberately not `reviewFeedbackAddressed` — that also requires every
+  // nitpick to be resolved, and nitpicks never block.
+  //
+  // The gate has to be read here too: with `thread_gate: off` the sync ignores
+  // blocking threads entirely and will clear the status, so `ship` must agree or
+  // it reports a failing check in the same comment that just greened it.
+  const nothingBlocking =
+    (input.gate ?? "blocking") === "off" || input.threads.botUnresolvedBlocking === 0;
+  const isStale = (s: CommitStatusLike) =>
+    nothingBlocking && input.threads.botTotal > 0 && s.context === REVIEW_STATUS_CONTEXT;
   const allFailing = input.statuses.filter((s) => s.state === "failure" || s.state === "error");
 
   return {
@@ -61,6 +78,8 @@ export function renderShipCheck(input: {
   statusRefreshed: boolean;
   /** Blockers computed outside the signal triage, e.g. the CODEOWNERS gate. */
   extraBlockers?: string[];
+  /** The repo's `reviews.thread_gate`. Must match what `assessShipSignals` saw. */
+  gate?: ThreadGate;
 }): string {
   const { botName, reviewState, threads, signals, statusRefreshed } = input;
   const { failingChecks, staleFailing, pendingChecks, staleReviewState } = signals;
@@ -73,8 +92,21 @@ export function renderShipCheck(input: {
   if (reviewState === "CHANGES_REQUESTED" && !staleReviewState) {
     blockers.push("DiffSentry has requested changes (latest review).");
   }
-  if (unresolvedThreads > 0) {
-    warnings.push(`${unresolvedThreads} unresolved review thread${unresolvedThreads === 1 ? "" : "s"}.`);
+  // Blocking findings gate the merge; nitpicks are worth naming but not worth
+  // blocking on. Splitting them is what keeps the verdict honest — three open
+  // criticals used to render the same amber as three open nitpicks.
+  //
+  // Under `thread_gate: off` nothing here blocks: the commit status ignores
+  // threads, so calling them blockers would contradict the check this same
+  // comment reports on. They stay visible as warnings.
+  const gateOn = (input.gate ?? "blocking") !== "off";
+  const blockingThreads = gateOn ? threads.botUnresolvedBlocking : 0;
+  if (blockingThreads > 0) {
+    blockers.push(`${blockingThreads} unresolved blocking finding${blockingThreads === 1 ? "" : "s"}.`);
+  }
+  const nonBlocking = unresolvedThreads - blockingThreads;
+  if (nonBlocking > 0) {
+    warnings.push(`${nonBlocking} unresolved review thread${nonBlocking === 1 ? "" : "s"}.`);
   }
   if (failingChecks.length > 0) {
     blockers.push(
@@ -122,7 +154,9 @@ export function renderShipCheck(input: {
   lines.push(`| Surface | Status |`);
   lines.push(`|---|---|`);
   lines.push(`| DiffSentry review | \`${reviewState}\`${staleReviewState ? " (stale)" : ""} |`);
-  lines.push(`| Unresolved review threads | ${unresolvedThreads} |`);
+  lines.push(
+    `| Unresolved review threads | ${unresolvedThreads}${blockingThreads > 0 ? ` (${blockingThreads} blocking)` : ""} |`,
+  );
   lines.push(
     `| Failing commit statuses | ${failingChecks.length}${staleFailing.length > 0 ? ` (+${staleFailing.length} stale)` : ""} |`,
   );
@@ -145,4 +179,38 @@ export function renderShipCheck(input: {
   }
 
   return lines.join("\n") + `\n\n<sub>Re-run with \`@${botName} ship\` after addressing.</sub>`;
+}
+
+/** How unresolved DiffSentry threads affect the `DiffSentry` commit status. */
+export type ThreadGate = "blocking" | "off";
+
+/**
+ * The single decision point for the `DiffSentry` commit status.
+ *
+ * Before this existed the rule was spread across three call sites that each got
+ * it slightly differently — most visibly the empty-diff path, which hard-coded
+ * `success` and so let a "Merge branch 'main'…" commit erase a real failure.
+ *
+ * Unresolved *blocking* findings outrank the review verdict: a `COMMENTED`
+ * review that opened a `critical` thread is a failure until that thread is
+ * resolved. Nitpicks never gate — see `isBlockingSeverity`.
+ */
+export function resolveReviewStatus(input: {
+  approval?: "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
+  threads: ReviewThreadSummary;
+  /** Description used when nothing blocks, e.g. "No reviewable files". */
+  successDescription: string;
+  gate?: ThreadGate;
+}): { state: "success" | "failure"; description: string } {
+  const blocking = input.threads.botUnresolvedBlocking;
+  if ((input.gate ?? "blocking") === "blocking" && blocking > 0) {
+    return {
+      state: "failure",
+      description: `${blocking} unresolved blocking finding${blocking === 1 ? "" : "s"}`,
+    };
+  }
+  if (input.approval === "REQUEST_CHANGES") {
+    return { state: "failure", description: "Changes requested" };
+  }
+  return { state: "success", description: input.successDescription };
 }

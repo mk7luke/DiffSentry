@@ -59,6 +59,11 @@ export const REPO_CONFIG_SCHEMA: JsonSchema = {
         auto_apply_labels: { type: "boolean", description: "Apply suggested labels automatically." },
         auto_assign_reviewers: { type: "boolean", description: "Assign suggested reviewers automatically." },
         commit_status: { type: "boolean", description: "Set a commit status for the review." },
+        thread_gate: {
+          type: "string",
+          enum: ["blocking", "off"],
+          description: "Fail the DiffSentry check while a critical/major review thread is unresolved.",
+        },
         abort_on_close: { type: "boolean", description: "Abort in-flight reviews when the PR closes." },
         builtin_patterns: { type: "boolean", description: "Run built-in performance / footgun checks." },
 

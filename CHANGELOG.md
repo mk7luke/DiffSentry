@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The `DiffSentry` check no longer flips to passing when a branch-update merge
+  commit produces an empty diff. Clicking "Update branch" made every file's
+  patch identical to what was already reviewed, so the review pass took its
+  "no reviewable files" path and wrote an unconditional `success` — erasing a
+  failure earned on the previous commit. The status is now re-derived from the
+  PR's live review threads instead of assumed green.
+- `@diffsentry ship` can now correct the check in either direction. The refresh
+  helper bailed out unless the status was already failing and only ever wrote
+  `success`, so `ship` could report unresolved threads and leave the check
+  passing in the same breath.
+
+### Changed
+
+- Unresolved `critical` / `major` DiffSentry review threads now fail the
+  `DiffSentry` commit status, regardless of the review verdict — a `COMMENTED`
+  review that opened a critical is a failure until that thread is resolved.
+  `minor` and `trivial` findings never block. Opt out with
+  `reviews.thread_gate: off`; `reviews.commit_status: false` still disables
+  status writes entirely.
+- Ship Check files blocking findings as blockers rather than warnings, so a PR
+  with open criticals reads "Not ready" instead of "Probably safe to ship".
+- **Breaking for existing PRs:** review threads posted before this release carry
+  no severity marker and are treated as blocking, so open PRs with unresolved
+  DiffSentry threads go red on their next event. The population drains as those
+  PRs merge.
+- DiffSentry now reacts to `pull_request_review_thread` `unresolved` events, not
+  just `resolved`.
+- The sticky status card sources its unresolved-thread count from the paginated
+  thread summary rather than a single-page query, so PRs with more than 100
+  threads no longer under-report.
+
 ### Added
 
 - CI/CD build-out: the PR gate now covers unit tests, the strict `tsc` build,

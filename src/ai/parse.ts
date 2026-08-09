@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { PRContext, ReviewComment, ReviewResult, WalkthroughResult, CommentType, CommentSeverity, Confidence } from "../types.js";
 import { logger } from "../logger.js";
+import { VALID_SEVERITIES, renderSeverityMarker, DIFFSENTRY_COMMENT_FOOTER } from "../thread-severity.js";
 
 const VALID_CONFIDENCE: Confidence[] = ["high", "medium", "low"];
 
@@ -85,8 +86,6 @@ const VALID_TYPES: CommentType[] = [
   "documentation",
   "security",
 ];
-const VALID_SEVERITIES: CommentSeverity[] = ["critical", "major", "minor", "trivial"];
-
 const TYPE_LABEL: Record<CommentType, string> = {
   issue: "Potential issue",
   suggestion: "Refactor suggestion",
@@ -342,7 +341,14 @@ function formatCommentBody(comment: {
     parts.push(`<!-- diffsentry-fingerprint:${comment.fingerprint} -->`);
   }
 
-  parts.push("<!-- This is an auto-generated reply by DiffSentry -->");
+  // Lets summarizeReviewThreads read this finding's severity back off the live
+  // thread, so an unresolved nitpick doesn't gate the commit status the way an
+  // unresolved critical does.
+  if (comment.severity) {
+    parts.push(renderSeverityMarker(comment.severity));
+  }
+
+  parts.push(DIFFSENTRY_COMMENT_FOOTER);
 
   return parts.join("\n\n");
 }
