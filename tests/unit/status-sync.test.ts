@@ -45,6 +45,21 @@ describe("syncReviewCommitStatus", () => {
     expect(setCommitStatus).not.toHaveBeenCalled();
   });
 
+  it("clears a failure when the only threads left open are nitpicks", async () => {
+    // The guard that keeps a PR-level-finding failure standing must key on
+    // "DiffSentry opened no threads at all", not on "every thread is resolved".
+    // Keying on the latter would pin the check red on an open nitpick, which
+    // the documented rule says never blocks.
+    const { reviewer, setCommitStatus } = reviewerWith({
+      currentState: "failure",
+      threads: threads({ total: 2, unresolved: 1, botTotal: 2, botUnresolved: 1, botUnresolvedBlocking: 0 }),
+    });
+    await expect(reviewer.syncReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(true);
+    expect(setCommitStatus).toHaveBeenCalledWith(
+      1, "o", "r", "abc123", "success", "All review threads resolved", "DiffSentry",
+    );
+  });
+
   it("leaves a failure standing when only human threads are resolved", async () => {
     // Humans resolving their own threads says nothing about DiffSentry's verdict.
     const { reviewer, setCommitStatus } = reviewerWith({

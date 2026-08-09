@@ -18,6 +18,20 @@ const BLOCKING: readonly CommentSeverity[] = ["critical", "major"];
 
 const MARKER_KEY = "diffsentry-severity";
 
+/**
+ * Footer every DiffSentry review comment carries. Predates the severity marker,
+ * so it is the one reliable way to recognise a DiffSentry thread posted before
+ * severities were stamped — which matters because `isOurBotThread` deliberately
+ * matches any `*[bot]` login, and a second review bot's comment must not be
+ * mistaken for an unreadable DiffSentry finding.
+ */
+export const DIFFSENTRY_COMMENT_FOOTER = "<!-- This is an auto-generated reply by DiffSentry -->";
+
+/** Whether a body was authored by DiffSentry, marker or not. */
+export function isDiffSentryComment(body: string): boolean {
+  return body.includes(DIFFSENTRY_COMMENT_FOOTER);
+}
+
 /** Tolerant of the whitespace GitHub's markdown pipeline may normalise. */
 const MARKER_RE = new RegExp(`<!--\\s*${MARKER_KEY}:\\s*([a-z]+)\\s*-->`, "gi");
 

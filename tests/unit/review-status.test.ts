@@ -132,7 +132,11 @@ describe("Reviewer.writeReviewStatus (wiring)", () => {
     );
   });
 
-  it("fails open to success when the thread fetch rejects", async () => {
+  it("writes nothing when the thread fetch rejects and there is no verdict", async () => {
+    // The empty-diff path. An all-zero stand-in would resolve to `success` and
+    // green a PR with open criticals on a network blip — the reported bug by
+    // another route. With no verdict to fall back on, leave the SHA's existing
+    // status alone.
     const setCommitStatus = vi.fn().mockResolvedValue(undefined);
     const reviewer = reviewerWith({
       summarizeReviewThreads: vi.fn().mockRejectedValue(new Error("boom")),
@@ -143,8 +147,26 @@ describe("Reviewer.writeReviewStatus (wiring)", () => {
       1, "o", "r", "sha1", 7, { successDescription: "No reviewable files" }, undefined, () => {},
     );
 
+    expect(setCommitStatus).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the verdict when the thread fetch rejects mid-review", async () => {
+    // The final-verdict path has a verdict to stand on — what this status meant
+    // before threads gated it — so it still writes rather than going silent.
+    const setCommitStatus = vi.fn().mockResolvedValue(undefined);
+    const reviewer = reviewerWith({
+      summarizeReviewThreads: vi.fn().mockRejectedValue(new Error("boom")),
+      setCommitStatus,
+    });
+
+    await reviewer.writeReviewStatus(
+      1, "o", "r", "sha1", 7,
+      { approval: "REQUEST_CHANGES", successDescription: "Review complete with comments" },
+      undefined, () => {},
+    );
+
     expect(setCommitStatus).toHaveBeenCalledWith(
-      1, "o", "r", "sha1", "success", "No reviewable files", REVIEW_STATUS_CONTEXT, undefined,
+      1, "o", "r", "sha1", "failure", "Changes requested", REVIEW_STATUS_CONTEXT, undefined,
     );
   });
 });

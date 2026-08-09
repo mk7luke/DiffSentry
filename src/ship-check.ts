@@ -39,12 +39,17 @@ export function assessShipSignals(input: {
   statuses: CommitStatusLike[];
 }): ShipSignals {
   const reviewFeedbackAddressed = isReviewFeedbackAddressed(input.threads);
-  // A failing status is only stale if the current rule would write green. A
-  // blocking thread — including a legacy one whose severity we can't read —
-  // means the failure is live, not left over.
+  // A failing status is stale exactly when `syncReviewCommitStatus` would clear
+  // it — no blocking thread left, and DiffSentry opened at least one thread that
+  // could account for the failure in the first place. These two predicates must
+  // stay in lockstep: if `ship` calls a status stale that the sync then refuses
+  // to clear, `ship` reports green while the check stays red.
+  //
+  // Deliberately not `reviewFeedbackAddressed` — that also requires every
+  // nitpick to be resolved, and nitpicks never block.
   const nothingBlocking = input.threads.botUnresolvedBlocking === 0;
   const isStale = (s: CommitStatusLike) =>
-    nothingBlocking && reviewFeedbackAddressed && s.context === REVIEW_STATUS_CONTEXT;
+    nothingBlocking && input.threads.botTotal > 0 && s.context === REVIEW_STATUS_CONTEXT;
   const allFailing = input.statuses.filter((s) => s.state === "failure" || s.state === "error");
 
   return {

@@ -3,7 +3,7 @@ import { Octokit } from "@octokit/rest";
 import { Config, FileChange, PRContext, ReviewComment, ReviewResult, IssueContext, IssueComment } from "./types.js";
 import { logger } from "./logger.js";
 import { isFileLevelFinding, REVIEW_BODY_MARKER } from "./review-body.js";
-import { parseThreadSeverity, isBlockingSeverity } from "./thread-severity.js";
+import { parseThreadSeverity, isBlockingSeverity, isDiffSentryComment } from "./thread-severity.js";
 
 type Logger = typeof logger;
 
@@ -335,6 +335,14 @@ function isOurBotThread(thread: any, botLogin: string): boolean {
  * Exported for testing: the rule (which severities block, and that an
  * unreadable one blocks) is the whole point of the gate and deserves coverage
  * without standing up a GitHub client.
+ *
+ * A readable severity settles it. An unreadable one only counts when the body
+ * carries DiffSentry's own footer: `isOurBotThread` deliberately matches any
+ * `*[bot]` login so old deployments can self-resolve, which was harmless when
+ * the count only fed a number in a comment — but now that it gates a commit
+ * status, a second review bot's inline comment would otherwise red the
+ * `DiffSentry` check for a finding DiffSentry never made. Every pre-marker
+ * DiffSentry thread carries the footer, so legacy threads still count.
  */
 export function countBlockingThreads(threads: any[], botLogin: string): number {
   let n = 0;
@@ -342,7 +350,10 @@ export function countBlockingThreads(threads: any[], botLogin: string): number {
     if (t.isResolved) continue;
     if (!isOurBotThread(t, botLogin)) continue;
     const body = t.comments?.nodes?.[0]?.body ?? "";
-    if (isBlockingSeverity(parseThreadSeverity(body))) n++;
+    const severity = parseThreadSeverity(body);
+    if (!isBlockingSeverity(severity)) continue;
+    if (severity === undefined && !isDiffSentryComment(body)) continue;
+    n++;
   }
   return n;
 }

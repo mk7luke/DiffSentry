@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { PRContext, ReviewComment, ReviewResult, WalkthroughResult, CommentType, CommentSeverity, Confidence } from "../types.js";
 import { logger } from "../logger.js";
-import { VALID_SEVERITIES, renderSeverityMarker } from "../thread-severity.js";
+import { VALID_SEVERITIES, renderSeverityMarker, DIFFSENTRY_COMMENT_FOOTER } from "../thread-severity.js";
 
 const VALID_CONFIDENCE: Confidence[] = ["high", "medium", "low"];
 
@@ -348,7 +348,7 @@ function formatCommentBody(comment: {
     parts.push(renderSeverityMarker(comment.severity));
   }
 
-  parts.push("<!-- This is an auto-generated reply by DiffSentry -->");
+  parts.push(DIFFSENTRY_COMMENT_FOOTER);
 
   return parts.join("\n\n");
 }

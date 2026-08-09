@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { GitHubClient, isReviewFeedbackAddressed, type ReviewThreadSummary } from "../../src/github.js";
 import { assessShipSignals, renderShipCheck, resolveReviewStatus, type CommitStatusLike } from "../../src/ship-check.js";
+import { DIFFSENTRY_COMMENT_FOOTER } from "../../src/thread-severity.js";
 
 const BOT = "diffsentry";
 
@@ -48,7 +49,7 @@ describe("assessShipSignals", () => {
   it("keeps the DiffSentry status as a real failure while threads are open", () => {
     const signals = assessShipSignals({
       reviewState: "CHANGES_REQUESTED",
-      threads: threads({ total: 1, unresolved: 1, botTotal: 1, botUnresolved: 1 }),
+      threads: threads({ total: 1, unresolved: 1, botTotal: 1, botUnresolved: 1, botUnresolvedBlocking: 1 }),
       statuses: [STALE_FAILURE],
     });
 
@@ -161,12 +162,16 @@ describe("renderShipCheck", () => {
 });
 
 describe("GitHubClient.summarizeReviewThreads", () => {
-  function node(opts: { resolved: boolean; author: string; type?: string }) {
+  function node(opts: { resolved: boolean; author: string; type?: string; body?: string }) {
     return {
       id: `t-${opts.author}-${opts.resolved}`,
       isResolved: opts.resolved,
       path: "src/a.ts",
-      comments: { nodes: [{ author: { login: opts.author, __typename: opts.type ?? "Bot" } }] },
+      comments: {
+        // Defaults to a pre-severity-marker DiffSentry comment: no marker, but
+        // carrying the footer that identifies it as ours.
+        nodes: [{ body: opts.body ?? DIFFSENTRY_COMMENT_FOOTER, author: { login: opts.author, __typename: opts.type ?? "Bot" } }],
+      },
     };
   }
 
@@ -189,6 +194,16 @@ describe("GitHubClient.summarizeReviewThreads", () => {
         node({ resolved: false, author: "luke", type: "User" }),
       ]),
     ).toEqual({ total: 3, unresolved: 2, botTotal: 2, botUnresolved: 1, botUnresolvedBlocking: 1 });
+  });
+
+  it("does not let another vendor's bot thread gate the DiffSentry check", async () => {
+    // isOurBotThread matches any *[bot] login so old deployments can
+    // self-resolve. Harmless when it only fed a number in a comment; now that it
+    // gates a commit status, a Copilot/Sonar/Codecov review comment must not red
+    // the check for a finding DiffSentry never made.
+    expect(
+      await summarize([node({ resolved: false, author: "copilot[bot]", body: "Consider renaming this." })]),
+    ).toMatchObject({ botUnresolved: 1, botUnresolvedBlocking: 0 });
   });
 
   it("reports zero bot threads on a PR DiffSentry never commented on", async () => {

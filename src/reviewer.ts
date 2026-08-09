@@ -486,6 +486,26 @@ export class Reviewer {
    *
    * Best-effort; returns true only when the status was actually changed.
    */
+  /**
+   * `reviews.thread_gate` for a repo, read from the default branch like every
+   * other config read. Best-effort by design: this only ever chooses between
+   * gating and not gating, so an unreadable config falls back to the documented
+   * default rather than aborting the status sync.
+   */
+  private async loadThreadGate(
+    installationId: number,
+    owner: string,
+    repo: string,
+  ): Promise<ThreadGate | undefined> {
+    try {
+      const octokit = await this.github.getInstallationOctokit(installationId);
+      const cfg = mergeWithDefaults(await loadRepoConfig(octokit, owner, repo, "HEAD"));
+      return cfg.reviews?.thread_gate;
+    } catch {
+      return undefined;
+    }
+  }
+
   async syncReviewCommitStatus(
     installationId: number,
     owner: string,
@@ -508,21 +528,30 @@ export class Reviewer {
         opts.threads ??
         (await this.github.summarizeReviewThreads(installationId, owner, repo, pullNumber));
 
+      // Most callers (the webhook, push auto-resolve, the resolve command) have
+      // no repo config in scope, and the webhook can't even pass one — so
+      // without this load, `reviews.thread_gate: off` would be silently ignored
+      // on every trigger but `ship`. Fully guarded: a config we can't read falls
+      // through to the default rather than failing the whole sync.
+      const gate = opts.gate ?? (await this.loadThreadGate(installationId, owner, repo));
+
       // No approval: this path has no verdict of its own, and re-deriving one
       // from the last review would resurrect a REQUEST_CHANGES whose threads are
       // now resolved — the exact staleness this is here to clear.
       const target = resolveReviewStatus({
         threads,
         successDescription: "All review threads resolved",
-        gate: opts.gate,
+        gate,
       });
       if (target.state === current) return false;
 
-      // See the doc comment: only clear a failure DiffSentry's own threads
-      // actually account for. Anything else — a PR-level finding with no thread,
-      // or a failure this bot never wrote — is not ours to clear from here.
-      if (target.state === "success" && !isReviewFeedbackAddressed(threads)) {
-        log.debug({ headSha, threads }, "Leaving failure standing — threads don't account for it");
+      // See the doc comment. Keyed on `botTotal === 0` specifically — "DiffSentry
+      // opened no threads at all", the PR-level-finding case. Testing
+      // `isReviewFeedbackAddressed` instead would also refuse to clear while an
+      // unresolved *nitpick* is open, which would make the documented rule
+      // ("minor and trivial never block") false via this path.
+      if (target.state === "success" && threads.botTotal === 0) {
+        log.debug({ headSha, threads }, "Leaving failure standing — no DiffSentry threads account for it");
         return false;
       }
 
@@ -547,12 +576,18 @@ export class Reviewer {
    * whole change fixes, and duplicated logic is duplicated risk of that
    * regression coming back in only one of the two spots.
    *
-   * The thread fetch degrades to an all-zero summary on failure so a
-   * thread-fetch error never reds a PR on a guess. `onStatusError` lets each
-   * call site keep its own `setCommitStatus` failure handling — the
-   * empty-diff site swallows silently, the final-verdict site logs — an
-   * asymmetry that predates this extraction and isn't this method's call to
-   * change.
+   * When the thread fetch fails we must not guess in either direction. With a
+   * verdict in hand (final-verdict path) we fall back to the verdict alone,
+   * which is what this status meant before threads gated it. With no verdict
+   * (empty-diff path) there is nothing to fall back to, so we write nothing and
+   * leave whatever status is already on the SHA standing — an all-zero summary
+   * there would resolve to `success` and green a PR with open criticals on a
+   * network blip, which is the reported bug by another route.
+   *
+   * `onStatusError` lets each call site keep its own `setCommitStatus` failure
+   * handling — the empty-diff site swallows silently, the final-verdict site
+   * logs — an asymmetry that predates this extraction and isn't this method's
+   * call to change.
    */
   private async writeReviewStatus(
     installationId: number,
@@ -568,14 +603,21 @@ export class Reviewer {
     signal: AbortSignal | undefined,
     onStatusError: (err: unknown) => void,
   ): Promise<void> {
+    const log = logger.child({ owner, repo, pr: pullNumber });
     const liveThreads = await this.github
       .summarizeReviewThreads(installationId, owner, repo, pullNumber, signal)
-      .catch((): ReviewThreadSummary => ({
-        total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0,
-      }));
+      .catch(() => null);
+
+    if (!liveThreads && !opts.approval) {
+      log.warn({ headSha }, "Thread fetch failed and no verdict to fall back on — leaving commit status unchanged");
+      return;
+    }
+
+    // A null summary only reaches here alongside a verdict; the all-zero stand-in
+    // makes `resolveReviewStatus` decide on that verdict alone.
     const status = resolveReviewStatus({
       approval: opts.approval,
-      threads: liveThreads,
+      threads: liveThreads ?? { total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0 },
       successDescription: opts.successDescription,
       gate: opts.gate,
     });
