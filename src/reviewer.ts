@@ -459,34 +459,6 @@ export class Reviewer {
 
   // ─── Stale review-status refresh ─────────────────────────────
   /**
-   * Bring the `DiffSentry` commit status in line with the PR's live review
-   * threads, in whichever direction that requires.
-   *
-   * The status is only ever written by a review pass, and resolving a thread
-   * doesn't trigger one — so without this the check drifts out of date the
-   * moment the threads move. It used to drift in one direction only: it could
-   * clear a failure it had written, but nothing could re-red a green check, so
-   * `ship` reported open blocking threads and a passing check in the same
-   * breath.
-   *
-   * A `null` current state means we can't see a status for this context on this
-   * SHA — no review pass has run, the repo set `reviews.commit_status: false`,
-   * or the read itself failed. All three are a no-op, which is how the config is
-   * honoured here without a config read, and which fails toward inaction rather
-   * than toward a wrong write.
-   *
-   * Clearing a failure additionally requires that DiffSentry's own threads
-   * explain it (`isReviewFeedbackAddressed`). Threads are not a complete proxy
-   * for the verdict: a `REQUEST_CHANGES` can rest solely on a PR-level finding
-   * that names no file, which never becomes a thread and so never counts toward
-   * `botUnresolvedBlocking`. Without this guard, any unrelated sync trigger
-   * would recompute `blocking === 0`, flip that PR green, and leave no thread to
-   * resolve and no route back short of a fresh review. Reding a green check
-   * needs no such guard — an open blocking thread speaks for itself.
-   *
-   * Best-effort; returns true only when the status was actually changed.
-   */
-  /**
    * `reviews.thread_gate` for a repo, read from the default branch like every
    * other config read. Best-effort by design: this only ever chooses between
    * gating and not gating, so an unreadable config falls back to the documented
@@ -515,6 +487,34 @@ export class Reviewer {
     }
   }
 
+  /**
+   * Bring the `DiffSentry` commit status in line with the PR's live review
+   * threads, in whichever direction that requires.
+   *
+   * The status is only ever written by a review pass, and resolving a thread
+   * doesn't trigger one — so without this the check drifts out of date the
+   * moment the threads move. It used to drift in one direction only: it could
+   * clear a failure it had written, but nothing could re-red a green check, so
+   * `ship` reported open blocking threads and a passing check in the same
+   * breath.
+   *
+   * A `null` current state means we can't see a status for this context on this
+   * SHA — no review pass has run, the repo set `reviews.commit_status: false`,
+   * or the read itself failed. All three are a no-op, which is how the config is
+   * honoured here without a config read, and which fails toward inaction rather
+   * than toward a wrong write.
+   *
+   * Clearing a failure additionally requires that DiffSentry's own threads
+   * explain it (`isReviewFeedbackAddressed`). Threads are not a complete proxy
+   * for the verdict: a `REQUEST_CHANGES` can rest solely on a PR-level finding
+   * that names no file, which never becomes a thread and so never counts toward
+   * `botUnresolvedBlocking`. Without this guard, any unrelated sync trigger
+   * would recompute `blocking === 0`, flip that PR green, and leave no thread to
+   * resolve and no route back short of a fresh review. Reding a green check
+   * needs no such guard — an open blocking thread speaks for itself.
+   *
+   * Best-effort; returns true only when the status was actually changed.
+   */
   async syncReviewCommitStatus(
     installationId: number,
     owner: string,
