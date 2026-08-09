@@ -3,7 +3,7 @@ import { Config, AIProvider, DiffBudgetConfig, FileChange, PRContext, PriorRevie
 import { buildProvider, ProviderSpec } from "./ai/provider-factory.js";
 import { FailoverProvider } from "./ai/failover.js";
 import { isAiTimeoutError } from "./ai/timeout.js";
-import { GitHubClient, REVIEW_STATUS_CONTEXT, type ReviewThreadSummary } from "./github.js";
+import { GitHubClient, REVIEW_STATUS_CONTEXT, isReviewFeedbackAddressed, type ReviewThreadSummary } from "./github.js";
 import { assessShipSignals, renderShipCheck, resolveReviewStatus, type CommitStatusLike, type ThreadGate } from "./ship-check.js";
 import { loadRepoConfig, mergeWithDefaults, shouldReviewPR, isPathIncluded } from "./repo-config.js";
 import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary, injectSummaryIntoPRBody } from "./walkthrough.js";
@@ -469,10 +469,20 @@ export class Reviewer {
    * `ship` reported open blocking threads and a passing check in the same
    * breath.
    *
-   * A `null` current state means we've never posted this context on this SHA —
-   * either no review pass has run, or the repo set `reviews.commit_status:
-   * false`. Both are a no-op, which is how the config is honoured here without
-   * a config read.
+   * A `null` current state means we can't see a status for this context on this
+   * SHA — no review pass has run, the repo set `reviews.commit_status: false`,
+   * or the read itself failed. All three are a no-op, which is how the config is
+   * honoured here without a config read, and which fails toward inaction rather
+   * than toward a wrong write.
+   *
+   * Clearing a failure additionally requires that DiffSentry's own threads
+   * explain it (`isReviewFeedbackAddressed`). Threads are not a complete proxy
+   * for the verdict: a `REQUEST_CHANGES` can rest solely on a PR-level finding
+   * that names no file, which never becomes a thread and so never counts toward
+   * `botUnresolvedBlocking`. Without this guard, any unrelated sync trigger
+   * would recompute `blocking === 0`, flip that PR green, and leave no thread to
+   * resolve and no route back short of a fresh review. Reding a green check
+   * needs no such guard — an open blocking thread speaks for itself.
    *
    * Best-effort; returns true only when the status was actually changed.
    */
@@ -507,6 +517,14 @@ export class Reviewer {
         gate: opts.gate,
       });
       if (target.state === current) return false;
+
+      // See the doc comment: only clear a failure DiffSentry's own threads
+      // actually account for. Anything else — a PR-level finding with no thread,
+      // or a failure this bot never wrote — is not ours to clear from here.
+      if (target.state === "success" && !isReviewFeedbackAddressed(threads)) {
+        log.debug({ headSha, threads }, "Leaving failure standing — threads don't account for it");
+        return false;
+      }
 
       await this.github.setCommitStatus(
         installationId, owner, repo, headSha,

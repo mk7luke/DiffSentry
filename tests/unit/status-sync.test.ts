@@ -32,6 +32,29 @@ describe("syncReviewCommitStatus", () => {
     );
   });
 
+  it("leaves a failure standing when DiffSentry opened no threads at all", async () => {
+    // A REQUEST_CHANGES can rest solely on a PR-level finding that names no
+    // file. Those never become threads, so botTotal is 0 and the blocking count
+    // can't see them. Clearing here would flip the PR green with nothing left to
+    // resolve and no route back short of a fresh review pass.
+    const { reviewer, setCommitStatus } = reviewerWith({
+      currentState: "failure",
+      threads: threads({ total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0 }),
+    });
+    await expect(reviewer.syncReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(false);
+    expect(setCommitStatus).not.toHaveBeenCalled();
+  });
+
+  it("leaves a failure standing when only human threads are resolved", async () => {
+    // Humans resolving their own threads says nothing about DiffSentry's verdict.
+    const { reviewer, setCommitStatus } = reviewerWith({
+      currentState: "failure",
+      threads: threads({ total: 3, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0 }),
+    });
+    await expect(reviewer.syncReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(false);
+    expect(setCommitStatus).not.toHaveBeenCalled();
+  });
+
   it("reds a passing status when a blocking thread is open", async () => {
     // This is the direction the old refreshReviewCommitStatus could not go,
     // which is why `ship` left the check green on a PR with 3 open threads.
