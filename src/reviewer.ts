@@ -501,7 +501,10 @@ export class Reviewer {
       const octokit = await this.github.getInstallationOctokit(installationId);
       const cfg = mergeWithDefaults(await loadRepoConfig(octokit, owner, repo, "HEAD"));
       return cfg.reviews?.thread_gate;
-    } catch {
+    } catch (err) {
+      // Silent fallback would make a mis-set gate indistinguishable from an
+      // unreachable config, so leave a trace even though the fallback is safe.
+      logger.warn({ err, owner, repo }, "Could not read reviews.thread_gate — using the default gate");
       return undefined;
     }
   }
@@ -551,7 +554,10 @@ export class Reviewer {
       // unresolved *nitpick* is open, which would make the documented rule
       // ("minor and trivial never block") false via this path.
       if (target.state === "success" && threads.botTotal === 0) {
-        log.debug({ headSha, threads }, "Leaving failure standing — no DiffSentry threads account for it");
+        // info, not debug: the other branch info-logs a successful sync, and an
+        // operator chasing a stuck red check needs to see the deliberate
+        // decision to leave it standing at default log level.
+        log.info({ headSha, threads }, "Leaving failure standing — no DiffSentry threads account for it");
         return false;
       }
 
@@ -1980,7 +1986,12 @@ export class Reviewer {
           // silently under-reporting.
           const summary = await this.github.summarizeReviewThreads(installationId, owner, repo, pullNumber, signal);
           unresolvedThreads = summary.unresolved;
-          blockingThreads = summary.botUnresolvedBlocking;
+          // Gated for the same reason Ship Check gates it: under
+          // `thread_gate: off` these threads don't gate anything, so labelling
+          // them "blocking" on the card would contradict the green check
+          // sitting beside it.
+          blockingThreads =
+            repoConfig.reviews?.thread_gate === "off" ? 0 : summary.botUnresolvedBlocking;
         } catch {
           // best effort
         }

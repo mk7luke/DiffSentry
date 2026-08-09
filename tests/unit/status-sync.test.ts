@@ -183,11 +183,15 @@ describe("syncReviewCommitStatus", () => {
     // The webhook can't pass a gate — its interface has no opts parameter — so
     // the sync must load it. Without this, `thread_gate: off` is silently
     // ignored on the most frequent trigger.
+    // Fixture chosen so the two gates diverge on the *write*, not on a shared
+    // no-op: current `failure` with blocking threads open clears under `off`
+    // and stays put under `blocking`. A swallowed config load would fall back
+    // to `blocking` and fail this, so a pass can't be faked by the fallback.
     const { reviewer, setCommitStatus } = reviewerWith({
-      currentState: "success",
+      currentState: "failure",
       threads: threads({ botTotal: 2, botUnresolved: 2, botUnresolvedBlocking: 2 }),
     });
-    (reviewer as any).github.getInstallationOctokit = vi.fn().mockResolvedValue({
+    const getInstallationOctokit = vi.fn().mockResolvedValue({
       repos: {
         getContent: vi.fn().mockResolvedValue({
           data: {
@@ -197,10 +201,13 @@ describe("syncReviewCommitStatus", () => {
         }),
       },
     });
+    (reviewer as any).github.getInstallationOctokit = getInstallationOctokit;
 
-    // Gate off ⇒ blocking threads don't count ⇒ green stays green.
-    await expect(reviewer.syncReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(false);
-    expect(setCommitStatus).not.toHaveBeenCalled();
+    await expect(reviewer.syncReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(true);
+    expect(getInstallationOctokit).toHaveBeenCalledWith(1);
+    expect(setCommitStatus).toHaveBeenCalledWith(
+      1, "o", "r", "abc123", "success", "All review threads resolved", "DiffSentry",
+    );
   });
 
   it("reuses a caller-supplied head SHA and thread summary", async () => {
