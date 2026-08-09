@@ -286,12 +286,22 @@ describe("sanitiseReleaseNotes", () => {
   });
 
   it("produces output with none of the banned characters", () => {
-    const messy = "🎉 Big news — we’ve shipped “v2” … 2–3x better 🚀";
+    // A ZWJ sequence and a keycap, so the input carries the invisible
+    // modifiers as well as the visible pictographs.
+    const messy = "🎉 Big news — we’ve shipped “v2” … 2–3x better 👩‍💻 1️⃣ 🚀";
     const out = sanitiseReleaseNotes(messy);
 
+    // Extended_Pictographic covers the base pictographs only. It does not
+    // match a stranded FE0F, ZWJ, keycap, skin tone or regional indicator, so
+    // those need naming or a half-stripped emoji would pass as clean.
     expect(out).not.toMatch(/\p{Extended_Pictographic}/u);
+    expect(out).not.toMatch(/[\u{1F3FB}-\u{1F3FF}\u{1F1E6}-\u{1F1FF}]/u);
+    expect(out).not.toMatch(/\u{FE0F}|\u{20E3}|\u{200D}/u);
     expect(out).not.toMatch(/[—–“”‘’…]/);
-    expect(out).toBe(`Big news, we've shipped "v2" ... 2-3x better`);
+
+    // The exact-match assertion is the real guarantee: any leftover byte,
+    // visible or not, breaks it.
+    expect(out).toBe(`Big news, we've shipped "v2" ... 2-3x better 1`);
   });
 });
 
