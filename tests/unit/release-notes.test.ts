@@ -108,6 +108,49 @@ describe("sanitiseReleaseNotes", () => {
     expect(out).toContain("More, prose.");
   });
 
+  it("protects a top-level indented code block", () => {
+    const input = ["Run this — carefully:", "", "    printf “hi” — 🚀", "", "Then — done."].join("\n");
+    const out = sanitiseReleaseNotes(input);
+
+    expect(out).toContain("    printf “hi” — 🚀");
+    expect(out).toContain("Run this, carefully:");
+    expect(out).toContain("Then, done.");
+  });
+
+  it("still sanitises nested bullets, which are not an indented code block", () => {
+    // Four spaces means code only at the top level. Inside a list it is
+    // continuation, and release notes are mostly lists, so reading every
+    // indented run as code would hand the reader the dash and the curly quotes.
+    const out = sanitiseReleaseNotes(
+      [
+        "### Improvements",
+        "",
+        "- The check gates on severity:",
+        "    - Critical findings block — as before.",
+        "    - Nits no longer block, with “minor” notes open.",
+      ].join("\n"),
+    );
+
+    expect(out).toContain("    - Critical findings block, as before.");
+    expect(out).toContain('    - Nits no longer block, with "minor" notes open.');
+  });
+
+  it("still sanitises a loose nested list and an indented continuation", () => {
+    // A blank line before the indent is not enough to make it code: what
+    // matters is whether the preceding non-blank line opened a list.
+    expect(sanitiseReleaseNotes("- Parent:\n\n    - Nested — dash.")).toContain("    - Nested, dash.");
+    expect(sanitiseReleaseNotes("- Parent:\n\n    Continuation — “q”.")).toContain(
+      '    Continuation, "q".',
+    );
+  });
+
+  it("keeps leading indentation intact while collapsing gaps mid-line", () => {
+    // Collapsing a nested bullet's four spaces to one would flatten it into a
+    // sibling, which changes the rendered structure.
+    expect(sanitiseReleaseNotes("- Parent:\n    - ✨ Nested item")).toContain("    - Nested item");
+    expect(sanitiseReleaseNotes("### ✨ What's new")).toBe("### What's new");
+  });
+
   it("protects a fence that is never closed", () => {
     // CommonMark runs an unterminated fence to the end of the document, so the
     // em dash below is code, not prose.

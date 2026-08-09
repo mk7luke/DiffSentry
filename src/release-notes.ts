@@ -87,7 +87,7 @@ const EMOJI =
 /**
  * Everything the renderer will show as code, so sanitising can skip it.
  *
- * Fences come first so an inline span never claims part of one. The three
+ * Fences come first so an inline span never claims part of one. The four
  * alternatives, in order:
  *
  * 1. A closed fence. The closer must sit at the start of a line and carry no
@@ -95,7 +95,10 @@ const EMOJI =
  *    would let a stray opener pair with the *next* block's opener.
  * 2. An unclosed fence, which CommonMark runs to the end of the document.
  *    Without this an unterminated block gets no protection at all.
- * 3. An inline span. It may wrap across a line, which is legal, but a blank
+ * 3. A run of lines indented by four spaces or a tab. This is only *sometimes*
+ *    an indented code block, so every match is put through `isIndentedCode`
+ *    before it is trusted. See that function for why.
+ * 4. An inline span. It may wrap across a line, which is legal, but a blank
  *    line ends the paragraph and so cannot appear inside one. That guard is
  *    what stops a single stray backtick from swallowing the rest of the notes.
  */
@@ -103,10 +106,40 @@ const CODE_SEGMENT = new RegExp(
   [
     "^ {0,3}```[^\\n]*\\n[\\s\\S]*?^ {0,3}```[ \\t]*$",
     "^ {0,3}```[\\s\\S]*$",
+    "(?:^(?: {4}|\\t)[^\\n]*(?:\\n|$))+",
     "`(?:[^`\\n]|\\n(?![ \\t]*\\n))*`",
   ].join("|"),
   "gm",
 );
+
+/** A bullet or ordered-list marker, at any indentation. */
+const LIST_ITEM = /^[ \t]*(?:[-*+]|\d+[.)])[ \t]/;
+
+/**
+ * Decides whether a run of indented lines is really an indented code block.
+ *
+ * Four spaces means code only at the top level. Inside a list it means
+ * continuation, and release notes are mostly lists, so the naive reading is
+ * not just imprecise, it is backwards for the common case: a nested bullet
+ * like "    - Nits no longer block, so you can merge with “minor” notes open."
+ * would be handed back untouched with its dash and curly quotes intact.
+ *
+ * So the run counts as code only when the nearest preceding non-blank line is
+ * neither a list item nor itself indented, which is what tells us we are at the
+ * top level rather than inside one. An indented block also cannot interrupt a
+ * paragraph, so a blank line has to separate it from whatever came before.
+ */
+function isIndentedCode(text: string, offset: number): boolean {
+  if (offset === 0) return true;
+
+  const before = text.slice(0, offset);
+  if (!/\n[ \t]*\n$/.test(before)) return false;
+
+  const preceding = before.split("\n").filter((line) => line.trim() !== "").pop();
+  if (preceding === undefined) return true;
+
+  return !LIST_ITEM.test(preceding) && !/^(?: {2,}|\t)/.test(preceding);
+}
 
 /**
  * Applies the mechanical half of the house style to one run of prose.
@@ -132,7 +165,9 @@ function sanitiseProse(text: string): string {
       .replace(/[‘’‚‛]/g, "'")
       .replace(/…/g, "...")
       // An emoji removed from "### ✨ What's new" leaves a double space behind.
-      .replace(/[^\S\n]{2,}/g, " ")
+      // The lookbehind keeps this off leading indentation: collapsing the four
+      // spaces on a nested bullet to one would flatten it into a sibling.
+      .replace(/(?<=\S)[^\S\n]{2,}/g, " ")
       // Anchor on the newline, not on `$` with /m. A prose segment ends
       // wherever the next code span begins, which is usually mid-line, and `$`
       // would treat that as end-of-line and swallow the space before it.
@@ -183,6 +218,12 @@ export function sanitiseReleaseNotes(input: string): string {
 
   CODE_SEGMENT.lastIndex = 0;
   for (let match = CODE_SEGMENT.exec(raw); match !== null; match = CODE_SEGMENT.exec(raw)) {
+    // An indented run is the one candidate that might not be code at all.
+    // Leaving it for the prose pass is the safe default: the cost of sanitising
+    // a snippet is a broken example, but the cost of skipping a nested bullet
+    // is a dash or an emoji shipped to the reader, which is the whole point.
+    if (/^(?: {4}|\t)/.test(match[0]) && !isIndentedCode(raw, match.index)) continue;
+
     out += sanitiseProse(raw.slice(cursor, match.index)) + match[0];
     cursor = match.index + match[0].length;
   }
