@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { GitHubClient, isReviewFeedbackAddressed, type ReviewThreadSummary } from "../../src/github.js";
 import { assessShipSignals, renderShipCheck, resolveReviewStatus, type CommitStatusLike } from "../../src/ship-check.js";
 
