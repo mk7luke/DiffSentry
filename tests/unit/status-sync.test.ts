@@ -9,14 +9,15 @@ function threads(over: Partial<ReviewThreadSummary> = {}): ReviewThreadSummary {
 /** A Reviewer with only the GitHub calls syncReviewCommitStatus touches. */
 function reviewerWith(opts: { currentState: string | null; threads: ReviewThreadSummary }) {
   const setCommitStatus = vi.fn().mockResolvedValue(undefined);
-  const reviewer = Object.create(Reviewer.prototype) as Reviewer;
-  (reviewer as any).github = {
+  const github = {
     getHeadSha: vi.fn().mockResolvedValue("abc123"),
     getCommitStatusState: vi.fn().mockResolvedValue(opts.currentState),
     summarizeReviewThreads: vi.fn().mockResolvedValue(opts.threads),
     setCommitStatus,
   };
-  return { reviewer, setCommitStatus };
+  const reviewer = Object.create(Reviewer.prototype) as Reviewer;
+  (reviewer as any).github = github;
+  return { reviewer, github, setCommitStatus };
 }
 
 describe("syncReviewCommitStatus", () => {
@@ -26,7 +27,9 @@ describe("syncReviewCommitStatus", () => {
       threads: threads({ botTotal: 2, botUnresolved: 0, botUnresolvedBlocking: 0 }),
     });
     await expect(reviewer.syncReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(true);
-    expect(setCommitStatus).toHaveBeenCalledWith(1, "o", "r", "abc123", "success", expect.any(String), "DiffSentry");
+    expect(setCommitStatus).toHaveBeenCalledWith(
+      1, "o", "r", "abc123", "success", "All review threads resolved", "DiffSentry",
+    );
   });
 
   it("reds a passing status when a blocking thread is open", async () => {
@@ -46,6 +49,18 @@ describe("syncReviewCommitStatus", () => {
     const { reviewer, setCommitStatus } = reviewerWith({
       currentState: "success",
       threads: threads({ botTotal: 1, botUnresolved: 0, botUnresolvedBlocking: 0 }),
+    });
+    await expect(reviewer.syncReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(false);
+    expect(setCommitStatus).not.toHaveBeenCalled();
+  });
+
+  it("leaves a failing status alone while a blocking thread is still open", async () => {
+    // Already red and still should be — the sync must not rewrite an
+    // unchanged status, since its return value tells `ship` whether the
+    // check actually moved.
+    const { reviewer, setCommitStatus } = reviewerWith({
+      currentState: "failure",
+      threads: threads({ botTotal: 2, botUnresolved: 1, botUnresolvedBlocking: 1 }),
     });
     await expect(reviewer.syncReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(false);
     expect(setCommitStatus).not.toHaveBeenCalled();
@@ -74,6 +89,53 @@ describe("syncReviewCommitStatus", () => {
       currentState: "success",
       threads: threads({ botTotal: 4, botUnresolved: 4, botUnresolvedBlocking: 0 }),
     });
+    await expect(reviewer.syncReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(false);
+    expect(setCommitStatus).not.toHaveBeenCalled();
+  });
+
+  it("reuses a caller-supplied head SHA and thread summary", async () => {
+    // autoResolveOnPush passes headSha; the ship command passes both. Skipping
+    // the redundant lookups also means the caller's SHA is the one acted on,
+    // not whatever the head happens to be by the time this runs.
+    const { reviewer, github, setCommitStatus } = reviewerWith({
+      currentState: "failure",
+      threads: threads({ botTotal: 1, botUnresolved: 1, botUnresolvedBlocking: 1 }),
+    });
+    const suppliedThreads = threads({ botTotal: 2, botUnresolved: 0, botUnresolvedBlocking: 0 });
+
+    const changed = await reviewer.syncReviewCommitStatus(1, "o", "r", 7, {
+      headSha: "deadbee",
+      threads: suppliedThreads,
+    });
+
+    expect(changed).toBe(true);
+    expect(github.getHeadSha).not.toHaveBeenCalled();
+    expect(github.summarizeReviewThreads).not.toHaveBeenCalled();
+    expect(github.getCommitStatusState).toHaveBeenCalledWith(1, "o", "r", "deadbee", "DiffSentry");
+    expect(setCommitStatus).toHaveBeenCalledWith(
+      1, "o", "r", "deadbee", "success", "All review threads resolved", "DiffSentry",
+    );
+  });
+
+  it("swallows a setCommitStatus failure rather than throwing", async () => {
+    // Best-effort: autoResolveOnPush and the webhook path both call this
+    // fire-and-forget, so a GitHub outage here must never break the caller.
+    const { reviewer, setCommitStatus } = reviewerWith({
+      currentState: "success",
+      threads: threads({ botTotal: 1, botUnresolved: 1, botUnresolvedBlocking: 1 }),
+    });
+    setCommitStatus.mockRejectedValue(new Error("403"));
+
+    await expect(reviewer.syncReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(false);
+  });
+
+  it("swallows a summarizeReviewThreads failure rather than throwing", async () => {
+    const { reviewer, github, setCommitStatus } = reviewerWith({
+      currentState: "failure",
+      threads: threads(),
+    });
+    github.summarizeReviewThreads.mockRejectedValue(new Error("503"));
+
     await expect(reviewer.syncReviewCommitStatus(1, "o", "r", 7)).resolves.toBe(false);
     expect(setCommitStatus).not.toHaveBeenCalled();
   });
