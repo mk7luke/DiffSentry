@@ -1909,12 +1909,18 @@ export class Reviewer {
       // walkthrough — short, scannable snapshot of current PR state).
       try {
         let unresolvedThreads = 0;
+        let blockingThreads = 0;
         let failingChecks = 0;
         let pendingChecks = 0;
         try {
-          const q = `query($owner: String!, $repo: String!, $pr: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $pr) { reviewThreads(first: 100) { nodes { isResolved } } } } }`;
-          const r: any = await octokit.graphql(q, { owner, repo, pr: pullNumber });
-          unresolvedThreads = (r?.repository?.pullRequest?.reviewThreads?.nodes ?? []).filter((t: any) => !t.isResolved).length;
+          // Was a bespoke one-page GraphQL query counting only `isResolved`.
+          // `summarizeReviewThreads` returns the same total — it counts every
+          // author's unresolved threads too — plus the blocking breakdown the
+          // card now shows, and it paginates, so PRs past 100 threads stop
+          // silently under-reporting.
+          const summary = await this.github.summarizeReviewThreads(installationId, owner, repo, pullNumber, signal);
+          unresolvedThreads = summary.unresolved;
+          blockingThreads = summary.botUnresolvedBlocking;
         } catch {
           // best effort
         }
@@ -1931,6 +1937,7 @@ export class Reviewer {
           reviewState: reviewResult.approval as any,
           risk,
           unresolvedThreads,
+          blockingThreads,
           failingChecks,
           pendingChecks,
           filesProcessed: context.files.length,
@@ -2534,6 +2541,8 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
         case "ship": {
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
+          const rawConfig = await loadRepoConfig(octokit, owner, repo, context.defaultBranch || "HEAD");
+          const repoConfig = mergeWithDefaults(rawConfig);
 
           // Fetch live state across surfaces in parallel
           const [reviews, statusResp, ownerRules, threads] = await Promise.all([
@@ -2563,14 +2572,15 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
           const signals = assessShipSignals({ reviewState, threads, statuses });
 
           // Push the corrected verdict back to GitHub so the PR's check list
-          // goes green too — reporting it only in this comment would leave the
-          // merge button blocked by the same stale X we just discounted.
-          let statusRefreshed = false;
-          if (signals.staleFailing.length > 0) {
-            statusRefreshed = await this.syncReviewCommitStatus(
-              installationId, owner, repo, pullNumber, { headSha: context.headSha, threads },
-            );
-          }
+          // matches this comment — reporting a disagreement here while leaving
+          // the check wrong is how `ship` ended up saying "3 unresolved
+          // threads" next to a green check. Runs unconditionally now that the
+          // sync can red a check as well as clear one; it no-ops when the
+          // status already matches.
+          const statusRefreshed = await this.syncReviewCommitStatus(
+            installationId, owner, repo, pullNumber,
+            { headSha: context.headSha, threads, gate: repoConfig.reviews?.thread_gate },
+          );
 
           const extraBlockers: string[] = [];
 

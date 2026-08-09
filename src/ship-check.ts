@@ -39,7 +39,12 @@ export function assessShipSignals(input: {
   statuses: CommitStatusLike[];
 }): ShipSignals {
   const reviewFeedbackAddressed = isReviewFeedbackAddressed(input.threads);
-  const isStale = (s: CommitStatusLike) => reviewFeedbackAddressed && s.context === REVIEW_STATUS_CONTEXT;
+  // A failing status is only stale if the current rule would write green. A
+  // blocking thread — including a legacy one whose severity we can't read —
+  // means the failure is live, not left over.
+  const nothingBlocking = input.threads.botUnresolvedBlocking === 0;
+  const isStale = (s: CommitStatusLike) =>
+    nothingBlocking && reviewFeedbackAddressed && s.context === REVIEW_STATUS_CONTEXT;
   const allFailing = input.statuses.filter((s) => s.state === "failure" || s.state === "error");
 
   return {
@@ -73,8 +78,16 @@ export function renderShipCheck(input: {
   if (reviewState === "CHANGES_REQUESTED" && !staleReviewState) {
     blockers.push("DiffSentry has requested changes (latest review).");
   }
-  if (unresolvedThreads > 0) {
-    warnings.push(`${unresolvedThreads} unresolved review thread${unresolvedThreads === 1 ? "" : "s"}.`);
+  // Blocking findings gate the merge; nitpicks are worth naming but not worth
+  // blocking on. Splitting them is what keeps the verdict honest — three open
+  // criticals used to render the same amber as three open nitpicks.
+  const blockingThreads = threads.botUnresolvedBlocking;
+  if (blockingThreads > 0) {
+    blockers.push(`${blockingThreads} unresolved blocking finding${blockingThreads === 1 ? "" : "s"}.`);
+  }
+  const nonBlocking = unresolvedThreads - blockingThreads;
+  if (nonBlocking > 0) {
+    warnings.push(`${nonBlocking} unresolved review thread${nonBlocking === 1 ? "" : "s"}.`);
   }
   if (failingChecks.length > 0) {
     blockers.push(
@@ -122,7 +135,9 @@ export function renderShipCheck(input: {
   lines.push(`| Surface | Status |`);
   lines.push(`|---|---|`);
   lines.push(`| DiffSentry review | \`${reviewState}\`${staleReviewState ? " (stale)" : ""} |`);
-  lines.push(`| Unresolved review threads | ${unresolvedThreads} |`);
+  lines.push(
+    `| Unresolved review threads | ${unresolvedThreads}${blockingThreads > 0 ? ` (${blockingThreads} blocking)` : ""} |`,
+  );
   lines.push(
     `| Failing commit statuses | ${failingChecks.length}${staleFailing.length > 0 ? ` (+${staleFailing.length} stale)` : ""} |`,
   );

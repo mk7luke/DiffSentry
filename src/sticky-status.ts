@@ -11,6 +11,8 @@ export function renderStickyStatus(opts: {
   reviewState: "APPROVE" | "COMMENT" | "REQUEST_CHANGES" | "PENDING";
   risk?: RiskAssessment;
   unresolvedThreads: number;
+  /** Subset of `unresolvedThreads` that gates the commit status. */
+  blockingThreads?: number;
   failingChecks: number;
   pendingChecks: number;
   filesProcessed: number;
@@ -44,7 +46,9 @@ export function renderStickyStatus(opts: {
   if (opts.risk) {
     lines.push(`| **Risk score** | ${opts.risk.score}/100 (${capitalize(opts.risk.level)}) ${sparkline(opts.riskHistory ?? [opts.risk.score])} |`);
   }
-  lines.push(`| **Unresolved threads** | ${opts.unresolvedThreads} |`);
+  lines.push(
+    `| **Unresolved threads** | ${opts.unresolvedThreads}${opts.blockingThreads ? ` (${opts.blockingThreads} blocking)` : ""} |`,
+  );
   lines.push(`| **Failing checks** | ${opts.failingChecks} |`);
   lines.push(`| **Pending checks** | ${opts.pendingChecks} |`);
   lines.push(`| **Files reviewed** | ${opts.filesProcessed}${opts.filesSkipped ? ` (${opts.filesSkipped} skipped)` : ""} |`);
