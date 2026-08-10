@@ -62,8 +62,17 @@ export class OpenAIProvider implements AIProvider {
   }
 
   private get isGpt5OrLater(): boolean {
-    const gpt = this.model.toLowerCase().match(/^gpt-(\d+)/);
-    return !!(gpt && Number(gpt[1]) >= 5);
+    const version = this.gptVersion;
+    return version !== null && version >= 5;
+  }
+
+  /** `gpt-5.6-terra` → 5.6, `gpt-5.4` → 5.4, `gpt-5-mini` → 5. Null for
+   *  non-GPT ids. Used to pick a starting `reasoning_effort` that the family
+   *  actually accepts — the alphabet shifted at 5.5 (see below). */
+  private get gptVersion(): number | null {
+    const gpt = this.model.toLowerCase().match(/^gpt-(\d+)(?:\.(\d+))?/);
+    if (!gpt) return null;
+    return Number(gpt[2] ? `${gpt[1]}.${gpt[2]}` : gpt[1]);
   }
 
   private get tokenParam(): "max_completion_tokens" | "max_tokens" {
@@ -104,7 +113,14 @@ export class OpenAIProvider implements AIProvider {
     if (this.learnedReasoningEffort !== undefined) {
       return { reasoning_effort: this.learnedReasoningEffort };
     }
-    if (this.isGpt5OrLater) return { reasoning_effort: "minimal" };
+    if (this.isGpt5OrLater) {
+      // Verified 2026-08: gpt-5.6-terra rejects "minimal" and answers
+      // `Supported values are: 'none', 'low', 'medium', 'high', and 'xhigh'`.
+      // The retry below recovers from a wrong guess, but only after burning a
+      // round-trip on the first call of every process — so start from the value
+      // the family actually takes.
+      return { reasoning_effort: (this.gptVersion ?? 5) >= 5.5 ? "none" : "minimal" };
+    }
     if (this.isOSeries) return { reasoning_effort: "low" };
     return {};
   }

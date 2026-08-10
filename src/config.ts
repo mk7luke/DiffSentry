@@ -95,6 +95,7 @@ export function loadConfig(): Config {
   let backupLocalAiApiKey: string | undefined;
   let backupLocalAiModel: string | undefined;
   let backupLocalAiJsonMode: boolean | undefined;
+  let backupLocalAiReasoningEffort: string | undefined;
 
   if (backupRaw) {
     if (!isAiProvider(backupRaw)) {
@@ -116,6 +117,8 @@ export function loadConfig(): Config {
     backupLocalAiModel = process.env.BACKUP_LOCAL_AI_MODEL || process.env.LOCAL_AI_MODEL || "";
     backupLocalAiJsonMode =
       (process.env.BACKUP_LOCAL_AI_JSON_MODE || process.env.LOCAL_AI_JSON_MODE || "true").toLowerCase() !== "false";
+    backupLocalAiReasoningEffort =
+      process.env.BACKUP_LOCAL_AI_REASONING_EFFORT || process.env.LOCAL_AI_REASONING_EFFORT || undefined;
 
     // Fail fast if the resolved backup can't actually be constructed.
     if (backupAiProvider === "anthropic" && !backupAnthropicApiKey) {
@@ -195,6 +198,7 @@ export function loadConfig(): Config {
     localAiApiKey: process.env.LOCAL_AI_API_KEY,
     localAiModel: process.env.LOCAL_AI_MODEL || "",
     localAiJsonMode: (process.env.LOCAL_AI_JSON_MODE || "true").toLowerCase() !== "false",
+    localAiReasoningEffort: process.env.LOCAL_AI_REASONING_EFFORT || undefined,
     aiRequestTimeoutMs,
     backupAiProvider,
     backupAnthropicApiKey,
@@ -207,6 +211,7 @@ export function loadConfig(): Config {
     backupLocalAiApiKey,
     backupLocalAiModel,
     backupLocalAiJsonMode,
+    backupLocalAiReasoningEffort,
     primaryAiTimeoutMs,
     backupCircuitThreshold,
     backupCircuitCooldownMs,

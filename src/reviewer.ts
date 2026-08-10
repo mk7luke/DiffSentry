@@ -355,6 +355,7 @@ export class Reviewer {
       localAiApiKey: config.localAiApiKey,
       localAiModel: config.localAiModel,
       localAiJsonMode: config.localAiJsonMode,
+      localAiReasoningEffort: config.localAiReasoningEffort,
       // Short deadline ONLY when there's a backup to fail over to; otherwise the
       // primary keeps the full budget (unchanged behavior).
       timeoutMs: config.backupAiProvider ? config.primaryAiTimeoutMs : config.aiRequestTimeoutMs,
@@ -374,6 +375,7 @@ export class Reviewer {
         localAiApiKey: config.backupLocalAiApiKey,
         localAiModel: config.backupLocalAiModel ?? "",
         localAiJsonMode: config.backupLocalAiJsonMode ?? true,
+        localAiReasoningEffort: config.backupLocalAiReasoningEffort,
         timeoutMs: config.aiRequestTimeoutMs,
         // Distinguish a same-type backup in cost/log attribution.
         label: config.backupAiProvider === "openai-compatible" ? "openai-compatible-backup" : undefined,
