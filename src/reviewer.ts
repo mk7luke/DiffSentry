@@ -631,6 +631,38 @@ export class Reviewer {
   }
 
   /**
+   * Entry point for `pull_request_review_thread`, alongside the status sync.
+   *
+   * Without this the thread gate would be a mute button rather than a delay. On
+   * the ordinary PR the checks go green first and the findings are addressed
+   * afterwards, so the `check_suite` delivery is spent while threads are still
+   * open, and the resolution that finally clears them arrives on an event the
+   * release-notes path never sees — the `status` our own sync then writes is
+   * dropped by the dispatcher on purpose, precisely so we can't re-read a
+   * commit in response to an event we raised (see `isDiffSentryCheck`).
+   *
+   * So resolution is made a trigger in its own right. Nothing about the decision
+   * moves here: `maybePostAutoReleaseNotes` re-reads the checks, the config and
+   * the threads, and most deliveries down this path stop at the first gate.
+   */
+  async reconsiderAutoReleaseNotes(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+  ): Promise<void> {
+    const headSha = await this.github.getHeadSha(installationId, owner, repo, pullNumber);
+    if (!headSha) {
+      logger.debug({ owner, repo, pr: pullNumber }, "No head SHA for PR, skipping release notes");
+      return;
+    }
+    await runWithCostContext(
+      { owner, repo, number: pullNumber, kind: "chat" },
+      () => this.maybePostAutoReleaseNotes(installationId, owner, repo, pullNumber, headSha),
+    );
+  }
+
+  /**
    * Draft and post release notes for a PR whose checks have all gone green,
    * unless something says not to.
    *
@@ -699,6 +731,25 @@ export class Reviewer {
       const verdict = assessChecks(signals);
       if (verdict.state !== "passed") {
         log.debug({ verdict }, "Checks are not all green, holding release notes");
+        return;
+      }
+
+      // Our own findings, unlike our own commit status, do gate the notes.
+      //
+      // The status is excluded from `assessChecks` for a reason that doesn't
+      // extend to this: counting it would let a status *we* write tip the
+      // aggregate green and re-enter this path (see `isDiffSentryCheck`). Asking
+      // about threads directly has no such feedback edge — posting a comment
+      // raises no thread event.
+      //
+      // What's left is the judgement, and it goes the other way from the status:
+      // notes drafted over an open critical or major finding describe a PR that
+      // is about to change, and land next to the finding reading like a sign-off
+      // on it. `botUnresolvedBlocking` rather than `botUnresolved` keeps the
+      // documented rule true — minor and trivial never block, here either.
+      const threads = await this.github.summarizeReviewThreads(installationId, owner, repo, pullNumber);
+      if (threads.botUnresolvedBlocking > 0) {
+        log.debug({ threads }, "Blocking DiffSentry threads are unresolved, holding release notes");
         return;
       }
 

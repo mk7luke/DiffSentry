@@ -6,6 +6,7 @@ process.env.DB_PATH = "";
 
 import { Reviewer } from "../../src/reviewer.js";
 import { AUTO_RELEASE_NOTES_MARKER, headMarker } from "../../src/auto-release-notes.js";
+import type { ReviewThreadSummary } from "../../src/github.js";
 import type { Config } from "../../src/types.js";
 
 afterAll(() => {
@@ -54,6 +55,8 @@ function makeHarness(opts: {
   currentHead?: string;
   /** Hold the model call open until `releaseChat` is called. */
   gateChat?: boolean;
+  /** DiffSentry's own review threads on the PR. Defaults to none. */
+  threads?: Partial<ReviewThreadSummary>;
 } = {}): Harness {
   const reviewer = new Reviewer(CONFIG);
   const posted: { body: string; marker: string }[] = [];
@@ -80,6 +83,11 @@ function makeHarness(opts: {
       statuses: opts.statuses ?? [],
       checkRuns: opts.checkRuns ?? [{ name: "build", status: "completed", conclusion: "success" }],
     }),
+    summarizeReviewThreads: async (): Promise<ReviewThreadSummary> => ({
+      total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0,
+      ...opts.threads,
+    }),
+    getHeadSha: async () => opts.currentHead ?? SHA,
     getPRContext: async () => ({
       owner: "acme", repo: "app", pullNumber: 7,
       title: "t", description: "d",
@@ -178,10 +186,62 @@ describe("automatic release notes", () => {
     expect(failed.posted).toEqual([]);
   });
 
-  it("posts even while DiffSentry's own check is red", async () => {
+  it("posts even while DiffSentry's own check is red, when no thread accounts for it", async () => {
+    // The status alone is not the gate — it also goes red for PR-level findings
+    // that opened no thread, and counting it in `assessChecks` is what would let
+    // a status we wrote ourselves tip the aggregate green.
     const h = makeHarness({ statuses: [{ context: "DiffSentry", state: "failure" }] });
     await h.reviewer.handleChecksCompleted(1, "acme", "app", SHA);
     expect(h.posted).toHaveLength(1);
+  });
+
+  it("holds while one of our blocking findings is unresolved", async () => {
+    // Notes drafted over an open critical or major finding describe a PR that is
+    // about to change, and read as a sign-off on the finding they sit next to.
+    const h = makeHarness({
+      threads: { total: 2, unresolved: 2, botTotal: 2, botUnresolved: 2, botUnresolvedBlocking: 1 },
+    });
+    await h.reviewer.handleChecksCompleted(1, "acme", "app", SHA);
+    expect(h.posted).toEqual([]);
+    expect(h.chatCalls).toBe(0);
+  });
+
+  it("posts while only nitpicks are open", async () => {
+    // "Minor and trivial never block" is a documented rule, and this path must
+    // not be the one place it stops being true.
+    const h = makeHarness({
+      threads: { total: 3, unresolved: 3, botTotal: 3, botUnresolved: 3, botUnresolvedBlocking: 0 },
+    });
+    await h.reviewer.handleChecksCompleted(1, "acme", "app", SHA);
+    expect(h.posted).toHaveLength(1);
+  });
+
+  it("ignores unresolved threads that are not ours", async () => {
+    const h = makeHarness({
+      threads: { total: 4, unresolved: 4, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0 },
+    });
+    await h.reviewer.handleChecksCompleted(1, "acme", "app", SHA);
+    expect(h.posted).toHaveLength(1);
+  });
+
+  it("posts on thread resolution, when the checks went green earlier", async () => {
+    // The ordinary sequence: CI passes first, the findings are addressed after.
+    // Without this trigger the gate above would be a mute button — the
+    // `check_suite` delivery is long spent by the time the last thread closes,
+    // and the `status` our sync then writes is dropped by the dispatcher.
+    const h = makeHarness();
+    await h.reviewer.reconsiderAutoReleaseNotes(1, "acme", "app", 7);
+    expect(h.posted).toHaveLength(1);
+    expect(h.posted[0].body).toContain(headMarker(SHA));
+  });
+
+  it("stays silent on thread resolution while another blocking finding is open", async () => {
+    const h = makeHarness({
+      threads: { total: 2, unresolved: 1, botTotal: 2, botUnresolved: 1, botUnresolvedBlocking: 1 },
+    });
+    await h.reviewer.reconsiderAutoReleaseNotes(1, "acme", "app", 7);
+    expect(h.posted).toEqual([]);
+    expect(h.chatCalls).toBe(0);
   });
 
   it("stays silent on a repo with no CI at all", async () => {

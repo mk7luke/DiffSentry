@@ -372,7 +372,8 @@ to make it take effect.
 ### Automatic release notes on a green PR
 
 Off by default. Turn it on and DiffSentry posts release notes without being
-asked, once every check on the PR's head commit has passed:
+asked, once every check on the PR's head commit has passed and no blocking
+finding of its own is still open:
 
 ```yaml
 release_notes:
@@ -386,12 +387,15 @@ sanitiser, same heading. Only the trigger differs.
   statuses are both counted, because a PR routinely has some of each and
   reading only one list ignores half the pipeline. `neutral` and `skipped`
   count as passes, matching branch protection.
-- **DiffSentry's own checks are excluded.** `DiffSentry` and
-  `DiffSentry / Pre-Merge` do not count toward the verdict. Release notes
-  describe what a PR does, not whether it is approved, so open findings do not
-  hold them back. Since the `DiffSentry` check goes red while a critical
-  or major finding is unresolved, counting it would mean notes never arrive on
-  the PRs most likely to need them.
+- **DiffSentry's own checks are excluded from that count.** `DiffSentry` and
+  `DiffSentry / Pre-Merge` do not count toward the CI verdict — counting a
+  status the app writes itself would let it tip its own aggregate green and
+  re-enter the same path.
+- **Unresolved blocking findings hold the notes.** An open `critical` or
+  `major` DiffSentry thread means the PR is about to change, and notes posted
+  next to it read like a sign-off on it. Minor and trivial never block, here as
+  everywhere else. Resolving the last blocking thread is itself a trigger, so
+  the notes arrive then rather than waiting for a new commit.
 - **A PR with no CI never triggers.** Nothing passed, so nothing fires.
 - **One comment per PR.** A later push that goes green rewrites it in place
   rather than stacking a second one, and re-deliveries of the same event are
@@ -708,8 +712,8 @@ GitHub webhook
 | `issue_comment` | `created` (on an issue) | `@bot` issue commands (summary / plan / chat / pause / resume / learn) |
 | `issue_comment` | `edited` | Finishing-Touches checkbox click handler |
 | `pull_request_review_comment` | `created` | `@bot` chat commands on review threads |
-| `pull_request_review_thread` | `resolved` | Clear the stale `DiffSentry` commit status once every thread it opened is resolved |
-| `check_suite` | `completed` | Re-read every check on the head commit; post release notes if they have all passed and `release_notes.auto` is on |
+| `pull_request_review_thread` | `resolved` | Clear the stale `DiffSentry` commit status once every thread it opened is resolved; re-evaluate automatic release notes now that a blocking finding may have closed |
+| `check_suite` | `completed` | Re-read every check on the head commit; post release notes if they have all passed, no blocking finding is open, and `release_notes.auto` is on |
 | `status` | any non-pending | Same, for repos whose CI writes legacy commit statuses rather than check runs |
 
 ## Environment variables

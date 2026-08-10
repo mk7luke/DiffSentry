@@ -33,6 +33,7 @@ function makeDeps(overrides: Partial<WebhookDispatchDeps> = {}): WebhookDispatch
       getInstallationOctokit: async () => {
         throw new Error("not used");
       },
+      reconsiderAutoReleaseNotes: async () => {},
     } as unknown as WebhookDispatchDeps["reviewer"],
     ...overrides,
   };
@@ -245,6 +246,31 @@ describe("webhook gate — review thread resolution", () => {
     expect(refreshed).toEqual([{ owner: "acme", repo: "app", pr: 7 }]);
   });
 
+  it("re-evaluates automatic release notes when a thread is resolved", async () => {
+    // Resolving the last blocking finding is the other way a PR becomes eligible
+    // for notes, and on most PRs it is the only one left: the checks went green
+    // while the findings were still open, and the status this sync writes is
+    // dropped by the `status` branch below.
+    const reconsiderAutoReleaseNotes = vi.fn().mockResolvedValue(undefined);
+    const { deps } = makeRefreshDeps();
+    (deps.reviewer as any).reconsiderAutoReleaseNotes = reconsiderAutoReleaseNotes;
+
+    await dispatchWebhookEvent(deps, "pull_request_review_thread", resolvedPayload());
+    await settle();
+
+    expect(reconsiderAutoReleaseNotes).toHaveBeenCalledWith(1, "acme", "app", 7);
+  });
+
+  it("still answers 202 when the release-notes re-evaluation fails", async () => {
+    const { deps } = makeRefreshDeps();
+    (deps.reviewer as any).reconsiderAutoReleaseNotes = async () => {
+      throw new Error("503");
+    };
+    const res = await dispatchWebhookEvent(deps, "pull_request_review_thread", resolvedPayload());
+    await settle();
+    expect(res.status).toBe(202);
+  });
+
   it("ignores a payload with no installation", async () => {
     const { deps, refreshed } = makeRefreshDeps();
     const res = await dispatchWebhookEvent(
@@ -292,7 +318,8 @@ describe("pull_request_review_thread", () => {
     // The direction the old handler ignored on purpose. Now that the status is
     // derived from live threads, re-opening one must be able to red the check.
     const syncReviewCommitStatus = vi.fn().mockResolvedValue(true);
-    const deps = makeDeps({ reviewer: { syncReviewCommitStatus } as any });
+    const reconsiderAutoReleaseNotes = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({ reviewer: { syncReviewCommitStatus, reconsiderAutoReleaseNotes } as any });
 
     const res = await dispatchWebhookEvent(deps, "pull_request_review_thread", threadPayload("unresolved"));
     await settle();
@@ -303,7 +330,8 @@ describe("pull_request_review_thread", () => {
 
   it("still syncs when a thread is resolved", async () => {
     const syncReviewCommitStatus = vi.fn().mockResolvedValue(true);
-    const deps = makeDeps({ reviewer: { syncReviewCommitStatus } as any });
+    const reconsiderAutoReleaseNotes = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({ reviewer: { syncReviewCommitStatus, reconsiderAutoReleaseNotes } as any });
 
     await dispatchWebhookEvent(deps, "pull_request_review_thread", threadPayload("resolved"));
     await settle();
@@ -313,7 +341,8 @@ describe("pull_request_review_thread", () => {
 
   it("ignores other thread actions", async () => {
     const syncReviewCommitStatus = vi.fn();
-    const deps = makeDeps({ reviewer: { syncReviewCommitStatus } as any });
+    const reconsiderAutoReleaseNotes = vi.fn();
+    const deps = makeDeps({ reviewer: { syncReviewCommitStatus, reconsiderAutoReleaseNotes } as any });
 
     const res = await dispatchWebhookEvent(deps, "pull_request_review_thread", threadPayload("edited"));
     await settle();

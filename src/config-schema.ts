@@ -228,7 +228,7 @@ export const REPO_CONFIG_SCHEMA: JsonSchema = {
       properties: {
         auto: {
           type: "boolean",
-          description: "Post release notes automatically once every check on the head commit passes (default false).",
+          description: "Post release notes automatically once every check on the head commit passes and no blocking finding is unresolved (default false).",
         },
       },
     },

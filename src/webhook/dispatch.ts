@@ -80,6 +80,12 @@ export interface WebhookReviewer {
     repo: string,
     headSha: string,
   ): Promise<void>;
+  reconsiderAutoReleaseNotes(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+  ): Promise<void>;
   getInstallationOctokit(installationId: number): Promise<import("@octokit/rest").Octokit>;
 }
 
@@ -476,6 +482,14 @@ export async function dispatchWebhookEvent(
     logger.info({ owner, repo, pr: pullNumber, action: payload.action }, "Review thread resolution changed, syncing review status");
     reviewer.syncReviewCommitStatus(installationId, owner, repo, pullNumber).catch((err) => {
       logger.error({ err, owner, repo, pr: pullNumber }, "Review status sync failed");
+    });
+    // Resolving the last blocking finding is the other way a PR becomes eligible
+    // for automatic release notes, and it's the common one: the checks usually
+    // went green long before anyone got to the findings. The status this sync
+    // writes can't carry that news, since `status` deliveries for our own
+    // context are dropped below.
+    reviewer.reconsiderAutoReleaseNotes(installationId, owner, repo, pullNumber).catch((err) => {
+      logger.error({ err, owner, repo, pr: pullNumber }, "Automatic release notes failed");
     });
     return { status: 202, body: { status: "accepted" } };
   }

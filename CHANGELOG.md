@@ -13,9 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.diffsentry.yaml` and DiffSentry drafts the same notes `@diffsentry
   release-notes` produces, once every check on the PR's head commit has passed,
   with no comment needed. Check runs and legacy commit statuses both count;
-  DiffSentry's own `DiffSentry` and `DiffSentry / Pre-Merge` checks do not, so
-  open findings do not hold the notes back. One comment per PR, rewritten in
-  place when a later push goes green. Off by default.
+  DiffSentry's own `DiffSentry` and `DiffSentry / Pre-Merge` checks do not.
+  Unresolved critical and major findings hold the notes back, and resolving the
+  last one is itself a trigger — minor and trivial never block. One comment per
+  PR, rewritten in place when a later push goes green. Off by default.
   - **Action required for existing installs:** the App must be subscribed to
     the **Check suite** and **Status** webhook events and hold the
     **Checks: Read** permission. Events an App is not subscribed to are never

@@ -59,13 +59,17 @@ const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
  * These are deliberately left out of the verdict, and the reasoning is worth
  * writing down because counting them looks more rigorous than it is.
  *
- * The `DiffSentry` status carries the app's own review verdict, and since the
- * thread gate landed it sits at `failure` for as long as a critical or major
- * finding is unresolved. Counting it would mean release notes only ever appear
- * on a PR whose every blocking finding has been closed. That is a merge gate.
- * Release notes describe what a PR does; they are not an approval of it, and
- * withholding them behind our own verdict makes the feature self-referential:
- * DiffSentry deciding whether DiffSentry may speak.
+ * The `DiffSentry` status carries the app's own review verdict, which is more
+ * than the findings: it also goes red for PR-level findings that opened no
+ * thread, and it is the app's opinion of whether the PR should merge. That is a
+ * merge gate, and it is not what this function is for — callers ask it "did the
+ * repo's CI pass", and folding our verdict in would make the answer to that
+ * question self-referential.
+ *
+ * This is not the same as saying nothing of ours may gate release notes. The
+ * caller applies its own check on unresolved blocking threads afterwards
+ * (`maybePostAutoReleaseNotes`), which is the part of the verdict that has to
+ * hold notes back. It just isn't expressible as a check on a SHA.
  *
  * There is a mechanical reason too. Our status is the one check on the SHA that
  * our own actions move: resolving a thread runs the status sync, which writes

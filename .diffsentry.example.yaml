@@ -180,13 +180,17 @@ issues:
 
 # Automatic release notes. Off by default. With `auto: true`, DiffSentry drafts
 # the same notes `@bot release-notes` produces and posts them on its own, once
-# every check on the PR's head commit has passed.
+# every check on the PR's head commit has passed and no blocking finding of its
+# own is still open.
 #
 # "Every check" means the repo's own CI: check runs and legacy commit statuses
 # are both counted, and DiffSentry's own `DiffSentry` and `DiffSentry / Pre-Merge`
-# checks are excluded. Notes are about what the PR does, not whether it is
-# approved, so open findings do not hold them back. A PR with no CI at all
-# never triggers: there is nothing to have passed.
+# checks are excluded. A PR with no CI at all never triggers: there is nothing
+# to have passed.
+#
+# Unresolved critical and major findings hold the notes back — resolving the
+# last one is itself a trigger, so they arrive then. Minor and trivial never
+# block.
 #
 # One comment per PR, rewritten in place when a later push goes green, so a
 # long-lived branch does not collect a stack of them.

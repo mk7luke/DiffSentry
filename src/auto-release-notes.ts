@@ -82,7 +82,7 @@ export function renderAutoReleaseNotes(opts: {
     "",
     sanitiseReleaseNotes(opts.notes),
     "",
-    `<sub>Drafted automatically once every check on \`${opts.headSha.slice(0, 7)}\` passed, and rewritten in place on later commits. ` +
+    `<sub>Drafted automatically once every check on \`${opts.headSha.slice(0, 7)}\` passed with no blocking findings open, and rewritten in place on later commits. ` +
       `Re-run by hand with \`@${opts.botName} release-notes\`, or set \`release_notes.auto: false\` in \`.diffsentry.yaml\` to stop.</sub>`,
   ].join("\n");
 }
