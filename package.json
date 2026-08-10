@@ -59,7 +59,7 @@
     "@types/express": "^5.0.0",
     "@types/js-yaml": "^4.0.9",
     "@types/minimatch": "^5.1.2",
-    "@types/node": "^22.13.0",
+    "@types/node": "^26.1.2",
     "eslint": "^10.8.1",
     "tsx": "^4.23.5",
     "typescript": "^5.7.0",
