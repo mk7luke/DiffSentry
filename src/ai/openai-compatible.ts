@@ -61,7 +61,16 @@ export class OpenAICompatibleProvider implements AIProvider {
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_AI_REQUEST_TIMEOUT_MS;
   }
 
-  /** The `reasoning_effort` field to merge into a request, if any. */
+  /** The `reasoning_effort` field to merge into a request, if any.
+   *
+   *  Applied to EVERY request shape — review, walkthrough, chat, issue chat and
+   *  complete. `OpenAIProvider` scopes its equivalent to JSON surfaces because
+   *  it *infers* the effort from the model family and only wants that guess
+   *  where hidden reasoning is known to be wasted. Here the operator has
+   *  declared an effort for this specific endpoint, so honouring it everywhere
+   *  is what they asked for. Applying it selectively would also be incoherent
+   *  with `tokenBudgetFor`, which widens the budget for every one of those
+   *  shapes. */
   private reasoningExtras(): Record<string, unknown> {
     if (!this.reasoningEffort || this.reasoningEffortRejected) return {};
     return { reasoning_effort: this.reasoningEffort };
@@ -204,6 +213,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         { role: "system", content: system },
         { role: "user", content: user },
       ],
+      ...this.reasoningExtras(),
     });
 
     const text = response.choices[0]?.message?.content || "";
@@ -226,14 +236,11 @@ export class OpenAICompatibleProvider implements AIProvider {
    *  fails open and keeps every finding. Give reasoning its own headroom while
    *  still honouring the caller's figure as a floor.
    *
-   *  The effort goes on EVERY complete() call, not just the JSON ones. The
-   *  non-JSON caller is reviewer.ts's connectivity probe ("reply with the
-   *  single word: pong", maxTokens 16) — exactly the request that should not
-   *  sit through a full chain-of-thought, and one whose measured latency is
-   *  reported as a health signal. This is the one place we deliberately go
-   *  wider than `OpenAIProvider.structuredOutputExtras`, which is scoped to
-   *  JSON surfaces: there the effort is inferred per model family, whereas
-   *  here the operator has declared it for this endpoint. */
+   *  The effort goes on EVERY complete() call, not just the JSON ones — see
+   *  `reasoningExtras` for why it is endpoint-wide here. The non-JSON caller is
+   *  reviewer.ts's connectivity probe ("reply with the single word: pong",
+   *  maxTokens 16): exactly the request that should not sit through a full
+   *  chain-of-thought, and one whose measured latency is a health signal. */
   async complete(system: string, user: string, opts?: { maxTokens?: number; json?: boolean }): Promise<string> {
     const requested = opts?.maxTokens ?? 512;
     const response = await this.create("complete", {
@@ -263,6 +270,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         { role: "system", content: system },
         { role: "user", content: user },
       ],
+      ...this.reasoningExtras(),
     });
 
     const text = response.choices[0]?.message?.content || "";

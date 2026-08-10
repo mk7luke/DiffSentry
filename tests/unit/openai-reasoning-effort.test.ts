@@ -62,6 +62,16 @@ describe("OpenAIProvider initial reasoning_effort guess", () => {
     expect(await effortSentFor("gpt-5-mini")).toBe("minimal");
   });
 
+  // Comparing versions as decimals makes Number("5.10") === 5.1, which sorts
+  // gpt-5.10 BELOW gpt-5.5 and hands it the retired "minimal" alphabet.
+  it("orders two-digit minor versions above 5.5, not below", async () => {
+    expect(await effortSentFor("gpt-5.10")).toBe("none");
+  });
+
+  it("keeps later majors on the newer alphabet", async () => {
+    expect(await effortSentFor("gpt-6")).toBe("none");
+  });
+
   it("uses 'low' for the o-series, which rejects 'minimal'", async () => {
     expect(await effortSentFor("o4-mini")).toBe("low");
   });

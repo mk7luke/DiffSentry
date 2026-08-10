@@ -63,16 +63,27 @@ export class OpenAIProvider implements AIProvider {
 
   private get isGpt5OrLater(): boolean {
     const version = this.gptVersion;
-    return version !== null && version >= 5;
+    return version !== null && version[0] >= 5;
   }
 
-  /** `gpt-5.6-terra` → 5.6, `gpt-5.4` → 5.4, `gpt-5-mini` → 5. Null for
-   *  non-GPT ids. Used to pick a starting `reasoning_effort` that the family
-   *  actually accepts — the alphabet shifted at 5.5 (see below). */
-  private get gptVersion(): number | null {
+  /** `gpt-5.6-terra` → [5, 6], `gpt-5.10` → [5, 10], `gpt-5-mini` → [5, 0].
+   *  Null for non-GPT ids.
+   *
+   *  Deliberately a (major, minor) pair rather than a decimal: `Number("5.10")`
+   *  is 5.1, which would sort gpt-5.10 *below* gpt-5.5 and hand a future
+   *  two-digit-minor release the wrong effort alphabet. */
+  private get gptVersion(): [number, number] | null {
     const gpt = this.model.toLowerCase().match(/^gpt-(\d+)(?:\.(\d+))?/);
     if (!gpt) return null;
-    return Number(gpt[2] ? `${gpt[1]}.${gpt[2]}` : gpt[1]);
+    return [Number(gpt[1]), gpt[2] ? Number(gpt[2]) : 0];
+  }
+
+  /** True from gpt-5.5 onward, where `reasoning_effort: "minimal"` stopped
+   *  being accepted in favour of `"none"`. Later majors inherit the newer
+   *  alphabet; a wrong guess is still caught by the retry below. */
+  private get prefersNoneEffort(): boolean {
+    const [major, minor] = this.gptVersion ?? [5, 0];
+    return major > 5 || (major === 5 && minor >= 5);
   }
 
   private get tokenParam(): "max_completion_tokens" | "max_tokens" {
@@ -119,7 +130,7 @@ export class OpenAIProvider implements AIProvider {
       // The retry below recovers from a wrong guess, but only after burning a
       // round-trip on the first call of every process — so start from the value
       // the family actually takes.
-      return { reasoning_effort: (this.gptVersion ?? 5) >= 5.5 ? "none" : "minimal" };
+      return { reasoning_effort: this.prefersNoneEffort ? "none" : "minimal" };
     }
     if (this.isOSeries) return { reasoning_effort: "low" };
     return {};

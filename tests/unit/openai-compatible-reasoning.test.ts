@@ -117,6 +117,22 @@ describe("openai-compatible reasoning_effort", () => {
     expect(received[0]).not.toHaveProperty("response_format");
   });
 
+  // tokenBudgetFor widens the budget for chat too, so omitting the effort there
+  // would leave the model reasoning at its default inside a wider cap.
+  it("sends the effort on the chat surfaces as well", async () => {
+    const p = provider("low");
+    await p.chat(ctx(), "why did this change?");
+    expect(received[0].reasoning_effort).toBe("low");
+    expect(received[0].max_tokens).toBe(8192);
+
+    received.length = 0;
+    await p.chatIssue(
+      { owner: "o", repo: "r", issueNumber: 1, title: "t", body: "", state: "open", labels: [], url: "u", comments: [] },
+      "hi",
+    );
+    expect(received[0].reasoning_effort).toBe("low");
+  });
+
   it("leaves complete()'s budget alone when no reasoning effort is configured", async () => {
     await provider().complete("sys", "usr", { json: true, maxTokens: 1024 });
     expect(received[0].max_tokens).toBe(1024);
