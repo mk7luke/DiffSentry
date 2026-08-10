@@ -224,7 +224,16 @@ export class OpenAICompatibleProvider implements AIProvider {
    *  number is the combined CoT+output budget, so the hidden reasoning eats it
    *  whole and the caller parses an empty string — for verify.ts that silently
    *  fails open and keeps every finding. Give reasoning its own headroom while
-   *  still honouring the caller's figure as a floor. */
+   *  still honouring the caller's figure as a floor.
+   *
+   *  The effort goes on EVERY complete() call, not just the JSON ones. The
+   *  non-JSON caller is reviewer.ts's connectivity probe ("reply with the
+   *  single word: pong", maxTokens 16) — exactly the request that should not
+   *  sit through a full chain-of-thought, and one whose measured latency is
+   *  reported as a health signal. This is the one place we deliberately go
+   *  wider than `OpenAIProvider.structuredOutputExtras`, which is scoped to
+   *  JSON surfaces: there the effort is inferred per model family, whereas
+   *  here the operator has declared it for this endpoint. */
   async complete(system: string, user: string, opts?: { maxTokens?: number; json?: boolean }): Promise<string> {
     const requested = opts?.maxTokens ?? 512;
     const response = await this.create("complete", {
@@ -234,7 +243,8 @@ export class OpenAICompatibleProvider implements AIProvider {
         { role: "system", content: system },
         { role: "user", content: user },
       ],
-      ...(opts?.json ? { response_format: { type: "json_object" as const }, ...this.reasoningExtras() } : {}),
+      ...(opts?.json ? { response_format: { type: "json_object" as const } } : {}),
+      ...this.reasoningExtras(),
     });
     this.track(response.usage, "complete");
     return response.choices[0]?.message?.content || "";

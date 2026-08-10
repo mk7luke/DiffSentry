@@ -108,6 +108,15 @@ describe("openai-compatible reasoning_effort", () => {
     expect(received[0].reasoning_effort).toBe("low");
   });
 
+  it("sends the effort on non-JSON complete() too — the connectivity probe", async () => {
+    // reviewer.ts probes with { maxTokens: 16 } and no json flag, then reports
+    // the round-trip as a health latency. Omitting the effort there would leave
+    // the probe reasoning at the model's default.
+    await provider("low").complete("probe", "ping", { maxTokens: 16 });
+    expect(received[0].reasoning_effort).toBe("low");
+    expect(received[0]).not.toHaveProperty("response_format");
+  });
+
   it("leaves complete()'s budget alone when no reasoning effort is configured", async () => {
     await provider().complete("sys", "usr", { json: true, maxTokens: 1024 });
     expect(received[0].max_tokens).toBe(1024);
