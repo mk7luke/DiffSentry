@@ -195,6 +195,34 @@ describe("automatic release notes", () => {
     expect(h.posted).toHaveLength(1);
   });
 
+  it("holds while the review itself is still running", async () => {
+    // The race the thread gate alone cannot see. CI starts when the PR opens and
+    // the review starts when the webhook lands, so the checks routinely go green
+    // mid-review — at which point no thread has been opened yet and the gate
+    // below reads a zero that means "not yet", not "none".
+    const h = makeHarness({ statuses: [{ context: "DiffSentry", state: "pending" }] });
+    await h.reviewer.handleChecksCompleted(1, "acme", "app", SHA);
+    expect(h.posted).toEqual([]);
+    expect(h.chatCalls).toBe(0);
+  });
+
+  it("posts once the review has published a verdict", async () => {
+    for (const state of ["success", "failure"]) {
+      const h = makeHarness({ statuses: [{ context: "DiffSentry", state }] });
+      await h.reviewer.handleChecksCompleted(1, "acme", "app", SHA);
+      expect(h.posted).toHaveLength(1);
+    }
+  });
+
+  it("does not hold when we never wrote a status at all", async () => {
+    // Absence is not "not yet". A paused PR, or one with
+    // `reviews.commit_status: false`, has no review coming — holding on that
+    // would be a permanent silent mute rather than a wait.
+    const h = makeHarness({ statuses: [] });
+    await h.reviewer.handleChecksCompleted(1, "acme", "app", SHA);
+    expect(h.posted).toHaveLength(1);
+  });
+
   it("holds while one of our blocking findings is unresolved", async () => {
     // Notes drafted over an open critical or major finding describe a PR that is
     // about to change, and read as a sign-off on the finding they sit next to.
@@ -222,6 +250,29 @@ describe("automatic release notes", () => {
     });
     await h.reviewer.handleChecksCompleted(1, "acme", "app", SHA);
     expect(h.posted).toHaveLength(1);
+  });
+
+  it("posts when the review publishes its verdict, checks having gone green first", async () => {
+    // The other half of the hold: something has to deliver the news that the
+    // review finished, and it cannot be the `status` that finishing writes —
+    // the dispatcher drops our own context on purpose. `writeReviewStatus` is
+    // both ends of a review pass, so it re-asks directly.
+    const h = makeHarness();
+    (h.reviewer as unknown as { github: Record<string, unknown> }).github.setCommitStatus =
+      async () => {};
+
+    await (h.reviewer as unknown as {
+      writeReviewStatus: (...a: unknown[]) => Promise<void>;
+    }).writeReviewStatus(
+      1, "acme", "app", SHA, 7,
+      { approval: "APPROVE", successDescription: "Looks good!" },
+      undefined,
+      () => {},
+    );
+    await settle();
+
+    expect(h.posted).toHaveLength(1);
+    expect(h.posted[0].body).toContain(headMarker(SHA));
   });
 
   it("posts on thread resolution, when the checks went green earlier", async () => {

@@ -631,7 +631,12 @@ export class Reviewer {
   }
 
   /**
-   * Entry point for `pull_request_review_thread`, alongside the status sync.
+   * Re-ask the release-notes question for a PR, at its current head.
+   *
+   * Two callers, for the two gates that are not about CI: the webhook when a
+   * review thread is resolved, and `writeReviewStatus` when a review pass
+   * publishes its verdict. Both are moments when a hold this app placed on the
+   * notes may have just lifted, and neither is expressible as a check on a SHA.
    *
    * Without this the thread gate would be a mute button rather than a delay. On
    * the ordinary PR the checks go green first and the findings are addressed
@@ -734,6 +739,29 @@ export class Reviewer {
         return;
       }
 
+      // A review still in flight has no findings *yet*, which is not the same
+      // as having none — and the thread gate below cannot tell the two apart.
+      //
+      // The two clocks are independent: CI starts when the PR opens and the
+      // review starts when the webhook lands, so on any PR whose diff is big
+      // enough to slow the model, the checks go green first. Without this the
+      // notes post into that window, the thread count reads zero because no
+      // thread has been opened, and the findings arrive underneath them.
+      //
+      // `pending` on our own status is the signal, because the review pass
+      // writes it as its first act and replaces it with a verdict as its last.
+      // Absence deliberately does *not* hold: no status at all means the review
+      // was never going to run for this commit (paused PR, `commit_status:
+      // false`, a repo we skipped), and holding on that would be a silent
+      // permanent mute rather than a wait. It is read out of `signals`, which is
+      // already in hand — `assessChecks` filters our status out of the verdict,
+      // it does not drop it from the payload.
+      const reviewStatus = signals.statuses.find((s) => s.context === REVIEW_STATUS_CONTEXT)?.state;
+      if (reviewStatus === "pending") {
+        log.debug("Review is still in progress, holding release notes");
+        return;
+      }
+
       // Our own findings, unlike our own commit status, do gate the notes.
       //
       // The status is excluded from `assessChecks` for a reason that doesn't
@@ -784,6 +812,10 @@ export class Reviewer {
    * — the empty-diff path hard-coding `success` is exactly the bug this
    * whole change fixes, and duplicated logic is duplicated risk of that
    * regression coming back in only one of the two spots.
+   *
+   * Those two sites are also the only ways a review pass ends, which is why the
+   * automatic release notes are reconsidered from here — see the tail of the
+   * method.
    *
    * When the thread fetch fails we write nothing at all, whether or not a
    * verdict is in hand. Falling back to the verdict looks safe for
@@ -840,6 +872,20 @@ export class Reviewer {
       installationId, owner, repo, headSha,
       status.state, status.description, REVIEW_STATUS_CONTEXT, signal
     ).catch(onStatusError);
+
+    // The review has just published its verdict for this commit, clearing the
+    // `pending` that holds the automatic release notes. Nothing else can deliver
+    // that news: the `status` this very call raises carries our own context, and
+    // the dispatcher drops those on purpose so the app can't re-read a commit in
+    // response to an event it raised.
+    //
+    // Not awaited, and deliberately not passed `signal`. Awaiting would hang the
+    // tail of the review pass on a model call, and the review's abort signal
+    // fires when the PR closes — which has nothing to say about notes already
+    // being drafted. `runWithCostContext` forks a fresh store, so this keeps its
+    // own attribution rather than inheriting the review's.
+    void this.reconsiderAutoReleaseNotes(installationId, owner, repo, pullNumber)
+      .catch((err) => log.warn({ err }, "Failed to reconsider automatic release notes"));
   }
 
   // ─── Abort on PR Close ───────────────────────────────────────

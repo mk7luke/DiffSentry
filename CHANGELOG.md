@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with no comment needed. Check runs and legacy commit statuses both count;
   DiffSentry's own `DiffSentry` and `DiffSentry / Pre-Merge` checks do not.
   Unresolved critical and major findings hold the notes back, and resolving the
-  last one is itself a trigger — minor and trivial never block. One comment per
+  last one is itself a trigger — minor and trivial never block. A review still
+  in progress holds them too, since CI regularly goes green mid-review and a
+  finding that has not been posted yet cannot gate anything. One comment per
   PR, rewritten in place when a later push goes green. Off by default.
   - **Action required for existing installs:** the App must be subscribed to
     the **Check suite** and **Status** webhook events and hold the

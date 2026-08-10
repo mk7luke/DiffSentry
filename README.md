@@ -372,8 +372,8 @@ to make it take effect.
 ### Automatic release notes on a green PR
 
 Off by default. Turn it on and DiffSentry posts release notes without being
-asked, once every check on the PR's head commit has passed and no blocking
-finding of its own is still open:
+asked, once every check on the PR's head commit has passed, its own review has
+finished, and no blocking finding of that review is still open:
 
 ```yaml
 release_notes:
@@ -391,6 +391,15 @@ sanitiser, same heading. Only the trigger differs.
   `DiffSentry / Pre-Merge` do not count toward the CI verdict — counting a
   status the app writes itself would let it tip its own aggregate green and
   re-enter the same path.
+- **A review in progress holds the notes.** CI starts when the PR opens and the
+  review starts when the webhook lands, so on a PR large enough to slow the
+  model the checks go green mid-review — and a finding that has not been posted
+  yet cannot gate anything. While the `DiffSentry` status reads `pending` the
+  notes wait, and the review publishing its verdict is itself a trigger. No
+  status at all does *not* hold: a paused PR, or one with
+  `reviews.commit_status: false`, has no review coming, and waiting on it would
+  be a permanent mute rather than a delay. A review that crashes mid-pass leaves
+  `pending` behind; `@bot review` clears it.
 - **Unresolved blocking findings hold the notes.** An open `critical` or
   `major` DiffSentry thread means the PR is about to change, and notes posted
   next to it read like a sign-off on it. Minor and trivial never block, here as
@@ -713,7 +722,7 @@ GitHub webhook
 | `issue_comment` | `edited` | Finishing-Touches checkbox click handler |
 | `pull_request_review_comment` | `created` | `@bot` chat commands on review threads |
 | `pull_request_review_thread` | `resolved` | Clear the stale `DiffSentry` commit status once every thread it opened is resolved; re-evaluate automatic release notes now that a blocking finding may have closed |
-| `check_suite` | `completed` | Re-read every check on the head commit; post release notes if they have all passed, no blocking finding is open, and `release_notes.auto` is on |
+| `check_suite` | `completed` | Re-read every check on the head commit; post release notes if they have all passed, the review has finished, no blocking finding is open, and `release_notes.auto` is on |
 | `status` | any non-pending | Same, for repos whose CI writes legacy commit statuses rather than check runs |
 
 ## Environment variables

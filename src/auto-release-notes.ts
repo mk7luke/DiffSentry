@@ -2,8 +2,8 @@ import { sanitiseReleaseNotes } from "./release-notes.js";
 import type { RepoConfig } from "./types.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Release notes posted without anyone asking, once every check on the PR's head
-// commit has passed.
+// Release notes posted without anyone asking, once the PR's head commit has a
+// finished review, no blocking finding left open, and every check passed.
 //
 // The command path (`@bot release-notes`) and this one share everything that
 // decides *what* the notes say: the prompt and the sanitiser both live in
@@ -82,7 +82,7 @@ export function renderAutoReleaseNotes(opts: {
     "",
     sanitiseReleaseNotes(opts.notes),
     "",
-    `<sub>Drafted automatically once every check on \`${opts.headSha.slice(0, 7)}\` passed with no blocking findings open, and rewritten in place on later commits. ` +
+    `<sub>Drafted automatically once the review of \`${opts.headSha.slice(0, 7)}\` finished with no blocking findings open and every check passed, and rewritten in place on later commits. ` +
       `Re-run by hand with \`@${opts.botName} release-notes\`, or set \`release_notes.auto: false\` in \`.diffsentry.yaml\` to stop.</sub>`,
   ].join("\n");
 }
