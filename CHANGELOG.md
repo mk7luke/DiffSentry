@@ -14,10 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release-notes` produces, once every check on the PR's head commit has passed,
   with no comment needed. Check runs and legacy commit statuses both count;
   DiffSentry's own `DiffSentry` and `DiffSentry / Pre-Merge` checks do not.
-  Unresolved critical and major findings hold the notes back, and resolving the
-  last one is itself a trigger — minor and trivial never block. A review still
-  in progress holds them too, since CI regularly goes green mid-review and a
-  finding that has not been posted yet cannot gate anything. One comment per
+  Any unresolved review thread holds the notes back, at every severity and from
+  any author, and resolving the last one is itself a trigger. ("Minor and
+  trivial never block" governs the `DiffSentry` check; these notes are a summary
+  of a finished PR, not a merge gate.) A review still in progress holds them
+  too, since CI regularly goes green mid-review and a finding that has not been
+  posted yet cannot gate anything — as does a review that came back red, which
+  is the only place a finding that named no file is visible. One comment per
   PR, rewritten in place when a later push goes green. Off by default.
   - **Action required for existing installs:** the App must be subscribed to
     the **Check suite** and **Status** webhook events and hold the
@@ -26,6 +29,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The sticky 📌 Status comment no longer reads 🟢 Approved above its own
+  "Unresolved threads: 2" row. It was showing the verdict of the last review
+  pass, which describes only the diff that pass read — so a follow-up push
+  touching two files legitimately came back `APPROVE` while the findings from
+  the previous pass sat open. The card now shows the PR's verdict: 🔴 while a
+  blocking finding is open, 🟡 while any other thread is unresolved, 🟢 only on
+  a clean thread list, with a line saying which it is when that differs from the
+  pass's own verdict.
+- Automatic release notes no longer post underneath a 🔴 Changes requested
+  status. The gate read our own commit status only for `pending`, so a red
+  verdict — including a `REQUEST_CHANGES` resting on a PR-level finding, which
+  opens no thread and was therefore invisible to the thread gate — let the notes
+  through. Red now holds them, and both writers of that status re-ask once it
+  goes green.
 - The `DiffSentry` check no longer flips to passing when a branch-update merge
   commit produces an empty diff. Clicking "Update branch" made every file's
   patch identical to what was already reviewed, so the review pass took its

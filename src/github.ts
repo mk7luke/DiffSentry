@@ -29,6 +29,15 @@ export interface ReviewThreadSummary {
 }
 
 /**
+ * The all-zero summary, for callers whose thread read failed and who need a
+ * shape to carry on with. Frozen: it is shared, and a caller incrementing it in
+ * place would corrupt every later fallback in the process.
+ */
+export const EMPTY_THREAD_SUMMARY: Readonly<ReviewThreadSummary> = Object.freeze({
+  total: 0, unresolved: 0, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0,
+});
+
+/**
  * Whether DiffSentry's review feedback has been fully addressed — it opened at
  * least one thread and every one of them is now resolved.
  *

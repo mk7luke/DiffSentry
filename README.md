@@ -128,7 +128,11 @@ Everything below documents DiffSentry in full. Jump to a section:
   list, matching CodeRabbit.
 - **📌 Sticky pinned status comment** — separate top-of-PR comment with
   verdict, risk score + sparkline of recent runs, unresolved threads,
-  failing/pending checks, and files reviewed. Upserted every review pass.
+  failing/pending checks, and files reviewed. Upserted every review pass. The
+  verdict is the PR's, not the pass's: a pass that reviews a two-file follow-up
+  push and finds nothing still renders 🔴 while a blocking finding from an
+  earlier pass is open, and 🟡 while any other thread is unresolved. Only a
+  clean thread list renders 🟢 Approved.
 - **🧠 Prior discussions on this file** — inline comments append a collapse
   linking to bot comments on the same path/near-line in prior merged PRs.
   Builds institutional memory.
@@ -373,7 +377,7 @@ to make it take effect.
 
 Off by default. Turn it on and DiffSentry posts release notes without being
 asked, once every check on the PR's head commit has passed, its own review has
-finished, and no blocking finding of that review is still open:
+finished green, and every review thread on the PR is resolved:
 
 ```yaml
 release_notes:
@@ -390,7 +394,15 @@ sanitiser, same heading. Only the trigger differs.
 - **DiffSentry's own checks are excluded from that count.** `DiffSentry` and
   `DiffSentry / Pre-Merge` do not count toward the CI verdict — counting a
   status the app writes itself would let it tip its own aggregate green and
-  re-enter the same path.
+  re-enter the same path. They are still read separately, below: excluding our
+  status from the sum stops it *greening* the aggregate, and reading it only to
+  hold the notes adds no such loop.
+- **A red DiffSentry verdict holds the notes.** While the `DiffSentry` status
+  reads `failure`, nothing is posted. This is the only place a
+  `REQUEST_CHANGES` resting on a PR-level finding is visible — such a finding
+  names no file, so it never becomes a thread and the thread rule below cannot
+  see it. Both writers of that status re-ask once it goes green, so coming back
+  from red is a trigger rather than a wait for the next push.
 - **A review in progress holds the notes.** CI starts when the PR opens and the
   review starts when the webhook lands, so on a PR large enough to slow the
   model the checks go green mid-review — and a finding that has not been posted
@@ -400,11 +412,14 @@ sanitiser, same heading. Only the trigger differs.
   `reviews.commit_status: false`, has no review coming, and waiting on it would
   be a permanent mute rather than a delay. A review that crashes mid-pass leaves
   `pending` behind; `@bot review` clears it.
-- **Unresolved blocking findings hold the notes.** An open `critical` or
-  `major` DiffSentry thread means the PR is about to change, and notes posted
-  next to it read like a sign-off on it. Minor and trivial never block, here as
-  everywhere else. Resolving the last blocking thread is itself a trigger, so
-  the notes arrive then rather than waiting for a new commit.
+- **Any unresolved thread holds the notes.** Every open thread counts, at every
+  severity, from anyone — ours and a human reviewer's alike. An open thread
+  means the PR is about to change, and notes posted next to it read like a
+  sign-off on it. "Minor and trivial never block" still governs the *merge*
+  gate: a nitpick never fails the `DiffSentry` check. Release notes are not a
+  merge gate, and holding them costs a delay rather than a block — resolving the
+  last thread is itself a trigger, so they arrive seconds later rather than
+  waiting for a new commit.
 - **A PR with no CI never triggers.** Nothing passed, so nothing fires.
 - **One comment per PR.** A later push that goes green rewrites it in place
   rather than stacking a second one, and re-deliveries of the same event are
@@ -721,8 +736,8 @@ GitHub webhook
 | `issue_comment` | `created` (on an issue) | `@bot` issue commands (summary / plan / chat / pause / resume / learn) |
 | `issue_comment` | `edited` | Finishing-Touches checkbox click handler |
 | `pull_request_review_comment` | `created` | `@bot` chat commands on review threads |
-| `pull_request_review_thread` | `resolved` | Clear the stale `DiffSentry` commit status once every thread it opened is resolved; re-evaluate automatic release notes now that a blocking finding may have closed |
-| `check_suite` | `completed` | Re-read every check on the head commit; post release notes if they have all passed, the review has finished, no blocking finding is open, and `release_notes.auto` is on |
+| `pull_request_review_thread` | `resolved` | Clear the stale `DiffSentry` commit status once every thread it opened is resolved; re-evaluate automatic release notes now that the last open thread may have closed |
+| `check_suite` | `completed` | Re-read every check on the head commit; post release notes if they have all passed, the review has finished green, no thread is unresolved, and `release_notes.auto` is on |
 | `status` | any non-pending | Same, for repos whose CI writes legacy commit statuses rather than check runs |
 
 ## Environment variables

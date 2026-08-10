@@ -214,3 +214,64 @@ export function resolveReviewStatus(input: {
   }
   return { state: "success", description: input.successDescription };
 }
+
+/** What the sticky Status card shows, once the PR's live threads are folded in. */
+export interface DisplayVerdict {
+  state: "APPROVE" | "COMMENT" | "REQUEST_CHANGES" | "PENDING";
+  /**
+   * Why the card differs from the verdict the pass itself reached. Unset when
+   * the two agree, which is the common case.
+   */
+  reason?: string;
+}
+
+/**
+ * The verdict the sticky Status card shows.
+ *
+ * Distinct from `resolveReviewStatus` on purpose: that one answers "may this
+ * merge?", where the documented rule is that nitpicks never block. This one
+ * answers "what does DiffSentry currently think of this PR?", and there an open
+ * thread of *any* severity means the conversation is not finished. A card
+ * reading 🟢 Approved above a row reading "Unresolved threads: 2" is the bug
+ * this exists to prevent — the two halves of the same card contradicted.
+ *
+ * The pass's own `approval` covers only the diff it just read. A pass over a
+ * two-file follow-up push legitimately returns `APPROVE` while the criticals
+ * from the previous pass sit open, so the threads have to outrank it:
+ *
+ * - an open blocking finding renders 🔴, matching the commit status,
+ * - any other unresolved thread renders 🟡 — not a merge blocker, but not a
+ *   sign-off either,
+ * - only a clean thread list lets `APPROVE` through as 🟢.
+ *
+ * Under `thread_gate: off` blocking threads stop being a merge gate, so they
+ * stop rendering 🔴 too — but they still hold the card off green, because that
+ * setting is about the check, not about pretending the threads are closed.
+ */
+export function resolveDisplayVerdict(input: {
+  approval?: "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
+  threads: ReviewThreadSummary;
+  gate?: ThreadGate;
+}): DisplayVerdict {
+  const { approval, threads } = input;
+  const blocking = (input.gate ?? "blocking") === "off" ? 0 : threads.botUnresolvedBlocking;
+  const plural = (n: number) => (n === 1 ? "" : "s");
+
+  let state: DisplayVerdict["state"];
+  let cause: string | undefined;
+  if (blocking > 0) {
+    state = "REQUEST_CHANGES";
+    cause = `${blocking} unresolved blocking finding${plural(blocking)} still open`;
+  } else if (approval === "REQUEST_CHANGES") {
+    state = "REQUEST_CHANGES";
+  } else if (threads.unresolved > 0) {
+    state = "COMMENT";
+    cause = `${threads.unresolved} unresolved thread${plural(threads.unresolved)} still open`;
+  } else {
+    state = approval ?? "PENDING";
+  }
+
+  // The note is worth showing only when it explains a difference. On a pass that
+  // reached the same verdict on its own, it would just restate the table.
+  return { state, reason: cause && approval && state !== approval ? cause : undefined };
+}

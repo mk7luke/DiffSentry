@@ -186,13 +186,16 @@ describe("automatic release notes", () => {
     expect(failed.posted).toEqual([]);
   });
 
-  it("posts even while DiffSentry's own check is red, when no thread accounts for it", async () => {
-    // The status alone is not the gate — it also goes red for PR-level findings
-    // that opened no thread, and counting it in `assessChecks` is what would let
-    // a status we wrote ourselves tip the aggregate green.
-    const h = makeHarness({ statuses: [{ context: "DiffSentry", state: "failure" }] });
-    await h.reviewer.handleChecksCompleted(1, "acme", "app", SHA);
-    expect(h.posted).toHaveLength(1);
+  it("holds while DiffSentry's own verdict is red, thread or no thread", async () => {
+    // The reported bug: a 🔴 Changes requested status with release notes posted
+    // underneath it. A REQUEST_CHANGES resting on a PR-level finding opens no
+    // thread at all, so the status is the only place the verdict is visible.
+    for (const state of ["failure", "error"]) {
+      const h = makeHarness({ statuses: [{ context: "DiffSentry", state }] });
+      await h.reviewer.handleChecksCompleted(1, "acme", "app", SHA);
+      expect(h.posted).toEqual([]);
+      expect(h.chatCalls).toBe(0);
+    }
   });
 
   it("holds while the review itself is still running", async () => {
@@ -206,12 +209,10 @@ describe("automatic release notes", () => {
     expect(h.chatCalls).toBe(0);
   });
 
-  it("posts once the review has published a verdict", async () => {
-    for (const state of ["success", "failure"]) {
-      const h = makeHarness({ statuses: [{ context: "DiffSentry", state }] });
-      await h.reviewer.handleChecksCompleted(1, "acme", "app", SHA);
-      expect(h.posted).toHaveLength(1);
-    }
+  it("posts once the review has published a green verdict", async () => {
+    const h = makeHarness({ statuses: [{ context: "DiffSentry", state: "success" }] });
+    await h.reviewer.handleChecksCompleted(1, "acme", "app", SHA);
+    expect(h.posted).toHaveLength(1);
   });
 
   it("does not hold when we never wrote a status at all", async () => {
@@ -234,19 +235,31 @@ describe("automatic release notes", () => {
     expect(h.chatCalls).toBe(0);
   });
 
-  it("posts while only nitpicks are open", async () => {
-    // "Minor and trivial never block" is a documented rule, and this path must
-    // not be the one place it stops being true.
+  it("holds while nitpicks are open", async () => {
+    // "Minor and trivial never block" governs the merge gate. Release notes are
+    // not a merge gate: an open nitpick is still an open question about the diff
+    // the notes claim to describe, and holding costs a delay, not a block.
     const h = makeHarness({
       threads: { total: 3, unresolved: 3, botTotal: 3, botUnresolved: 3, botUnresolvedBlocking: 0 },
     });
     await h.reviewer.handleChecksCompleted(1, "acme", "app", SHA);
-    expect(h.posted).toHaveLength(1);
+    expect(h.posted).toEqual([]);
+    expect(h.chatCalls).toBe(0);
   });
 
-  it("ignores unresolved threads that are not ours", async () => {
+  it("holds on unresolved threads that are not ours", async () => {
+    // A human reviewer's open conversation is feedback the same way ours is.
     const h = makeHarness({
       threads: { total: 4, unresolved: 4, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0 },
+    });
+    await h.reviewer.handleChecksCompleted(1, "acme", "app", SHA);
+    expect(h.posted).toEqual([]);
+    expect(h.chatCalls).toBe(0);
+  });
+
+  it("posts once every thread has been resolved", async () => {
+    const h = makeHarness({
+      threads: { total: 5, unresolved: 0, botTotal: 3, botUnresolved: 0, botUnresolvedBlocking: 0 },
     });
     await h.reviewer.handleChecksCompleted(1, "acme", "app", SHA);
     expect(h.posted).toHaveLength(1);
@@ -284,6 +297,30 @@ describe("automatic release notes", () => {
     await h.reviewer.reconsiderAutoReleaseNotes(1, "acme", "app", 7);
     expect(h.posted).toHaveLength(1);
     expect(h.posted[0].body).toContain(headMarker(SHA));
+  });
+
+  it("re-asks when the status sync greens the check", async () => {
+    // The race the sync closes: the thread-resolution webhook fires the sync and
+    // a direct re-ask side by side, and the direct one can read the red status
+    // the sync is about to clear. Asking again from the write itself is what
+    // makes the outcome the same whichever wins.
+    const h = makeHarness({
+      statuses: [{ context: "DiffSentry", state: "failure" }],
+      threads: { total: 2, unresolved: 0, botTotal: 2, botUnresolved: 0, botUnresolvedBlocking: 0 },
+    });
+    const github = (h.reviewer as unknown as { github: Record<string, unknown> }).github;
+    github.getCommitStatusState = async () => "failure";
+    github.setCommitStatus = async () => {};
+    // The notes re-read the statuses through `getCheckSignals`, which is a
+    // separate fake — point it at the green the sync has just written.
+    github.getCheckSignals = async () => ({
+      statuses: [{ context: "DiffSentry", state: "success" }],
+      checkRuns: [{ name: "build", status: "completed", conclusion: "success" }],
+    });
+
+    expect(await h.reviewer.syncReviewCommitStatus(1, "acme", "app", 7)).toBe(true);
+    await settle();
+    expect(h.posted).toHaveLength(1);
   });
 
   it("stays silent on thread resolution while another blocking finding is open", async () => {

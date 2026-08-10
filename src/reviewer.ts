@@ -3,8 +3,8 @@ import { Config, AIProvider, DiffBudgetConfig, FileChange, PRContext, PriorRevie
 import { buildProvider, ProviderSpec } from "./ai/provider-factory.js";
 import { FailoverProvider } from "./ai/failover.js";
 import { isAiTimeoutError } from "./ai/timeout.js";
-import { GitHubClient, REVIEW_STATUS_CONTEXT, type ReviewThreadSummary } from "./github.js";
-import { assessShipSignals, renderShipCheck, resolveReviewStatus, type CommitStatusLike, type ThreadGate } from "./ship-check.js";
+import { EMPTY_THREAD_SUMMARY, GitHubClient, REVIEW_STATUS_CONTEXT, type ReviewThreadSummary } from "./github.js";
+import { assessShipSignals, renderShipCheck, resolveDisplayVerdict, resolveReviewStatus, type CommitStatusLike, type ThreadGate } from "./ship-check.js";
 import { loadRepoConfig, mergeWithDefaults, shouldReviewPR, isPathIncluded } from "./repo-config.js";
 import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary, injectSummaryIntoPRBody } from "./walkthrough.js";
 import { parseCommand, formatHelpMessage, formatConfigMessage, formatUnknownCommandMessage } from "./commands.js";
@@ -594,6 +594,21 @@ export class Reviewer {
         target.state, target.description, REVIEW_STATUS_CONTEXT,
       );
       log.info({ headSha, threads, from: current, to: target.state }, "Synced review commit status");
+
+      // Greening the status is one of the two ways a PR becomes eligible for
+      // automatic release notes, and this is the moment it happens — the notes
+      // path holds while our own status reads red, and cannot see the flip any
+      // other way: the `status` event this very write raises carries our own
+      // context, which the dispatcher drops on purpose.
+      //
+      // The callers that also re-ask directly (the thread-resolution webhook)
+      // race this write and may read the stale red; asking again from here is
+      // what makes the outcome independent of who wins. Both are cheap when they
+      // lose — the in-flight guard and the head marker collapse the duplicate.
+      if (target.state === "success") {
+        void this.reconsiderAutoReleaseNotes(installationId, owner, repo, pullNumber, headSha)
+          .catch((err) => log.warn({ err }, "Failed to reconsider automatic release notes"));
+      }
       return true;
     } catch (err) {
       log.warn({ err }, "Failed to sync review commit status");
@@ -633,10 +648,16 @@ export class Reviewer {
   /**
    * Re-ask the release-notes question for a PR, at its current head.
    *
-   * Two callers, for the two gates that are not about CI: the webhook when a
-   * review thread is resolved, and `writeReviewStatus` when a review pass
-   * publishes its verdict. Both are moments when a hold this app placed on the
-   * notes may have just lifted, and neither is expressible as a check on a SHA.
+   * Called for the two gates that are not about CI: the webhook when a review
+   * thread is resolved, and the two writers of our own commit status
+   * (`writeReviewStatus` when a pass publishes its verdict, and
+   * `syncReviewCommitStatus` when it clears a red one) — every moment a hold
+   * this app placed on the notes may have just lifted, none of them expressible
+   * as a check on a SHA.
+   *
+   * `headSha` is an optimisation, not a parameter to the decision: callers that
+   * already resolved the head pass it so this doesn't re-ask GitHub for a value
+   * it just had.
    *
    * Without this the thread gate would be a mute button rather than a delay. On
    * the ordinary PR the checks go green first and the findings are addressed
@@ -655,8 +676,10 @@ export class Reviewer {
     owner: string,
     repo: string,
     pullNumber: number,
+    knownHeadSha?: string,
   ): Promise<void> {
-    const headSha = await this.github.getHeadSha(installationId, owner, repo, pullNumber);
+    const headSha =
+      knownHeadSha ?? (await this.github.getHeadSha(installationId, owner, repo, pullNumber));
     if (!headSha) {
       logger.debug({ owner, repo, pr: pullNumber }, "No head SHA for PR, skipping release notes");
       return;
@@ -762,22 +785,47 @@ export class Reviewer {
         return;
       }
 
-      // Our own findings, unlike our own commit status, do gate the notes.
+      // A red verdict of our own holds them too. `assessChecks` leaves this
+      // status out of the CI verdict for a reason that does not extend here:
+      // excluding it stops a status *we* wrote from tipping the aggregate green
+      // and re-entering this path, and reading it only to *hold* adds no such
+      // edge — nothing we do in response to red posts anything.
       //
-      // The status is excluded from `assessChecks` for a reason that doesn't
-      // extend to this: counting it would let a status *we* write tip the
-      // aggregate green and re-enter this path (see `isDiffSentryCheck`). Asking
-      // about threads directly has no such feedback edge — posting a comment
-      // raises no thread event.
+      // It has to be read, because it is the only place a REQUEST_CHANGES that
+      // rests on a PR-level finding is visible. Such a finding never becomes a
+      // thread, so the thread gate below cannot see it, and notes drafted over it
+      // are exactly the "🔴 Changes requested, release notes underneath" pairing
+      // this is here to stop.
       //
-      // What's left is the judgement, and it goes the other way from the status:
-      // notes drafted over an open critical or major finding describe a PR that
-      // is about to change, and land next to the finding reading like a sign-off
-      // on it. `botUnresolvedBlocking` rather than `botUnresolved` keeps the
-      // documented rule true — minor and trivial never block, here either.
+      // Coming back from red is covered: the two writers of this status,
+      // `writeReviewStatus` and `syncReviewCommitStatus`, both re-ask once the
+      // write lands.
+      if (reviewStatus === "failure" || reviewStatus === "error") {
+        log.debug({ reviewStatus }, "Review verdict is not green, holding release notes");
+        return;
+      }
+
+      // The last gate, and the one the status cannot stand in for: a green
+      // verdict means the review found nothing new *this pass*, which says
+      // nothing about the threads earlier passes left open. Asking about them
+      // directly has no feedback edge of its own — posting a comment raises no
+      // thread event.
+      //
+      // The judgement goes the other way from the status:
+      // notes drafted over an open thread describe a PR that is about to change,
+      // and land next to the discussion reading like a sign-off on it.
+      //
+      // Every unresolved thread counts, not just the blocking ones, and not just
+      // ours. "Minor and trivial never block" is a rule about the *merge* gate —
+      // a nitpick should never stop a PR shipping. Release notes are not a merge
+      // gate; they are a summary of a finished PR, and a PR with an open thread
+      // of any severity, from anyone, is a PR whose diff still has a pending
+      // question against it. Holding is cheap here in a way it isn't there: this
+      // is a delay, not a block, and resolving the last thread is itself a
+      // trigger, so the notes arrive seconds later.
       const threads = await this.github.summarizeReviewThreads(installationId, owner, repo, pullNumber);
-      if (threads.botUnresolvedBlocking > 0) {
-        log.debug({ threads }, "Blocking DiffSentry threads are unresolved, holding release notes");
+      if (threads.unresolved > 0) {
+        log.debug({ threads }, "Review threads are unresolved, holding release notes");
         return;
       }
 
@@ -2233,6 +2281,7 @@ export class Reviewer {
         let blockingThreads = 0;
         let failingChecks = 0;
         let pendingChecks = 0;
+        let liveThreads: ReviewThreadSummary | null = null;
         try {
           // Was a bespoke one-page GraphQL query counting only `isResolved`.
           // `summarizeReviewThreads` returns the same total — it counts every
@@ -2240,6 +2289,7 @@ export class Reviewer {
           // card now shows, and it paginates, so PRs past 100 threads stop
           // silently under-reporting.
           const summary = await this.github.summarizeReviewThreads(installationId, owner, repo, pullNumber, signal);
+          liveThreads = summary;
           unresolvedThreads = summary.unresolved;
           // Gated for the same reason Ship Check gates it: under
           // `thread_gate: off` these threads don't gate anything, so labelling
@@ -2259,8 +2309,24 @@ export class Reviewer {
         } catch {
           // best effort
         }
+        // The card's verdict is the PR's, not this pass's. `reviewResult.approval`
+        // describes only the diff just read, so a two-file follow-up push that
+        // finds nothing returns APPROVE while the criticals from the previous
+        // pass are still open — which is how a 🟢 Approved card ended up sitting
+        // directly above "Unresolved threads: 2".
+        //
+        // A failed thread read falls back to the pass's own verdict, matching the
+        // zeroes the table shows in that case: with no thread data there is
+        // nothing to downgrade *from*, and the alternative — assuming the worst —
+        // would paint a red card on a transient GraphQL blip.
+        const displayVerdict = resolveDisplayVerdict({
+          approval: reviewResult.approval,
+          threads: liveThreads ?? EMPTY_THREAD_SUMMARY,
+          gate: repoConfig.reviews?.thread_gate,
+        });
         const stickyBody = renderStickyStatus({
-          reviewState: reviewResult.approval as any,
+          reviewState: displayVerdict.state,
+          verdictReason: displayVerdict.reason,
           risk,
           unresolvedThreads,
           blockingThreads,
@@ -2860,15 +2926,7 @@ Order by priority for review (highest-risk / load-bearing first), not alphabetic
             loadCodeowners(octokit, owner, repo, context.headSha).catch(() => []),
             this.github
               .summarizeReviewThreads(installationId, owner, repo, pullNumber)
-              .catch(
-                (): ReviewThreadSummary => ({
-                  total: 0,
-                  unresolved: 0,
-                  botTotal: 0,
-                  botUnresolved: 0,
-                  botUnresolvedBlocking: 0,
-                })
-              ),
+              .catch((): ReviewThreadSummary => ({ ...EMPTY_THREAD_SUMMARY })),
           ]);
 
           // Latest bot review state

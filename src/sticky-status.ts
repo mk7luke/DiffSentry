@@ -8,7 +8,13 @@ export const STICKY_MARKER = "<!-- DiffSentry Sticky Status -->";
  * latest snapshot is always near the top of the timeline.
  */
 export function renderStickyStatus(opts: {
+  /**
+   * The verdict for the PR as it stands, not the one the last pass reached on
+   * its own — see `resolveDisplayVerdict`, which is what callers pass through.
+   */
   reviewState: "APPROVE" | "COMMENT" | "REQUEST_CHANGES" | "PENDING";
+  /** Why that differs from the last pass's own verdict, when it does. */
+  verdictReason?: string;
   risk?: RiskAssessment;
   unresolvedThreads: number;
   /** Subset of `unresolvedThreads` that gates the commit status. */
@@ -40,6 +46,10 @@ export function renderStickyStatus(opts: {
   lines.push(`# 📌 Status — last updated ${headLink}`);
   lines.push("");
   lines.push(verdict);
+  if (opts.verdictReason) {
+    lines.push("");
+    lines.push(`<sub>Reflects the PR's open threads, not just the latest pass: ${opts.verdictReason}.</sub>`);
+  }
   lines.push("");
   lines.push(`| | |`);
   lines.push(`|---|---|`);

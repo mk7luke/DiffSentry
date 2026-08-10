@@ -180,8 +180,8 @@ issues:
 
 # Automatic release notes. Off by default. With `auto: true`, DiffSentry drafts
 # the same notes `@bot release-notes` produces and posts them on its own, once
-# every check on the PR's head commit has passed, its own review has finished,
-# and no blocking finding of that review is still open.
+# every check on the PR's head commit has passed, its own review has finished
+# green, and every review thread on the PR is resolved.
 #
 # "Every check" means the repo's own CI: check runs and legacy commit statuses
 # are both counted, and DiffSentry's own `DiffSentry` and `DiffSentry / Pre-Merge`
@@ -190,10 +190,13 @@ issues:
 #
 # A review still in progress holds the notes back: CI regularly goes green
 # mid-review, and a finding that has not been posted yet cannot gate anything.
+# So does a review that came back red, which is the only place a finding that
+# named no file is visible.
 #
-# Unresolved critical and major findings hold them back too — resolving the
-# last one is itself a trigger, so they arrive then. Minor and trivial never
-# block.
+# Any unresolved thread holds them back too, at every severity and from any
+# author — resolving the last one is itself a trigger, so they arrive then.
+# ("Minor and trivial never block" is about the `DiffSentry` check; these notes
+# are a summary of a finished PR, not a merge gate.)
 #
 # One comment per PR, rewritten in place when a later push goes green, so a
 # long-lived branch does not collect a stack of them.
