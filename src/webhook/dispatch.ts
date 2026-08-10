@@ -197,7 +197,7 @@ export async function dispatchWebhookEvent(
 
       // Run push-driven auto-resolve unconditionally (not gated by pause/draft/auto-review),
       // so threads close even on PRs the bot won't re-review.
-      reviewer.autoResolveOnPush(installationId, owner, repo, number).catch((err) => {
+      const autoResolved = reviewer.autoResolveOnPush(installationId, owner, repo, number).catch((err) => {
         logger.error({ err, owner, repo, pr: number }, "Push auto-resolve failed");
       });
 
@@ -211,8 +211,17 @@ export async function dispatchWebhookEvent(
         return { status: 202, body: { status: blocked } };
       }
 
-      void runReviewJob({ reviewer, installationId, owner, repo, number, mode: "incremental" }).catch((err) => {
-        logger.error({ err, owner, repo, pr: number }, "Background review failed");
+      // Queued behind auto-resolve rather than beside it. Auto-resolve retires
+      // the fingerprints of the threads it closes, and the review builds its
+      // dedup set from that state the moment it starts: racing the two lets the
+      // pass read the pre-drop set and suppress the re-raise of a finding
+      // auto-resolve had just closed unread. Chained, not awaited, so the
+      // webhook still answers immediately — and `finally`, so an auto-resolve
+      // failure delays the review rather than cancelling it.
+      void autoResolved.finally(() => {
+        void runReviewJob({ reviewer, installationId, owner, repo, number, mode: "incremental" }).catch((err) => {
+          logger.error({ err, owner, repo, pr: number }, "Background review failed");
+        });
       });
       return { status: 202, body: { status: "accepted" } };
     }

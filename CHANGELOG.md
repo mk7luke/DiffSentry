@@ -29,6 +29,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `DiffSentry` check no longer passes with unresolved `major` findings on
+  the PR. The severity gate had never once fired: GitHub reports a bot's login
+  two ways — REST appends `[bot]`, GraphQL's `Bot` node does not — and the
+  thread reader compared the GraphQL login against the REST form, so it matched
+  nothing. Every thread summary came back `botTotal: 0`, and the check was green
+  whenever the review pass's own verdict wasn't `REQUEST_CHANGES`, exactly as it
+  had been before the gate was added. The same predicate backed `ship`'s stale-
+  check detection and push auto-resolve, so those had never worked either. Both
+  logins are now normalised before comparing, and a thread carrying DiffSentry's
+  footer counts as ours even under a renamed `BOT_NAME` — while another vendor's
+  review bot no longer does, at all. The unit fixtures that hid this were written
+  in the REST shape; they now carry the shape GitHub actually returns.
+- Push auto-resolve no longer risks burying a finding it closed. It resolves
+  every DiffSentry thread on a file the push touched — "the file changed" is all
+  it knows, never "the finding was addressed" — and cross-review dedup would
+  then have suppressed the next pass's re-raise, leaving a live `major` on
+  neither the PR nor the check. Closing a thread now retires its dedup
+  fingerprint, so the next pass raises the finding again if it is still true;
+  only a resolution nobody undid makes it stick. A resolution by a human stays
+  permanent, since that one carries a judgement. The synchronize webhook now
+  chains the review behind auto-resolve rather than running the two side by
+  side, so the pass reads state after the retirement rather than racing it.
 - The sticky 📌 Status comment no longer reads 🟢 Approved above its own
   "Unresolved threads: 2" row. It was showing the verdict of the last review
   pass, which describes only the diff that pass read — so a follow-up push

@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
 import { PRContext, ReviewComment, ReviewResult, WalkthroughResult, CommentType, CommentSeverity, Confidence } from "../types.js";
 import { logger } from "../logger.js";
-import { VALID_SEVERITIES, renderSeverityMarker, DIFFSENTRY_COMMENT_FOOTER } from "../thread-severity.js";
+import {
+  VALID_SEVERITIES,
+  renderSeverityMarker,
+  renderFingerprintMarker,
+  DIFFSENTRY_COMMENT_FOOTER,
+} from "../thread-severity.js";
 
 const VALID_CONFIDENCE: Confidence[] = ["high", "medium", "low"];
 
@@ -338,7 +343,7 @@ function formatCommentBody(comment: {
   }
 
   if (comment.fingerprint) {
-    parts.push(`<!-- diffsentry-fingerprint:${comment.fingerprint} -->`);
+    parts.push(renderFingerprintMarker(comment.fingerprint));
   }
 
   // Lets summarizeReviewThreads read this finding's severity back off the live

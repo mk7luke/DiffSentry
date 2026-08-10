@@ -24,7 +24,7 @@ import { parseIssueReferences, fetchLinkedIssues, formatIssuesForPrompt, formatI
 import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-merge.js";
 import { generateDocstrings, generateTests, simplifyCode, autofix } from "./finishing-touches.js";
 import { formatReviewBody, reconcileApproval } from "./review-body.js";
-import { encodeState, encodeStateRef, extractState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
+import { encodeState, encodeStateRef, extractState, replaceState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
 import { assessRisk, renderRiskBlock, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion, renderConfidenceAggregate, computeReviewerDeltas, renderReviewerDeltaBlock, calibrateSeverities, resolveSeverityCalibration, renderSeverityCalibrationBlock, type CalibrationResult } from "./insights.js";
 import { suggestReviewersFromBlame, renderSuggestedReviewers, combineReviewers, renderCombinedReviewers } from "./blame-reviewers.js";
 import { loadCodeowners, ownersForFiles } from "./codeowners.js";
@@ -460,15 +460,80 @@ export class Reviewer {
       const ctx = await this.github.getPRContext(installationId, owner, repo, pullNumber);
       const changedFiles = ctx.files.map((f) => f.filename);
       if (changedFiles.length === 0) return;
-      const resolved = await this.github.resolveAddressedThreads(
+      const { resolved, fingerprints } = await this.github.resolveAddressedThreads(
         installationId, owner, repo, pullNumber, changedFiles
       );
       if (resolved > 0) {
         log.info({ resolved }, "Push auto-resolve: closed addressed threads");
+        // Before the status sync, and awaited: the review pass queued behind
+        // this reads the state to build its dedup set, and a fingerprint still
+        // recorded there would suppress the re-raise of a finding this just
+        // closed on nothing but a file having changed.
+        await this.retirePostedFingerprints(installationId, owner, repo, pullNumber, fingerprints);
         await this.syncReviewCommitStatus(installationId, owner, repo, pullNumber, { headSha: ctx.headSha });
       }
     } catch (err) {
       log.warn({ err }, "Push auto-resolve failed");
+    }
+  }
+
+  /**
+   * Forget that the given findings were ever posted, so the next review pass is
+   * free to raise them again.
+   *
+   * Only push auto-resolve calls this, and only for threads it closed itself.
+   * A resolution by a human is a judgement — "addressed", or "won't fix" — and
+   * must stay permanent; auto-resolve carries no such judgement, so the finding
+   * has to earn its silence from a fresh look at the code instead.
+   *
+   * Writes both homes deliberately. The next pass prefers the database row and
+   * falls back to the comment blob, so amending only one leaves the other to
+   * overrule it — invisibly, and only on the deployments configured the other
+   * way. Best-effort throughout: this is bookkeeping, and it must never keep
+   * `autoResolveOnPush` from reaching the commit-status sync.
+   */
+  private async retirePostedFingerprints(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    fingerprints: string[],
+  ): Promise<void> {
+    if (fingerprints.length === 0) return;
+    const log = logger.child({ owner, repo, pr: pullNumber });
+    try {
+      const comment = await this.github
+        .findCommentByMarker(installationId, owner, repo, pullNumber, WALKTHROUGH_MARKER)
+        .catch(() => null);
+      const priorState = getWalkthroughState(owner, repo, pullNumber) ?? extractState(comment?.body);
+      if (!priorState?.postedFingerprints?.length) return;
+
+      const retiring = new Set(fingerprints);
+      const kept = priorState.postedFingerprints.filter((fp) => !retiring.has(fp));
+      // No overlap — nothing recorded for what we closed. Skip the writes rather
+      // than churn the walkthrough comment on every push.
+      if (kept.length === priorState.postedFingerprints.length) return;
+
+      const nextState: WalkthroughState = {
+        ...priorState,
+        postedFingerprints: kept,
+        updatedAt: new Date().toISOString(),
+      };
+      saveWalkthroughState(owner, repo, pullNumber, nextState);
+      if (comment?.body) {
+        const nextBody = replaceState(comment.body, nextState);
+        if (nextBody !== comment.body) {
+          await this.github.upsertComment(
+            installationId, owner, repo, pullNumber, nextBody, WALKTHROUGH_MARKER,
+          );
+        }
+      }
+      log.info(
+        { retired: priorState.postedFingerprints.length - kept.length },
+        "Push auto-resolve: retired fingerprints of the threads it closed",
+      );
+    } catch (err) {
+      log.warn({ err }, "Failed to retire fingerprints for auto-resolved threads");
     }
   }
 
@@ -2364,11 +2429,12 @@ export class Reviewer {
       }
 
       // Set final commit status. Read the threads *now*, after this pass has
-      // posted its own — that ordering is guaranteed. `autoResolveOnPush` is
-      // dispatched fire-and-forget and runs concurrently rather than joined,
-      // so it usually — but not certainly — has also landed by this point;
-      // when it hasn't, it calls its own status sync and self-heals, so a
-      // narrow miss here doesn't leave the status stuck wrong.
+      // posted its own — that ordering is guaranteed. `autoResolveOnPush` has
+      // also finished: the synchronize dispatcher chains the review behind it
+      // rather than beside it, so the threads read here are exactly the ones the
+      // PR is left with. Should this ever run without that chaining (a manual
+      // `@diffsentry review`, say), auto-resolve calls its own status sync and
+      // self-heals, so a narrow miss doesn't leave the status stuck wrong.
       if (repoConfig.reviews?.commit_status !== false) {
         await this.writeReviewStatus(
           installationId, owner, repo, context.headSha, pullNumber,
