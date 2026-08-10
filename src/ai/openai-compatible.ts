@@ -72,8 +72,17 @@ export class OpenAICompatibleProvider implements AIProvider {
    *  with `tokenBudgetFor`, which widens the budget for every one of those
    *  shapes. */
   private reasoningExtras(): Record<string, unknown> {
-    if (!this.reasoningEffort || this.reasoningEffortRejected) return {};
+    if (!this.reasoningActive) return {};
     return { reasoning_effort: this.reasoningEffort };
+  }
+
+  /** Whether reasoning is actually in play: configured AND not rejected by this
+   *  endpoint. Everything that widens a budget keys off THIS rather than off
+   *  `reasoningEffort` alone — once a backend has refused the field there is no
+   *  hidden chain-of-thought to leave room for, and holding the wider ceiling
+   *  would hand a small-context local runtime a max_tokens it cannot serve. */
+  private get reasoningActive(): boolean {
+    return !!this.reasoningEffort && !this.reasoningEffortRejected;
   }
 
   /** Reasoning models split the token budget between hidden CoT and visible
@@ -82,7 +91,7 @@ export class OpenAICompatibleProvider implements AIProvider {
    *  hit exactly that on gpt-5+. Backends without a declared reasoning effort
    *  keep the original budgets exactly. */
   private tokenBudgetFor(task: "review" | "walkthrough" | "chat"): number {
-    if (!this.reasoningEffort) return task === "chat" ? 2048 : 4096;
+    if (!this.reasoningActive) return task === "chat" ? 2048 : 4096;
     return task === "chat" ? 8192 : 16384;
   }
 
@@ -245,7 +254,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     const requested = opts?.maxTokens ?? 512;
     const response = await this.create("complete", {
       model: this.model,
-      max_tokens: this.reasoningEffort ? Math.max(requested, 4096) : requested,
+      max_tokens: this.reasoningActive ? Math.max(requested, 4096) : requested,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },

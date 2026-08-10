@@ -155,6 +155,24 @@ describe("openai-compatible reasoning_effort", () => {
     expect(received[2]).not.toHaveProperty("reasoning_effort");
   });
 
+  // The wider budget exists to leave room for hidden chain-of-thought. Once the
+  // endpoint has refused the field there is no such reasoning, and holding 16384
+  // would hand a small-context local runtime a max_tokens it cannot serve.
+  it("reverts to the legacy budgets after the endpoint rejects the field", async () => {
+    const p = provider("low");
+    rejectReasoningEffortOnce = true;
+    await p.review(ctx());          // rejected, then retried without the field
+    received.length = 0;
+
+    await p.review(ctx());
+    expect(received[0].max_tokens).toBe(4096);
+    expect(received[0]).not.toHaveProperty("reasoning_effort");
+
+    received.length = 0;
+    await p.complete("sys", "usr", { json: true, maxTokens: 1024 });
+    expect(received[0].max_tokens).toBe(1024);
+  });
+
   it("does not swallow a 400 that has nothing to do with reasoning_effort", async () => {
     const p = provider("low");
     server.removeAllListeners("request");
