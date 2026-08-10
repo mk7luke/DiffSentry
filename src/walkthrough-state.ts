@@ -72,6 +72,28 @@ export function encodeStateRef(ref: WalkthroughStateRef): string {
   return `${STATE_REF_MARKER_START}${JSON.stringify(ref)}${STATE_MARKER_END}`;
 }
 
+/**
+ * Swap the encoded state blob in an existing walkthrough body, leaving every
+ * other byte — prose, the DB pointer, the surrounding markers — as it was.
+ *
+ * Lets a caller that isn't the review pass amend state without re-rendering a
+ * walkthrough it has no way to reproduce. Push auto-resolve is the one such
+ * caller: it retires the fingerprints of threads it closed. A body with no blob
+ * comes back untouched, so a PR whose walkthrough predates state (or was edited
+ * by hand) is a no-op rather than a corruption.
+ */
+export function replaceState(walkthroughBody: string, state: WalkthroughState): string {
+  const start = walkthroughBody.indexOf(STATE_MARKER_START);
+  if (start === -1) return walkthroughBody;
+  const end = walkthroughBody.indexOf(STATE_MARKER_END, start + STATE_MARKER_START.length);
+  if (end === -1) return walkthroughBody;
+  return (
+    walkthroughBody.slice(0, start) +
+    encodeState(state) +
+    walkthroughBody.slice(end + STATE_MARKER_END.length)
+  );
+}
+
 export function extractState(walkthroughBody: string | null | undefined): WalkthroughState | null {
   if (!walkthroughBody) return null;
   const start = walkthroughBody.indexOf(STATE_MARKER_START);
