@@ -103,6 +103,28 @@ describe("countBlockingThreads", () => {
     ).toBe(1);
   });
 
+  it("normalises a BOT_NAME that already carries the suffix", () => {
+    // Callers build the expected login as `${botName}[bot]`, so this one
+    // arrives as `diffsentry[bot][bot]`. Both sides have to fold to the same
+    // bare name or the login match is dead again.
+    expect(
+      countBlockingThreads([thread({ severity: "major", footer: false })], "diffsentry[bot][bot]"),
+    ).toBe(1);
+  });
+
+  it("does not collapse a bot name whose interior contains [bot]", () => {
+    // Stripping every occurrence rather than the trailing run folds
+    // `acme[bot]-review[bot]` onto an unrelated `acme-review`. A login match
+    // short-circuits the footer check, so that would hand another vendor's
+    // thread the power to red our check.
+    const other = thread({
+      severity: "critical",
+      footer: false,
+      author: { login: "acme-review", __typename: "Bot" },
+    });
+    expect(countBlockingThreads([other], "acme[bot]-review[bot]")).toBe(0);
+  });
+
   it("claims a thread from a deployment running under a different bot name", () => {
     // BOT_NAME is configurable, so the same PR can carry threads from an older
     // deployment under another login. Our footer is the authoritative signal —

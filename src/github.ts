@@ -344,10 +344,14 @@ interface RawRateBucket {
  * never closed a thread.
  */
 function bareBotLogin(login: string): string {
-  // Global, not anchored: callers build the expected login as `${botName}[bot]`,
-  // so a BOT_NAME already carrying the suffix yields `diffsentry[bot][bot]` and
-  // an anchored strip would leave the two sides asymmetric again.
-  return login.toLowerCase().replace(/\[bot\]/g, "");
+  // Trailing suffixes only, but any number of them: callers build the expected
+  // login as `${botName}[bot]`, so a BOT_NAME already carrying the suffix
+  // yields `diffsentry[bot][bot]` and a single anchored strip would leave the
+  // two sides asymmetric. Stripping every occurrence instead would go too far —
+  // `acme[bot]-review[bot]` and an unrelated bot's `acme-review` both collapse
+  // to `acme-review`, and a login match short-circuits the footer check, so
+  // this would claim another vendor's thread outright.
+  return login.toLowerCase().replace(/(?:\[bot\])+$/, "");
 }
 
 function isOurBotThread(thread: any, botLogin: string): boolean {
