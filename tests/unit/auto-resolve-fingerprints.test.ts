@@ -28,6 +28,7 @@ const WALKTHROUGH_MARKER = "<!-- DiffSentry Walkthrough -->";
  */
 function reviewerWith(opts: {
   fingerprints: string[];
+  paths?: string[];
   priorState?: Record<string, unknown>;
   comment?: { id: number; body: string } | null;
 }) {
@@ -37,9 +38,11 @@ function reviewerWith(opts: {
       headSha: "abc123",
       files: [{ filename: "a.ts" }, { filename: "b.ts" }],
     }),
-    resolveAddressedThreads: vi
-      .fn()
-      .mockResolvedValue({ resolved: opts.fingerprints.length, fingerprints: opts.fingerprints }),
+    resolveAddressedThreads: vi.fn().mockResolvedValue({
+      resolved: Math.max(opts.fingerprints.length, opts.paths?.length ?? 0),
+      fingerprints: opts.fingerprints,
+      paths: opts.paths ?? ["a.ts"],
+    }),
     findCommentByMarker: vi.fn().mockResolvedValue(opts.comment ?? null),
     upsertComment,
   };
@@ -113,6 +116,48 @@ describe("autoResolveOnPush", () => {
     expect(saved.postedFingerprints).toEqual(["bbb"]);
   });
 
+  it("retires the file SHAs of the files whose threads it closed", async () => {
+    // Retiring the fingerprint alone isn't enough. `getPRContext` returns the
+    // PR's WHOLE diff, not the push delta, so auto-resolve closes threads on
+    // files this push never touched — and `partitionFilesForReview` then skips
+    // exactly those files on the next incremental pass, because their patch
+    // hash is unchanged. The finding would be closed, un-suppressed, and still
+    // never looked at again. Dropping the file SHA forces the re-read.
+    const { reviewer, upsertComment } = reviewerWith({
+      fingerprints: ["aaa"],
+      paths: ["b.ts"],
+      comment: {
+        id: 9,
+        body: walkthroughBody({
+          postedFingerprints: ["aaa"],
+          fileShas: { "a.ts": "h1", "b.ts": "h2" },
+        }),
+      },
+    });
+
+    await reviewer.autoResolveOnPush(1, "o", "r", 7);
+
+    const written = upsertComment.mock.calls[0][4] as string;
+    expect(extractState(written)?.fileShas).toEqual({ "a.ts": "h1" });
+  });
+
+  it("retires a file SHA even for a thread that carried no fingerprint", async () => {
+    // Threads posted before fingerprints were stamped have nothing to
+    // un-suppress, but their file still has to be re-read — otherwise closing
+    // one is a pure deletion.
+    const { reviewer, upsertComment } = reviewerWith({
+      fingerprints: [],
+      paths: ["b.ts"],
+      comment: { id: 9, body: walkthroughBody({ fileShas: { "a.ts": "h1", "b.ts": "h2" } }) },
+    });
+
+    await reviewer.autoResolveOnPush(1, "o", "r", 7);
+
+    expect(upsertComment).toHaveBeenCalledTimes(1);
+    const written = upsertComment.mock.calls[0][4] as string;
+    expect(extractState(written)?.fileShas).toEqual({ "a.ts": "h1" });
+  });
+
   it("leaves state alone when nothing it resolved was ever fingerprinted", async () => {
     const { reviewer, upsertComment } = reviewerWith({
       fingerprints: [],
@@ -156,6 +201,7 @@ describe("autoResolveOnPush", () => {
     (github.resolveAddressedThreads as ReturnType<typeof vi.fn>).mockResolvedValue({
       resolved: 0,
       fingerprints: [],
+      paths: [],
     });
 
     await reviewer.autoResolveOnPush(1, "o", "r", 7);

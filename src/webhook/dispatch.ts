@@ -212,12 +212,15 @@ export async function dispatchWebhookEvent(
       }
 
       // Queued behind auto-resolve rather than beside it. Auto-resolve retires
-      // the fingerprints of the threads it closes, and the review builds its
-      // dedup set from that state the moment it starts: racing the two lets the
-      // pass read the pre-drop set and suppress the re-raise of a finding
-      // auto-resolve had just closed unread. Chained, not awaited, so the
-      // webhook still answers immediately — and `finally`, so an auto-resolve
-      // failure delays the review rather than cancelling it.
+      // the state of the threads it closes, and the review builds its dedup set
+      // and skip list from that state the moment it starts: racing the two lets
+      // the pass read the pre-retirement copy and suppress the re-raise of a
+      // finding auto-resolve had just closed unread. Chained, not awaited, so
+      // the webhook still answers immediately.
+      //
+      // `autoResolved` is the promise AFTER its `.catch` above, so it never
+      // rejects and `finally` always runs — the outer error is handled, not
+      // dropped. The inner `.catch` covers only `runReviewJob`.
       void autoResolved.finally(() => {
         void runReviewJob({ reviewer, installationId, owner, repo, number, mode: "incremental" }).catch((err) => {
           logger.error({ err, owner, repo, pr: number }, "Background review failed");

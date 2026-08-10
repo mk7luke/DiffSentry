@@ -199,6 +199,23 @@ describe("resolveAddressedThreads", () => {
     expect([...result.fingerprints].sort()).toEqual(["aaa111", "bbb222"]);
   });
 
+  it("reports the paths it closed threads on, deduplicated", async () => {
+    // The caller drops these from fileShas. `changedFiles` is the PR's whole
+    // diff, so a thread can be closed on a file this push never touched — and
+    // that is exactly the file an incremental pass would skip, leaving the
+    // un-suppressed finding with nobody to re-raise it.
+    const { client } = clientWith([
+      graphqlThread({ id: "1", path: "a.ts", severity: "major", fingerprint: "aaa111" }),
+      graphqlThread({ id: "2", path: "a.ts", severity: "major", fingerprint: "bbb222" }),
+      graphqlThread({ id: "3", path: "b.ts", severity: "major" }),
+      graphqlThread({ id: "4", path: "z.ts", severity: "major" }),
+    ]);
+
+    const result = await client.resolveAddressedThreads(1, "o", "r", 1, ["a.ts", "b.ts"]);
+
+    expect([...result.paths].sort()).toEqual(["a.ts", "b.ts"]);
+  });
+
   it("returns an empty result rather than throwing when the read fails", async () => {
     const client = new GitHubClient(cfg());
     vi.spyOn(client, "getInstallationOctokit").mockResolvedValue({
@@ -208,6 +225,7 @@ describe("resolveAddressedThreads", () => {
     await expect(client.resolveAddressedThreads(1, "o", "r", 1, ["a.ts"])).resolves.toEqual({
       resolved: 0,
       fingerprints: [],
+      paths: [],
     });
   });
 
@@ -233,6 +251,7 @@ describe("resolveAddressedThreads", () => {
     await expect(client.resolveAddressedThreads(1, "o", "r", 1, ["a.ts"])).resolves.toEqual({
       resolved: 0,
       fingerprints: [],
+      paths: [],
     });
   });
 });

@@ -344,7 +344,10 @@ interface RawRateBucket {
  * never closed a thread.
  */
 function bareBotLogin(login: string): string {
-  return login.toLowerCase().replace(/\[bot\]$/, "");
+  // Global, not anchored: callers build the expected login as `${botName}[bot]`,
+  // so a BOT_NAME already carrying the suffix yields `diffsentry[bot][bot]` and
+  // an anchored strip would leave the two sides asymmetric again.
+  return login.toLowerCase().replace(/\[bot\]/g, "");
 }
 
 function isOurBotThread(thread: any, botLogin: string): boolean {
@@ -1314,16 +1317,23 @@ export class GitHubClient {
    * that were modified in the latest push. Uses GraphQL since the REST API
    * doesn't support resolving review threads.
    *
-   * Reports the dedup fingerprint of every thread it actually closed. The
-   * trigger is only ever "the push touched this file" — never "the finding was
-   * addressed" — so the caller retires those fingerprints from the walkthrough
+   * Reports the dedup fingerprint AND the path of every thread it actually
+   * closed. The trigger is only ever "the push touched this file" — never "the
+   * finding was addressed" — so the caller retires both from the walkthrough
    * state, letting the next pass re-raise anything still true. Without that,
    * cross-review dedup would swallow the re-raise and a `major` nobody fixed
    * would leave the PR green with no thread left to point at.
    *
-   * A thread whose mutation failed is deliberately absent from both counts: its
-   * finding is still open on the PR, and retiring the fingerprint would let the
-   * next pass post a duplicate beside it.
+   * The paths matter as much as the fingerprints, for a second reason:
+   * `changedFiles` is the PR's whole diff rather than the push delta, so this
+   * closes threads on files the push never touched — and those are exactly the
+   * files `partitionFilesForReview` skips on an incremental pass, their patch
+   * hash being unchanged. Un-suppressing a finding on a file nobody re-reads
+   * would lose it just the same.
+   *
+   * A thread whose mutation failed is deliberately absent from all three: its
+   * finding is still open on the PR, and retiring its state would let the next
+   * pass post a duplicate beside it.
    */
   async resolveAddressedThreads(
     installationId: number,
@@ -1331,7 +1341,7 @@ export class GitHubClient {
     repo: string,
     pullNumber: number,
     changedFiles: string[]
-  ): Promise<{ resolved: number; fingerprints: string[] }> {
+  ): Promise<{ resolved: number; fingerprints: string[]; paths: string[] }> {
     const octokit = await this.getInstallationOctokit(installationId);
     const log = logger.child({ owner, repo, pr: pullNumber });
     const botLogin = `${this.config.botName}[bot]`.toLowerCase();
@@ -1342,6 +1352,7 @@ export class GitHubClient {
 
       let resolvedCount = 0;
       const fingerprints: string[] = [];
+      const paths = new Set<string>();
       for (const thread of threads) {
         if (thread.isResolved) continue;
         if (!changed.has(thread.path)) continue;
@@ -1356,8 +1367,9 @@ export class GitHubClient {
             }
           `, { threadId: thread.id });
           resolvedCount++;
+          if (thread.path) paths.add(thread.path);
           // Absent on threads posted before fingerprints were stamped; those
-          // simply have nothing to retire.
+          // have nothing to un-suppress, but their file is re-read regardless.
           const fp = parseThreadFingerprint(thread.comments?.nodes?.[0]?.body ?? "");
           if (fp) fingerprints.push(fp);
         } catch (err) {
@@ -1366,10 +1378,10 @@ export class GitHubClient {
       }
 
       log.info({ resolvedCount, totalThreads: threads.length }, "Auto-resolved addressed review threads");
-      return { resolved: resolvedCount, fingerprints };
+      return { resolved: resolvedCount, fingerprints, paths: [...paths] };
     } catch (err) {
       log.warn({ err }, "Failed to auto-resolve review threads");
-      return { resolved: 0, fingerprints: [] };
+      return { resolved: 0, fingerprints: [], paths: [] };
     }
   }
 

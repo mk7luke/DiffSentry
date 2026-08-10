@@ -460,16 +460,16 @@ export class Reviewer {
       const ctx = await this.github.getPRContext(installationId, owner, repo, pullNumber);
       const changedFiles = ctx.files.map((f) => f.filename);
       if (changedFiles.length === 0) return;
-      const { resolved, fingerprints } = await this.github.resolveAddressedThreads(
+      const { resolved, fingerprints, paths } = await this.github.resolveAddressedThreads(
         installationId, owner, repo, pullNumber, changedFiles
       );
       if (resolved > 0) {
         log.info({ resolved }, "Push auto-resolve: closed addressed threads");
         // Before the status sync, and awaited: the review pass queued behind
-        // this reads the state to build its dedup set, and a fingerprint still
-        // recorded there would suppress the re-raise of a finding this just
-        // closed on nothing but a file having changed.
-        await this.retirePostedFingerprints(installationId, owner, repo, pullNumber, fingerprints);
+        // this reads the state to build its dedup set and its skip list, and
+        // either one left standing would suppress the re-raise of a finding
+        // this just closed on nothing but a file having changed.
+        await this.retireResolvedThreadState(installationId, owner, repo, pullNumber, fingerprints, paths);
         await this.syncReviewCommitStatus(installationId, owner, repo, pullNumber, { headSha: ctx.headSha });
       }
     } catch (err) {
@@ -478,8 +478,17 @@ export class Reviewer {
   }
 
   /**
-   * Forget that the given findings were ever posted, so the next review pass is
-   * free to raise them again.
+   * Forget everything that would keep the next review pass from raising the
+   * findings whose threads were just closed.
+   *
+   * Two records have to go, and dropping only one loses the finding just as
+   * completely:
+   *   - its `postedFingerprints` entry, or cross-review dedup filters the
+   *     re-raise out after the model has made it;
+   *   - its file's `fileShas` entry, or `partitionFilesForReview` skips the file
+   *     before the model ever looks. That second one bites hardest on the files
+   *     this push never touched — and auto-resolve closes threads on those too,
+   *     since it works from the PR's whole diff.
    *
    * Only push auto-resolve calls this, and only for threads it closed itself.
    * A resolution by a human is a judgement — "addressed", or "won't fix" — and
@@ -492,31 +501,40 @@ export class Reviewer {
    * way. Best-effort throughout: this is bookkeeping, and it must never keep
    * `autoResolveOnPush` from reaching the commit-status sync.
    */
-  private async retirePostedFingerprints(
+  private async retireResolvedThreadState(
     installationId: number,
     owner: string,
     repo: string,
     pullNumber: number,
     fingerprints: string[],
+    paths: string[],
   ): Promise<void> {
-    if (fingerprints.length === 0) return;
+    if (fingerprints.length === 0 && paths.length === 0) return;
     const log = logger.child({ owner, repo, pr: pullNumber });
     try {
       const comment = await this.github
         .findCommentByMarker(installationId, owner, repo, pullNumber, WALKTHROUGH_MARKER)
         .catch(() => null);
       const priorState = getWalkthroughState(owner, repo, pullNumber) ?? extractState(comment?.body);
-      if (!priorState?.postedFingerprints?.length) return;
+      if (!priorState) return;
 
-      const retiring = new Set(fingerprints);
-      const kept = priorState.postedFingerprints.filter((fp) => !retiring.has(fp));
-      // No overlap — nothing recorded for what we closed. Skip the writes rather
-      // than churn the walkthrough comment on every push.
-      if (kept.length === priorState.postedFingerprints.length) return;
+      const retiringFps = new Set(fingerprints);
+      const keptFps = (priorState.postedFingerprints ?? []).filter((fp) => !retiringFps.has(fp));
+      const retiringPaths = new Set(paths);
+      const keptShas = Object.fromEntries(
+        Object.entries(priorState.fileShas ?? {}).filter(([path]) => !retiringPaths.has(path)),
+      );
+
+      const droppedFps = (priorState.postedFingerprints ?? []).length - keptFps.length;
+      const droppedShas = Object.keys(priorState.fileShas ?? {}).length - Object.keys(keptShas).length;
+      // Nothing recorded for what we closed. Skip the writes rather than churn
+      // the walkthrough comment on every push.
+      if (droppedFps === 0 && droppedShas === 0) return;
 
       const nextState: WalkthroughState = {
         ...priorState,
-        postedFingerprints: kept,
+        ...(priorState.postedFingerprints ? { postedFingerprints: keptFps } : {}),
+        ...(priorState.fileShas ? { fileShas: keptShas } : {}),
         updatedAt: new Date().toISOString(),
       };
       saveWalkthroughState(owner, repo, pullNumber, nextState);
@@ -529,11 +547,11 @@ export class Reviewer {
         }
       }
       log.info(
-        { retired: priorState.postedFingerprints.length - kept.length },
-        "Push auto-resolve: retired fingerprints of the threads it closed",
+        { retiredFingerprints: droppedFps, reopenedFiles: droppedShas },
+        "Push auto-resolve: retired the state of the threads it closed",
       );
     } catch (err) {
-      log.warn({ err }, "Failed to retire fingerprints for auto-resolved threads");
+      log.warn({ err }, "Failed to retire state for auto-resolved threads");
     }
   }
 
