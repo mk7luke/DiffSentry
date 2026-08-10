@@ -3,6 +3,7 @@ import { Octokit } from "@octokit/rest";
 import { Config, FileChange, PRContext, ReviewComment, ReviewResult, IssueContext, IssueComment } from "./types.js";
 import { logger } from "./logger.js";
 import { isFileLevelFinding, REVIEW_BODY_MARKER } from "./review-body.js";
+import { injectSummaryIntoPRBody } from "./walkthrough.js";
 import {
   parseThreadSeverity,
   parseThreadFingerprint,
@@ -1235,6 +1236,55 @@ export class GitHubClient {
       pull_number: pullNumber,
       body,
     });
+  }
+
+  /**
+   * Merge DiffSentry's summary block into the PR description, rebasing on the
+   * body as it is *right now*.
+   *
+   * Callers only supply the block; they deliberately cannot supply the body to
+   * merge it into. A review runs for minutes, so the description a caller
+   * captured before the model calls started is stale by the time the summary
+   * exists, and writing that snapshot back silently reverted whatever the
+   * author edited in between — including edits made in response to DiffSentry's
+   * own description findings, which were then re-raised against text DiffSentry
+   * itself had restored.
+   *
+   * Returns true when a write actually happened.
+   */
+  async upsertSummaryInPRDescription(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    summary: string,
+    signal?: AbortSignal
+  ): Promise<boolean> {
+    const octokit = await this.getInstallationOctokit(installationId, signal);
+    const log = logger.child({ owner, repo, pr: pullNumber });
+
+    let currentBody: string;
+    try {
+      const pr = await octokit.pulls.get({ owner, repo, pull_number: pullNumber });
+      currentBody = pr.data.body ?? "";
+    } catch (err) {
+      // Nothing safe to merge onto: the only body we could fall back to is the
+      // stale snapshot this method exists to avoid. Leave the description as
+      // the author left it; the next review retries with a fresh read.
+      log.warn({ err }, "Could not read PR description; leaving it untouched");
+      return false;
+    }
+
+    const newBody = injectSummaryIntoPRBody(currentBody, summary);
+    if (newBody === currentBody) {
+      // A re-review of an unchanged PR shouldn't churn the description —
+      // each write notifies watchers and fires another pull_request.edited.
+      log.debug("PR description summary already current; skipping write");
+      return false;
+    }
+
+    await this.updatePRDescription(installationId, owner, repo, pullNumber, newBody, signal);
+    return true;
   }
 
   async getFileContent(

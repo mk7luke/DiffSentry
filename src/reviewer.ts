@@ -6,7 +6,7 @@ import { isAiTimeoutError } from "./ai/timeout.js";
 import { EMPTY_THREAD_SUMMARY, GitHubClient, REVIEW_STATUS_CONTEXT, type ReviewThreadSummary } from "./github.js";
 import { assessShipSignals, renderShipCheck, resolveDisplayVerdict, resolveReviewStatus, type CommitStatusLike, type ThreadGate } from "./ship-check.js";
 import { loadRepoConfig, mergeWithDefaults, shouldReviewPR, isPathIncluded } from "./repo-config.js";
-import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary, injectSummaryIntoPRBody } from "./walkthrough.js";
+import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary } from "./walkthrough.js";
 import { parseCommand, formatHelpMessage, formatConfigMessage, formatUnknownCommandMessage } from "./commands.js";
 import type { SlashOptions } from "./slash-commands.js";
 import { parseIssueCommand, formatIssueHelpMessage } from "./issue-commands.js";
@@ -2134,9 +2134,10 @@ export class Reviewer {
       if (walkthroughResult && summaryEnabled) {
         try {
           const prSummary = formatPRSummary(walkthroughResult);
-          const newBody = injectSummaryIntoPRBody(context.description, prSummary);
-          await this.github.updatePRDescription(installationId, owner, repo, pullNumber, newBody, signal);
-          log.info("PR description updated with summary");
+          const written = await this.github.upsertSummaryInPRDescription(
+            installationId, owner, repo, pullNumber, prSummary, signal,
+          );
+          if (written) log.info("PR description updated with summary");
         } catch (err) {
           log.warn({ err }, "Failed to update PR description");
         }
@@ -2645,8 +2646,7 @@ export class Reviewer {
           await this.github.upsertComment(installationId, owner, repo, pullNumber, walkthroughBody, WALKTHROUGH_MARKER);
 
           const prSummary = formatPRSummary(walkthroughResult);
-          const newBody = injectSummaryIntoPRBody(context.description, prSummary);
-          await this.github.updatePRDescription(installationId, owner, repo, pullNumber, newBody);
+          await this.github.upsertSummaryInPRDescription(installationId, owner, repo, pullNumber, prSummary);
           break;
         }
 

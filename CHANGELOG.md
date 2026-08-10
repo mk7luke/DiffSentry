@@ -29,6 +29,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Editing a PR description while a review is running no longer gets that edit
+  silently reverted. The summary block was written back on top of the
+  description as it looked *before* the review's model calls started — a
+  snapshot minutes stale by the time the summary existed — so anything the
+  author saved in between was overwritten with no trace. Worst case it undid an
+  edit made to satisfy one of DiffSentry's own description findings, which the
+  next review then re-raised against text DiffSentry itself had restored. The
+  summary is now merged onto the description read back immediately before the
+  write, callers can no longer supply a body at all, and a description that
+  already carries the current summary is left alone rather than rewritten (each
+  rewrite notifies watchers and fires another `pull_request.edited`). If the
+  live description can't be read, it is left untouched instead of being
+  reverted to the snapshot.
+
 - The `DiffSentry` check no longer passes with unresolved `major` findings on
   the PR. The severity gate had never once fired: GitHub reports a bot's login
   two ways — REST appends `[bot]`, GraphQL's `Bot` node does not — and the

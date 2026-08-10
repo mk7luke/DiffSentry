@@ -1,0 +1,94 @@
+import { describe, it, expect, vi } from "vitest";
+import { GitHubClient } from "../../src/github.js";
+import type { Config } from "../../src/types.js";
+
+// A review runs for minutes. DiffSentry used to write the PR description back
+// from the snapshot it captured before the model calls started, so any edit the
+// author made in the meantime was silently reverted — including edits made in
+// response to DiffSentry's own description findings, which then got re-raised
+// against text DiffSentry itself had restored.
+
+const SUMMARY =
+  "<!-- DiffSentry Summary -->\n## Summary\n\nAdds the retry hook.\n\n<!-- End DiffSentry Summary -->";
+const OLD_SUMMARY =
+  "<!-- DiffSentry Summary -->\n## Summary\n\nStale prose from an earlier run.\n\n<!-- End DiffSentry Summary -->";
+
+function cfg(): Config {
+  return { githubAppId: "1", githubPrivateKey: "k" } as unknown as Config;
+}
+
+function harness(live: string | null | { throws: true }) {
+  const updates: string[] = [];
+  const octokit = {
+    pulls: {
+      get: async () => {
+        if (live && typeof live === "object") throw new Error("502 from GitHub");
+        return { data: { body: live } };
+      },
+      update: async ({ body }: { body: string }) => {
+        updates.push(body);
+        return { data: {} };
+      },
+    },
+  };
+  const client = new GitHubClient(cfg());
+  vi.spyOn(client, "getInstallationOctokit").mockResolvedValue(octokit as never);
+  return { client, updates };
+}
+
+describe("upsertSummaryInPRDescription", () => {
+  it("rebases onto the description as it is now, not a caller's snapshot", async () => {
+    // The reported bug: the author corrected a sentence while the review was
+    // in flight. The summary write must carry that correction forward.
+    const { client, updates } = harness(
+      "Corrected sentence the author just saved.\n\n" + OLD_SUMMARY,
+    );
+
+    const written = await client.upsertSummaryInPRDescription(1, "acme", "app", 7, SUMMARY);
+
+    expect(written).toBe(true);
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toContain("Corrected sentence the author just saved.");
+    expect(updates[0]).toContain("Adds the retry hook.");
+    expect(updates[0]).not.toContain("Stale prose from an earlier run.");
+  });
+
+  it("appends the summary when the live description has no block yet", async () => {
+    const { client, updates } = harness("Author prose, no DiffSentry block.");
+
+    await client.upsertSummaryInPRDescription(1, "acme", "app", 7, SUMMARY);
+
+    expect(updates[0]).toContain("Author prose, no DiffSentry block.");
+    expect(updates[0]).toContain(SUMMARY);
+  });
+
+  it("skips the write when the live description already carries this summary", async () => {
+    // Re-reviews of an unchanged PR shouldn't churn the description, which
+    // notifies watchers and fires a `pull_request.edited` webhook each time.
+    const { client, updates } = harness("Author prose.\n\n---\n\n" + SUMMARY);
+
+    const written = await client.upsertSummaryInPRDescription(1, "acme", "app", 7, SUMMARY);
+
+    expect(written).toBe(false);
+    expect(updates).toEqual([]);
+  });
+
+  it("leaves the description untouched when the live body can't be read", async () => {
+    // Nothing safe to merge onto: the only fallback available is exactly the
+    // stale snapshot this method exists to avoid.
+    const { client, updates } = harness({ throws: true });
+
+    const written = await client.upsertSummaryInPRDescription(1, "acme", "app", 7, SUMMARY);
+
+    expect(written).toBe(false);
+    expect(updates).toEqual([]);
+  });
+
+  it("treats a null description as empty rather than the string 'null'", async () => {
+    const { client, updates } = harness(null);
+
+    await client.upsertSummaryInPRDescription(1, "acme", "app", 7, SUMMARY);
+
+    expect(updates[0]).toBe(SUMMARY);
+  });
+});
