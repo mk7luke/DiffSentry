@@ -19,21 +19,25 @@ function cfg(): Config {
 
 function harness(live: string | null | { throws: true }) {
   const updates: string[] = [];
+  /** Calls in order, so a test can assert the read precedes the write. */
+  const calls: string[] = [];
   const octokit = {
     pulls: {
       get: async () => {
+        calls.push("get");
         if (live && typeof live === "object") throw new Error("502 from GitHub");
         return { data: { body: live } };
       },
       update: async ({ body }: { body: string }) => {
+        calls.push("update");
         updates.push(body);
         return { data: {} };
       },
     },
   };
   const client = new GitHubClient(cfg());
-  vi.spyOn(client, "getInstallationOctokit").mockResolvedValue(octokit as never);
-  return { client, updates };
+  const auth = vi.spyOn(client, "getInstallationOctokit").mockResolvedValue(octokit as never);
+  return { client, updates, calls, auth };
 }
 
 describe("upsertSummaryInPRDescription", () => {
@@ -82,6 +86,24 @@ describe("upsertSummaryInPRDescription", () => {
 
     expect(written).toBe(false);
     expect(updates).toEqual([]);
+  });
+
+  it("writes through the client that already read, adding no round trip to the race window", async () => {
+    // The read→write gap is the one window in which an author edit can still
+    // be lost, and it cannot be closed: GitHub rejects conditional headers on
+    // this endpoint outright (400 "Conditional request headers are not allowed
+    // in unsafe requests unless supported by the endpoint"), so there is no
+    // If-Match/compare-and-swap to reach for. All that's left is to keep the
+    // gap as short as possible. getInstallationOctokit builds a *new* Octokit
+    // each call, and a new client mints a fresh installation token on its first
+    // request — routing the write through a second client put an entire auth
+    // round trip between the read and the write.
+    const { client, calls, auth } = harness("Author prose.");
+
+    await client.upsertSummaryInPRDescription(1, "acme", "app", 7, SUMMARY);
+
+    expect(calls).toEqual(["get", "update"]);
+    expect(auth).toHaveBeenCalledTimes(1);
   });
 
   it("treats a null description as empty rather than the string 'null'", async () => {

@@ -1221,23 +1221,6 @@ export class GitHubClient {
     }
   }
 
-  async updatePRDescription(
-    installationId: number,
-    owner: string,
-    repo: string,
-    pullNumber: number,
-    body: string,
-    signal?: AbortSignal
-  ): Promise<void> {
-    const octokit = await this.getInstallationOctokit(installationId, signal);
-    await octokit.pulls.update({
-      owner,
-      repo,
-      pull_number: pullNumber,
-      body,
-    });
-  }
-
   /**
    * Merge DiffSentry's summary block into the PR description, rebasing on the
    * body as it is *right now*.
@@ -1248,7 +1231,23 @@ export class GitHubClient {
    * exists, and writing that snapshot back silently reverted whatever the
    * author edited in between — including edits made in response to DiffSentry's
    * own description findings, which were then re-raised against text DiffSentry
-   * itself had restored.
+   * itself had restored. This is the only way to write the description, so
+   * there is no longer a "write this exact body" entry point for a future
+   * caller to reintroduce that bug through.
+   *
+   * One window survives and cannot be closed: an edit saved between the read
+   * below and GitHub applying the PATCH is still lost. GitHub offers no
+   * compare-and-swap here — a conditional header on this endpoint is rejected
+   * outright rather than evaluated:
+   *
+   *     PATCH /repos/{owner}/{repo}/pulls/{n}   If-Match: W/"<the live etag>"
+   *     400 {"errors":["Conditional request headers are not allowed in unsafe
+   *          requests unless supported by the endpoint"]}
+   *
+   * So the mitigation is to keep the window short: the PATCH goes through the
+   * same `octokit` as the read. `getInstallationOctokit` builds a fresh client
+   * each call, and a fresh client mints a new installation token on its first
+   * request, which would put a whole auth round trip inside the gap.
    *
    * Returns true when a write actually happened.
    */
@@ -1283,7 +1282,7 @@ export class GitHubClient {
       return false;
     }
 
-    await this.updatePRDescription(installationId, owner, repo, pullNumber, newBody, signal);
+    await octokit.pulls.update({ owner, repo, pull_number: pullNumber, body: newBody });
     return true;
   }
 
