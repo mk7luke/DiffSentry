@@ -144,12 +144,42 @@ export function formatPRSummary(result: WalkthroughResult): string {
 const SUMMARY_START = "<!-- DiffSentry Summary -->";
 const SUMMARY_END = "<!-- End DiffSentry Summary -->";
 
+/**
+ * Offsets at which `marker` sits alone on its own line — how formatPRSummary
+ * writes it, and never how prose mentions it (`\`<!-- ... -->\`` mid-sentence).
+ */
+function ownLineOccurrences(body: string, marker: string): number[] {
+  const out: number[] = [];
+  for (let i = body.indexOf(marker); i !== -1; i = body.indexOf(marker, i + 1)) {
+    const atLineStart = i === 0 || body[i - 1] === "\n";
+    const after = i + marker.length;
+    const atLineEnd = after === body.length || body[after] === "\n" || body[after] === "\r";
+    if (atLineStart && atLineEnd) out.push(i);
+  }
+  return out;
+}
+
 export function injectSummaryIntoPRBody(
   existingBody: string,
   summary: string,
 ): string {
-  const startIdx = existingBody.indexOf(SUMMARY_START);
-  const endIdx = existingBody.indexOf(SUMMARY_END);
+  // Both markers must sit on their own line, and we pair the LAST end marker
+  // with the nearest start marker before it. Plain `indexOf` on the raw body
+  // anchored the splice on the first *textual* match anywhere — so a
+  // description that merely quoted the marker in prose had everything from
+  // that sentence to the end of the real block deleted. PR #132 did exactly
+  // that to itself, losing 3189 bytes of its own description; the author never
+  // saw an edit, only a shorter page. Re-reading the live body first (see
+  // GitHubClient.upsertSummaryInPRDescription) does not help — the loss
+  // happens here, in the merge.
+  const ends = ownLineOccurrences(existingBody, SUMMARY_END);
+  const endIdx = ends.length > 0 ? ends[ends.length - 1] : -1;
+  const startIdx =
+    endIdx === -1
+      ? -1
+      : ownLineOccurrences(existingBody, SUMMARY_START)
+          .filter((i) => i < endIdx)
+          .pop() ?? -1;
 
   if (startIdx !== -1 && endIdx !== -1) {
     const before = existingBody.slice(0, startIdx);

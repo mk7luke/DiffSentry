@@ -29,6 +29,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A PR description that so much as *mentions* DiffSentry's summary marker is no
+  longer partly deleted by the next review. `injectSummaryIntoPRBody` located
+  its block with a plain `indexOf` over the raw body, so the first textual
+  occurrence anywhere — including one quoted inside backticks in ordinary prose
+  — anchored the splice, and everything from there to the end of the real block
+  was replaced by the new summary. The PR that introduced this changelog entry
+  did it to itself: it described the marker in its own "Root cause" section and
+  lost 3189 bytes, 35 lines, of its own description, with no edit event and
+  nothing to diff against. Both markers must now sit alone on their own line —
+  which is how the block is written and never how prose quotes it — and the last
+  end marker is paired with the nearest start marker before it. Re-reading the
+  live body does not help here; the loss was in the merge, not the staleness.
+
 - Editing a PR description while a review is running no longer gets that edit
   silently reverted. The summary block was written back on top of the
   description as it looked *before* the review's model calls started — a

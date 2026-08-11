@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { GitHubClient } from "../../src/github.js";
+import { injectSummaryIntoPRBody } from "../../src/walkthrough.js";
 import type { Config } from "../../src/types.js";
 
 // A review runs for minutes. DiffSentry used to write the PR description back
@@ -112,5 +113,57 @@ describe("upsertSummaryInPRDescription", () => {
     await client.upsertSummaryInPRDescription(1, "acme", "app", 7, SUMMARY);
 
     expect(updates[0]).toBe(SUMMARY);
+  });
+});
+
+describe("injectSummaryIntoPRBody — marker collisions", () => {
+  // Self-inflicted on PR #132, which described this very fix and so quoted the
+  // marker in prose. `indexOf` anchored the splice on that mention and paired
+  // it with the real block's end marker 3189 bytes later, deleting 35 lines of
+  // the author's description. A fresh read does not help: the destruction is in
+  // the merge, not in the staleness.
+  const PROSE = "It only swaps the `<!-- DiffSentry Summary -->` block, in place.";
+
+  it("does not anchor on a marker quoted inline in prose", () => {
+    const body = `## Root cause\n\n${PROSE}\n\n---\n\n${OLD_SUMMARY}`;
+
+    const out = injectSummaryIntoPRBody(body, SUMMARY);
+
+    expect(out).toContain(PROSE);
+    expect(out).toContain("## Root cause");
+    expect(out).toContain("Adds the retry hook.");
+    expect(out).not.toContain("Stale prose from an earlier run.");
+  });
+
+  it("still replaces the block when prose quotes the marker after it", () => {
+    const body = `${OLD_SUMMARY}\n\n${PROSE}`;
+
+    const out = injectSummaryIntoPRBody(body, SUMMARY);
+
+    expect(out).toContain(PROSE);
+    expect(out).toContain("Adds the retry hook.");
+    expect(out).not.toContain("Stale prose from an earlier run.");
+  });
+
+  it("is idempotent across repeated reviews of a description that quotes it", () => {
+    // The real failure mode was cumulative: each review ate another chunk.
+    const body = `## Root cause\n\n${PROSE}\n\n---\n\n${OLD_SUMMARY}`;
+
+    const once = injectSummaryIntoPRBody(body, SUMMARY);
+    const twice = injectSummaryIntoPRBody(once, SUMMARY);
+
+    expect(twice).toBe(once);
+    expect(twice).toContain(PROSE);
+  });
+
+  it("appends rather than splicing when only a prose mention exists", () => {
+    // No real block yet — the very first review of PR #132's description.
+    const body = `## Root cause\n\n${PROSE}`;
+
+    const out = injectSummaryIntoPRBody(body, SUMMARY);
+
+    expect(out).toContain(PROSE);
+    expect(out).toContain("## Root cause");
+    expect(out).toContain(SUMMARY);
   });
 });
