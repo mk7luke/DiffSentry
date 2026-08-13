@@ -38,15 +38,15 @@
     "serve:seeded": "tsx scripts/serve-seeded.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.115.0",
+    "@anthropic-ai/sdk": "^0.116.0",
     "@octokit/auth-app": "^8.3.0",
     "@octokit/rest": "^22.0.1",
     "@octokit/webhooks": "^14.2.0",
-    "better-sqlite3": "^13.0.2",
+    "better-sqlite3": "^13.0.3",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "js-yaml": "^4.3.1",
-    "marked": "^18.0.8",
+    "marked": "^18.0.9",
     "minimatch": "^10.2.6",
     "openai": "^7.4.0",
     "parse-diff": "^0.12.0",
@@ -61,9 +61,9 @@
     "@types/minimatch": "^5.1.2",
     "@types/node": "^22.13.0",
     "eslint": "^10.8.1",
-    "tsx": "^4.23.5",
+    "tsx": "^4.23.12",
     "typescript": "^5.7.0",
-    "typescript-eslint": "^8.66.0",
+    "typescript-eslint": "^8.67.0",
     "vitest": "^4.1.10"
   }
 }
