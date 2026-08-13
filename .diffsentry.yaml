@@ -188,13 +188,22 @@ reviews:
             string produces a blank gap. Don't suggest swapping these to a
             `!= null` presence check.
 
-  # Coach checks on PR title + description. Commit style here is plain
-  # imperative ("Add X", "Fix Y", "Replace Z with W"), no Conventional
-  # Commits prefix, no trailing period — see `git log --oneline`.
+  # Coach checks on PR title + description. Both title styles are in use and
+  # both are fine: most of the history is plain imperative ("Add X", "Fix Y",
+  # "Replace Z with W"), while recent PRs carry a Conventional Commits prefix
+  # (`fix(summary):`, `build(deps):`). This rule used to forbid the prefix and
+  # cite `git log --oneline` as the evidence; the log had since moved on, so
+  # every recent PR tripped a warning for matching the convention around it.
+  # Enforce only what the two styles share, and don't push authors either way.
   pre_merge_checks:
     title:
       mode: "warning"
-      requirements: "Imperative verb, under 72 chars, no trailing period, no Conventional Commits prefix (we don't use them)."
+      requirements: >-
+        Imperative verb, under 72 chars, no trailing period. A Conventional
+        Commits prefix (`type:` or `type(scope):`, optionally with `!`) is
+        allowed but never required — plain imperative titles are equally
+        valid. When a prefix is present, judge the imperative verb on the
+        text after it, and do not flag the prefix itself.
     description:
       mode: "warning"
       requirements: "At least one sentence explaining WHAT changed and WHY. Link related issue/PR if applicable."

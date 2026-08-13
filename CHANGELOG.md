@@ -29,6 +29,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A PR description that so much as *mentions* DiffSentry's summary marker is no
+  longer partly deleted by the next review. `injectSummaryIntoPRBody` located
+  its block with a plain `indexOf` over the raw body, so the first textual
+  occurrence anywhere — including one quoted inside backticks in ordinary prose
+  — anchored the splice, and everything from there to the end of the real block
+  was replaced by the new summary. The PR that introduced this changelog entry
+  did it to itself: it described the marker in its own "Root cause" section and
+  lost 3189 bytes, 35 lines, of its own description, with no edit event and
+  nothing to diff against. Both markers must now sit alone on their own line —
+  which is how the block is written and never how prose quotes it — and the last
+  end marker is paired with the nearest start marker before it. Re-reading the
+  live body does not help here; the loss was in the merge, not the staleness.
+
+- Editing a PR description while a review is running no longer gets that edit
+  silently reverted. The summary block was written back on top of the
+  description as it looked *before* the review's model calls started — a
+  snapshot minutes stale by the time the summary existed — so anything the
+  author saved in between was overwritten with no trace. Worst case it undid an
+  edit made to satisfy one of DiffSentry's own description findings, which the
+  next review then re-raised against text DiffSentry itself had restored. The
+  summary is now merged onto the description read back immediately before the
+  write, callers can no longer supply a body at all, and a description that
+  already carries the current summary is left alone rather than rewritten (each
+  rewrite notifies watchers and fires another `pull_request.edited`). If the
+  live description can't be read, it is left untouched instead of being
+  reverted to the snapshot.
+
+- The `DiffSentry` check no longer passes with unresolved `major` findings on
+  the PR. The severity gate had never once fired: GitHub reports a bot's login
+  two ways — REST appends `[bot]`, GraphQL's `Bot` node does not — and the
+  thread reader compared the GraphQL login against the REST form, so it matched
+  nothing. Every thread summary came back `botTotal: 0`, and the check was green
+  whenever the review pass's own verdict wasn't `REQUEST_CHANGES`, exactly as it
+  had been before the gate was added. The same predicate backed `ship`'s stale-
+  check detection and push auto-resolve, so those had never worked either. Both
+  logins are now normalised before comparing, and a thread carrying DiffSentry's
+  footer counts as ours even under a renamed `BOT_NAME` — while another vendor's
+  review bot no longer does, at all. The unit fixtures that hid this were written
+  in the REST shape; they now carry the shape GitHub actually returns.
+- Push auto-resolve no longer risks burying a finding it closed. It resolves
+  every DiffSentry thread on a file the push touched — "the file changed" is all
+  it knows, never "the finding was addressed" — and cross-review dedup would
+  then have suppressed the next pass's re-raise, leaving a live `major` on
+  neither the PR nor the check. Closing a thread now retires its dedup
+  fingerprint **and its file's recorded SHA**, so the next pass both may raise
+  the finding again and actually re-reads the file — dropping only the
+  fingerprint would leave the finding un-suppressed on a file the incremental
+  pass skips, which is most of them, since auto-resolve works from the PR's
+  whole diff rather than the push delta. Only a resolution nobody undid makes it
+  stick; a resolution by a human stays permanent, since that one carries a
+  judgement. The synchronize webhook now chains the review behind auto-resolve
+  rather than running the two side by side, so the pass reads state after the
+  retirement rather than racing it.
 - The sticky 📌 Status comment no longer reads 🟢 Approved above its own
   "Unresolved threads: 2" row. It was showing the verdict of the last review
   pass, which describes only the diff that pass read — so a follow-up push

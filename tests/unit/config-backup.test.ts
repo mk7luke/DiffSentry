@@ -133,4 +133,27 @@ describe("backup provider config", () => {
     expect(cfg.backupLocalAiBaseUrl).toBe("http://localhost:9999/v1");
     expect(cfg.backupLocalAiModel).toBe("backup-model");
   });
+
+  // Unset must stay unset: a local runtime 400s on a reasoning_effort it has
+  // never heard of, so we only send one when the operator asks for it.
+  it("leaves the openai-compatible reasoning effort undefined by default", () => {
+    const cfg = loadConfig();
+    expect(cfg.localAiReasoningEffort).toBeUndefined();
+  });
+
+  it("reads LOCAL_AI_REASONING_EFFORT and reuses it for the backup", () => {
+    process.env.LOCAL_AI_REASONING_EFFORT = "low";
+    process.env.BACKUP_AI_PROVIDER = "openai-compatible";
+    const cfg = loadConfig();
+    expect(cfg.localAiReasoningEffort).toBe("low");
+    expect(cfg.backupLocalAiReasoningEffort).toBe("low");
+  });
+
+  it("prefers BACKUP_LOCAL_AI_REASONING_EFFORT over the primary's", () => {
+    process.env.LOCAL_AI_REASONING_EFFORT = "low";
+    process.env.BACKUP_LOCAL_AI_REASONING_EFFORT = "minimal";
+    process.env.BACKUP_AI_PROVIDER = "openai-compatible";
+    const cfg = loadConfig();
+    expect(cfg.backupLocalAiReasoningEffort).toBe("minimal");
+  });
 });

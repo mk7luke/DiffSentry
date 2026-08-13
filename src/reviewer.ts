@@ -6,7 +6,7 @@ import { isAiTimeoutError } from "./ai/timeout.js";
 import { EMPTY_THREAD_SUMMARY, GitHubClient, REVIEW_STATUS_CONTEXT, type ReviewThreadSummary } from "./github.js";
 import { assessShipSignals, renderShipCheck, resolveDisplayVerdict, resolveReviewStatus, type CommitStatusLike, type ThreadGate } from "./ship-check.js";
 import { loadRepoConfig, mergeWithDefaults, shouldReviewPR, isPathIncluded } from "./repo-config.js";
-import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary, injectSummaryIntoPRBody } from "./walkthrough.js";
+import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary } from "./walkthrough.js";
 import { parseCommand, formatHelpMessage, formatConfigMessage, formatUnknownCommandMessage } from "./commands.js";
 import type { SlashOptions } from "./slash-commands.js";
 import { parseIssueCommand, formatIssueHelpMessage } from "./issue-commands.js";
@@ -24,7 +24,7 @@ import { parseIssueReferences, fetchLinkedIssues, formatIssuesForPrompt, formatI
 import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-merge.js";
 import { generateDocstrings, generateTests, simplifyCode, autofix } from "./finishing-touches.js";
 import { formatReviewBody, reconcileApproval } from "./review-body.js";
-import { encodeState, encodeStateRef, extractState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
+import { encodeState, encodeStateRef, extractState, replaceState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
 import { assessRisk, renderRiskBlock, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion, renderConfidenceAggregate, computeReviewerDeltas, renderReviewerDeltaBlock, calibrateSeverities, resolveSeverityCalibration, renderSeverityCalibrationBlock, type CalibrationResult } from "./insights.js";
 import { suggestReviewersFromBlame, renderSuggestedReviewers, combineReviewers, renderCombinedReviewers } from "./blame-reviewers.js";
 import { loadCodeowners, ownersForFiles } from "./codeowners.js";
@@ -355,6 +355,7 @@ export class Reviewer {
       localAiApiKey: config.localAiApiKey,
       localAiModel: config.localAiModel,
       localAiJsonMode: config.localAiJsonMode,
+      localAiReasoningEffort: config.localAiReasoningEffort,
       // Short deadline ONLY when there's a backup to fail over to; otherwise the
       // primary keeps the full budget (unchanged behavior).
       timeoutMs: config.backupAiProvider ? config.primaryAiTimeoutMs : config.aiRequestTimeoutMs,
@@ -374,6 +375,7 @@ export class Reviewer {
         localAiApiKey: config.backupLocalAiApiKey,
         localAiModel: config.backupLocalAiModel ?? "",
         localAiJsonMode: config.backupLocalAiJsonMode ?? true,
+        localAiReasoningEffort: config.backupLocalAiReasoningEffort,
         timeoutMs: config.aiRequestTimeoutMs,
         // Distinguish a same-type backup in cost/log attribution.
         label: config.backupAiProvider === "openai-compatible" ? "openai-compatible-backup" : undefined,
@@ -460,15 +462,98 @@ export class Reviewer {
       const ctx = await this.github.getPRContext(installationId, owner, repo, pullNumber);
       const changedFiles = ctx.files.map((f) => f.filename);
       if (changedFiles.length === 0) return;
-      const resolved = await this.github.resolveAddressedThreads(
+      const { resolved, fingerprints, paths } = await this.github.resolveAddressedThreads(
         installationId, owner, repo, pullNumber, changedFiles
       );
       if (resolved > 0) {
         log.info({ resolved }, "Push auto-resolve: closed addressed threads");
+        // Before the status sync, and awaited: the review pass queued behind
+        // this reads the state to build its dedup set and its skip list, and
+        // either one left standing would suppress the re-raise of a finding
+        // this just closed on nothing but a file having changed.
+        await this.retireResolvedThreadState(installationId, owner, repo, pullNumber, fingerprints, paths);
         await this.syncReviewCommitStatus(installationId, owner, repo, pullNumber, { headSha: ctx.headSha });
       }
     } catch (err) {
       log.warn({ err }, "Push auto-resolve failed");
+    }
+  }
+
+  /**
+   * Forget everything that would keep the next review pass from raising the
+   * findings whose threads were just closed.
+   *
+   * Two records have to go, and dropping only one loses the finding just as
+   * completely:
+   *   - its `postedFingerprints` entry, or cross-review dedup filters the
+   *     re-raise out after the model has made it;
+   *   - its file's `fileShas` entry, or `partitionFilesForReview` skips the file
+   *     before the model ever looks. That second one bites hardest on the files
+   *     this push never touched — and auto-resolve closes threads on those too,
+   *     since it works from the PR's whole diff.
+   *
+   * Only push auto-resolve calls this, and only for threads it closed itself.
+   * A resolution by a human is a judgement — "addressed", or "won't fix" — and
+   * must stay permanent; auto-resolve carries no such judgement, so the finding
+   * has to earn its silence from a fresh look at the code instead.
+   *
+   * Writes both homes deliberately. The next pass prefers the database row and
+   * falls back to the comment blob, so amending only one leaves the other to
+   * overrule it — invisibly, and only on the deployments configured the other
+   * way. Best-effort throughout: this is bookkeeping, and it must never keep
+   * `autoResolveOnPush` from reaching the commit-status sync.
+   */
+  private async retireResolvedThreadState(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    fingerprints: string[],
+    paths: string[],
+  ): Promise<void> {
+    if (fingerprints.length === 0 && paths.length === 0) return;
+    const log = logger.child({ owner, repo, pr: pullNumber });
+    try {
+      const comment = await this.github
+        .findCommentByMarker(installationId, owner, repo, pullNumber, WALKTHROUGH_MARKER)
+        .catch(() => null);
+      const priorState = getWalkthroughState(owner, repo, pullNumber) ?? extractState(comment?.body);
+      if (!priorState) return;
+
+      const retiringFps = new Set(fingerprints);
+      const keptFps = (priorState.postedFingerprints ?? []).filter((fp) => !retiringFps.has(fp));
+      const retiringPaths = new Set(paths);
+      const keptShas = Object.fromEntries(
+        Object.entries(priorState.fileShas ?? {}).filter(([path]) => !retiringPaths.has(path)),
+      );
+
+      const droppedFps = (priorState.postedFingerprints ?? []).length - keptFps.length;
+      const droppedShas = Object.keys(priorState.fileShas ?? {}).length - Object.keys(keptShas).length;
+      // Nothing recorded for what we closed. Skip the writes rather than churn
+      // the walkthrough comment on every push.
+      if (droppedFps === 0 && droppedShas === 0) return;
+
+      const nextState: WalkthroughState = {
+        ...priorState,
+        ...(priorState.postedFingerprints ? { postedFingerprints: keptFps } : {}),
+        ...(priorState.fileShas ? { fileShas: keptShas } : {}),
+        updatedAt: new Date().toISOString(),
+      };
+      saveWalkthroughState(owner, repo, pullNumber, nextState);
+      if (comment?.body) {
+        const nextBody = replaceState(comment.body, nextState);
+        if (nextBody !== comment.body) {
+          await this.github.upsertComment(
+            installationId, owner, repo, pullNumber, nextBody, WALKTHROUGH_MARKER,
+          );
+        }
+      }
+      log.info(
+        { retiredFingerprints: droppedFps, reopenedFiles: droppedShas },
+        "Push auto-resolve: retired the state of the threads it closed",
+      );
+    } catch (err) {
+      log.warn({ err }, "Failed to retire state for auto-resolved threads");
     }
   }
 
@@ -2049,9 +2134,10 @@ export class Reviewer {
       if (walkthroughResult && summaryEnabled) {
         try {
           const prSummary = formatPRSummary(walkthroughResult);
-          const newBody = injectSummaryIntoPRBody(context.description, prSummary);
-          await this.github.updatePRDescription(installationId, owner, repo, pullNumber, newBody, signal);
-          log.info("PR description updated with summary");
+          const written = await this.github.upsertSummaryInPRDescription(
+            installationId, owner, repo, pullNumber, prSummary, signal,
+          );
+          if (written) log.info("PR description updated with summary");
         } catch (err) {
           log.warn({ err }, "Failed to update PR description");
         }
@@ -2364,11 +2450,12 @@ export class Reviewer {
       }
 
       // Set final commit status. Read the threads *now*, after this pass has
-      // posted its own — that ordering is guaranteed. `autoResolveOnPush` is
-      // dispatched fire-and-forget and runs concurrently rather than joined,
-      // so it usually — but not certainly — has also landed by this point;
-      // when it hasn't, it calls its own status sync and self-heals, so a
-      // narrow miss here doesn't leave the status stuck wrong.
+      // posted its own — that ordering is guaranteed. `autoResolveOnPush` has
+      // also finished: the synchronize dispatcher chains the review behind it
+      // rather than beside it, so the threads read here are exactly the ones the
+      // PR is left with. Should this ever run without that chaining (a manual
+      // `@diffsentry review`, say), auto-resolve calls its own status sync and
+      // self-heals, so a narrow miss doesn't leave the status stuck wrong.
       if (repoConfig.reviews?.commit_status !== false) {
         await this.writeReviewStatus(
           installationId, owner, repo, context.headSha, pullNumber,
@@ -2559,8 +2646,7 @@ export class Reviewer {
           await this.github.upsertComment(installationId, owner, repo, pullNumber, walkthroughBody, WALKTHROUGH_MARKER);
 
           const prSummary = formatPRSummary(walkthroughResult);
-          const newBody = injectSummaryIntoPRBody(context.description, prSummary);
-          await this.github.updatePRDescription(installationId, owner, repo, pullNumber, newBody);
+          await this.github.upsertSummaryInPRDescription(installationId, owner, repo, pullNumber, prSummary);
           break;
         }
 

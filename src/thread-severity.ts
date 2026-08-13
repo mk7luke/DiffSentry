@@ -61,3 +61,30 @@ export function parseThreadSeverity(body: string): CommentSeverity | undefined {
 export function isBlockingSeverity(severity: CommentSeverity | undefined): boolean {
   return severity === undefined || BLOCKING.includes(severity);
 }
+
+const FINGERPRINT_KEY = "diffsentry-fingerprint";
+
+/**
+ * The dedup fingerprint, stamped the same way and for the same reason as the
+ * severity: it has to survive the round trip through GitHub so a thread can be
+ * matched back to the finding that produced it.
+ *
+ * Read by `resolveAddressedThreads`, so that closing a thread on nothing more
+ * than "the file was touched" also retires its fingerprint — otherwise
+ * cross-review dedup suppresses the next pass's re-raise and a finding nobody
+ * addressed disappears from the PR.
+ */
+export function renderFingerprintMarker(fingerprint: string): string {
+  return `<!-- ${FINGERPRINT_KEY}:${fingerprint} -->`;
+}
+
+/** Hex digest from `fingerprintFor`; anything else isn't one of ours. */
+const FINGERPRINT_RE = new RegExp(`<!--\\s*${FINGERPRINT_KEY}:\\s*([0-9a-f]+)\\s*-->`, "gi");
+
+/** Last marker wins, matching `parseThreadSeverity` — see its note on quoting. */
+export function parseThreadFingerprint(body: string): string | undefined {
+  if (!body) return undefined;
+  let found: string | undefined;
+  for (const m of body.matchAll(FINGERPRINT_RE)) found = m[1].toLowerCase();
+  return found;
+}

@@ -22,6 +22,15 @@ export interface Config {
   localAiApiKey?: string;
   localAiModel: string;
   localAiJsonMode: boolean;
+  /** Hosted reasoning models behind an OpenAI-compatible endpoint (grok-4.5,
+   *  DeepSeek-R1, …) default to a HIGH reasoning effort, which spends the
+   *  output-token budget on hidden chain-of-thought and stretches a review well
+   *  past the per-request deadline. Lowering it is a real trade-off, not a free
+   *  win — measured against grok-4.5 on three PRs, "high" took 34-136s, "medium"
+   *  29-98s, and "low" 2-10s, but "low" dropped a major finding the other two
+   *  caught. Tune it against your own deadline. Unset (the default) sends no
+   *  field at all, so local runtimes that reject the parameter are unaffected. */
+  localAiReasoningEffort?: string;
   /**
    * Per-request deadline (ms) applied to every AI provider call. Sourced from
    * AI_REQUEST_TIMEOUT_MS (default 60s). Guarantees a hung model call surfaces
@@ -41,6 +50,7 @@ export interface Config {
   backupLocalAiApiKey?: string;
   backupLocalAiModel?: string;
   backupLocalAiJsonMode?: boolean;
+  backupLocalAiReasoningEffort?: string;
   /** Short per-op deadline for the PRIMARY when a backup is configured, so a
    *  slow-hang fails over quickly. Ignored (primary uses aiRequestTimeoutMs)
    *  when no backup is set. */

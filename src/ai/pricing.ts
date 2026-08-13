@@ -25,20 +25,40 @@ export interface ModelPrice {
 /**
  * Built-in defaults (USD per 1M tokens). Keys are lowercase and intentionally
  * coarse (family prefixes) so snapshot suffixes resolve via prefix matching.
- * These are best-effort list prices as of early 2026 — override via env for
- * exact billing.
+ * These are best-effort list prices as of August 2026 — override via env for
+ * exact billing. Claude Sonnet 5 is listed at its standard $3/$15; it bills at
+ * an introductory $2/$10 through 2026-08-31.
  */
 const DEFAULT_PRICES: Record<string, ModelPrice> = {
   // Anthropic — Claude
+  "claude-opus-5": { input: 5, output: 25 },
+  "claude-sonnet-5": { input: 3, output: 15 },
+  "claude-fable-5": { input: 10, output: 50 },
+  "claude-opus-4-5": { input: 5, output: 25 },
   "claude-opus-4": { input: 15, output: 75 },
   "claude-sonnet-4": { input: 3, output: 15 },
+  "claude-haiku-4-5": { input: 1, output: 5 },
   "claude-haiku-4": { input: 0.8, output: 4 },
   "claude-3-7-sonnet": { input: 3, output: 15 },
   "claude-3-5-sonnet": { input: 3, output: 15 },
   "claude-3-5-haiku": { input: 0.8, output: 4 },
   "claude-3-opus": { input: 15, output: 75 },
   "claude-3-haiku": { input: 0.25, output: 1.25 },
-  // OpenAI — GPT / o-series
+  // OpenAI — GPT / o-series.
+  // NB: keys are prefix-matched longest-first, so the dotted 5.x families must
+  // each have their own entry — a bare "gpt-5" key would otherwise swallow
+  // "gpt-5.4" and price it at the 5.0 rate.
+  "gpt-5.6-sol": { input: 5, output: 30 },
+  "gpt-5.6-terra": { input: 2, output: 12 },
+  "gpt-5.6-luna": { input: 0.2, output: 1.2 },
+  "gpt-5.5-pro": { input: 30, output: 180 },
+  "gpt-5.5": { input: 5, output: 30 },
+  "gpt-5.4-pro": { input: 30, output: 180 },
+  "gpt-5.4-mini": { input: 0.75, output: 4.5 },
+  "gpt-5.4-nano": { input: 0.2, output: 1.25 },
+  "gpt-5.4": { input: 2.5, output: 15 },
+  "gpt-5.2-pro": { input: 21, output: 168 },
+  "gpt-5.2": { input: 1.75, output: 14 },
   "gpt-5-mini": { input: 0.25, output: 2 },
   "gpt-5-nano": { input: 0.05, output: 0.4 },
   "gpt-5": { input: 1.25, output: 10 },
@@ -50,6 +70,13 @@ const DEFAULT_PRICES: Record<string, ModelPrice> = {
   "o4-mini": { input: 1.1, output: 4.4 },
   "o3-mini": { input: 1.1, output: 4.4 },
   "o3": { input: 2, output: 8 },
+  // xAI — Grok (reachable via AI_PROVIDER=openai-compatible, https://api.x.ai/v1).
+  // These are the <200k-token-prompt rates; xAI doubles them once a single
+  // prompt crosses 200k, which this flat table can't express — a reviewer that
+  // routinely sends prompts that large should override via AI_MODEL_PRICES.
+  "grok-4.5": { input: 2, output: 6 },
+  "grok-4.3": { input: 1.25, output: 2.5 },
+  "grok-4.20": { input: 1.25, output: 2.5 },
 };
 
 /**

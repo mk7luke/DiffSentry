@@ -162,6 +162,10 @@ describe("renderShipCheck", () => {
 });
 
 describe("GitHubClient.summarizeReviewThreads", () => {
+  // Authors here are written the way GraphQL returns them — a bare `diffsentry`,
+  // no `[bot]` suffix. REST is the one that appends it, and writing REST logins
+  // into GraphQL fixtures is how `isOurBotThread` shipped matching nothing at
+  // all while its whole test suite stayed green.
   function node(opts: { resolved: boolean; author: string; type?: string; body?: string }) {
     return {
       id: `t-${opts.author}-${opts.resolved}`,
@@ -189,21 +193,31 @@ describe("GitHubClient.summarizeReviewThreads", () => {
   it("splits resolution counts by author", async () => {
     expect(
       await summarize([
-        node({ resolved: true, author: "diffsentry[bot]" }),
-        node({ resolved: false, author: "diffsentry[bot]" }),
+        node({ resolved: true, author: "diffsentry" }),
+        node({ resolved: false, author: "diffsentry" }),
         node({ resolved: false, author: "luke", type: "User" }),
       ]),
     ).toEqual({ total: 3, unresolved: 2, botTotal: 2, botUnresolved: 1, botUnresolvedBlocking: 1 });
   });
 
-  it("does not let another vendor's bot thread gate the DiffSentry check", async () => {
-    // isOurBotThread matches any *[bot] login so old deployments can
-    // self-resolve. Harmless when it only fed a number in a comment; now that it
-    // gates a commit status, a Copilot/Sonar/Codecov review comment must not red
-    // the check for a finding DiffSentry never made.
+  it("does not count another vendor's bot thread as DiffSentry's own", async () => {
+    // A Copilot/Sonar/Codecov review comment is neither our login nor our
+    // footer, so it is nobody's business but its own: it must not red the check
+    // for a finding DiffSentry never made, and it must not sit in botUnresolved
+    // either — that count feeds isReviewFeedbackAddressed, so an open thread
+    // from a second review bot would otherwise pin `ship` on a stale red
+    // forever, with no DiffSentry thread anywhere to resolve.
     expect(
-      await summarize([node({ resolved: false, author: "copilot[bot]", body: "Consider renaming this." })]),
-    ).toMatchObject({ botUnresolved: 1, botUnresolvedBlocking: 0 });
+      await summarize([node({ resolved: false, author: "copilot", body: "Consider renaming this." })]),
+    ).toMatchObject({ total: 1, unresolved: 1, botTotal: 0, botUnresolved: 0, botUnresolvedBlocking: 0 });
+  });
+
+  it("claims a thread from an older deployment under a different bot name", async () => {
+    // BOT_NAME is configurable; our footer is what identifies the thread once
+    // the login no longer matches.
+    expect(
+      await summarize([node({ resolved: false, author: "diffsentry-staging" })]),
+    ).toMatchObject({ botTotal: 1, botUnresolved: 1, botUnresolvedBlocking: 1 });
   });
 
   it("reports zero bot threads on a PR DiffSentry never commented on", async () => {
@@ -218,8 +232,8 @@ describe("GitHubClient.summarizeReviewThreads", () => {
 
   it("counts an all-resolved bot review as addressed", async () => {
     const summary = await summarize([
-      node({ resolved: true, author: "diffsentry[bot]" }),
-      node({ resolved: true, author: "diffsentry[bot]" }),
+      node({ resolved: true, author: "diffsentry" }),
+      node({ resolved: true, author: "diffsentry" }),
     ]);
     expect(summary).toEqual({ total: 2, unresolved: 0, botTotal: 2, botUnresolved: 0, botUnresolvedBlocking: 0 });
     expect(isReviewFeedbackAddressed(summary)).toBe(true);

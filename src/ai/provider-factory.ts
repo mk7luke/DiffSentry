@@ -17,6 +17,7 @@ export interface ProviderSpec {
   localAiApiKey?: string;
   localAiModel: string;
   localAiJsonMode: boolean;
+  localAiReasoningEffort?: string;
   timeoutMs: number;
   /** Overrides the openai-compatible provider label for cost/log attribution.
    *  Only `OpenAICompatibleProvider` accepts a label, so this disambiguates a
@@ -49,6 +50,7 @@ export function buildProvider(spec: ProviderSpec): AIProvider {
       model: spec.localAiModel,
       apiKey: spec.localAiApiKey,
       jsonMode: spec.localAiJsonMode,
+      reasoningEffort: spec.localAiReasoningEffort,
       timeoutMs: spec.timeoutMs,
       providerLabel: spec.label,
     });

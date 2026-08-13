@@ -3,7 +3,13 @@ import { Octokit } from "@octokit/rest";
 import { Config, FileChange, PRContext, ReviewComment, ReviewResult, IssueContext, IssueComment } from "./types.js";
 import { logger } from "./logger.js";
 import { isFileLevelFinding, REVIEW_BODY_MARKER } from "./review-body.js";
-import { parseThreadSeverity, isBlockingSeverity, isDiffSentryComment } from "./thread-severity.js";
+import { injectSummaryIntoPRBody } from "./walkthrough.js";
+import {
+  parseThreadSeverity,
+  parseThreadFingerprint,
+  isBlockingSeverity,
+  isDiffSentryComment,
+} from "./thread-severity.js";
 
 type Logger = typeof logger;
 
@@ -326,16 +332,45 @@ interface RawRateBucket {
   reset: number;
 }
 
+/**
+ * GitHub reports the same bot under two logins: REST appends `[bot]`
+ * (`diffsentry[bot]`), GraphQL's `Bot` node does not (`diffsentry`). Callers
+ * here build the REST form from `config.botName` while the threads come from
+ * GraphQL, so both sides are folded to the bare name before comparing.
+ *
+ * Comparing the two shapes directly is what made `isOurBotThread` match nothing
+ * for the whole life of the thread gate: every summary read back
+ * `botTotal: 0, botUnresolvedBlocking: 0`, so an open `major` never redded the
+ * `DiffSentry` check, `ship` never cleared a stale one, and push auto-resolve
+ * never closed a thread.
+ */
+function bareBotLogin(login: string): string {
+  // Trailing suffixes only, but any number of them: callers build the expected
+  // login as `${botName}[bot]`, so a BOT_NAME already carrying the suffix
+  // yields `diffsentry[bot][bot]` and a single anchored strip would leave the
+  // two sides asymmetric. Stripping every occurrence instead would go too far —
+  // `acme[bot]-review[bot]` and an unrelated bot's `acme-review` both collapse
+  // to `acme-review`, and a login match short-circuits the footer check, so
+  // this would claim another vendor's thread outright.
+  return login.toLowerCase().replace(/(?:\[bot\])+$/, "");
+}
+
 function isOurBotThread(thread: any, botLogin: string): boolean {
   const first = thread.comments?.nodes?.[0];
   if (!first) return false;
   const author = first.author;
   if (!author) return false;
+  // Authorship is decided before the body is read: a human quoting one of our
+  // comments must not inherit its severity, and a third-party bot must not be
+  // able to gate the check by emitting a marker of its own.
   if (author.__typename !== "Bot") return false;
-  const login = (author.login ?? "").toLowerCase();
-  // Exact match against our app login first; fall back to suffix so older
-  // deployments under a different bot name can still self-resolve their threads.
-  return login === botLogin || login.endsWith("[bot]");
+  if (bareBotLogin(author.login ?? "") === bareBotLogin(botLogin)) return true;
+  // `BOT_NAME` is configurable, so the same PR can carry threads from an older
+  // deployment under a different login. Our footer — which every DiffSentry
+  // comment has carried since long before the severity marker — is the
+  // authoritative signal. This replaces a `*[bot]` suffix test that would have
+  // claimed every other vendor's review bot as ours had it ever matched.
+  return isDiffSentryComment(first.body ?? "");
 }
 
 /**
@@ -346,12 +381,9 @@ function isOurBotThread(thread: any, botLogin: string): boolean {
  * without standing up a GitHub client.
  *
  * A readable severity settles it. An unreadable one only counts when the body
- * carries DiffSentry's own footer: `isOurBotThread` deliberately matches any
- * `*[bot]` login so old deployments can self-resolve, which was harmless when
- * the count only fed a number in a comment — but now that it gates a commit
- * status, a second review bot's inline comment would otherwise red the
- * `DiffSentry` check for a finding DiffSentry never made. Every pre-marker
- * DiffSentry thread carries the footer, so legacy threads still count.
+ * carries DiffSentry's own footer — belt and braces alongside `isOurBotThread`,
+ * which already refuses anything that is neither our login nor our footer. Every
+ * pre-marker DiffSentry thread carries the footer, so legacy threads still count.
  */
 export function countBlockingThreads(threads: any[], botLogin: string): number {
   let n = 0;
@@ -1189,21 +1221,69 @@ export class GitHubClient {
     }
   }
 
-  async updatePRDescription(
+  /**
+   * Merge DiffSentry's summary block into the PR description, rebasing on the
+   * body as it is *right now*.
+   *
+   * Callers only supply the block; they deliberately cannot supply the body to
+   * merge it into. A review runs for minutes, so the description a caller
+   * captured before the model calls started is stale by the time the summary
+   * exists, and writing that snapshot back silently reverted whatever the
+   * author edited in between — including edits made in response to DiffSentry's
+   * own description findings, which were then re-raised against text DiffSentry
+   * itself had restored. This is the only way to write the description, so
+   * there is no longer a "write this exact body" entry point for a future
+   * caller to reintroduce that bug through.
+   *
+   * One window survives and cannot be closed: an edit saved between the read
+   * below and GitHub applying the PATCH is still lost. GitHub offers no
+   * compare-and-swap here — a conditional header on this endpoint is rejected
+   * outright rather than evaluated:
+   *
+   *     PATCH /repos/{owner}/{repo}/pulls/{n}   If-Match: W/"<the live etag>"
+   *     400 {"errors":["Conditional request headers are not allowed in unsafe
+   *          requests unless supported by the endpoint"]}
+   *
+   * So the mitigation is to keep the window short: the PATCH goes through the
+   * same `octokit` as the read. `getInstallationOctokit` builds a fresh client
+   * each call, and a fresh client mints a new installation token on its first
+   * request, which would put a whole auth round trip inside the gap.
+   *
+   * Returns true when a write actually happened.
+   */
+  async upsertSummaryInPRDescription(
     installationId: number,
     owner: string,
     repo: string,
     pullNumber: number,
-    body: string,
+    summary: string,
     signal?: AbortSignal
-  ): Promise<void> {
+  ): Promise<boolean> {
     const octokit = await this.getInstallationOctokit(installationId, signal);
-    await octokit.pulls.update({
-      owner,
-      repo,
-      pull_number: pullNumber,
-      body,
-    });
+    const log = logger.child({ owner, repo, pr: pullNumber });
+
+    let currentBody: string;
+    try {
+      const pr = await octokit.pulls.get({ owner, repo, pull_number: pullNumber });
+      currentBody = pr.data.body ?? "";
+    } catch (err) {
+      // Nothing safe to merge onto: the only body we could fall back to is the
+      // stale snapshot this method exists to avoid. Leave the description as
+      // the author left it; the next review retries with a fresh read.
+      log.warn({ err }, "Could not read PR description; leaving it untouched");
+      return false;
+    }
+
+    const newBody = injectSummaryIntoPRBody(currentBody, summary);
+    if (newBody === currentBody) {
+      // A re-review of an unchanged PR shouldn't churn the description —
+      // each write notifies watchers and fires another pull_request.edited.
+      log.debug("PR description summary already current; skipping write");
+      return false;
+    }
+
+    await octokit.pulls.update({ owner, repo, pull_number: pullNumber, body: newBody });
+    return true;
   }
 
   async getFileContent(
@@ -1289,6 +1369,24 @@ export class GitHubClient {
    * Resolve review threads on a PR where DiffSentry left comments on files
    * that were modified in the latest push. Uses GraphQL since the REST API
    * doesn't support resolving review threads.
+   *
+   * Reports the dedup fingerprint AND the path of every thread it actually
+   * closed. The trigger is only ever "the push touched this file" — never "the
+   * finding was addressed" — so the caller retires both from the walkthrough
+   * state, letting the next pass re-raise anything still true. Without that,
+   * cross-review dedup would swallow the re-raise and a `major` nobody fixed
+   * would leave the PR green with no thread left to point at.
+   *
+   * The paths matter as much as the fingerprints, for a second reason:
+   * `changedFiles` is the PR's whole diff rather than the push delta, so this
+   * closes threads on files the push never touched — and those are exactly the
+   * files `partitionFilesForReview` skips on an incremental pass, their patch
+   * hash being unchanged. Un-suppressing a finding on a file nobody re-reads
+   * would lose it just the same.
+   *
+   * A thread whose mutation failed is deliberately absent from all three: its
+   * finding is still open on the PR, and retiring its state would let the next
+   * pass post a duplicate beside it.
    */
   async resolveAddressedThreads(
     installationId: number,
@@ -1296,7 +1394,7 @@ export class GitHubClient {
     repo: string,
     pullNumber: number,
     changedFiles: string[]
-  ): Promise<number> {
+  ): Promise<{ resolved: number; fingerprints: string[]; paths: string[] }> {
     const octokit = await this.getInstallationOctokit(installationId);
     const log = logger.child({ owner, repo, pr: pullNumber });
     const botLogin = `${this.config.botName}[bot]`.toLowerCase();
@@ -1306,6 +1404,8 @@ export class GitHubClient {
       const threads = await this.fetchAllReviewThreads(octokit, owner, repo, pullNumber);
 
       let resolvedCount = 0;
+      const fingerprints: string[] = [];
+      const paths = new Set<string>();
       for (const thread of threads) {
         if (thread.isResolved) continue;
         if (!changed.has(thread.path)) continue;
@@ -1320,16 +1420,21 @@ export class GitHubClient {
             }
           `, { threadId: thread.id });
           resolvedCount++;
+          if (thread.path) paths.add(thread.path);
+          // Absent on threads posted before fingerprints were stamped; those
+          // have nothing to un-suppress, but their file is re-read regardless.
+          const fp = parseThreadFingerprint(thread.comments?.nodes?.[0]?.body ?? "");
+          if (fp) fingerprints.push(fp);
         } catch (err) {
           log.warn({ err, threadId: thread.id }, "Failed to resolve thread");
         }
       }
 
       log.info({ resolvedCount, totalThreads: threads.length }, "Auto-resolved addressed review threads");
-      return resolvedCount;
+      return { resolved: resolvedCount, fingerprints, paths: [...paths] };
     } catch (err) {
       log.warn({ err }, "Failed to auto-resolve review threads");
-      return 0;
+      return { resolved: 0, fingerprints: [], paths: [] };
     }
   }
 
