@@ -19,6 +19,32 @@ updates:
       server-minor-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      # `@types/node` describes the runtime, and the runtime is whatever both
+      # Dockerfile stages say — currently `node:22-slim`. Types running ahead
+      # of the base image is worse than types running behind it: `tsc` accepts
+      # an API that only exists in Node 24+, the build is green, and the
+      # container throws a TypeError in production. Bump this in the same
+      # commit that moves the base image, never on its own.
+      #
+      # This only holds the root package.json. `web/` keeps floating, because
+      # its `@types/node` types Vite's build tooling — which runs on the
+      # developer/CI Node, not inside the server image.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
+      # TypeScript is capped by the linter, not by us: typescript-eslint peers
+      # on `>=4.8.4 <6.1.0`, and 8.67.0 (current latest) still does. A TS 6/7
+      # bump therefore cannot even install — `npm ci` dies with ERESOLVE
+      # before a single file is compiled, so the PR arrives with every job red
+      # and nothing to read.
+      #
+      # A version range is used rather than `update-types: semver-major`, so
+      # that lifting the hold is a one-line delete once typescript-eslint
+      # ships a release that peers on the newer major. Check with:
+      #   npm view typescript-eslint@latest peerDependencies
+      - dependency-name: "typescript"
+        versions: [">=6"]
 
   - package-ecosystem: npm
     directory: "/web"
