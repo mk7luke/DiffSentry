@@ -315,7 +315,7 @@ export class OpenAIProvider implements AIProvider {
     return parseWalkthroughResponse(text);
   }
 
-  async chat(context: PRContext, userMessage: string, repoConfig?: RepoConfig): Promise<string> {
+  async chat(context: PRContext, userMessage: string, _repoConfig?: RepoConfig): Promise<string> {
     const { system, user } = buildChatPrompt(context, userMessage);
     const log = logger.child({ provider: "openai", model: this.model });
 

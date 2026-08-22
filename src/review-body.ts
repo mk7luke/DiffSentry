@@ -1,11 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type {
-  Confidence,
-  PRContext,
-  ReviewComment,
-  ReviewResult,
-  RepoConfig,
-} from "./types.js";
+import type { Confidence, ReviewComment, ReviewResult } from "./types.js";
 
 export type ReviewBodyMeta = {
   profile: string;

@@ -25,7 +25,7 @@ import {
   stackedSeverityBar,
   type DayBin,
 } from "./layout.js";
-import { createCsrf, createNoopCsrf, getCurrentUser, type CsrfRuntime } from "./auth.js";
+import { createNoopCsrf, getCurrentUser, type CsrfRuntime } from "./auth.js";
 import { renderMarkdown } from "./markdown.js";
 import {
   getApprovalMix,
