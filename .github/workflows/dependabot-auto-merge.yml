@@ -1,0 +1,148 @@
+# Merges Dependabot's routine minor/patch group PRs once everything is green,
+# so the weekly drip stops needing a human to approve bumps nobody reads.
+#
+# Three more obvious mechanisms do not work here, hence the shape of this file:
+#
+#   - GitHub's auto-merge cannot be armed until a PR's requirements are already
+#     met (422, regression dating to 2026-03-25), and its deferred completion
+#     path never re-checks `bypass_actors`, so a PR handed to it sits BLOCKED
+#     forever. community discussions 190610 and 162623.
+#   - `@dependabot squash and merge` was removed on 2026-01-27.
+#   - GITHUB_TOKEN cannot be granted ruleset bypass on a user-owned repo
+#     ("Actor GitHub Actions integration must be part of the ruleset source or
+#     owner organization"), so the merge has to authenticate as someone who
+#     already holds bypass — hence AUTOMERGE_TOKEN.
+#
+# What is left is the synchronous merge endpoint, which does honor bypass.
+#
+# The trigger is `workflow_run` rather than `pull_request` on purpose: a
+# workflow that Dependabot itself triggers can only read Dependabot secrets,
+# not Actions secrets, so AUTOMERGE_TOKEN would be invisible to it.
+name: Dependabot auto-merge
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+# Every write here is done with AUTOMERGE_TOKEN; this job's own token only
+# ever reads.
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-automerge-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge if this is a routine group and everything is green
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          SELF: ${{ github.workflow }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::notice::AUTOMERGE_TOKEN is not set — auto-merge is inert."
+            exit 0
+          fi
+
+          # Scope is the branch name, not the update type. dependabot.yml keeps
+          # majors OUT of the groups so each arrives alone for reading, which
+          # makes "is this a *-minor-patch group branch" exactly the right
+          # question — and it cannot be forged, since only Dependabot pushes
+          # dependabot/* branches.
+          #
+          # The `actions` group is deliberately excluded: it carries no
+          # update-type filter, so a major lands in it (codeql-action 3 -> 4 in
+          # #102 did).
+          case "$BRANCH" in
+            dependabot/npm_and_yarn/server-minor-patch-*) ;;
+            dependabot/npm_and_yarn/web/spa-minor-patch-*) ;;
+            *) echo "::notice::$BRANCH is not a minor/patch group — leaving for review."; exit 0 ;;
+          esac
+
+          pr=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+                 --json number,author,headRefOid,title --jq '.[0] // empty')
+          if [ -z "$pr" ]; then
+            echo "::notice::no open PR for $BRANCH."
+            exit 0
+          fi
+
+          num=$(jq -r '.number'        <<<"$pr")
+          author=$(jq -r '.author.login' <<<"$pr")
+          head=$(jq -r '.headRefOid'   <<<"$pr")
+          title=$(jq -r '.title'       <<<"$pr")
+
+          if [ "$author" != "dependabot[bot]" ]; then
+            echo "::notice::#$num is authored by $author, not Dependabot."
+            exit 0
+          fi
+
+          # The CI run that woke us described $HEAD_SHA. If the branch has moved
+          # since (a rebase, a follow-up push), that newer commit has its own CI
+          # run and its own turn here — merging now would ship something no
+          # green run ever covered.
+          if [ "$head" != "$HEAD_SHA" ]; then
+            echo "::notice::#$num moved past $HEAD_SHA — a later run will handle it."
+            exit 0
+          fi
+
+          # Trust the whole rollup, not just the two required contexts. Required
+          # checks are what the ruleset enforces; this is automation acting
+          # unattended, so it should refuse on anything red or unfinished.
+          # $SELF is filtered out because a workflow_run job must not wait on
+          # itself.
+          rollup=$(gh pr view "$num" --repo "$REPO" --json statusCheckRollup --jq '.statusCheckRollup')
+
+          pending=$(jq --arg self "$SELF" '[ .[]
+            | select((.name // .context) != $self)
+            | select((.status // "COMPLETED") != "COMPLETED") ] | length' <<<"$rollup")
+
+          failed=$(jq --arg self "$SELF" '[ .[]
+            | select((.name // .context) != $self)
+            | (.conclusion // .state // "") | ascii_upcase
+            | select(. != "" and . != "SUCCESS" and . != "NEUTRAL" and . != "SKIPPED") ] | length' <<<"$rollup")
+
+          if [ "$pending" -ne 0 ]; then
+            echo "::notice::#$num still has $pending check(s) running."
+            exit 0
+          fi
+          if [ "$failed" -ne 0 ]; then
+            echo "::notice::#$num has $failed check(s) not green — leaving for review."
+            exit 0
+          fi
+
+          # `sha` pins the merge to the commit vetted above, so a push landing
+          # between the check above and this call is rejected rather than
+          # merged unseen.
+          if gh api -X PUT "repos/$REPO/pulls/$num/merge" \
+               -f merge_method=squash \
+               -f commit_title="$title (#$num)" \
+               -f sha="$head" >/dev/null 2>merge-err.txt; then
+            echo "::notice::merged #$num."
+            exit 0
+          fi
+
+          # `strict_required_status_checks_policy` means a PR that fell behind
+          # main is refused. Update it and stop: that push starts a fresh CI
+          # run, which brings us back here with the branch current.
+          if grep -qiE 'not up to date|Base branch was modified' merge-err.txt; then
+            gh api -X PUT "repos/$REPO/pulls/$num/update-branch" >/dev/null
+            echo "::notice::#$num was behind main — updated it; the next CI run will merge."
+            exit 0
+          fi
+
+          echo "::error::merging #$num failed:" >&2
+          cat merge-err.txt >&2
+          exit 1
