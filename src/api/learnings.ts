@@ -1,4 +1,5 @@
 import type { Request, Response, Router } from "express";
+import { sendData, sendError } from "./http.js";
 import { minimatch } from "minimatch";
 import type { Role } from "../dashboard/roles.js";
 import { getActor, type Actor } from "../dashboard/roles.js";
@@ -33,16 +34,6 @@ export interface LearningDeps {
 type IdParams = { id: string };
 type RepoParams = { owner: string; repo: string };
 type RepoIdParams = { owner: string; repo: string; id: string };
-
-type ErrorCode = "forbidden" | "not_found" | "bad_request" | "internal";
-
-function sendData(res: Response, data: unknown, status = 200): void {
-  res.status(status).json({ data });
-}
-
-function sendError(res: Response, status: number, code: ErrorCode, message: string): void {
-  res.status(status).json({ error: { code, message } });
-}
 
 // owner/repo path segments are interpolated into a filesystem path by the
 // store, so constrain them to the GitHub-legal character set and reject the

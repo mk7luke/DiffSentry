@@ -1,5 +1,6 @@
 import express from "express";
-import type { Request, Response } from "express";
+import type { Request } from "express";
+import { sendData, sendError } from "./http.js";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { getRecentLogs, logger } from "../logger.js";
@@ -119,21 +120,6 @@ export interface ApiDeps {
    * runs the same engine path). When omitted, GET /webhooks still works but
    * POST /webhooks/:id/replay answers 503. */
   replayWebhook?: ReplayWebhook;
-}
-
-type ErrorCode =
-  | "unauthorized"
-  | "forbidden"
-  | "not_found"
-  | "bad_request"
-  | "internal";
-
-function sendData(res: Response, data: unknown, status = 200): void {
-  res.status(status).json({ data });
-}
-
-function sendError(res: Response, status: number, code: ErrorCode, message: string): void {
-  res.status(status).json({ error: { code, message } });
 }
 
 async function loadLearningsSafe(baseDir: string, owner: string, repo: string): Promise<Learning[]> {

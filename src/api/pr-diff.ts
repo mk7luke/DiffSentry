@@ -1,4 +1,5 @@
 import type { Request, Response, Router } from "express";
+import { sendData, sendError } from "./http.js";
 import type { Octokit } from "@octokit/rest";
 import { logger } from "../logger.js";
 import { getFindingsForPR, getInstallationId, getPR } from "../dashboard/queries.js";
@@ -17,16 +18,6 @@ import type { Role } from "../dashboard/roles.js";
 // on record, or GitHub errors, `diff` is null and `diffError` explains why —
 // the findings still return so the panel degrades to a list rather than a 500.
 // ─────────────────────────────────────────────────────────────────────────────
-
-type ErrorCode = "forbidden" | "not_found" | "bad_request" | "internal" | "unavailable";
-
-function sendData(res: Response, data: unknown, status = 200): void {
-  res.status(status).json({ data });
-}
-
-function sendError(res: Response, status: number, code: ErrorCode, message: string): void {
-  res.status(status).json({ error: { code, message } });
-}
 
 // A unified diff for a large PR can be many megabytes; cap what we ship to the
 // browser so a single huge PR can't blow up the response (and the renderer).

@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Request, Response, Router } from "express";
+import { sendData, sendError } from "./http.js";
 import yaml from "js-yaml";
 import type { Octokit } from "@octokit/rest";
 import type { RepoConfig } from "../types.js";
@@ -36,15 +37,6 @@ export interface ConfigRouteDeps {
   getInstallationOctokit?: (installationId: number) => Promise<Octokit>;
   requireRole: (role: Role) => import("express").RequestHandler;
   csrf: CsrfRuntime;
-}
-
-type ErrorCode = "forbidden" | "not_found" | "bad_request" | "internal" | "unavailable";
-
-function sendData(res: Response, data: unknown, status = 200): void {
-  res.status(status).json({ data });
-}
-function sendError(res: Response, status: number, code: ErrorCode, message: string, extra?: unknown): void {
-  res.status(status).json({ error: { code, message, ...(extra ? { details: extra } : {}) } });
 }
 
 /** Cached fetch of the raw .diffsentry.yaml on the default branch (null if absent). */
