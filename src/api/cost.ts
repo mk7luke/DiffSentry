@@ -1,4 +1,5 @@
 import type { Request, Response, Router } from "express";
+import { sendData, sendError } from "./http.js";
 import type { Role } from "../dashboard/roles.js";
 import { getActor } from "../dashboard/roles.js";
 import type { CsrfRuntime } from "../dashboard/auth.js";
@@ -23,16 +24,6 @@ import { logger } from "../logger.js";
 export interface CostDeps {
   requireRole: (role: Role) => import("express").RequestHandler;
   csrf: CsrfRuntime;
-}
-
-type ErrorCode = "forbidden" | "bad_request" | "internal";
-
-function sendData(res: Response, data: unknown, status = 200): void {
-  res.status(status).json({ data });
-}
-
-function sendError(res: Response, status: number, code: ErrorCode, message: string): void {
-  res.status(status).json({ error: { code, message } });
 }
 
 /** Map a `range` query value to a since-ISO floor (undefined = all time). */

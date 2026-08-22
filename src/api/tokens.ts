@@ -1,4 +1,5 @@
 import type { Request, Response, Router } from "express";
+import { sendData, sendError } from "./http.js";
 import type { Role } from "../dashboard/roles.js";
 import { getActor } from "../dashboard/roles.js";
 import type { CsrfRuntime } from "../dashboard/auth.js";
@@ -30,15 +31,6 @@ export interface TokenRouteDeps {
   /** CSRF runtime (cookie sessions). Token principals are exempt but never
    *  reach here anyway — these routes are admin/cookie-only. */
   csrf: CsrfRuntime;
-}
-
-type ErrorCode = "forbidden" | "not_found" | "bad_request" | "internal";
-
-function sendData(res: Response, data: unknown, status = 200): void {
-  res.status(status).json({ data });
-}
-function sendError(res: Response, status: number, code: ErrorCode, message: string): void {
-  res.status(status).json({ error: { code, message } });
 }
 
 function parseScopes(scopesJson: string | null): string[] {

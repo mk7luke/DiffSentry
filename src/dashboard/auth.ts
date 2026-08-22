@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { Request, Response, NextFunction, RequestHandler } from "express";
+import type { Request, Response, RequestHandler } from "express";
 import { logger } from "../logger.js";
 import { esc, renderLayout } from "./layout.js";
 

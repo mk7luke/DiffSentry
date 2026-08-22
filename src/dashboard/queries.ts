@@ -62,19 +62,6 @@ export interface RuleHitRow {
   example_pr: number | null;
 }
 
-export interface RecentReviewRow {
-  id: number;
-  number: number;
-  created_at: string;
-  sha: string;
-  approval: string | null;
-  risk_score: number | null;
-  risk_level: string | null;
-  finding_count: number;
-  title: string | null;
-  author: string | null;
-}
-
 /** Look up the most recent installation id for a repo, or null. */
 export function getInstallationId(owner: string, repo: string): number | null {
   const db = openDatabase();
@@ -216,25 +203,6 @@ export function getTopRules(owner: string, repo: string): RuleHitRow[] {
        LIMIT 10`,
     )
     .all(owner, repo) as RuleHitRow[];
-}
-
-/** Last 50 reviews for a repo, with PR title + author + finding count. */
-export function getRecentReviews(owner: string, repo: string, limit = 50): RecentReviewRow[] {
-  const db = openDatabase();
-  if (!db) return [];
-  return db
-    .prepare(
-      `SELECT
-         rv.id, rv.number, rv.created_at, rv.sha, rv.approval, rv.risk_score, rv.risk_level,
-         (SELECT COUNT(*) FROM findings f WHERE f.review_id = rv.id) AS finding_count,
-         p.title, p.author
-       FROM reviews rv
-       LEFT JOIN prs p ON p.owner = rv.owner AND p.repo = rv.repo AND p.number = rv.number
-       WHERE rv.owner = ? AND rv.repo = ?
-       ORDER BY rv.created_at DESC
-       LIMIT ?`,
-    )
-    .all(owner, repo, limit) as RecentReviewRow[];
 }
 
 export interface RecentPRRow {
@@ -413,27 +381,6 @@ export function getFindingsForPR(owner: string, repo: string, number: number): P
          f.path ASC, f.line ASC`,
     )
     .all(owner, repo, number) as PRFindingRow[];
-}
-
-export function getFindings(reviewId: number): FindingRow[] {
-  const db = openDatabase();
-  if (!db) return [];
-  return db
-    .prepare(
-      `SELECT id, path, line, type, severity, title, body, fingerprint, source, confidence
-       FROM findings
-       WHERE review_id = ?
-       ORDER BY
-         CASE severity
-           WHEN 'critical' THEN 0
-           WHEN 'major' THEN 1
-           WHEN 'minor' THEN 2
-           WHEN 'nit' THEN 3
-           ELSE 4
-         END ASC,
-         path ASC, line ASC`,
-    )
-    .all(reviewId) as FindingRow[];
 }
 
 // ─── Findings explorer ─────────────────────────────────────────────
@@ -2341,22 +2288,6 @@ export function getAlertRules(): AlertRuleRow[] {
   }
 }
 
-export function getAlertRule(id: number): AlertRuleRow | null {
-  const db = openDatabase();
-  if (!db) return null;
-  try {
-    const row = db
-      .prepare(
-        `SELECT id, name, scope, condition_json, channel_id, enabled, created_by, created_at
-         FROM alert_rules WHERE id = ?`,
-      )
-      .get(id) as AlertRuleRow | undefined;
-    return row ?? null;
-  } catch {
-    return null;
-  }
-}
-
 /** Recent notification deliveries, newest first. Degrades to [] on a database
  *  that predates the notifications schema. */
 export function getNotificationDeliveries(limit = 50): NotificationDeliveryRow[] {
@@ -2469,25 +2400,5 @@ export function getWeeklyDigest(days = 7, scope?: { owner: string; repo: string 
     };
   } catch {
     return empty;
-  }
-}
-
-/** Sum AI cost over the last `days` (for the budget checker). 0 when disabled. */
-export function getCostSince(sinceIso: string, scope?: { owner: string; repo: string }): number {
-  const db = openDatabase();
-  if (!db) return 0;
-  try {
-    if (scope) {
-      const row = db
-        .prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS total FROM cost_events WHERE ts >= ? AND owner = ? AND repo = ?`)
-        .get(sinceIso, scope.owner, scope.repo) as { total: number };
-      return row.total ?? 0;
-    }
-    const row = db
-      .prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS total FROM cost_events WHERE ts >= ?`)
-      .get(sinceIso) as { total: number };
-    return row.total ?? 0;
-  } catch {
-    return 0;
   }
 }

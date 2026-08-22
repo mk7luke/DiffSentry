@@ -83,33 +83,6 @@ export async function fetchLinkedIssues(
 }
 
 /**
- * Format issues for injection into the AI review prompt.
- */
-export function formatIssuesForPrompt(issues: LinkedIssue[]): string {
-  if (issues.length === 0) return "";
-
-  const MAX_BODY_LENGTH = 1000;
-
-  let output = `## Linked Issues\n\nThis PR is linked to the following issues. Verify the PR properly addresses them.\n`;
-
-  for (const issue of issues) {
-    const labels = issue.labels.length > 0 ? issue.labels.join(", ") : "none";
-    const body =
-      issue.body.length > MAX_BODY_LENGTH
-        ? issue.body.slice(0, MAX_BODY_LENGTH) + "..."
-        : issue.body;
-
-    output += `\n### #${issue.number}: ${issue.title}\n`;
-    output += `**State:** ${issue.state} | **Labels:** ${labels}\n`;
-    if (body) {
-      output += `${body}\n`;
-    }
-  }
-
-  return output;
-}
-
-/**
  * Format issues as a CodeRabbit-style bullet list intended to be appended
  * inside the walkthrough collapse (sibling to "Possibly related PRs").
  */

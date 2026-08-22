@@ -1,7 +1,7 @@
 // Pure formatting helpers — ported from the primitive helpers in
 // src/dashboard/layout.ts so the SPA renders identical labels and series.
 
-import type { DailyActivityRow, Severity } from "../api/types";
+import type { DailyActivityRow } from "../api/types";
 
 export interface DayBin {
   day: string; // YYYY-MM-DD
@@ -94,8 +94,6 @@ export function formatBytes(bytes: number | null): string {
   }
   return `${v.toFixed(v >= 10 ? 0 : 1)} ${units[i]}`;
 }
-
-export const SEVERITY_ORDER: Severity[] = ["critical", "major", "minor", "nit"];
 
 /** Format a USD amount. Sub-cent values get more precision so they aren't $0.00. */
 export function formatUsd(n: number | null | undefined): string {

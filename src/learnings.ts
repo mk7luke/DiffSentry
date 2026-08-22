@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
 import { minimatch } from "minimatch";
+import { stripFences } from "./ai/parse.js";
 import { AIProvider, Learning } from "./types.js";
 import { logger } from "./logger.js";
 
@@ -12,6 +13,15 @@ export const GLOBAL_REPO = "*";
 /** Filename (at the store root) holding the global learnings array. GitHub
  * owner logins can't contain underscores, so this never shadows an owner dir. */
 const GLOBAL_FILE = "__global__.json";
+
+/** Owner/repo segments are interpolated into filesystem paths by the store,
+ * so constrain them to the GitHub-legal character set and reject the
+ * directory-traversal specials ("." / ".." / separators) before they ever
+ * reach path.join. */
+const REPO_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
+export function validRepoSegment(s: string): boolean {
+  return REPO_SEGMENT_RE.test(s) && s !== "." && s !== "..";
+}
 
 /** Apply an edit patch to a learning, returning the next value. Empty/blank
  * content is ignored (keeps the current); path === null | "" clears the glob. */
@@ -44,6 +54,9 @@ export class LearningsStore {
   private filePath(repo: string): string {
     // repo is "owner/name" → store as {baseDir}/owner/name.json
     const [owner, name] = repo.split("/");
+    if (!validRepoSegment(owner) || !validRepoSegment(name)) {
+      throw new Error(`Invalid repository segment in learnings path: ${repo}`);
+    }
     return path.join(this.baseDir, owner, `${name}.json`);
   }
 
@@ -75,7 +88,10 @@ export class LearningsStore {
     const fp = this.filePath(repo);
     try {
       const data = await fs.readFile(fp, "utf-8");
-      return JSON.parse(data) as Learning[];
+      const parsed: unknown = JSON.parse(data);
+      // A hand-edited or corrupt file holding a JSON object (not an array)
+      // must degrade to "no learnings", not crash downstream .filter() calls.
+      return Array.isArray(parsed) ? (parsed as Learning[]) : [];
     } catch {
       return [];
     }
@@ -310,11 +326,7 @@ export async function synthesizeLearning(
 function parseSynthesisJSON(raw: string): SynthesizedLearning | null {
   if (!raw) return null;
   // Strip ```json fences if any provider wrapped it.
-  const cleaned = raw
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/```\s*$/, "")
-    .trim();
+  const cleaned = stripFences(raw);
   try {
     const obj = JSON.parse(cleaned) as { content?: unknown; path?: unknown };
     const content = typeof obj.content === "string" ? obj.content.trim() : "";

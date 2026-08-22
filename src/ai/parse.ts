@@ -264,19 +264,26 @@ export function isRepeatPrLevelFinding(
   });
 }
 
-function stripFences(input: string): string {
+/** Strip a leading/trailing markdown code fence from an AI response. Several
+ * modules receive model output that may or may not be wrapped in ```json
+ * fences; this is the one implementation they all share. */
+export function stripFences(input: string): string {
   let s = input.trim();
   s = s.replace(/^```(?:\w+)?\s*\n?/, "");
   s = s.replace(/\n?\s*```$/, "");
   return s;
 }
 
-function renderSuggestionBlock(suggestion: string, language: "diff" | "suggestion"): string {
+export function renderSuggestionBlock(
+  suggestion: string,
+  language: "diff" | "suggestion",
+  summary = "🔧 Proposed fix",
+): string {
   const cleaned = stripFences(suggestion);
-  return `<details>\n<summary>🔧 Proposed fix</summary>\n\n\`\`\`${language}\n${cleaned}\n\`\`\`\n\n</details>`;
+  return `<details>\n<summary>${summary}</summary>\n\n\`\`\`${language}\n${cleaned}\n\`\`\`\n\n</details>`;
 }
 
-function renderAiAgentPromptBlock(prompt: string): string {
+export function renderAiAgentPromptBlock(prompt: string): string {
   const trimmed = prompt.trim();
   const withPreamble = trimmed.startsWith("Verify each finding")
     ? trimmed
@@ -369,7 +376,7 @@ function formatCommentBody(comment: {
 function extractJsonObject(raw: string): any | null {
   let cleaned = raw.trim();
   if (cleaned.startsWith("```")) {
-    cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?\s*```$/, "").trim();
+    cleaned = stripFences(cleaned).trim();
   }
   if (!cleaned) return null;
 
@@ -731,7 +738,7 @@ export function parseWalkthroughResponse(raw: string): WalkthroughResult {
 
   let cleaned = raw.trim();
   if (cleaned.startsWith("```")) {
-    cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?\s*```$/, "");
+    cleaned = stripFences(cleaned);
   }
 
   let parsed: any;

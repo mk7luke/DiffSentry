@@ -6,7 +6,7 @@ import { isAiTimeoutError } from "./ai/timeout.js";
 import { EMPTY_THREAD_SUMMARY, GitHubClient, REVIEW_STATUS_CONTEXT, type ReviewThreadSummary } from "./github.js";
 import { assessShipSignals, renderShipCheck, resolveDisplayVerdict, resolveReviewStatus, type CommitStatusLike, type ThreadGate } from "./ship-check.js";
 import { loadRepoConfig, mergeWithDefaults, shouldReviewPR, isPathIncluded } from "./repo-config.js";
-import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary } from "./walkthrough.js";
+import { WALKTHROUGH_MARKER, formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary } from "./walkthrough.js";
 import { parseCommand, formatHelpMessage, formatConfigMessage, formatUnknownCommandMessage } from "./commands.js";
 import type { SlashOptions } from "./slash-commands.js";
 import { parseIssueCommand, formatIssueHelpMessage } from "./issue-commands.js";
@@ -16,11 +16,11 @@ import {
   buildReviewComment,
   isRepeatPrLevelFinding,
   prLevelRepeatKeysFor,
+  stripFences,
 } from "./ai/parse.js";
 import { verifyFindings } from "./ai/verify.js";
 import { LearningsStore, synthesizeLearning, extractFindingMeta, type FindingContext } from "./learnings.js";
-import { loadGuidelines, getRelevantGuidelines, formatGuidelinesForPrompt } from "./guidelines.js";
-import { parseIssueReferences, fetchLinkedIssues, formatIssuesForPrompt, formatIssuesForWalkthrough } from "./issues.js";
+import { parseIssueReferences, fetchLinkedIssues, formatIssuesForWalkthrough } from "./issues.js";
 import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-merge.js";
 import { generateDocstrings, generateTests, simplifyCode, autofix } from "./finishing-touches.js";
 import { formatReviewBody, reconcileApproval } from "./review-body.js";
@@ -204,7 +204,6 @@ export function dropContextOnlyFindings(
   return comments.filter((c) => c.prLevel || !c.path || !contextOnly.has(c.path));
 }
 
-const WALKTHROUGH_MARKER = "<!-- DiffSentry Walkthrough -->";
 const WALKTHROUGH_START = "<!-- walkthrough_start -->";
 const WALKTHROUGH_END = "<!-- walkthrough_end -->";
 const STATUS_MARKER = "<!-- DiffSentry Status -->";
@@ -1361,7 +1360,7 @@ export class Reviewer {
         return;
       }
 
-      // Load knowledge in parallel: learnings, guidelines, linked issues
+      // Load knowledge in parallel: learnings, linked issues
       const repoFullName = `${owner}/${repo}`;
       const filenames = context.files.map((f) => f.filename);
 
@@ -1369,10 +1368,9 @@ export class Reviewer {
       // built alongside the knowledge loads — it issues its own parallel head-
       // file fetches and a fast local SQLite read, and is fully best-effort, so
       // a missing/stale graph never blocks or slows the review meaningfully.
-      const [allLearnings, relevantLearnings, allGuidelines, issueNumbers, graphContext] = await Promise.all([
+      const [allLearnings, relevantLearnings, issueNumbers, graphContext] = await Promise.all([
         this.learnings.getLearnings(repoFullName),
         this.learnings.getRelevantLearnings(repoFullName, filenames),
-        loadGuidelines(octokit, owner, repo, context.headSha),
         Promise.resolve(parseIssueReferences(context.description)),
         buildGraphContext({
           files: context.files.map((f) => ({ path: f.filename, patch: f.patch })),
@@ -1457,7 +1455,6 @@ export class Reviewer {
         );
       }
 
-      const relevantGuidelines = getRelevantGuidelines(allGuidelines, filenames);
       const linkedIssues = issueNumbers.length > 0
         ? await fetchLinkedIssues(octokit, owner, repo, issueNumbers)
         : [];
@@ -1466,11 +1463,9 @@ export class Reviewer {
       review.phase("reviewing");
 
       // Build enhanced prompt context by injecting knowledge into the AI prompt
-      // (Guidelines and issues are injected via the prompt builder's learnings param)
+      // (learnings + language preference; linked issues surface separately in
+      // the walkthrough's "Linked issues" section)
       const knowledgeLearnings = [...relevantLearnings];
-      // Add guideline content as synthetic learnings
-      const guidelinesPrompt = formatGuidelinesForPrompt(relevantGuidelines);
-      const issuesPrompt = formatIssuesForPrompt(linkedIssues);
 
       // Inject language preference
       if (repoConfig.language) {
@@ -1632,9 +1627,7 @@ export class Reviewer {
                 `Pre-merge check: ${instruction}\n\nRespond with JSON: {"passed": true/false, "message": "reason"}`,
               );
               try {
-                const parsed = JSON.parse(
-                  response.replace(/^```json?\s*\n?/, "").replace(/\n?\s*```$/, ""),
-                );
+                const parsed = JSON.parse(stripFences(response));
                 return { passed: !!parsed.passed, message: parsed.message || "" };
               } catch {
                 return { passed: true, message: "Could not evaluate" };
@@ -2869,7 +2862,7 @@ Output ONLY valid JSON (no fences, no prose):
   "body": "Multi-paragraph Markdown body. Lead with WHAT, then WHY, then any caveats. Reference filenames in backticks. Include a short bulleted list of changes if it helps."
 }`;
           const raw = await this.ai.chat(context, ask, repoConfig);
-          const cleaned = raw.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
+          const cleaned = stripFences(raw);
           let proposal: { title?: string; body?: string } = {};
           try {
             proposal = JSON.parse(cleaned);

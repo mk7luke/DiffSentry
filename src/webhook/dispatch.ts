@@ -6,6 +6,7 @@ import { isPauseAll, isAutoReviewEnabled } from "../settings/overrides.js";
 import { addressesBot, SlashOptions } from "../slash-commands.js";
 import { resolvesToSlashCommand } from "../commands.js";
 import { isDiffSentryCheck } from "../checks-state.js";
+import { WALKTHROUGH_MARKER } from "../walkthrough.js";
 
 /**
  * Whether an automatic (webhook-triggered) review should be queued for a repo,
@@ -310,7 +311,7 @@ export async function dispatchWebhookEvent(
     const body: string = comment.body || "";
     const prevBody: string = payload.changes?.body?.from || "";
     // Only act on our own walkthrough comments (which carry the marker).
-    if (!body.includes("<!-- DiffSentry Walkthrough -->")) {
+    if (!body.includes(WALKTHROUGH_MARKER)) {
       return { status: 200, body: { status: "ignored" } };
     }
 
