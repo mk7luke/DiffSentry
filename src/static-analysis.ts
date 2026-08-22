@@ -32,8 +32,6 @@ export type { StaticAnalysisConfig };
 /** The deterministic analyzers this module knows how to drive. */
 export type StaticSource = "eslint" | "tsc" | "semgrep";
 
-export const STATIC_SOURCES: readonly StaticSource[] = ["eslint", "tsc", "semgrep"];
-
 const DEFAULT_TIMEOUT_MS = 60_000;
 /** Cap captured analyzer output so a pathological run can't exhaust memory. */
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
