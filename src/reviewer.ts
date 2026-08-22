@@ -6,7 +6,7 @@ import { isAiTimeoutError } from "./ai/timeout.js";
 import { EMPTY_THREAD_SUMMARY, GitHubClient, REVIEW_STATUS_CONTEXT, type ReviewThreadSummary } from "./github.js";
 import { assessShipSignals, renderShipCheck, resolveDisplayVerdict, resolveReviewStatus, type CommitStatusLike, type ThreadGate } from "./ship-check.js";
 import { loadRepoConfig, mergeWithDefaults, shouldReviewPR, isPathIncluded } from "./repo-config.js";
-import { formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary } from "./walkthrough.js";
+import { WALKTHROUGH_MARKER, formatWalkthrough, formatWalkthroughInner, wrapWalkthroughCollapse, formatPRSummary } from "./walkthrough.js";
 import { parseCommand, formatHelpMessage, formatConfigMessage, formatUnknownCommandMessage } from "./commands.js";
 import type { SlashOptions } from "./slash-commands.js";
 import { parseIssueCommand, formatIssueHelpMessage } from "./issue-commands.js";
@@ -204,7 +204,6 @@ export function dropContextOnlyFindings(
   return comments.filter((c) => c.prLevel || !c.path || !contextOnly.has(c.path));
 }
 
-const WALKTHROUGH_MARKER = "<!-- DiffSentry Walkthrough -->";
 const WALKTHROUGH_START = "<!-- walkthrough_start -->";
 const WALKTHROUGH_END = "<!-- walkthrough_end -->";
 const STATUS_MARKER = "<!-- DiffSentry Status -->";
