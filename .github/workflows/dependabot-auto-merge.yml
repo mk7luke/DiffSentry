@@ -105,14 +105,38 @@ jobs:
           # itself.
           rollup=$(gh pr view "$num" --repo "$REPO" --json statusCheckRollup --jq '.statusCheckRollup')
 
-          pending=$(jq --arg self "$SELF" '[ .[]
-            | select((.name // .context) != $self)
-            | select((.status // "COMPLETED") != "COMPLETED") ] | length' <<<"$rollup")
+          # The rollup mixes two node shapes and they must be read differently:
+          #
+          #   CheckRun      has .status (QUEUED / IN_PROGRESS / COMPLETED) plus
+          #                 .conclusion once finished.
+          #   StatusContext has no .status at all — .state carries lifecycle and
+          #                 verdict together (PENDING / SUCCESS / FAILURE / ...).
+          #
+          # Both DiffSentry entries are StatusContexts, so keying pending off a
+          # bare `.status != "COMPLETED"` would treat every one of them as
+          # forever-unfinished and nothing would ever merge. Classify per shape
+          # instead. Anything unrecognised counts as bad, so an unexpected node
+          # blocks the merge rather than sailing through it.
+          counts=$(jq -r --arg self "$SELF" '
+            def norm: (. // "") | ascii_upcase;
+            [ .[] | select((.name // .context) != $self) ]
+            | map(
+                (.status | norm) as $st
+                | ((.conclusion // .state) | norm) as $v
+                | if $st != "" then
+                    if   $st != "COMPLETED"                                 then "pending"
+                    elif $v == "SUCCESS" or $v == "NEUTRAL" or $v == "SKIPPED" then "ok"
+                    else "bad" end
+                  else
+                    if   $v == "PENDING" or $v == "EXPECTED" then "pending"
+                    elif $v == "SUCCESS"                     then "ok"
+                    else "bad" end
+                  end)
+            | [ (map(select(. == "pending")) | length),
+                (map(select(. == "bad"))     | length) ] | @tsv' <<<"$rollup")
 
-          failed=$(jq --arg self "$SELF" '[ .[]
-            | select((.name // .context) != $self)
-            | (.conclusion // .state // "") | ascii_upcase
-            | select(. != "" and . != "SUCCESS" and . != "NEUTRAL" and . != "SKIPPED") ] | length' <<<"$rollup")
+          pending=$(cut -f1 <<<"$counts")
+          failed=$(cut -f2 <<<"$counts")
 
           if [ "$pending" -ne 0 ]; then
             echo "::notice::#$num still has $pending check(s) running."
