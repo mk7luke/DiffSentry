@@ -186,7 +186,6 @@ export function loadConfig(): Config {
     githubAppId: process.env.GITHUB_APP_ID,
     githubPrivateKey: privateKey,
     githubWebhookSecret: process.env.GITHUB_WEBHOOK_SECRET,
-    dashboardSessionSecret: process.env.DASHBOARD_SESSION_SECRET,
     aiProvider,
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL,
