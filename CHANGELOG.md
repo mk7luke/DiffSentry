@@ -29,6 +29,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The legacy dashboard's markdown renderer now sanitizes with an allowlist
+  (`sanitize-html`) instead of a regex blacklist. Markdown rendered on the
+  dashboard is not always bot-authored: issue bodies and PR descriptions are
+  stored verbatim from the webhook, so anyone who can open an issue on an
+  installed repo authors content an operator's browser will render. The old
+  blacklist could be bypassed with entity-encoded payloads — `href="javascript&colon;..."`,
+  `<iframe srcdoc="&#60;script&#62;...">` without a closing tag, scheme tricks
+  like `java&Tab;script:` — executing script in the operator's session origin.
+  The new sanitizer keeps everything the bot's own comments rely on
+  (`<details>/<summary>`, tables, fenced code, GFM checkboxes) and restricts
+  URL schemes to http/https/mailto. The command-center SPA already used
+  DOMPurify and is unchanged.
+
 - A PR description that so much as *mentions* DiffSentry's summary marker is no
   longer partly deleted by the next review. `injectSummaryIntoPRBody` located
   its block with a plain `indexOf` over the raw body, so the first textual
