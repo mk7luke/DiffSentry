@@ -4,7 +4,7 @@ import { minimatch } from "minimatch";
 import type { Role } from "../dashboard/roles.js";
 import { getActor, type Actor } from "../dashboard/roles.js";
 import type { CsrfRuntime } from "../dashboard/auth.js";
-import { GLOBAL_REPO, type LearningsStore } from "../learnings.js";
+import { GLOBAL_REPO, validRepoSegment, type LearningsStore } from "../learnings.js";
 import type { Learning } from "../types.js";
 import { insertAuditLog } from "../storage/dao.js";
 import { bus } from "../realtime/bus.js";
@@ -34,14 +34,6 @@ export interface LearningDeps {
 type IdParams = { id: string };
 type RepoParams = { owner: string; repo: string };
 type RepoIdParams = { owner: string; repo: string; id: string };
-
-// owner/repo path segments are interpolated into a filesystem path by the
-// store, so constrain them to the GitHub-legal character set and reject the
-// directory-traversal specials before they ever reach path.join.
-const SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
-function validSegment(s: string): boolean {
-  return SEGMENT_RE.test(s) && s !== "." && s !== "..";
-}
 
 const MAX_CONTENT = 4000;
 const MAX_PATH = 500;
@@ -228,7 +220,7 @@ export function registerLearningRoutes(router: Router, deps: LearningDeps): void
       sendError(res, 400, "bad_request", "A non-empty 'path' (file path to test) is required.");
       return;
     }
-    if ((owner || repo) && !(validSegment(owner) && validSegment(repo))) {
+    if ((owner || repo) && !(validRepoSegment(owner) && validRepoSegment(repo))) {
       sendError(res, 400, "bad_request", "Invalid owner/repo.");
       return;
     }
@@ -295,7 +287,7 @@ export function registerLearningRoutes(router: Router, deps: LearningDeps): void
       } else if (raw.scope === "repo") {
         const owner = typeof raw.owner === "string" ? raw.owner : "";
         const repo = typeof raw.repo === "string" ? raw.repo : "";
-        if (!validSegment(owner) || !validSegment(repo)) {
+        if (!validRepoSegment(owner) || !validRepoSegment(repo)) {
           sendError(res, 400, "bad_request", "Repo-scoped items require a valid 'owner' and 'repo'.");
           return;
         }
@@ -382,7 +374,7 @@ export function registerLearningRoutes(router: Router, deps: LearningDeps): void
 
   router.post(repoBase, author, csrf.verify, async (req: Request<RepoParams>, res: Response) => {
     const { owner, repo } = req.params;
-    if (!validSegment(owner) || !validSegment(repo)) {
+    if (!validRepoSegment(owner) || !validRepoSegment(repo)) {
       sendError(res, 400, "bad_request", "Invalid owner/repo.");
       return;
     }
@@ -404,7 +396,7 @@ export function registerLearningRoutes(router: Router, deps: LearningDeps): void
 
   router.put(`${repoBase}/:id`, author, csrf.verify, async (req: Request<RepoIdParams>, res: Response) => {
     const { owner, repo, id } = req.params;
-    if (!validSegment(owner) || !validSegment(repo)) {
+    if (!validRepoSegment(owner) || !validRepoSegment(repo)) {
       sendError(res, 400, "bad_request", "Invalid owner/repo.");
       return;
     }
@@ -430,7 +422,7 @@ export function registerLearningRoutes(router: Router, deps: LearningDeps): void
 
   router.delete(`${repoBase}/:id`, author, csrf.verify, async (req: Request<RepoIdParams>, res: Response) => {
     const { owner, repo, id } = req.params;
-    if (!validSegment(owner) || !validSegment(repo)) {
+    if (!validRepoSegment(owner) || !validRepoSegment(repo)) {
       sendError(res, 400, "bad_request", "Invalid owner/repo.");
       return;
     }
@@ -451,7 +443,7 @@ export function registerLearningRoutes(router: Router, deps: LearningDeps): void
 
   router.post(`${repoBase}/:id/promote`, author, csrf.verify, async (req: Request<RepoIdParams>, res: Response) => {
     const { owner, repo, id } = req.params;
-    if (!validSegment(owner) || !validSegment(repo)) {
+    if (!validRepoSegment(owner) || !validRepoSegment(repo)) {
       sendError(res, 400, "bad_request", "Invalid owner/repo.");
       return;
     }

@@ -1,8 +1,6 @@
 import express from "express";
-import fs from "node:fs/promises";
-import path from "node:path";
 import { getRecentLogs, logger, type LogEntry } from "../logger.js";
-import { LearningsStore } from "../learnings.js";
+import { LearningsStore, validRepoSegment } from "../learnings.js";
 import type { Learning } from "../types.js";
 import {
   approvalBadge,
@@ -114,7 +112,7 @@ export function createDashboardRouter(deps: DashboardDeps): express.Router {
       const issues = getRecentIssues(owner, repo, 50);
       const activity = buildDaySeries(toDayBins(getDailyActivity(owner, repo, 30)), 30);
       const approvalMix = getApprovalMix(owner, repo, 30);
-      const learnings = await loadLearningsSafe(deps.learningsDir, owner, repo);
+      const learnings = await learningsStore.getLearnings(`${owner}/${repo}`);
       const configYaml = await loadRepoConfigSafe(deps, owner, repo);
       const csrfToken = csrf.tokenFor(req);
       res.type("html").send(
@@ -128,6 +126,10 @@ export function createDashboardRouter(deps: DashboardDeps): express.Router {
 
   router.post("/repo/:owner/:repo/learnings/:id/delete", csrf.verify, async (req, res) => {
     const { owner, repo, id } = req.params;
+    if (!validRepoSegment(owner) || !validRepoSegment(repo)) {
+      res.redirect(303, "/dashboard");
+      return;
+    }
     try {
       await learningsStore.removeLearning(`${owner}/${repo}`, id);
     } catch (err) {
@@ -138,6 +140,10 @@ export function createDashboardRouter(deps: DashboardDeps): express.Router {
 
   router.post("/repo/:owner/:repo/learnings/:id/edit", csrf.verify, async (req, res) => {
     const { owner, repo, id } = req.params;
+    if (!validRepoSegment(owner) || !validRepoSegment(repo)) {
+      res.redirect(303, "/dashboard");
+      return;
+    }
     const body = (req.body ?? {}) as Record<string, unknown>;
     const content = typeof body.content === "string" ? body.content : "";
     const rawPath = typeof body.path === "string" ? body.path.trim() : "";
@@ -427,18 +433,6 @@ interface RepoDetailArgs {
   learnings: Learning[];
   configYaml: string | null;
   csrfToken: string;
-}
-
-async function loadLearningsSafe(baseDir: string, owner: string, repo: string): Promise<Learning[]> {
-  try {
-    const fp = path.join(baseDir, owner, `${repo}.json`);
-    const raw = await fs.readFile(fp, "utf-8");
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed as Learning[];
-  } catch {
-    return [];
-  }
 }
 
 const configCache = new Map<string, { yaml: string | null; ts: number }>();

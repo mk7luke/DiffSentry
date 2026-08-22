@@ -1,11 +1,8 @@
 import express from "express";
 import type { Request } from "express";
 import { sendData, sendError } from "./http.js";
-import path from "node:path";
-import fs from "node:fs/promises";
 import { getRecentLogs, logger } from "../logger.js";
 import { LearningsStore } from "../learnings.js";
-import type { Learning } from "../types.js";
 import { createNoopCsrf, type AuthRuntime, type CsrfRuntime } from "../dashboard/auth.js";
 import {
   createRequireRole,
@@ -120,18 +117,6 @@ export interface ApiDeps {
    * runs the same engine path). When omitted, GET /webhooks still works but
    * POST /webhooks/:id/replay answers 503. */
   replayWebhook?: ReplayWebhook;
-}
-
-async function loadLearningsSafe(baseDir: string, owner: string, repo: string): Promise<Learning[]> {
-  try {
-    const fp = path.join(baseDir, owner, `${repo}.json`);
-    const raw = await fs.readFile(fp, "utf-8");
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed as Learning[];
-  } catch {
-    return [];
-  }
 }
 
 function parseFindingFilters(q: Record<string, unknown>): FindingFilters {
@@ -570,7 +555,7 @@ export function createApiRouter(deps: ApiDeps): express.Router {
         return;
       }
       const [learnings, config] = await Promise.all([
-        loadLearningsSafe(deps.learningsDir, owner, repo),
+        learningsStore.getLearnings(`${owner}/${repo}`),
         loadRepoConfigYaml(deps.getInstallationOctokit, owner, repo),
       ]);
       sendData(res, {
@@ -956,7 +941,7 @@ export function createApiRouter(deps: ApiDeps): express.Router {
       // files are tiny; mirrors how /repos/:owner/:repo already loads them.
       const learningHits = await Promise.all(
         listRepos().map(async ({ owner, repo }) => {
-          const learnings = await loadLearningsSafe(deps.learningsDir, owner, repo);
+          const learnings = await learningsStore.getLearnings(`${owner}/${repo}`);
           return learnings
             .filter((l) => l.content.toLowerCase().includes(ql))
             .map<SearchResult>((l) => ({

@@ -13,6 +13,15 @@ export const GLOBAL_REPO = "*";
  * owner logins can't contain underscores, so this never shadows an owner dir. */
 const GLOBAL_FILE = "__global__.json";
 
+/** Owner/repo segments are interpolated into filesystem paths by the store,
+ * so constrain them to the GitHub-legal character set and reject the
+ * directory-traversal specials ("." / ".." / separators) before they ever
+ * reach path.join. */
+const REPO_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
+export function validRepoSegment(s: string): boolean {
+  return REPO_SEGMENT_RE.test(s) && s !== "." && s !== "..";
+}
+
 /** Apply an edit patch to a learning, returning the next value. Empty/blank
  * content is ignored (keeps the current); path === null | "" clears the glob. */
 function applyPatch(
@@ -44,6 +53,9 @@ export class LearningsStore {
   private filePath(repo: string): string {
     // repo is "owner/name" → store as {baseDir}/owner/name.json
     const [owner, name] = repo.split("/");
+    if (!validRepoSegment(owner) || !validRepoSegment(name)) {
+      throw new Error(`Invalid repository segment in learnings path: ${repo}`);
+    }
     return path.join(this.baseDir, owner, `${name}.json`);
   }
 
@@ -75,7 +87,10 @@ export class LearningsStore {
     const fp = this.filePath(repo);
     try {
       const data = await fs.readFile(fp, "utf-8");
-      return JSON.parse(data) as Learning[];
+      const parsed: unknown = JSON.parse(data);
+      // A hand-edited or corrupt file holding a JSON object (not an array)
+      // must degrade to "no learnings", not crash downstream .filter() calls.
+      return Array.isArray(parsed) ? (parsed as Learning[]) : [];
     } catch {
       return [];
     }
