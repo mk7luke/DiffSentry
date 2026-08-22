@@ -27,6 +27,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     **Checks: Read** permission. Events an App is not subscribed to are never
     delivered, so without this the feature is silent.
 
+### Changed
+
+- Internal clean-up pass (dead code + deduplication). No intended behavior
+  change beyond what is noted below:
+  - Dead code removed: four unused dashboard query helpers
+    (`getRecentReviews`, singular `getFindings`, `getAlertRule`,
+    `getCostSince`), five unreferenced helpers (`resetPriceTableCache`,
+    `hasKnownPrice`, `renderCodeownersBlock`, `STATIC_SOURCES`,
+    `getPathInstructions`), the never-read `Config.dashboardSessionSecret`
+    field, three dead SPA exports, and the unused `parse-diff` /
+    `@octokit/webhooks` dependencies. All nine remaining `no-unused-vars`
+    eslint warnings are resolved; the tree lints warning-free.
+  - The guidelines module (`CLAUDE.md` / `AGENTS.md` / `.cursorrules`
+    auto-detection) is retired. Its prompt string was built and then never
+    used — repository guidelines provably never reached any model prompt —
+    so the loader, its reviewer wiring, and `formatIssuesForPrompt` are gone.
+    Linked-issue handling in the walkthrough is untouched.
+  - Duplicated helpers consolidated onto single sources of truth:
+    `sendData`/`sendError` and one API error-code union now live in
+    `src/api/http.ts` instead of thirteen per-file copies whose error-code
+    unions had already drifted; learnings reads go through `LearningsStore`
+    (which now degrades a corrupt non-array JSON file to "no learnings"
+    instead of crashing); AI-response fence stripping shares one exported
+    `stripFences`; the suggestion / AI-agent-prompt `<details>` renderers are
+    shared between inline comments and nitpick collapses; and the walkthrough
+    HTML marker is exported from `walkthrough.ts` rather than hardcoded a
+    second time in the webhook dispatcher.
+  - **Schema:** migration 8 drops the `saved_views` table. It was created by
+    the v2 `command_center` migration but nothing ever wrote to or read from
+    it, so every deployment carries an empty table and no data can be lost.
+
 ### Fixed
 
 - A PR description that so much as *mentions* DiffSentry's summary marker is no

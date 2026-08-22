@@ -35,6 +35,11 @@
     "smoke:cost": "tsx scripts/smoke-cost.ts",
     "smoke:webhooks": "tsx scripts/smoke-webhooks.ts",
     "smoke:signature": "tsx scripts/smoke-signature.ts",
+    "preview:dashboard": "tsx scripts/preview-dashboard.ts",
+    "preview:learnings": "tsx scripts/preview-learnings.ts",
+    "preview:spa": "tsx scripts/preview-spa.ts",
+    "preview:webhooks": "tsx scripts/preview-webhooks.ts",
+    "screenshot": "tsx scripts/screenshot-actionbar.ts",
     "serve:seeded": "tsx scripts/serve-seeded.ts"
   },
   "dependencies": {
