@@ -48,7 +48,6 @@ jobs:
           REPO: ${{ github.repository }}
           BRANCH: ${{ github.event.workflow_run.head_branch }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          SELF: ${{ github.workflow }}
         run: |
           set -euo pipefail
 
@@ -101,8 +100,12 @@ jobs:
           # Trust the whole rollup, not just the two required contexts. Required
           # checks are what the ruleset enforces; this is automation acting
           # unattended, so it should refuse on anything red or unfinished.
-          # $SELF is filtered out because a workflow_run job must not wait on
-          # itself.
+          #
+          # Every node counts, with no self-exclusion. A workflow_run job runs
+          # against the default branch, so this workflow never appears among
+          # the PR head's checks and cannot wait on itself. Filtering by name
+          # would only risk dropping some unrelated check that happened to
+          # share the name, since rollup names are labels, not identities.
           rollup=$(gh pr view "$num" --repo "$REPO" --json statusCheckRollup --jq '.statusCheckRollup')
 
           # The rollup mixes two node shapes and they must be read differently:
@@ -117,9 +120,9 @@ jobs:
           # forever-unfinished and nothing would ever merge. Classify per shape
           # instead. Anything unrecognised counts as bad, so an unexpected node
           # blocks the merge rather than sailing through it.
-          counts=$(jq -r --arg self "$SELF" '
+          counts=$(jq -r '
             def norm: (. // "") | ascii_upcase;
-            [ .[] | select((.name // .context) != $self) ]
+            [ .[] ]
             | map(
                 (.status | norm) as $st
                 | ((.conclusion // .state) | norm) as $v
