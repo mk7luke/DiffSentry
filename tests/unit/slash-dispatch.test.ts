@@ -124,6 +124,56 @@ describe("webhook gate — slash commands", () => {
   });
 });
 
+/** Payload shape of `issue_comment.edited` on a PR comment. */
+function editedCommentPayload(body: string, prevBody: string, authorType: "User" | "Bot"): any {
+  return {
+    action: "edited",
+    installation: { id: 1 },
+    repository: { owner: { login: "acme" }, name: "app" },
+    issue: { number: 7, pull_request: {}, user: { type: "User" } },
+    changes: { body: { from: prevBody } },
+    comment: { id: 99, body, user: { type: authorType } },
+  };
+}
+
+const MARKER = "<!-- DiffSentry Walkthrough -->";
+const AUTOFIX_CHECKED = `- [x] <!-- {"checkboxId": "c4"} -->   Push autofix commit to this branch`;
+const AUTOFIX_UNCHECKED = `- [ ] <!-- {"checkboxId": "c4"} -->   Push autofix commit to this branch`;
+
+describe("webhook gate — finishing-touches checkbox edits", () => {
+  it("ignores a checkbox flip on a user-authored comment that pastes the walkthrough marker", async () => {
+    const payload = editedCommentPayload(
+      `${MARKER}\n${AUTOFIX_CHECKED}`,
+      `${MARKER}\n${AUTOFIX_UNCHECKED}`,
+      "User"
+    );
+    const res = await dispatchWebhookEvent(makeDeps(), "issue_comment", payload);
+    await settle();
+    expect(res.status).toBe(200);
+    expect(handled).toEqual([]);
+  });
+
+  it("still dispatches checkbox commands on our own bot-authored walkthrough comment", async () => {
+    const payload = editedCommentPayload(
+      `${MARKER}\n${AUTOFIX_CHECKED}`,
+      `${MARKER}\n${AUTOFIX_UNCHECKED}`,
+      "Bot"
+    );
+    const res = await dispatchWebhookEvent(makeDeps(), "issue_comment", payload);
+    await settle();
+    expect(res.status).toBe(202);
+    expect(handled).toEqual([{ kind: "pr", body: "@diffsentry autofix" }]);
+  });
+
+  it("ignores a bot-authored edit whose body never gained a checkbox", async () => {
+    const payload = editedCommentPayload(`${MARKER}\n${AUTOFIX_UNCHECKED}`, `${MARKER}\n${AUTOFIX_UNCHECKED}`, "Bot");
+    const res = await dispatchWebhookEvent(makeDeps(), "issue_comment", payload);
+    await settle();
+    expect(res.status).toBe(200);
+    expect(handled).toEqual([]);
+  });
+});
+
 describe("webhook gate — review thread replies", () => {
   function threadPayload(body: string, replyToId?: number): any {
     return {
