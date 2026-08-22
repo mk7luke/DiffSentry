@@ -503,6 +503,14 @@ export const MIGRATIONS: Migration[] = [
   { version: 5, name: "durable_queue", sql: SCHEMA_V5 },
   { version: 6, name: "walkthrough_state", sql: SCHEMA_V6 },
   { version: 7, name: "impact_shares", sql: SCHEMA_V7 },
+  {
+    version: 8,
+    name: "drop_saved_views",
+    sql: `
+DROP INDEX IF EXISTS idx_saved_views_owner;
+DROP TABLE IF EXISTS saved_views;
+`,
+  },
 ];
 
 /** Highest version this binary knows how to migrate to. */
