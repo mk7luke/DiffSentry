@@ -46,6 +46,30 @@ updates:
       - dependency-name: "typescript"
         versions: [">=6"]
 
+      # js-yaml 5 is a parser rewrite, not a version bump, and this repo runs
+      # two copies of it: the server parses `.diffsentry.yaml` for real
+      # (`src/repo-config.ts`, `src/api/config.ts`) and the SPA config editor
+      # parses the same text to preview what the server is about to do
+      # (`web/src/pages/RepoConfig.tsx`). Those two must agree, so the two
+      # directories can only move together — which Dependabot cannot express,
+      # because it raises one PR per directory. #110/#111 were the first such
+      # pair and #138 was the web half arriving again on its own.
+      #
+      # Three v4/v5 differences are load-bearing for user-authored config:
+      #
+      #   input                     v4                 v5
+      #   "# just a comment"        null (-> defaults) throws "input is empty"
+      #   "d: 2001-12-14"           Date               "2001-12-14" (string)
+      #   "m: {<<: *base, y: 2}"    merged             literal "<<" key
+      #
+      # Ship the lift as one PR touching both directories: convert the three
+      # default imports (v5 has no default export — that is the MISSING_EXPORT
+      # the SPA build dies on), swallow the empty-document throw where v4
+      # returned null, and add tests pinning all three rows above. Delete this
+      # hold and the matching one in the /web block in that same PR.
+      - dependency-name: "js-yaml"
+        update-types: ["version-update:semver-major"]
+
   - package-ecosystem: npm
     directory: "/web"
     schedule:
@@ -57,6 +81,12 @@ updates:
       spa-minor-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      # The other half of the js-yaml hold. See the root npm block above for
+      # the reasoning and for what lifting it requires; both entries come out
+      # in the same PR.
+      - dependency-name: "js-yaml"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"
