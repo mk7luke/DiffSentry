@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Confidence, ReviewComment, ReviewResult } from "./types.js";
+import { renderAiAgentPromptBlock, renderSuggestionBlock } from "./ai/parse.js";
 
 export type ReviewBodyMeta = {
   profile: string;
@@ -141,33 +142,12 @@ function renderNitpickEntry(c: ReviewComment): string {
   }
   if (c.suggestion && c.suggestion.trim()) {
     const lang = c.suggestionLanguage === "diff" ? "diff" : "suggestion";
-    const cleaned = c.suggestion
-      .replace(/^```(?:\w+)?\s*\n?/, "")
-      .replace(/\n?\s*```$/, "");
     lines.push("");
-    lines.push("<details>");
-    lines.push("<summary>♻️ Suggested fix</summary>");
-    lines.push("");
-    lines.push("```" + lang);
-    lines.push(cleaned);
-    lines.push("```");
-    lines.push("");
-    lines.push("</details>");
+    lines.push(renderSuggestionBlock(c.suggestion, lang, "♻️ Suggested fix"));
   }
   if (c.aiAgentPrompt && c.aiAgentPrompt.trim()) {
     lines.push("");
-    lines.push("<details>");
-    lines.push("<summary>🤖 Prompt for AI Agents</summary>");
-    lines.push("");
-    lines.push("```text");
-    lines.push(
-      c.aiAgentPrompt.startsWith("Verify each finding")
-        ? c.aiAgentPrompt
-        : `Verify each finding against the current code and only fix it if needed.\n\n${c.aiAgentPrompt}`,
-    );
-    lines.push("```");
-    lines.push("");
-    lines.push("</details>");
+    lines.push(renderAiAgentPromptBlock(c.aiAgentPrompt));
   }
   return lines.join("\n");
 }

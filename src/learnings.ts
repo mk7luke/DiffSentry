@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
 import { minimatch } from "minimatch";
+import { stripFences } from "./ai/parse.js";
 import { AIProvider, Learning } from "./types.js";
 import { logger } from "./logger.js";
 
@@ -325,11 +326,7 @@ export async function synthesizeLearning(
 function parseSynthesisJSON(raw: string): SynthesizedLearning | null {
   if (!raw) return null;
   // Strip ```json fences if any provider wrapped it.
-  const cleaned = raw
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/```\s*$/, "")
-    .trim();
+  const cleaned = stripFences(raw);
   try {
     const obj = JSON.parse(cleaned) as { content?: unknown; path?: unknown };
     const content = typeof obj.content === "string" ? obj.content.trim() : "";
