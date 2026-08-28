@@ -14,6 +14,16 @@ export function isAiProvider(value: string): value is AiProvider {
   return (AI_PROVIDERS as readonly string[]).includes(value);
 }
 
+// Canonical rule for a valid GitHub App ID. The App ID becomes the JWT's `iss`
+// claim, which GitHub requires to be an integer, so a Client ID (Iv23li…), the
+// app slug, or a stray prefix must be rejected. Like AI_PROVIDERS above this is
+// the single source of truth — the runtime loader, the diagnostics check, and
+// the interactive setup CLI all import it rather than re-hardcoding /^\d+$/,
+// so the three paths can never disagree about what a valid App ID is.
+export function isValidGitHubAppId(value: string): boolean {
+  return /^\d+$/.test(value.trim());
+}
+
 // Canonical default model names. These literals live here only — other modules
 // (e.g. the diagnostics config summary) import these rather than re-hardcoding.
 export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
@@ -55,12 +65,11 @@ export function loadConfig(): Config {
   if (!process.env.GITHUB_APP_ID) {
     throw new Error("GITHUB_APP_ID is required");
   }
-  // The App ID becomes the JWT's `iss` claim, which GitHub requires to be an
-  // integer. A non-numeric value is accepted by every local code path and only
-  // fails later as an opaque 401 ("'Issuer' claim ('iss') must be an Integer")
-  // on the first API call, so reject it at boot instead.
+  // A non-numeric App ID is accepted by every local code path and only fails
+  // later as an opaque 401 ("'Issuer' claim ('iss') must be an Integer") on the
+  // first API call, so reject it at boot instead.
   const githubAppId = process.env.GITHUB_APP_ID.trim();
-  if (!/^\d+$/.test(githubAppId)) {
+  if (!isValidGitHubAppId(githubAppId)) {
     throw new Error(
       `GITHUB_APP_ID must be numeric (got: "${process.env.GITHUB_APP_ID}"). ` +
         "Use the App ID from the GitHub App's settings page — not the Client ID " +

@@ -22,6 +22,7 @@ import { stdin, stdout } from "node:process";
 import {
   AI_PROVIDERS,
   isAiProvider,
+  isValidGitHubAppId,
   type AiProvider,
   DEFAULT_ANTHROPIC_MODEL,
   DEFAULT_OPENAI_MODEL,
@@ -124,7 +125,23 @@ async function main() {
 
     // ── GitHub App ──────────────────────────────────────────────────
     console.log("GitHub App (from your App's settings page):");
-    const githubAppId = await ask("  App ID");
+    // Validated at the prompt, like AI_PROVIDER below: the App ID becomes the
+    // JWT `iss` claim, so a Client ID (Iv23li…) or the app slug would be written
+    // to .env here and only rejected later when the server refuses to boot.
+    let githubAppId = "";
+    while (!githubAppId) {
+      const raw = await ask("  App ID");
+      if (isValidGitHubAppId(raw)) {
+        githubAppId = raw.trim();
+      } else if (!raw) {
+        console.log("  ✗ App ID is required.");
+      } else {
+        console.log(
+          `  ✗ "${raw}" is not a numeric App ID. Copy the App ID from the GitHub App's ` +
+            "settings page — not the Client ID (Iv23li…) and not the app slug."
+        );
+      }
+    }
     const githubPrivateKeyPath = await ask("  Private key (.pem) path", "./private-key.pem");
     const githubWebhookSecret = await ask("  Webhook secret");
 
@@ -223,6 +240,12 @@ export function validateEnvContent(content: string): string[] {
   };
 
   required("GITHUB_APP_ID");
+  if (env.GITHUB_APP_ID && !isValidGitHubAppId(env.GITHUB_APP_ID)) {
+    problems.push(
+      `GITHUB_APP_ID must be numeric (got "${env.GITHUB_APP_ID}") — use the App ID ` +
+        "from the GitHub App's settings page, not the Client ID or the app slug"
+    );
+  }
   if (!env.GITHUB_PRIVATE_KEY_PATH && !env.GITHUB_PRIVATE_KEY) {
     problems.push("GITHUB_PRIVATE_KEY_PATH (or GITHUB_PRIVATE_KEY) is required");
   }
