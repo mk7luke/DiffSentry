@@ -744,7 +744,7 @@ GitHub webhook
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `GITHUB_APP_ID` | Yes | | GitHub App ID |
+| `GITHUB_APP_ID` | Yes | | Numeric GitHub App ID (the integer on the App settings page — not the Client ID) |
 | `GITHUB_PRIVATE_KEY_PATH` | Yes* | `./private-key.pem` | Path to the private key file |
 | `GITHUB_PRIVATE_KEY` | Yes* | | Private key contents (alternative to PATH) |
 | `GITHUB_WEBHOOK_SECRET` | Yes | | Webhook signature secret |

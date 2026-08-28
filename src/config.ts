@@ -55,6 +55,18 @@ export function loadConfig(): Config {
   if (!process.env.GITHUB_APP_ID) {
     throw new Error("GITHUB_APP_ID is required");
   }
+  // The App ID becomes the JWT's `iss` claim, which GitHub requires to be an
+  // integer. A non-numeric value is accepted by every local code path and only
+  // fails later as an opaque 401 ("'Issuer' claim ('iss') must be an Integer")
+  // on the first API call, so reject it at boot instead.
+  const githubAppId = process.env.GITHUB_APP_ID.trim();
+  if (!/^\d+$/.test(githubAppId)) {
+    throw new Error(
+      `GITHUB_APP_ID must be numeric (got: "${process.env.GITHUB_APP_ID}"). ` +
+        "Use the App ID from the GitHub App's settings page — not the Client ID " +
+        "(which looks like Iv23li…) and not the app slug."
+    );
+  }
   if (!privateKey) {
     throw new Error("GITHUB_PRIVATE_KEY or GITHUB_PRIVATE_KEY_PATH is required");
   }
@@ -183,7 +195,7 @@ export function loadConfig(): Config {
 
   return {
     port: parseInt(process.env.PORT || "3005", 10),
-    githubAppId: process.env.GITHUB_APP_ID,
+    githubAppId,
     githubPrivateKey: privateKey,
     githubWebhookSecret: process.env.GITHUB_WEBHOOK_SECRET,
     dashboardSessionSecret: process.env.DASHBOARD_SESSION_SECRET,
