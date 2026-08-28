@@ -22,6 +22,7 @@ import { stdin, stdout } from "node:process";
 import {
   AI_PROVIDERS,
   isAiProvider,
+  isValidGitHubAppId,
   type AiProvider,
   DEFAULT_ANTHROPIC_MODEL,
   DEFAULT_OPENAI_MODEL,
@@ -124,7 +125,15 @@ async function main() {
 
     // ── GitHub App ──────────────────────────────────────────────────
     console.log("GitHub App (from your App's settings page):");
-    const githubAppId = await ask("  App ID");
+    let githubAppId = "";
+    while (!githubAppId) {
+      const raw = await ask("  App ID");
+      if (isValidGitHubAppId(raw)) {
+        githubAppId = raw;
+      } else {
+        console.log(`  ✗ "${raw}" is not a valid App ID (must be numeric, e.g. 123456). Do not use the Client ID.`);
+      }
+    }
     const githubPrivateKeyPath = await ask("  Private key (.pem) path", "./private-key.pem");
     const githubWebhookSecret = await ask("  Webhook secret");
 
@@ -222,7 +231,14 @@ export function validateEnvContent(content: string): string[] {
     if (!env[k]) problems.push(`${k} is required but empty`);
   };
 
-  required("GITHUB_APP_ID");
+  if (!env.GITHUB_APP_ID) {
+    problems.push("GITHUB_APP_ID is required but empty");
+  } else if (!isValidGitHubAppId(env.GITHUB_APP_ID)) {
+    problems.push(
+      `GITHUB_APP_ID must be numeric (got: "${env.GITHUB_APP_ID}"). ` +
+        "Use the App ID from the GitHub App's settings page — not the Client ID."
+    );
+  }
   if (!env.GITHUB_PRIVATE_KEY_PATH && !env.GITHUB_PRIVATE_KEY) {
     problems.push("GITHUB_PRIVATE_KEY_PATH (or GITHUB_PRIVATE_KEY) is required");
   }

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { loadConfig } from "../../src/config.js";
+import { isValidGitHubAppId, loadConfig } from "../../src/config.js";
+import { validateEnvContent } from "../../scripts/setup.js";
 
 const BASE: Record<string, string> = {
   GITHUB_APP_ID: "4747134",
@@ -43,5 +44,35 @@ describe("GITHUB_APP_ID validation", () => {
   it("still requires the variable to be set", () => {
     delete process.env.GITHUB_APP_ID;
     expect(() => loadConfig()).toThrow(/GITHUB_APP_ID is required/);
+  });
+
+  it("exports isValidGitHubAppId predicate", () => {
+    expect(isValidGitHubAppId("123456")).toBe(true);
+    expect(isValidGitHubAppId("  123456  ")).toBe(true);
+    expect(isValidGitHubAppId("Iv23liN5SOYtQEENAOkQ")).toBe(false);
+    expect(isValidGitHubAppId("")).toBe(false);
+    expect(isValidGitHubAppId("abc123")).toBe(false);
+  });
+
+  it("validates GITHUB_APP_ID format in setup validateEnvContent", () => {
+    const validEnv = [
+      "GITHUB_APP_ID=123456",
+      "GITHUB_PRIVATE_KEY_PATH=./key.pem",
+      "GITHUB_WEBHOOK_SECRET=secret",
+      "AI_PROVIDER=anthropic",
+      "ANTHROPIC_API_KEY=sk-ant-test",
+    ].join("\n");
+    expect(validateEnvContent(validEnv)).toEqual([]);
+
+    const invalidEnv = [
+      "GITHUB_APP_ID=Iv23liN5SOYtQEENAOkQ",
+      "GITHUB_PRIVATE_KEY_PATH=./key.pem",
+      "GITHUB_WEBHOOK_SECRET=secret",
+      "AI_PROVIDER=anthropic",
+      "ANTHROPIC_API_KEY=sk-ant-test",
+    ].join("\n");
+    expect(validateEnvContent(invalidEnv)).toContainEqual(
+      expect.stringContaining("GITHUB_APP_ID must be numeric")
+    );
   });
 });

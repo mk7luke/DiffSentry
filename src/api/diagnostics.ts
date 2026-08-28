@@ -4,7 +4,7 @@ import type { Role } from "../dashboard/roles.js";
 import { getActor } from "../dashboard/roles.js";
 import type { CsrfRuntime } from "../dashboard/auth.js";
 import { loadAuthConfigFromEnv } from "../dashboard/auth.js";
-import { AI_PROVIDERS, DEFAULT_ANTHROPIC_MODEL, DEFAULT_OPENAI_MODEL } from "../config.js";
+import { AI_PROVIDERS, DEFAULT_ANTHROPIC_MODEL, DEFAULT_OPENAI_MODEL, isValidGitHubAppId } from "../config.js";
 import { signWebhookPayload, verifyWebhookSignature } from "../webhook/signature.js";
 import { insertAuditLog } from "../storage/dao.js";
 import { openDatabase } from "../storage/db.js";
@@ -108,7 +108,7 @@ function buildChecks(authEnabled: boolean, persistenceEnabled: boolean): Diagnos
 
   // ── GitHub App ──────────────────────────────────────────────────
   const rawAppId = process.env.GITHUB_APP_ID?.trim() ?? "";
-  const appIdNumeric = /^\d+$/.test(rawAppId);
+  const appIdNumeric = isValidGitHubAppId(rawAppId);
   checks.push({
     id: "github.app_id",
     category: "github",

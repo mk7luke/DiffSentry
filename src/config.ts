@@ -14,6 +14,10 @@ export function isAiProvider(value: string): value is AiProvider {
   return (AI_PROVIDERS as readonly string[]).includes(value);
 }
 
+export function isValidGitHubAppId(value: string): boolean {
+  return /^\d+$/.test(value.trim());
+}
+
 // Canonical default model names. These literals live here only — other modules
 // (e.g. the diagnostics config summary) import these rather than re-hardcoding.
 export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
@@ -60,7 +64,7 @@ export function loadConfig(): Config {
   // fails later as an opaque 401 ("'Issuer' claim ('iss') must be an Integer")
   // on the first API call, so reject it at boot instead.
   const githubAppId = process.env.GITHUB_APP_ID.trim();
-  if (!/^\d+$/.test(githubAppId)) {
+  if (!isValidGitHubAppId(githubAppId)) {
     throw new Error(
       `GITHUB_APP_ID must be numeric (got: "${process.env.GITHUB_APP_ID}"). ` +
         "Use the App ID from the GitHub App's settings page — not the Client ID " +
