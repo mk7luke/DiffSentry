@@ -209,12 +209,6 @@ interface RawNode {
   line_end: number | null;
 }
 
-interface RawEdge {
-  kind: string;
-  source_qualified: string;
-  target_qualified: string;
-}
-
 /**
  * Pure-SQLite half: derive symbols + dependents/dependencies + fan-in for the
  * changed files. No source bodies yet (the graph stores line ranges, not text)

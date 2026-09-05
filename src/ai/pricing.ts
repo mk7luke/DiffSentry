@@ -126,12 +126,6 @@ function table(): Record<string, ModelPrice> {
   return _table;
 }
 
-/** Test/CLI hook: forget the cached table so a later env change is picked up. */
-export function resetPriceTableCache(): void {
-  _table = null;
-  _tableKeysByLen = null;
-}
-
 /**
  * Look up the price for a model id. Exact (case-insensitive) match first, then
  * the longest table key that is a prefix of the model id. Returns null when the
@@ -164,9 +158,4 @@ export function computeCostUsd(
   const outTok = Number.isFinite(outputTokens as number) ? (outputTokens as number) : 0;
   const usd = (inTok / 1_000_000) * price.input + (outTok / 1_000_000) * price.output;
   return Math.round(usd * 1e6) / 1e6;
-}
-
-/** Whether a model has a known price (for diagnostics / UI hints). */
-export function hasKnownPrice(model: string | null | undefined): boolean {
-  return priceForModel(model) !== null;
 }

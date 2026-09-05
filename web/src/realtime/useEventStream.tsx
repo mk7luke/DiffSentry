@@ -1,5 +1,4 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { ReviewQueueEntry } from "../api/types";
 import { DEMO } from "../demo/mode";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -118,15 +117,6 @@ export interface TokenChangePayload {
   result: string;
 }
 
-export interface RuleChangedPayload {
-  id: number | null;
-  name: string;
-  scope: string;
-  action: "create" | "update" | "delete";
-  actor: string | null;
-  role: string | null;
-}
-
 export interface ConfigUpdatePayload {
   owner: string;
   repo: string;
@@ -149,10 +139,6 @@ export interface LearningChangePayload {
   actor: string | null;
   role: string | null;
 }
-
-/** Payload of a `queue.updated` event — the canonical board entry shape, kept
- * in one place to avoid drift. */
-export type QueueUpdatedPayload = ReviewQueueEntry;
 
 export interface WebhookReplayPayload {
   id: number;

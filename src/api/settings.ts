@@ -1,4 +1,5 @@
 import type { Request, Response, Router } from "express";
+import { sendData, sendError } from "./http.js";
 import type { Role } from "../dashboard/roles.js";
 import { getActor } from "../dashboard/roles.js";
 import type { CsrfRuntime } from "../dashboard/auth.js";
@@ -33,15 +34,6 @@ import {
 export interface SettingsDeps {
   requireRole: (role: Role) => import("express").RequestHandler;
   csrf: CsrfRuntime;
-}
-
-type ErrorCode = "forbidden" | "not_found" | "bad_request" | "internal";
-
-function sendData(res: Response, data: unknown, status = 200): void {
-  res.status(status).json({ data });
-}
-function sendError(res: Response, status: number, code: ErrorCode, message: string): void {
-  res.status(status).json({ error: { code, message } });
 }
 
 /** A single validated change to apply: set a value, or clear (value === CLEAR). */

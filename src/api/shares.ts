@@ -1,5 +1,6 @@
 import express from "express";
 import type { Request, Response, Router } from "express";
+import { sendData, sendError } from "./http.js";
 import crypto from "node:crypto";
 import type { Role } from "../dashboard/roles.js";
 import { getActor } from "../dashboard/roles.js";
@@ -91,15 +92,6 @@ export function buildSharedImpactReport(token: string, rangeRaw: unknown): { rep
 }
 
 // ─── Envelope helpers (match the JSON API: { data } / { error }) ─────────────
-
-type ErrorCode = "not_found" | "bad_request" | "internal";
-
-function sendData(res: Response, data: unknown, status = 200): void {
-  res.status(status).json({ data });
-}
-function sendError(res: Response, status: number, code: ErrorCode, message: string): void {
-  res.status(status).json({ error: { code, message } });
-}
 
 /** The public read handler, shared by the in-router and standalone mounts. */
 function handlePublicShareRead(req: Request, res: Response): void {

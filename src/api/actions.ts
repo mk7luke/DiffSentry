@@ -1,4 +1,5 @@
 import type { Request, Response, Router } from "express";
+import { sendData, sendError } from "./http.js";
 import type { Role } from "../dashboard/roles.js";
 import { getActor } from "../dashboard/roles.js";
 import type { CsrfRuntime } from "../dashboard/auth.js";
@@ -71,16 +72,6 @@ export interface ActionDeps {
  * keeps req.params.* as `string` regardless of the Express default generics. */
 type PrParams = { owner: string; repo: string; number: string };
 type PrRequest = Request<PrParams>;
-
-type ErrorCode = "forbidden" | "not_found" | "bad_request" | "internal";
-
-function sendData(res: Response, data: unknown, status = 200): void {
-  res.status(status).json({ data });
-}
-
-function sendError(res: Response, status: number, code: ErrorCode, message: string): void {
-  res.status(status).json({ error: { code, message } });
-}
 
 function parsePrNumber(raw: string): number | null {
   const n = Number.parseInt(raw, 10);

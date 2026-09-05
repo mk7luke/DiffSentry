@@ -39,6 +39,12 @@ baseline is not re-run), and applies migration 2 onward. No data is touched.
 | ------- | ---------------- | ---------------------------------------------------------------------------- |
 | 1       | `v1_baseline`    | Original schema: `repos`, `prs`, `reviews`, `findings`, `events`, `pattern_hits`, `issues`. Idempotent `CREATE IF NOT EXISTS`. |
 | 2       | `command_center` | Command-center tables (`audit_log`, `settings_overrides`, `api_tokens`, `cost_events`, `notification_channels`, `alert_rules`, `saved_views`, `webhook_deliveries`, `roles`) and the `findings` triage columns (`snoozed_until`, `triaged_by`, `triaged_at`, `triage_note`). |
+| 3       | `custom_rules`   | User-defined anti-pattern rules (`custom_rules`) + per-rule hit attribution on `pattern_hits`. |
+| 4       | `notification_deliveries` | Delivery log for notification channels (`notification_deliveries`).  |
+| 5       | `durable_queue`  | Durable review-job queue (`review_jobs`) with lease/reclaim support.          |
+| 6       | `walkthrough_state` | Server-side walkthrough state persistence (`walkthrough_state`).           |
+| 7       | `impact_shares`  | Shareable impact-report links (`impact_shares`).                              |
+| 8       | `drop_saved_views` | Drops the never-used `saved_views` table (created by v2, written to by nothing). |
 
 ## Adding a migration
 

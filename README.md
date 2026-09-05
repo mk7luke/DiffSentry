@@ -688,7 +688,6 @@ GitHub webhook
                        everything, persists state in the walkthrough blob.
       │
       ├── repo-config.ts          .diffsentry.yaml loading + defaults
-      ├── guidelines.ts           CLAUDE.md / AGENTS.md / .cursorrules auto-detect
       ├── issues.ts               'fixes #N' parsing + linked-issue fetch
       ├── issue-commands.ts       Issue @-mention command parsing + help text
       ├── learnings.ts            Per-repo learnings store

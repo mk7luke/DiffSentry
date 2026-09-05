@@ -191,17 +191,6 @@ export function shouldReviewPR(
   return true;
 }
 
-export function getPathInstructions(
-  config: RepoConfig,
-  filename: string
-): string[] {
-  if (!config.reviews?.path_instructions?.length) return [];
-
-  return config.reviews.path_instructions
-    .filter((pi) => minimatch(filename, pi.path))
-    .map((pi) => pi.instructions);
-}
-
 export function isPathIncluded(
   config: RepoConfig,
   filename: string

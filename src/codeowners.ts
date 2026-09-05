@@ -98,14 +98,3 @@ export function ownersForFiles(
     .map(([login, v]) => ({ login, filesOwned: v.filesOwned, teams: v.teams }))
     .sort((a, b) => b.filesOwned - a.filesOwned);
 }
-
-export function renderCodeownersBlock(
-  owners: Array<{ login: string; filesOwned: number; teams: boolean }>,
-): string {
-  if (owners.length === 0) return "";
-  const bullets = owners
-    .slice(0, 5)
-    .map((o) => `- @${o.login}${o.teams ? " (team)" : ""} — owns ${o.filesOwned} touched file(s)`)
-    .join("\n");
-  return `## 👥 CODEOWNERS\n\nMatching owners for the files this PR touches:\n\n${bullets}\n\n<sub>From the repo's \`CODEOWNERS\` file. \`@bot ship\` will also factor these in (future).</sub>`;
-}

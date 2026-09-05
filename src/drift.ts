@@ -1,5 +1,6 @@
 import type { AIProvider, Confidence, FileChange, LicenseHeaderConfig, PRContext, ReviewResult } from "./types.js";
 import { minimatch } from "minimatch";
+import { stripFences } from "./ai/parse.js";
 
 /**
  * Compares the PR description's claims against the actual diff, asks the
@@ -86,7 +87,7 @@ Be specific — name files and identifiers, don't say "various changes".`;
       : "";
 
   const raw = await opts.ai.chat(opts.context, ask + scopeNote);
-  const cleaned = raw.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
+  const cleaned = stripFences(raw);
   // A path only earns a file-scoped thread if it names a file whose diff we
   // actually put in front of the model — so it excludes the unavailable set
   // (config-ignored, past the file cap, dropped by the size budget) just as the

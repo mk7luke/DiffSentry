@@ -1,5 +1,11 @@
 import type { WalkthroughResult, WalkthroughConfig } from "./types.js";
 
+/** HTML comment marker used to find and upsert the walkthrough comment on a
+ * PR. Single source of truth — both the reviewer (which posts the comment)
+ * and the webhook dispatcher (which routes checkbox clicks) match against it,
+ * so the string must not be duplicated or drift apart. */
+export const WALKTHROUGH_MARKER = "<!-- DiffSentry Walkthrough -->";
+
 const EFFORT_LABELS: Record<number, string> = {
   1: "Trivial",
   2: "Simple",

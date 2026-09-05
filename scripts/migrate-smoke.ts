@@ -39,7 +39,6 @@ const EXPECTED_V2_TABLES = [
   "cost_events",
   "notification_channels",
   "alert_rules",
-  "saved_views",
   "webhook_deliveries",
   "roles",
 ];

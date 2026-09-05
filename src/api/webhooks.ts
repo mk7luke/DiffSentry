@@ -1,4 +1,5 @@
 import type { Request, Response, Router } from "express";
+import { sendData, sendError } from "./http.js";
 import type { Role } from "../dashboard/roles.js";
 import { getActor } from "../dashboard/roles.js";
 import type { CsrfRuntime } from "../dashboard/auth.js";
@@ -38,16 +39,6 @@ export interface WebhookRouteDeps {
   csrf: CsrfRuntime;
   /** When omitted, replay returns 503 (the GET inspection endpoints still work). */
   replayWebhook?: ReplayWebhook;
-}
-
-type ErrorCode = "forbidden" | "not_found" | "bad_request" | "internal" | "unavailable";
-
-function sendData(res: Response, data: unknown, status = 200): void {
-  res.status(status).json({ data });
-}
-
-function sendError(res: Response, status: number, code: ErrorCode, message: string): void {
-  res.status(status).json({ error: { code, message } });
 }
 
 function parseId(raw: string): number | null {

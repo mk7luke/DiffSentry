@@ -407,8 +407,11 @@ const v2SchemaOkByDb = new WeakMap<DB, Set<string>>();
  *  schema result), so a missing v2 schema doesn't log on every v2 access. */
 let _v2SchemaMissingWarned = false;
 
-/** Every table introduced by the command-center (v2) migration — a full
- *  "did migration 2 run" check, not just the subset the DAO helpers touch. */
+/** Every table introduced by the command-center (v2) migration that survives
+ * to the latest schema version — a "did migration 2 run" check, not just the
+ * subset the DAO helpers touch. (`saved_views` was created by v2 but dropped
+ * again by migration 8; it must not be listed here or every opened DB would
+ * warn.) */
 const REQUIRED_V2_TABLES = [
   "audit_log",
   "settings_overrides",
@@ -416,7 +419,6 @@ const REQUIRED_V2_TABLES = [
   "cost_events",
   "notification_channels",
   "alert_rules",
-  "saved_views",
   "webhook_deliveries",
   "roles",
 ];
