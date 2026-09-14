@@ -11,9 +11,23 @@ on:
 permissions:
   contents: read
 
+# Deliberately does NOT cancel in progress. A cancelled run leaves
+# `Apply path labels = CANCELLED` as the latest node in the PR's status
+# rollup, and dependabot-auto-merge.yml counts every node, treating anything
+# that isn't SUCCESS/NEUTRAL/SKIPPED as bad — so one superseded labeler leaves
+# a PR green to the eye but permanently refused, with nothing left to wake the
+# job.
+#
+# Auto-merge triggers that itself: when a PR has fallen behind main it calls
+# update-branch, which fires a fresh `synchronize`, which cancelled this
+# workflow and blocked the very merge it was trying to perform. Observed twice
+# on #160 on 2026-09-14.
+#
+# Letting runs queue instead costs a few seconds of runner time on rapid
+# pushes; labeling is idempotent, so the last one to finish wins either way.
 concurrency:
   group: labeler-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   label:
