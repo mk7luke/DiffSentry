@@ -22,7 +22,19 @@ name: Dependabot auto-merge
 
 on:
   workflow_run:
-    workflows: ["CI"]
+    # Every workflow that contributes a check to a PR's rollup must appear
+    # here, because the job below refuses to merge while anything is still
+    # running and nothing re-wakes it afterwards. Waking only on "CI" made
+    # merging a race: on #160 CI settled at 21:21:37 and CodeQL at 21:22:17,
+    # so the run fired 40s early, reported "still has 1 check(s) running" and
+    # was never triggered again. (It looked correct when sampled on an earlier
+    # push, where CI happened to finish last — the order is not guaranteed.)
+    #
+    # "Dependency review" and "Secret scan" are absent deliberately: ci.yml
+    # invokes both via workflow_call, so their checks land inside CI's own run
+    # rather than as independent workflows. These four are the ones that can
+    # finish after CI:
+    workflows: ["CI", "CodeQL", "Dependency audit", "Label PRs"]
     types: [completed]
 
 # Every write here is done with AUTOMERGE_TOKEN; this job's own token only
@@ -36,9 +48,18 @@ concurrency:
 
 jobs:
   merge:
+    # `Label PRs` runs on pull_request_target, so gating on 'pull_request'
+    # alone would drop the wake-up whenever the labeler is the last to finish.
+    #
+    # The triggering run's own conclusion is deliberately NOT checked. The
+    # rollup read below is the authority and already refuses anything not
+    # green, so filtering here only creates a hole: a cancelled labeler (which
+    # happens whenever concurrency supersedes one) would fire no trigger at
+    # all, and the PR would sit green-but-unmerged with nothing left to wake
+    # it. An early exit on a red run costs one no-op job; that hole cost #160.
     if: >-
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'success' &&
+      (github.event.workflow_run.event == 'pull_request' ||
+       github.event.workflow_run.event == 'pull_request_target') &&
       startsWith(github.event.workflow_run.head_branch, 'dependabot/')
     runs-on: ubuntu-latest
     steps:
