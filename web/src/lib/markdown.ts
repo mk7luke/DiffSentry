@@ -5,11 +5,9 @@ import DOMPurify from "dompurify";
 // <details>/<summary>; parse to HTML so the SPA matches GitHub, then run the
 // result through DOMPurify before it reaches dangerouslySetInnerHTML.
 //
-// Unlike the legacy server-rendered dashboard (which strips a few XSS vectors
-// with regexes), DOMPurify is a maintained allowlist sanitizer: it drops
-// <script>/<iframe>/<object>, event-handler attributes, javascript:/data: URLs,
-// and other scriptable vectors the regex approach can miss, while keeping
-// normal markdown formatting (and the collapsible blocks we render).
+// This mirrors the server-side sanitizer in src/dashboard/markdown.ts (which
+// feeds the legacy dashboard): both are allowlist-based, so bot-authored and
+// user-authored markdown get equivalent treatment on either rendering path.
 
 marked.setOptions({ gfm: true, breaks: false });
 
