@@ -307,6 +307,15 @@ export async function dispatchWebhookEvent(
       return { status: 200, body: { status: "ignored" } };
     }
 
+    // Only checkbox edits on our own comments are actionable. The walkthrough
+    // marker below is plain text any commenter can paste into their own
+    // comment, so the author check — not the marker — is what stops a forged
+    // comment from dispatching codegen commands (autofix, tests, ...) against
+    // the PR's head branch.
+    if (comment.user?.type !== "Bot") {
+      return { status: 200, body: { status: "ignored" } };
+    }
+
     const body: string = comment.body || "";
     const prevBody: string = payload.changes?.body?.from || "";
     // Only act on our own walkthrough comments (which carry the marker).

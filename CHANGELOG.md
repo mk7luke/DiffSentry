@@ -41,6 +41,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`<details>/<summary>`, tables, fenced code, GFM checkboxes) and restricts
   URL schemes to http/https/mailto. The command-center SPA already used
   DOMPurify and is unchanged.
+- Checkbox clicks in the walkthrough's Finishing Touches section are now only
+  honored when the edited comment was authored by the bot itself. The
+  `issue_comment.edited` path previously gated on the `<!-- DiffSentry
+  Walkthrough -->` marker alone, which is plain text any commenter can paste
+  into their own comment — so on any installed repo, a user could post a forged
+  comment carrying the marker plus a checked "Push autofix commit to this
+  branch" box and edit it once to dispatch codegen commands that commit to the
+  PR's head branch. The created-comment path already filtered bot authors; the
+  edit path now does too.
 - A non-numeric `GITHUB_APP_ID` (a stray prefix, the OAuth Client ID, the app
   slug) no longer boots and then fails every GitHub call with an opaque 401
   (`'Issuer' claim ('iss') must be an Integer'`). `loadConfig()` rejects it at
