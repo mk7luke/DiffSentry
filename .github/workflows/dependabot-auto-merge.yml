@@ -83,10 +83,22 @@ jobs:
           head=$(jq -r '.headRefOid'   <<<"$pr")
           title=$(jq -r '.title'       <<<"$pr")
 
-          if [ "$author" != "dependabot[bot]" ]; then
-            echo "::notice::#$num is authored by $author, not Dependabot."
-            exit 0
-          fi
+          # Dependabot's login has two spellings and which one you get depends
+          # on the API behind the command, not on the PR:
+          #
+          #   REST  (gh api .../pulls/N --jq .user.login)   -> dependabot[bot]
+          #   GraphQL (gh pr list --json author)            -> app/dependabot
+          #
+          # `gh pr list --json` is GraphQL, so the bracketed REST spelling this
+          # originally compared against never matched and every run bailed here
+          # with "is authored by app/dependabot, not Dependabot" — auto-merge
+          # has merged nothing since it landed in #143. Accept both spellings
+          # (plus the bare login GraphQL returns underneath gh's `app/` prefix)
+          # rather than pinning one API's rendering.
+          case "$author" in
+            "dependabot[bot]"|"app/dependabot"|"dependabot") ;;
+            *) echo "::notice::#$num is authored by $author, not Dependabot."; exit 0 ;;
+          esac
 
           # The CI run that woke us described $HEAD_SHA. If the branch has moved
           # since (a rebase, a follow-up push), that newer commit has its own CI
