@@ -5,11 +5,17 @@ CodeRabbit/DiffSentry parity capture (see
 `../../../../../docs/superpowers/specs/2026-09-15-coderabbit-parity-capture-design.md`
 for the full design). Each directory holds:
 
-- `pr.json` — `{ title, body, base, branch, expects }`. Loaded and validated
-  by `src/parity/fixture.ts`.
+- `pr.json` — `{ title, body, base, branch, expects, deletes? }`. Loaded and
+  validated by `src/parity/fixture.ts`.
 - `files/` — complete file contents to copy over the fixture checkout for
   that branch. Data, not a patch, so it stays readable in review and needs
-  no nested git repo.
+  no nested git repo. This is an *overlay*: a path absent from `files/`
+  simply survives from the base commit untouched. If a PR's scenario means
+  to delete or rename a base file away, it can't say so by omission — list
+  that path in `deletes` (repo-relative, no leading `/`, no `..` segment)
+  instead, and `fixture-open-pr.ts` `git rm -f`s it before applying
+  `files/`. None of the ten PRs currently need this; see the note on PR 9
+  below for a case that looked like it did and, on investigation, didn't.
 
 Every PR is a real, reviewable change with an honest reason to exist. The
 planted problem rides inside that change rather than sitting in a PR whose
@@ -62,3 +68,14 @@ plan.
   `applyTemplatePath` in `src/parity/fixture.ts`) when it applies the PR to
   the fixture checkout, so the opened PR still lands a real `package.json`
   there.
+- PR #9 does *not* delete `src/worker.ts`, even though its `files/` tree
+  adds `src/retention.ts` and `test/worker.test.ts` without shipping
+  `src/worker.ts` — which looks, at a glance, like the worker was replaced.
+  It wasn't: `files/README.md`'s Layout section documents `src/worker.ts`
+  as a surviving module, `files/src/index.ts` still imports and schedules
+  `runWorker` from it unchanged, and the new `test/worker.test.ts` is
+  end-to-end coverage of that same unmodified file. The refactor pulled the
+  retention *predicate* out into `src/retention.ts` and split routing into
+  `src/routes/*`, but left the timer-driven worker alone. See
+  `tests/unit/parity-fixture.test.ts`'s "PR 09 does not declare a deletes
+  entry for src/worker.ts" suite for the full evidence trail.

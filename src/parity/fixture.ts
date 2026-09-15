@@ -17,6 +17,14 @@ export type PrDef = {
   expects: string[];
   /** false for a series entry that records a follow-up action rather than a PR to open. Defaults to true. */
   open?: boolean;
+  /**
+   * Repo-relative paths this PR removes from its base. `files/` is an
+   * overlay applied on top of the checkout (see copyFilesTree in
+   * scripts/fixture-open-pr.ts) — a path a PR's scenario means to delete or
+   * rename away has no way to say so just by being absent from `files/`,
+   * since the base version simply survives untouched. List it here instead.
+   */
+  deletes?: string[];
 };
 
 /**
@@ -61,6 +69,11 @@ export function validatePrSeries(defs: PrDef[]): string[] {
     if (!d.title.trim()) problems.push(`${d.dir}: empty title`);
     else if (d.title.trim().endsWith(".")) problems.push(`${d.dir}: title ends in a period`);
     else if (d.title.length > 72) problems.push(`${d.dir}: title over 72 chars`);
+    for (const del of d.deletes ?? []) {
+      if (!del || path.isAbsolute(del) || del.split(/[\\/]/).includes("..")) {
+        problems.push(`${d.dir}: deletes entry ${JSON.stringify(del)} must be a non-empty repo-relative path with no ".." segment`);
+      }
+    }
   }
   return problems;
 }

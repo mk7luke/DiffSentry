@@ -31,6 +31,22 @@ describe("validatePrSeries", () => {
   it("rejects a title ending in a period, which the repo's title check warns on", () => {
     expect(validatePrSeries([def({ title: "feat: a." })]).join()).toMatch(/title/i);
   });
+
+  it("accepts a well-formed deletes entry", () => {
+    expect(validatePrSeries([def({ deletes: ["src/old.ts"] })])).toEqual([]);
+  });
+
+  it("rejects an absolute path in deletes", () => {
+    expect(validatePrSeries([def({ deletes: ["/etc/passwd"] })]).join()).toMatch(/deletes/i);
+  });
+
+  it("rejects a path-traversal segment in deletes", () => {
+    expect(validatePrSeries([def({ deletes: ["../../etc/passwd"] })]).join()).toMatch(/deletes/i);
+  });
+
+  it("rejects an empty string in deletes", () => {
+    expect(validatePrSeries([def({ deletes: [""] })]).join()).toMatch(/deletes/i);
+  });
 });
 
 describe("applyTemplatePath", () => {
@@ -113,6 +129,67 @@ describe("PR 09's manifest ships as a template", () => {
       expect(applied.dependencies?.lodash).toBe("4.17.15");
     } finally {
       fs.rmSync(destDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("PR 09 does not declare a deletes entry for src/worker.ts", () => {
+  // Investigated after a review finding noted that overlay-only copying
+  // (files/ over the checkout, see copyFilesTree in
+  // scripts/fixture-open-pr.ts) leaves a base file in place if a PR's
+  // scenario means to remove it, and flagged PR 09 as a suspect: it ships
+  // src/retention.ts and adds test/worker.test.ts without shipping
+  // src/worker.ts, which looks superseded at a glance.
+  //
+  // It is not. Evidence, all within PR 09's own files/ tree:
+  //   - files/README.md's "Layout" section lists `src/worker.ts` as a
+  //     surviving module ("the pruning worker, run on a timer by
+  //     src/index.ts") alongside the new src/routes/ and src/archive/.
+  //   - files/src/index.ts still imports runWorker from "./worker.js" and
+  //     schedules it on a timer, unchanged from the seed.
+  //   - files/test/worker.test.ts imports runWorker from "../src/worker.js"
+  //     and exercises it end-to-end — it is a new test for the unmodified
+  //     seed file, not a replacement test for something that moved.
+  //   - Applying PR 09's overlay onto the seed and type-checking the result
+  //     produces no missing-module error for worker.ts or its import in
+  //     index.ts/test/worker.test.ts (only unrelated "no @types/node
+  //     installed in this scratch check" noise).
+  // The refactor moved request routing and pulled the retention predicate
+  // into src/retention.ts, but the worker that calls Store.prune on a timer
+  // was left alone. So PR 09 correctly declares no `deletes` entries; a
+  // `deletes: ["src/worker.ts"]` entry here would be wrong and would break
+  // the PR by removing a file src/index.ts still imports.
+  const pr09 = loadPrSeries(REAL_PR_SERIES_ROOT).find((d) => d.dir.startsWith("09-"));
+
+  it("PR 09 exists in the series", () => {
+    expect(pr09).toBeDefined();
+  });
+
+  it("declares no deletes", () => {
+    expect(pr09?.deletes ?? []).toEqual([]);
+  });
+
+  it("still ships src/index.ts importing from ./worker.js, confirming worker.ts stays live", () => {
+    const indexTs = fs.readFileSync(
+      path.join(REAL_PR_SERIES_ROOT, "09-layered-refactor-archive", "files", "src", "index.ts"),
+      "utf8",
+    );
+    expect(indexTs).toContain("./worker.js");
+  });
+});
+
+describe("none of the other PRs in the series need a deletes entry", () => {
+  // Checked every PR's files/ tree against the seed's file list (src/,
+  // test/, ingest/, docs/, .github/workflows/): PRs 1, 2, 7, 8 modify
+  // existing files in place; PRs 3, 4, 6 add or modify without removing
+  // anything the base still needs; PR 5 modifies docs/getting-started.md
+  // in place; PR 10 isn't opened as a PR at all (open: false). None of them
+  // omit a base file the way PR 09 was suspected (wrongly, see above) of
+  // omitting src/worker.ts.
+  it("no PR other than 09 declares deletes, and 09 declares none", () => {
+    const defs = loadPrSeries(REAL_PR_SERIES_ROOT);
+    for (const d of defs) {
+      expect(d.deletes ?? [], `${d.dir} should not declare deletes`).toEqual([]);
     }
   });
 });

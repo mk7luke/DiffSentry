@@ -19,10 +19,11 @@
  * (override with --dir), separate from this checkout, so this script never
  * touches DiffSentry's own working tree. Each run fetches origin, refuses
  * to proceed if that clone's tree is dirty (see ensureCleanCheckout), syncs
- * `base` to `origin/<base>`, branches, copies `files/` over the clone
- * (stripping any `.tmpl` suffix off copied filenames — see
- * `applyTemplatePath` in `src/parity/fixture.ts` for why), commits with the
- * PR title, pushes, and opens the PR via `gh pr create`.
+ * `base` to `origin/<base>`, branches, `git rm`s any paths the PR's
+ * `deletes` list names, copies `files/` over the clone (stripping any
+ * `.tmpl` suffix off copied filenames — see `applyTemplatePath` in
+ * `src/parity/fixture.ts` for why), commits with the PR title, pushes, and
+ * opens the PR via `gh pr create`.
  * If anything fails after branching, it best-effort checks the clone back
  * out to `base` so a failed run doesn't leave the clone parked on a
  * half-finished branch for the next invocation to trip over.
@@ -163,6 +164,16 @@ function main(): void {
     run("git", ["fetch", "origin", def.base], { cwd: dir });
     run("git", ["checkout", "-B", def.base, `origin/${def.base}`], { cwd: dir });
     run("git", ["checkout", "-b", def.branch], { cwd: dir });
+
+    // Apply declared deletions before copying files/: `files/` is an
+    // overlay (see copyFilesTree), so a path a PR means to remove or rename
+    // away has no way to say so just by being absent from files/ — the base
+    // version would otherwise survive untouched. Deleting first, then
+    // overlaying, means a path that is both deleted and re-added (a rename
+    // to a new location with the same leaf name, say) still lands correctly.
+    for (const del of def.deletes ?? []) {
+      run("git", ["rm", "-f", del], { cwd: dir });
+    }
 
     const filesDir = path.join(root, def.dir, "files");
     copyFilesTree(filesDir, dir);
