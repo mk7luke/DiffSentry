@@ -1,0 +1,99 @@
+openapi: 3.0.3
+info:
+  title: Reports API
+  description: >-
+    A minimal reports service: list and create reports scoped to the
+    requesting owner.
+  version: 0.1.0
+servers:
+  - url: http://localhost:3000
+paths:
+  /reports:
+    get:
+      operationId: listReports
+      summary: List the requesting owner's reports
+      parameters:
+        - name: x-owner-id
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Identifies the owner whose reports are being listed.
+      responses:
+        "200":
+          description: The owner's reports, most recently inserted last.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Report"
+        "400":
+          description: The x-owner-id header was missing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createReport
+      summary: Create a report for the requesting owner
+      parameters:
+        - name: x-owner-id
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Identifies the owner the new report belongs to.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewReport"
+      responses:
+        "201":
+          description: The created report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+        "400":
+          description: >-
+            The x-owner-id header was missing, the body was not valid JSON,
+            or title/body were not non-empty strings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+components:
+  schemas:
+    NewReport:
+      type: object
+      required: [title, body]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        body:
+          type: string
+          minLength: 1
+    Report:
+      allOf:
+        - $ref: "#/components/schemas/NewReport"
+        - type: object
+          required: [id, ownerId, createdAt]
+          properties:
+            id:
+              type: integer
+              description: Monotonically increasing within this service instance.
+            ownerId:
+              type: string
+            createdAt:
+              type: integer
+              description: Unix epoch milliseconds.
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
