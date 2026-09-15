@@ -36,7 +36,7 @@ https://github.com/cryostatio/cryostat/pull/1764 (comment
 | `walkthrough-collapsed.png` | The single CodeRabbit walkthrough comment (`issuecomment-5685603014`) as it renders by default: everything below the top banner — including the `📝 Walkthrough` summary itself — starts inside collapsed `<details>`. The comment also happened to be live-reprocessing at capture time ("Currently processing new changes in this PR..."), which is itself evidence for the finding below: CodeRabbit has no separate status comment, it splices a live status note into the top of this same walkthrough comment and edits it in place. |
 | `walkthrough-expanded.png` | The same comment with only the outer `📝 Walkthrough` `<details>` opened (nested per-file/sequence-diagram `<details>` left collapsed, matching what a reader would open first). Shows the file-change table, priority/effort estimate, and a rendered Mermaid sequence diagram — which required scrolling it into view once before capture, since GitHub lazy-renders Mermaid blocks on visibility. |
 | `review-summary.png` | The "Actionable comments posted: 3" review body (`pullrequestreview-5214188241`), including the caution callout for comments outside the diff, one severity-tagged outside-diff finding, and three already-resolved inline threads below it with GitHub's native "Show resolved" collapse control. |
-| `inline-finding.png` | One inline finding (`discussion_r3915066291`, `JfrView.java`) with its full severity header (`🎯 Functional Correctness | 🟡 Minor | ⚡ Quick win`), the file path bar and diff hunk above it, and a collapsed "📝 Committable suggestion" section — plus a green "✅ Addressed in commits" badge GitHub adds once the diff moved past the flagged lines. |
+| `inline-finding.png` | One inline finding (`discussion_r3915066291`, `JfrView.java`) with its full severity header (`🎯 Functional Correctness | 🟡 Minor | ⚡ Quick win`), the file path bar and diff hunk above it, and a collapsed "📝 Committable suggestion" section — plus a green "✅ Addressed in commits" badge. **That badge is CodeRabbit-emitted text, not GitHub chrome**: it sits in the comment body after the `<!-- auto-generated reply -->` marker (`../coderabbit/inline.md:559`, `:823`), and DiffSentry emits none. |
 | `suggestion-block.png` | The same comment with "📝 Committable suggestion" expanded, showing CodeRabbit's own red/green "Suggested change" diff block and its "‼️ IMPORTANT — carefully review before committing" notice. **GitHub's native apply UI (the "Add suggestion to batch" / "Commit suggestion" buttons) is not visible** — that chrome is permission-gated to authenticated users with write access, and this capture is deliberately logged out. What you see here is the full extent of what a logged-out visitor — or a reviewer without merge rights — ever sees of this affordance. |
 
 **Not captured: `status-comment.png`.** Confirmed absent, not a gap. Checked
@@ -75,18 +75,30 @@ profile settings) presumably the logged-in path.
 
 ## Correction to the working theory
 
-Task 6's brief carried a working theory from the corpus refresh: "both bots
-captured ZERO status-bucket comments... the in-progress comment is edited in
-place into the final walkthrough rather than left standing." That's exactly
-right for **CodeRabbit** (see above), but it's only half right for
-**DiffSentry**: DiffSentry *does* maintain a standing, separate, pinned
-status comment (`status-comment.png`) — it just wasn't captured under the
-`status` bucket during the September corpus refresh. The comment is real,
-public, and present on PR #146 right now. This is worth flagging to whoever
-owns the corpus capture script (Task 8's parity report): the `status.md`
-"no comments captured" result for DiffSentry looks like a bucketing miss in
-the capture script's classification heuristic, not a genuine absence of the
-surface.
+The corpus refresh carried a working theory: "both bots captured ZERO
+status-bucket comments... the in-progress comment is edited in place into the
+final walkthrough rather than left standing." That's exactly right for
+**CodeRabbit** (see above), but only half right for **DiffSentry**: DiffSentry
+*does* maintain a standing, separate, pinned status comment
+(`status-comment.png`), real and public on PR #146.
+
+**Resolved — this was a classifier bug and it has been fixed.** An earlier
+draft of this section flagged the DiffSentry `status.md` "no comments
+captured" result as a suspected bucketing miss. It was one, and the
+classification heuristic was corrected afterwards:
+`../diffsentry/manifest.json` now records `"status": 28` and
+`../diffsentry/status.md` holds all 28 bodies (18 terse
+`<!-- DiffSentry Status -->` verdict blockquotes plus 10 pinned
+`<!-- DiffSentry Sticky Status -->` comments). CodeRabbit's `status: 0` was
+never a miss — see the note above `suggestion-block.png` and
+`../drift.md` Surface 4.
+
+Worth knowing before reading either number as a parity gap: the separate
+status comment was **never a CodeRabbit behaviour** in the first place.
+`tests/e2e/reference/CODERABBIT-FORMAT.md`'s Surface 4 described DiffSentry's
+own pattern inside a CodeRabbit reference, and DiffSentry was built to it.
+`../drift.md` Surface 4 and `docs/parity/gap-backlog.md` §1.2 carry the
+evidence.
 
 ## Why Playwright isn't a repo dependency
 
