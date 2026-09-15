@@ -74,8 +74,15 @@ export function resolveCopyTarget(destDir: string, relPath: string): string {
 
 export function loadPrSeries(root: string): PrDef[] {
   return fs
-    .readdirSync(root)
-    .filter((d) => /^\d\d-/.test(d))
+    .readdirSync(root, { withFileTypes: true })
+    // Directories only, and only those carrying a pr.json. Matching on the
+    // `NN-` prefix alone would pull in a stray note file or an auxiliary
+    // directory and then fail deep inside readFileSync with an ENOTDIR or
+    // ENOENT naming a path the caller never asked for — a worse diagnostic
+    // than simply not treating it as a PR definition.
+    .filter((e) => e.isDirectory() && /^\d\d-/.test(e.name))
+    .map((e) => e.name)
+    .filter((d) => fs.existsSync(path.join(root, d, "pr.json")))
     .sort()
     .map((d) => ({
       dir: d,

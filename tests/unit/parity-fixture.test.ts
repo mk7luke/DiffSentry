@@ -241,4 +241,36 @@ describe("resolveCopyTarget", () => {
     expect(relPath).toBe(path.join("sub", "package.json"));
     expect(resolveCopyTarget(destDir, relPath)).toBe(path.join(destDir, "sub", "package.json"));
   });
+})
+
+describe("loadPrSeries directory filtering", () => {
+  function scratch(): string {
+    return fs.mkdtempSync(path.join(os.tmpdir(), "ds-prseries-"));
+  }
+
+  it("ignores a file whose name matches the NN- prefix", () => {
+    const root = scratch();
+    fs.writeFileSync(path.join(root, "01-notes.md"), "not a PR definition");
+    // Would throw ENOTDIR if the prefix alone decided what to read.
+    expect(loadPrSeries(root)).toEqual([]);
+  });
+
+  it("ignores a prefixed directory that carries no pr.json", () => {
+    const root = scratch();
+    fs.mkdirSync(path.join(root, "02-scratch"));
+    expect(loadPrSeries(root)).toEqual([]);
+  });
+
+  it("still loads a well-formed definition beside those", () => {
+    const root = scratch();
+    fs.writeFileSync(path.join(root, "01-notes.md"), "noise");
+    fs.mkdirSync(path.join(root, "02-scratch"));
+    fs.mkdirSync(path.join(root, "03-real"));
+    fs.writeFileSync(
+      path.join(root, "03-real", "pr.json"),
+      JSON.stringify({ title: "feat: a", body: "why", base: "main", branch: "feat/a", expects: ["walkthrough"] }),
+    );
+    expect(loadPrSeries(root).map((d) => d.dir)).toEqual(["03-real"]);
+  });
 });
+;
