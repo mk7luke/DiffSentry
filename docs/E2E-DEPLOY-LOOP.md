@@ -12,7 +12,7 @@ the bot's behavior without ever taking a screenshot of a PR comment.
 | **Sandbox repo** | A private GitHub repo you create with the DiffSentry App installed on it | Throw-away PRs that the harness opens, polls, and closes — never test on a working repo |
 | **Redeploy script** | `scripts/local/redeploy.sh` (gitignored) | One command: SSH to the host, `git pull --ff-only`, `docker compose up --build -d` |
 | **E2E harness** | `tests/e2e/` | TypeScript scenario runner that opens real PRs, polls for bot output, captures everything to a transcript |
-| **Reference data** | `tests/e2e/reference/` | A live capture of CodeRabbit's comment shape on a real PR + a parity rubric mapping each surface to its DiffSentry source location |
+| **Reference data** | `tests/e2e/reference/` | Live captures of CodeRabbit's comment shape on real PRs + a parity rubric mapping each surface to its DiffSentry source location. Files directly in the folder are the frozen April 2026 baseline (one PR); dated subfolders are later snapshots. `tests/e2e/reference/2026-09/` is current — 18 CodeRabbit PRs across 17 languages, 18 DiffSentry PRs, rendered screenshots, and a drift analysis |
 | **PRD for the dashboard** | `docs/PRD-web-dashboard.md` | Scope for the next major surface (read-only web dashboard backed by the persistent storage layer) |
 
 ## One-time setup (operator)
@@ -199,7 +199,13 @@ or add a new entry to `.gitignore` first.
 - `tests/e2e/README.md` — harness reference (CLI, scenario shape,
   output format).
 - `tests/e2e/reference/CODERABBIT-FORMAT.md` — the parity rubric;
-  open this when adding a new "match CodeRabbit" surface.
+  open this when adding a new "match CodeRabbit" surface. It is written
+  off the frozen April 2026 baseline, so read it together with
+  `tests/e2e/reference/2026-09/drift.md`, which records where
+  CodeRabbit has since moved.
+- `tests/e2e/reference/2026-09/README.md` — the current corpus: what was
+  captured, the per-surface counts, and how to re-run the capture
+  without replacing the sample.
 - `docs/PRD-web-dashboard.md` — full scope for the next major surface
   (read-only dashboard backed by the persistent storage layer above).
 - `README.md` § Architecture — module-level map of what calls what.
