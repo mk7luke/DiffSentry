@@ -436,9 +436,16 @@ function formatCommentBody(comment: {
   // → what it costs (effort). A model that omits the two newer axes — or names
   // a value outside their enums — falls back to the `type | severity` pair this
   // header has always been, rather than printing a gap or an `undefined`.
+  //
+  // The one collision the two vocabularies have is security: a vulnerability
+  // is `security` on both axes, and `_🔒 Security & Privacy_ | _🔒 Security_`
+  // says the same thing twice under the same glyph. The category is the more
+  // specific of the pair, so the type gives way.
+  const categoryIcon = comment.category ? CATEGORY_ICON[comment.category] : undefined;
+  const typeIcon = comment.type ? TYPE_ICON[comment.type] : undefined;
   const header = [
     axisPart(comment.category, CATEGORY_ICON, CATEGORY_LABEL),
-    axisPart(comment.type, TYPE_ICON, TYPE_LABEL),
+    categoryIcon && typeIcon === categoryIcon ? "" : axisPart(comment.type, TYPE_ICON, TYPE_LABEL),
     axisPart(comment.severity, SEVERITY_ICON, SEVERITY_LABEL),
     axisPart(comment.effort, EFFORT_ICON, EFFORT_LABEL),
   ].filter(Boolean);

@@ -90,8 +90,23 @@ describe("parse: category and effort from model JSON", () => {
     );
     expect(c.category).toBe("security_privacy");
     expect(c.effort).toBe("heavy_lift");
+    // The `security` type is dropped: it repeats the category's glyph and says
+    // less than the category does.
+    expect(header(c.body)).toBe("_🔒 Security & Privacy_ | _🔴 Critical_ | _🏗️ Heavy lift_");
+  });
+
+  it("keeps a security type when no category outranks it", () => {
+    const c = buildReviewComment({ body: "b", title: "t", type: "security", severity: "critical" }, anchor);
+    expect(header(c.body)).toBe("_🔒 Security_ | _🔴 Critical_");
+  });
+
+  it("keeps a non-colliding type alongside the security category", () => {
+    const c = buildReviewComment(
+      { body: "b", title: "t", type: "issue", severity: "major", category: "security_privacy", effort: "quick_win" },
+      anchor,
+    );
     expect(header(c.body)).toBe(
-      "_🔒 Security & Privacy_ | _🔒 Security_ | _🔴 Critical_ | _🏗️ Heavy lift_",
+      "_🔒 Security & Privacy_ | _⚠️ Potential issue_ | _🟠 Major_ | _⚡ Quick win_",
     );
   });
 
