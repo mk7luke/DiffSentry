@@ -30,3 +30,51 @@ export function classifySurface(c: CapturedComment): Surface {
   if (/\*\*Actionable comments posted:\s*\d+\*\*/i.test(body)) return "review-summary";
   return "chat";
 }
+
+export type Candidate = {
+  repo: string;
+  number: number;
+  title: string;
+  language: string | null;
+  updatedAt: string;
+};
+
+/**
+ * Pick candidates for breadth. Walks the list in rounds: each round takes at
+ * most one PR per repo, preferring a language not yet represented. Repos stop
+ * contributing once they hit maxPerRepo. The April corpus's flaw was 28
+ * reviews from one repo, so spread is the selection criterion, not recency.
+ */
+export function selectForSpread(cands: Candidate[], opts: { limit: number; maxPerRepo: number }): Candidate[] {
+  const picked: Candidate[] = [];
+  const perRepo = new Map<string, number>();
+  const seenLangs = new Set<string>();
+  const pool = [...cands];
+
+  while (picked.length < opts.limit) {
+    const roundRepos = new Set<string>();
+    let progressed = false;
+
+    // Freshness is re-checked at every pick, not pre-sorted once per round:
+    // picking a TS repo must make the next TS repo stale *within* this round,
+    // or a single popular language crowds the corpus out.
+    while (picked.length < opts.limit) {
+      const eligible = pool.filter(
+        (c) => !roundRepos.has(c.repo) && (perRepo.get(c.repo) ?? 0) < opts.maxPerRepo,
+      );
+      if (eligible.length === 0) break;
+
+      const c = eligible.find((x) => x.language && !seenLangs.has(x.language)) ?? eligible[0];
+      picked.push(c);
+      roundRepos.add(c.repo);
+      perRepo.set(c.repo, (perRepo.get(c.repo) ?? 0) + 1);
+      if (c.language) seenLangs.add(c.language);
+      pool.splice(pool.indexOf(c), 1);
+      progressed = true;
+    }
+
+    if (!progressed) break;
+  }
+
+  return picked;
+}
