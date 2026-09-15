@@ -42,7 +42,8 @@
     "preview:spa": "tsx scripts/preview-spa.ts",
     "preview:webhooks": "tsx scripts/preview-webhooks.ts",
     "screenshot": "tsx scripts/screenshot-actionbar.ts",
-    "serve:seeded": "tsx scripts/serve-seeded.ts"
+    "serve:seeded": "tsx scripts/serve-seeded.ts",
+    "fixture:open": "tsx scripts/fixture-open-pr.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",
