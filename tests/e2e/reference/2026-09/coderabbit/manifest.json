@@ -1,0 +1,122 @@
+{
+  "bot": "coderabbitai[bot]",
+  "capturedAt": "2026-09-15T18:34:35.139Z",
+  "prs": [
+    {
+      "repo": "janlampert08-dev/strado",
+      "number": 249,
+      "language": "TypeScript",
+      "url": "https://github.com/janlampert08-dev/strado/pull/249"
+    },
+    {
+      "repo": "marionettejs/marionette",
+      "number": 525,
+      "language": "JavaScript",
+      "url": "https://github.com/marionettejs/marionette/pull/525"
+    },
+    {
+      "repo": "TechValleyCenterOfGravity/door-sync",
+      "number": 62,
+      "language": "Python",
+      "url": "https://github.com/TechValleyCenterOfGravity/door-sync/pull/62"
+    },
+    {
+      "repo": "Strategy11/formidable-forms",
+      "number": 3246,
+      "language": "PHP",
+      "url": "https://github.com/Strategy11/formidable-forms/pull/3246"
+    },
+    {
+      "repo": "sumx21t-3310/FloatSoda",
+      "number": 228,
+      "language": "C#",
+      "url": "https://github.com/sumx21t-3310/FloatSoda/pull/228"
+    },
+    {
+      "repo": "cryostatio/cryostat",
+      "number": 1764,
+      "language": "Java",
+      "url": "https://github.com/cryostatio/cryostat/pull/1764"
+    },
+    {
+      "repo": "hypercerts-org/hypercerts-relay",
+      "number": 22,
+      "language": "Go",
+      "url": "https://github.com/hypercerts-org/hypercerts-relay/pull/22"
+    },
+    {
+      "repo": "hyperpolymath/natsci-studio",
+      "number": 90,
+      "language": "Just",
+      "url": "https://github.com/hyperpolymath/natsci-studio/pull/90"
+    },
+    {
+      "repo": "ViceVerse-cz/Serein",
+      "number": 230,
+      "language": "Rust",
+      "url": "https://github.com/ViceVerse-cz/Serein/pull/230"
+    },
+    {
+      "repo": "manaflow-ai/cmux",
+      "number": 12686,
+      "language": "Swift",
+      "url": "https://github.com/manaflow-ai/cmux/pull/12686"
+    },
+    {
+      "repo": "LerianStudio/helm",
+      "number": 2124,
+      "language": "Go Template",
+      "url": "https://github.com/LerianStudio/helm/pull/2124"
+    },
+    {
+      "repo": "Ysopking/Lifeos-new",
+      "number": 277,
+      "language": "Kotlin",
+      "url": "https://github.com/Ysopking/Lifeos-new/pull/277"
+    },
+    {
+      "repo": "elanthia-online/lich-5",
+      "number": 1575,
+      "language": "Ruby",
+      "url": "https://github.com/elanthia-online/lich-5/pull/1575"
+    },
+    {
+      "repo": "NVIDIA/cuopt",
+      "number": 1877,
+      "language": "Cuda",
+      "url": "https://github.com/NVIDIA/cuopt/pull/1877"
+    },
+    {
+      "repo": "openshift/release",
+      "number": 83792,
+      "language": "Shell",
+      "url": "https://github.com/openshift/release/pull/83792"
+    },
+    {
+      "repo": "scylladb/scylladb",
+      "number": 31495,
+      "language": "C++",
+      "url": "https://github.com/scylladb/scylladb/pull/31495"
+    },
+    {
+      "repo": "flowglad/onton",
+      "number": 423,
+      "language": "OCaml",
+      "url": "https://github.com/flowglad/onton/pull/423"
+    },
+    {
+      "repo": "PostHog/posthog",
+      "number": 100274,
+      "language": "Python",
+      "url": "https://github.com/PostHog/posthog/pull/100274"
+    }
+  ],
+  "counts": {
+    "walkthrough": 15,
+    "review-summary": 21,
+    "inline": 76,
+    "status": 0,
+    "chat": 9,
+    "other": 0
+  }
+}

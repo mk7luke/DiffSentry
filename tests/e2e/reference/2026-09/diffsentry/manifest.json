@@ -1,0 +1,26 @@
+{
+  "bot": "diffsentry[bot]",
+  "capturedAt": "2026-09-15T18:34:47.486Z",
+  "prs": [
+    {
+      "repo": "mk7luke/DiffSentry",
+      "number": 146,
+      "language": "TypeScript",
+      "url": "https://github.com/mk7luke/DiffSentry/pull/146"
+    },
+    {
+      "repo": "mk7luke/DiffSentry",
+      "number": 147,
+      "language": "TypeScript",
+      "url": "https://github.com/mk7luke/DiffSentry/pull/147"
+    }
+  ],
+  "counts": {
+    "walkthrough": 2,
+    "review-summary": 8,
+    "inline": 8,
+    "status": 0,
+    "chat": 11,
+    "other": 0
+  }
+}
