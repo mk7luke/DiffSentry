@@ -19,8 +19,10 @@
  * (override with --dir), separate from this checkout, so this script never
  * touches DiffSentry's own working tree. Each run fetches origin, refuses
  * to proceed if that clone's tree is dirty (see ensureCleanCheckout), syncs
- * `base` to `origin/<base>`, branches, copies `files/` over the clone,
- * commits with the PR title, pushes, and opens the PR via `gh pr create`.
+ * `base` to `origin/<base>`, branches, copies `files/` over the clone
+ * (stripping any `.tmpl` suffix off copied filenames — see
+ * `applyTemplatePath` in `src/parity/fixture.ts` for why), commits with the
+ * PR title, pushes, and opens the PR via `gh pr create`.
  * If anything fails after branching, it best-effort checks the clone back
  * out to `base` so a failed run doesn't leave the clone parked on a
  * half-finished branch for the next invocation to trip over.
@@ -29,7 +31,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadPrSeries, validatePrSeries, type PrDef } from "../src/parity/fixture.js";
+import { applyTemplatePath, loadPrSeries, validatePrSeries, type PrDef } from "../src/parity/fixture.js";
 
 const DEFAULT_ROOT = "tests/e2e/reference/2026-09/fixture-repo/pr-series";
 
@@ -119,6 +121,26 @@ function remoteBranchExists(dir: string, branch: string): boolean {
   return run("git", ["ls-remote", "--heads", "origin", branch], { cwd: dir, silent: true }).length > 0;
 }
 
+/**
+ * Copies `srcDir` over `destDir`, applying `applyTemplatePath` to every
+ * copied file's relative path so a `.tmpl`-suffixed template (see
+ * `src/parity/fixture.ts`) lands in the fixture checkout under its real
+ * name. Walks the tree itself (rather than `fs.cpSync`'s built-in
+ * recursion) because `cpSync` has no per-file rename hook.
+ */
+function copyFilesTree(srcDir: string, destDir: string): void {
+  for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+    const src = path.join(srcDir, entry.name);
+    if (entry.isDirectory()) {
+      copyFilesTree(src, path.join(destDir, entry.name));
+      continue;
+    }
+    const dest = path.join(destDir, applyTemplatePath(entry.name));
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+  }
+}
+
 function main(): void {
   const repo = arg("repo");
   const pr = arg("pr");
@@ -143,7 +165,7 @@ function main(): void {
     run("git", ["checkout", "-b", def.branch], { cwd: dir });
 
     const filesDir = path.join(root, def.dir, "files");
-    fs.cpSync(filesDir, dir, { recursive: true });
+    copyFilesTree(filesDir, dir);
 
     run("git", ["add", "-A"], { cwd: dir });
     run("git", ["commit", "-m", def.title], { cwd: dir });

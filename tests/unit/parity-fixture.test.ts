@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { loadPrSeries, validatePrSeries, type PrDef } from "../../src/parity/fixture.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { applyTemplatePath, loadPrSeries, validatePrSeries, type PrDef } from "../../src/parity/fixture.js";
 import { findPr } from "../../scripts/fixture-open-pr.js";
 
 function def(over: Partial<PrDef> = {}): PrDef {
@@ -30,6 +33,20 @@ describe("validatePrSeries", () => {
   });
 });
 
+describe("applyTemplatePath", () => {
+  it("strips a trailing .tmpl suffix", () => {
+    expect(applyTemplatePath("package.json.tmpl")).toBe("package.json");
+  });
+
+  it("leaves a path without a .tmpl suffix untouched", () => {
+    expect(applyTemplatePath("src/index.ts")).toBe("src/index.ts");
+  });
+
+  it("only strips a trailing .tmpl, not one mid-path", () => {
+    expect(applyTemplatePath("a.tmpl/b.json")).toBe("a.tmpl/b.json");
+  });
+});
+
 describe("the real pr-series fixture", () => {
   it("loads exactly ten entries and passes validation", () => {
     const defs = loadPrSeries(REAL_PR_SERIES_ROOT);
@@ -49,5 +66,53 @@ describe("the real pr-series fixture", () => {
 
   it("still finds an openable PR via findPr", () => {
     expect(findPr(REAL_PR_SERIES_ROOT, "01").dir).toBe("01-report-tags-search-export");
+  });
+});
+
+describe("PR 09's manifest ships as a template", () => {
+  // dependency-review-action flags any file named `package.json` by path,
+  // regardless of whether it's installed — see applyTemplatePath in
+  // src/parity/fixture.ts. PR 09 deliberately plants a vulnerable lodash
+  // pin, so its manifest must live in files/ as package.json.tmpl, never
+  // as a literal package.json.
+  const filesDir = path.join(REAL_PR_SERIES_ROOT, "09-layered-refactor-archive", "files");
+
+  it("has no literal package.json in its files/ tree", () => {
+    expect(fs.existsSync(path.join(filesDir, "package.json"))).toBe(false);
+  });
+
+  it("ships the manifest as package.json.tmpl", () => {
+    expect(fs.existsSync(path.join(filesDir, "package.json.tmpl"))).toBe(true);
+  });
+
+  it("applying the files/ tree produces package.json, not package.json.tmpl", () => {
+    const destDir = fs.mkdtempSync(path.join(os.tmpdir(), "diffsentry-fixture-apply-"));
+    try {
+      // Mirrors copyFilesTree's walk in scripts/fixture-open-pr.ts: recurse
+      // the files/ tree, mapping each relative path through
+      // applyTemplatePath before writing it into the destination checkout.
+      const walk = (srcDir: string, relDir: string): void => {
+        for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+          const rel = path.join(relDir, entry.name);
+          if (entry.isDirectory()) {
+            walk(path.join(srcDir, entry.name), rel);
+            continue;
+          }
+          const destRel = applyTemplatePath(rel);
+          const dest = path.join(destDir, destRel);
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          fs.copyFileSync(path.join(srcDir, entry.name), dest);
+        }
+      };
+      walk(filesDir, "");
+
+      expect(fs.existsSync(path.join(destDir, "package.json"))).toBe(true);
+      expect(fs.existsSync(path.join(destDir, "package.json.tmpl"))).toBe(false);
+
+      const applied = JSON.parse(fs.readFileSync(path.join(destDir, "package.json"), "utf8"));
+      expect(applied.dependencies?.lodash).toBe("4.17.15");
+    } finally {
+      fs.rmSync(destDir, { recursive: true, force: true });
+    }
   });
 });

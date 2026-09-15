@@ -28,7 +28,7 @@ change exists to provoke a specific finding.
 | 6 | `06-ingest-dedupe-checkpoint` | Language-agnostic review path | A bare `except:` that swallows every exception, including ones that should propagate; a check-then-act race in `poll_without_duplicates` — the seen-ids file is read once at the start of a run and written once at the end, so two overlapping invocations can each decide the same item is new and forward it twice (`ingest/worker.py`) |
 | 7 | `07-retention-boundary-test` | Fix-CI affordance | A new boundary test in `test/store.test.ts` asserts a report exactly at the retention cutoff is *kept*, but `Store.prune`'s comparison is strict (`now - createdAt < olderThanMs`), so it is actually pruned — the suite genuinely goes red |
 | 8 | `08-report-create-rate-limit` | Merge-conflict resolution | Edits the same lines of `src/router.ts`'s `handleCreate` that PR #1 edits (the final `store.insert(...)` call), on a branch cut from `main` before PR #1 merges. Opening it after PR #1 has merged produces a real `git merge` conflict — verified locally: `CONFLICT (content): Merge conflict in src/router.ts` |
-| 9 | `09-layered-refactor-archive` | Change Stack / layering, effort estimate, security, dependency advisory | Splits `router.ts` into `src/routes/*` and adds a scheduled archival job. The archival client falls back to a hardcoded AWS credential pair when the environment doesn't provide one (`AKIAIOSFODNN7EXAMPLE` / `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` — AWS's own published documentation example, never a real or revoked key) in `src/archive/s3Client.ts`; `package.json` pins `lodash@4.17.15`, which carries multiple high-severity advisories (command injection, prototype pollution) per `npm audit` |
+| 9 | `09-layered-refactor-archive` | Change Stack / layering, effort estimate, security, dependency advisory | Splits `router.ts` into `src/routes/*` and adds a scheduled archival job. The archival client falls back to a hardcoded AWS credential pair when the environment doesn't provide one (`AKIAIOSFODNN7EXAMPLE` / `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` — AWS's own published documentation example, never a real or revoked key) in `src/archive/s3Client.ts`; ships `package.json.tmpl` (applied as `package.json` when the PR is opened — see Safety notes) pinning `lodash@4.17.15`, which carries multiple high-severity advisories (command injection, prototype pollution) per `npm audit` |
 | 10 | `10-chat-commands-on-01` | Agentic chat (generate-tests, autofix) | Not a new PR. Records the chat commands (`/diffsentry generate-tests`, `/simplify`, `/tldr`, `/rubber-duck`, `/autofix`) to run against the already-open PR #1, to compare each bot's follow-through on its own review comments rather than its first-pass review |
 
 ## Ordering
@@ -51,3 +51,14 @@ plan.
 - The vulnerable dependency (`lodash@4.17.15`, PR #9) is pinned only in the
   fixture's own `package.json`, never in this repo's `package.json` or
   lockfile, and is never installed from this repo.
+- PR #9's manifest ships in this tree as `files/package.json.tmpl`, not
+  `files/package.json`. `actions/dependency-review-action` (this repo's own
+  `Dependency review` CI check) flags any file named `package.json` by path
+  in a diff, regardless of whether it's ever installed, so a literal
+  `package.json` here would fail this branch's own CI even though the
+  dependency is fixture-only data. The `.tmpl` suffix keeps GitHub's
+  manifest detection from seeing it while this repo's own tooling stays
+  clean; `scripts/fixture-open-pr.ts` strips the suffix (via
+  `applyTemplatePath` in `src/parity/fixture.ts`) when it applies the PR to
+  the fixture checkout, so the opened PR still lands a real `package.json`
+  there.

@@ -19,6 +19,25 @@ export type PrDef = {
   open?: boolean;
 };
 
+/**
+ * Maps a path from a PR's `files/` tree to the path it should land at in the
+ * fixture checkout. A `.tmpl` suffix strips off here.
+ *
+ * Why this exists: `actions/dependency-review-action` flags any file named
+ * `package.json` by path in a PR's diff, whether or not it's ever installed
+ * (see PR 09, which plants a vulnerable `lodash` pin on purpose to provoke a
+ * dependency-advisory finding). Naming the template `package.json.tmpl`
+ * keeps GitHub's manifest detection from seeing it, while this function
+ * still applies it to the fixture checkout as a real `package.json`. This is
+ * a general rule, not special-cased to PR 09 — any future PR that plants
+ * another manifest-named file gets the same treatment for free. Don't
+ * "tidy away" the `.tmpl` suffix or the rename in PR 09's `files/` tree;
+ * doing so re-breaks the dependency-review CI gate.
+ */
+export function applyTemplatePath(relPath: string): string {
+  return relPath.endsWith(".tmpl") ? relPath.slice(0, -".tmpl".length) : relPath;
+}
+
 export function loadPrSeries(root: string): PrDef[] {
   return fs
     .readdirSync(root)
