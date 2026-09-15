@@ -78,3 +78,49 @@ export function selectForSpread(cands: Candidate[], opts: { limit: number; maxPe
 
   return picked;
 }
+
+/**
+ * Redact anything token-shaped before captured text is committed. Scraped
+ * public comments sometimes quote a credential a contributor pasted; writing
+ * that into this repo would republish it. Deliberately broad — a false
+ * redaction costs one sample, a miss costs a leak.
+ */
+const SECRET_PATTERNS: RegExp[] = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b/g,
+  /\bgithub_pat_[A-Za-z0-9_]{22,}\b/g,
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\bsk-[A-Za-z0-9]{32,}\b/g,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
+];
+
+export function scrubSecrets(text: string): string {
+  let out = text;
+  for (const re of SECRET_PATTERNS) out = out.replace(re, "[REDACTED]");
+  return out;
+}
+
+export function renderCorpusMarkdown(title: string, comments: CapturedComment[]): string {
+  const lines: string[] = [`# ${title}`, ""];
+  if (comments.length === 0) {
+    lines.push("_No comments captured._", "");
+    return lines.join("\n");
+  }
+  for (const c of comments) {
+    const where = c.path ? `${c.path}:${c.line ?? "?"}` : "—";
+    lines.push(
+      `## ${c.author} · ${classifySurface(c)} · ${c.createdAt}`,
+      "",
+      `- Source: ${c.url}`,
+      `- Location: ${where}`,
+      "",
+      "```markdown",
+      scrubSecrets(c.body),
+      "```",
+      "",
+      "---",
+      "",
+    );
+  }
+  return lines.join("\n");
+}

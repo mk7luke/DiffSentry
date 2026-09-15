@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { classifySurface, selectForSpread, type CapturedComment, type Candidate } from "../../src/parity/corpus.js";
+import {
+  classifySurface,
+  selectForSpread,
+  scrubSecrets,
+  renderCorpusMarkdown,
+  type CapturedComment,
+  type Candidate,
+} from "../../src/parity/corpus.js";
 
 function c(over: Partial<CapturedComment>): CapturedComment {
   return { kind: "issue", body: "", author: "coderabbitai[bot]", createdAt: "2026-09-01T00:00:00Z", url: "u", ...over };
@@ -60,5 +67,40 @@ describe("selectForSpread", () => {
 
   it("returns an empty array for no candidates", () => {
     expect(selectForSpread([], { limit: 5, maxPerRepo: 2 })).toEqual([]);
+  });
+});
+
+describe("scrubSecrets", () => {
+  it("redacts a GitHub token", () => {
+    expect(scrubSecrets("use ghp_" + "a".repeat(36) + " here")).toBe("use [REDACTED] here");
+  });
+
+  it("redacts an AWS access key id", () => {
+    expect(scrubSecrets("AKIAIOSFODNN7EXAMPLE")).toBe("[REDACTED]");
+  });
+
+  it("redacts a private key block", () => {
+    const pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIEow==\n-----END RSA PRIVATE KEY-----";
+    expect(scrubSecrets(pem)).toBe("[REDACTED]");
+  });
+
+  it("leaves ordinary prose untouched", () => {
+    expect(scrubSecrets("This adds a token bucket rate limiter.")).toBe("This adds a token bucket rate limiter.");
+  });
+});
+
+describe("renderCorpusMarkdown", () => {
+  it("emits one section per comment with provenance and scrubbed body", () => {
+    const out = renderCorpusMarkdown("Walkthroughs", [
+      { kind: "issue", body: "## Walkthrough\nghp_" + "b".repeat(36), author: "coderabbitai[bot]", createdAt: "2026-09-01T00:00:00Z", url: "https://x/1" },
+    ]);
+    expect(out).toContain("# Walkthroughs");
+    expect(out).toContain("https://x/1");
+    expect(out).toContain("[REDACTED]");
+    expect(out).not.toContain("ghp_");
+  });
+
+  it("says so explicitly when nothing was captured", () => {
+    expect(renderCorpusMarkdown("Empty", [])).toContain("_No comments captured._");
   });
 });
