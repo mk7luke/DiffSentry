@@ -1,0 +1,24 @@
+{
+  "name": "reports-fixture",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Synthetic reports service used as a fixture for CodeRabbit/DiffSentry parity capture. Never installed or built from the parent repo.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "lodash": "4.17.15"
+  },
+  "devDependencies": {
+    "@types/lodash": "^4.17.7",
+    "@types/node": "^22.13.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.11"
+  }
+}

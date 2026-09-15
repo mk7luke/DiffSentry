@@ -1,0 +1,7 @@
+{
+  "title": "Document tags and pagination in the OpenAPI spec",
+  "body": "**What**\n\nAdds the `tags` field and `limit`/`offset` query parameters to the `/reports` spec, and tidies the `Report` schema while we're in there.\n\n**Why**\n\nThe internal dashboard's generated TypeScript client pulls its types from this file. It's been drifting from the actual API surface since the tagging and pagination work landed, and codegen was starting to disagree with what the server returns.",
+  "base": "main",
+  "branch": "docs/openapi-tags-pagination",
+  "expects": ["schema-diff", "breaking-change"]
+}

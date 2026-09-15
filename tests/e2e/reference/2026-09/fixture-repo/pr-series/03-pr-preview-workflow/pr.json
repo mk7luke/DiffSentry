@@ -1,0 +1,7 @@
+{
+  "title": "Add a PR preview build and comment",
+  "body": "**What**\n\nAdds a `preview` job to CI that builds the service for an incoming PR and posts a comment with the preview status, so reviewers do not have to check out the branch locally just to confirm it builds.\n\n**Why**\n\nReviewers keep pulling PR branches locally to sanity-check that `npm run build` still passes before they read the diff. Posting that result as a comment saves the round trip.",
+  "base": "main",
+  "branch": "feat/pr-preview-workflow",
+  "expects": ["workflow-analysis", "security"]
+}

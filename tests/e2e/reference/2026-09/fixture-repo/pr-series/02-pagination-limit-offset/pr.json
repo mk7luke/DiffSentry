@@ -1,0 +1,7 @@
+{
+  "title": "Add limit and offset query params to GET /reports",
+  "body": "**What**\n\nAdds optional `limit` and `offset` query parameters to `GET /reports`, so a caller can page through an owner's reports instead of always getting every row back.\n\n**Why**\n\nThe internal dashboard team is building a reports table and asked for paging support before they wire up infinite scroll against an endpoint that currently has no page size cap.",
+  "base": "main",
+  "branch": "fix/reports-list-pagination",
+  "expects": ["committable-suggestion", "one-click-fix"]
+}

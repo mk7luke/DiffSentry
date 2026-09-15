@@ -1,0 +1,7 @@
+{
+  "title": "Add report tags, a tag digest, and archive export",
+  "body": "**What**\n\nAdds an optional `tags` field to reports, a `GET /reports/digest` endpoint that counts how many reports carry each tag, a `PATCH /reports?id=` endpoint for editing a report after the fact, and a `POST /reports/export` endpoint that bundles an owner's reports into a zip archive for support hand-off.\n\n**Why**\n\nSupport has been manually grepping report bodies to find the right category, and asked for a lightweight way to tag and filter. The digest endpoint gives them tag counts without scripting against the list endpoint. The export endpoint replaces the current workaround of pasting report bodies into a ticket by hand when a customer needs their data bundled up.",
+  "base": "main",
+  "branch": "feat/report-tags-search-export",
+  "expects": ["walkthrough", "cohorts", "sequence-diagram", "severity-range", "security"]
+}

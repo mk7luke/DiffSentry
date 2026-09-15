@@ -1,0 +1,7 @@
+{
+  "title": "Split request handling into routed modules, add archival",
+  "body": "**What**\n\nSplits the growing `router.ts` into one module per route under `src/routes/`, with the pruning predicate and response helpers pulled into their own small modules so each piece can be tested on its own. Also adds a scheduled archival job that ships a per-owner manifest to cold storage before old reports are pruned, so a purge is not the only place that data exists.\n\n**Why**\n\n`router.ts` was accumulating a new `handle*` function for every endpoint and was becoming the file everyone had to touch, which was causing needless review conflicts. Splitting it into one file per route lets unrelated endpoint changes land without touching the same file. The archival job exists because support asked for pruned reports to be recoverable for a short window after they age out, instead of just gone.",
+  "base": "main",
+  "branch": "refactor/routed-handlers-archive",
+  "expects": ["change-stack", "layering", "effort-estimate", "security", "dependency-advisory"]
+}

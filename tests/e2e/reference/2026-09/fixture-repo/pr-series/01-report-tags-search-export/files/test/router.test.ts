@@ -1,0 +1,110 @@
+import { createServer, type Server } from "node:http";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createRouter } from "../src/router.js";
+import { Store } from "../src/store.js";
+
+describe("createRouter", () => {
+  let store: Store;
+  let server: Server;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    store = new Store();
+    server = createServer(createRouter(store));
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("expected server to bind a TCP port");
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it("rejects GET /reports without an owner header", async () => {
+    const res = await fetch(`${baseUrl}/reports`);
+    expect(res.status).toBe(400);
+  });
+
+  it("creates a report and lists it back for its owner", async () => {
+    const created = await fetch(`${baseUrl}/reports`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-owner-id": "a" },
+      body: JSON.stringify({ title: "one", body: "x" }),
+    });
+    expect(created.status).toBe(201);
+    const createdBody = await created.json();
+    expect(createdBody.title).toBe("one");
+
+    const listed = await fetch(`${baseUrl}/reports`, { headers: { "x-owner-id": "a" } });
+    expect(listed.status).toBe(200);
+    const rows = await listed.json();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(createdBody.id);
+  });
+
+  it("does not leak reports across owners", async () => {
+    await fetch(`${baseUrl}/reports`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-owner-id": "a" },
+      body: JSON.stringify({ title: "mine", body: "x" }),
+    });
+
+    const listed = await fetch(`${baseUrl}/reports`, { headers: { "x-owner-id": "b" } });
+    expect(await listed.json()).toEqual([]);
+  });
+
+  it("rejects a POST with a blank title", async () => {
+    const res = await fetch(`${baseUrl}/reports`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-owner-id": "a" },
+      body: JSON.stringify({ title: "  ", body: "x" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 for unknown routes", async () => {
+    const res = await fetch(`${baseUrl}/nope`);
+    expect(res.status).toBe(404);
+  });
+
+  it("stores tags on creation", async () => {
+    const created = await fetch(`${baseUrl}/reports`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-owner-id": "a" },
+      body: JSON.stringify({ title: "one", body: "x", tags: ["billing"] }),
+    });
+    const createdBody = await created.json();
+    expect(createdBody.tags).toEqual(["billing"]);
+  });
+
+  it("updates a report's title via PATCH", async () => {
+    const created = await fetch(`${baseUrl}/reports`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-owner-id": "a" },
+      body: JSON.stringify({ title: "one", body: "x" }),
+    });
+    const createdBody = await created.json();
+
+    const patched = await fetch(`${baseUrl}/reports?id=${createdBody.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", "x-owner-id": "a" },
+      body: JSON.stringify({ title: "renamed" }),
+    });
+    expect(patched.status).toBe(200);
+    const patchedBody = await patched.json();
+    expect(patchedBody.title).toBe("renamed");
+    expect(patchedBody.body).toBe("x");
+  });
+
+  it("returns 404 when patching an unknown report id", async () => {
+    const res = await fetch(`${baseUrl}/reports?id=999`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", "x-owner-id": "a" },
+      body: JSON.stringify({ title: "renamed" }),
+    });
+    expect(res.status).toBe(404);
+  });
+});

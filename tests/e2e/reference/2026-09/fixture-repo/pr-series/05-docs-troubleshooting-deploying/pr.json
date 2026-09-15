@@ -1,0 +1,7 @@
+{
+  "title": "Add Troubleshooting and Deploying sections to the guide",
+  "body": "**What**\n\nAdds a Troubleshooting section covering the common 400 responses, and a short Deploying section describing how the process is started and what it expects from its environment.\n\n**Why**\n\nTwo people asked the same \"why did my POST get rejected\" question in support this week, and there was nowhere written down to point them to. The deploying notes came up in the same conversation.",
+  "base": "main",
+  "branch": "docs/troubleshooting-deploying",
+  "expects": ["style-analysis", "prose"]
+}

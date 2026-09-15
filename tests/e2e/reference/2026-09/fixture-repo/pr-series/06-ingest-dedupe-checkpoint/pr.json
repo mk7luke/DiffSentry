@@ -1,0 +1,7 @@
+{
+  "title": "Skip already-forwarded items in the ingest worker",
+  "body": "**What**\n\nAdds a small seen-ids checkpoint file to the ingest worker, so a restart does not resend items that were already forwarded downstream.\n\n**Why**\n\nThe sink is not idempotent, and a redeploy mid-poll caused duplicate reports upstream last week. A checkpoint lets the worker pick up where it left off instead of resending everything since the beginning.",
+  "base": "main",
+  "branch": "fix/ingest-dedupe-checkpoint",
+  "expects": ["language-agnostic-review", "reliability"]
+}

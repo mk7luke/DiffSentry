@@ -1,0 +1,7 @@
+{
+  "title": "Rate limit report creation per owner",
+  "body": "**What**\n\nAdds a simple per-owner rate limit to `POST /reports`: an owner making more than 30 create requests within a 60-second window gets a 429 response.\n\n**Why**\n\nA misbehaving integration hammered the create endpoint in a loop last week and filled one owner's report list with thousands of near-duplicate rows before anyone noticed. A basic per-owner limit catches that class of bug without needing a real rate-limiting service in front of a service this small.",
+  "base": "main",
+  "branch": "feat/report-create-rate-limit",
+  "expects": ["merge-conflict-resolution"]
+}

@@ -1,0 +1,7 @@
+{
+  "title": "Assert retention boundary behaviour in the store tests",
+  "body": "**What**\n\nAdds a test asserting that a report inserted exactly at the retention cutoff is kept rather than pruned on the next sweep.\n\n**Why**\n\nSupport asked whether a report sitting right at the edge of the retention window survives one more sweep before being pruned, or gets pruned immediately. We should have that documented in the suite rather than relying on whoever reads `prune` next to work it out from the comparison operator.",
+  "base": "main",
+  "branch": "test/retention-boundary",
+  "expects": ["fix-ci"]
+}
