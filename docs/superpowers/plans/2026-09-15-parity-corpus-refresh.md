@@ -209,18 +209,16 @@ export function selectForSpread(cands: Candidate[], opts: { limit: number; maxPe
     const roundRepos = new Set<string>();
     let progressed = false;
 
-    // Fresh languages first within each round.
-    const ordered = [...pool].sort((a, b) => {
-      const af = a.language && !seenLangs.has(a.language) ? 0 : 1;
-      const bf = b.language && !seenLangs.has(b.language) ? 0 : 1;
-      return af - bf;
-    });
+    // Freshness is re-checked at every pick, not pre-sorted once per round:
+    // picking a TS repo must make the next TS repo stale *within* this round,
+    // or a single popular language crowds the corpus out.
+    while (picked.length < opts.limit) {
+      const eligible = pool.filter(
+        (c) => !roundRepos.has(c.repo) && (perRepo.get(c.repo) ?? 0) < opts.maxPerRepo,
+      );
+      if (eligible.length === 0) break;
 
-    for (const c of ordered) {
-      if (picked.length >= opts.limit) break;
-      if (roundRepos.has(c.repo)) continue;
-      if ((perRepo.get(c.repo) ?? 0) >= opts.maxPerRepo) continue;
-
+      const c = eligible.find((x) => x.language && !seenLangs.has(x.language)) ?? eligible[0];
       picked.push(c);
       roundRepos.add(c.repo);
       perRepo.set(c.repo, (perRepo.get(c.repo) ?? 0) + 1);
