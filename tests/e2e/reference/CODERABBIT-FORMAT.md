@@ -149,7 +149,7 @@ Claimed in April (superseded — see the correction above):
 - **Initial in-progress**: `> :eyes: **DiffSentry** is reviewing this pull request... hang tight.` (DiffSentry already does this — keep the icon/format.)
 - **Final status**: `> :x: **DiffSentry** has completed the review — Changes requested` / `:white_check_mark: ... — Looks good` / `:warning: ... — Comments only`. (DiffSentry already does this.)
 - **Review paused**: `> [!NOTE]` blockquote with `## Reviews paused` and management command list — `@bot resume`, `@bot review`. Includes checkbox UI rows. **[corrected 2026-09]** this one is real, but it is a block spliced into the walkthrough comment, not a comment of its own. Same text and same two checkboxes (`▶️ Resume reviews`, `🔍 Trigger review`) in September, 1/15.
-- **Chat replies**: `<details><summary>✅ Actions performed</summary>` followed by the action description. Always wrap chat-command acknowledgements in this collapse. **[corrected 2026-09]** removed — 1/1 in April, **0/5** in September. Chat replies are now plain prose, and carry a `_You are interacting with an AI system._` footer (25 occurrences corpus-wide, 0 in April).
+- **Chat replies**: `<details><summary>✅ Actions performed</summary>` followed by the action description. Always wrap chat-command acknowledgements in this collapse. **[corrected 2026-09]** removed — 1/1 in April, **0/2** in September (only 2 of the 5 comments in the `chat` bucket are real chat replies; the other 3 are service notices — rate-limit, draft-skip, skip-review). Real chat replies are now plain prose, and carry a `_You are interacting with an AI system._` footer (25 occurrences corpus-wide, 0 in April).
 
 ---
 
@@ -246,9 +246,12 @@ Based on `tests/e2e/runs/2026-04-18T18-52-09-787Z_divide-by-zero/` baseline.
 ## DiffSentry parity gap — September 2026 (current)
 
 Measured against `2026-09/` — 18 CodeRabbit PRs across 17 languages (15
-walkthroughs, 25 review bodies, 76 inline comments, 5 chat replies) and 18
+walkthroughs, 25 review bodies, 76 inline comments, 5 in the residual `chat`
+bucket — 2 real replies, 3 service notices, see the correction above) and 18
 DiffSentry PRs on `mk7luke/DiffSentry` (10 walkthroughs, 23 review bodies, 8
-inline comments, 28 status comments, 18 chat replies). Per-element counts and
+inline comments, 28 status comments, 18 in the `chat` bucket — all 18 are
+`<!-- DiffSentry Auto Release Notes -->` comments, zero real chat replies).
+Per-element counts and
 their derivation are in `2026-09/drift.md`; the disposition of every row —
 `adopt` / `adapt-lighter` / `decline`, with the reason — is in
 `docs/parity/gap-backlog.md`, which is the document that decides. **This table

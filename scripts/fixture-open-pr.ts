@@ -81,12 +81,18 @@ function assertSafeTarget(repo: string): void {
   }
 }
 
-function findPr(root: string, pr: string): PrDef {
+export function findPr(root: string, pr: string): PrDef {
   const defs = loadPrSeries(root);
   const problems = validatePrSeries(defs);
   if (problems.length) throw new Error(`pr-series at ${root} is invalid:\n${problems.join("\n")}`);
   const def = defs.find((d) => d.dir.startsWith(`${pr}-`));
   if (!def) throw new Error(`no PR ${pr} under ${root} (have: ${defs.map((d) => d.dir).join(", ")})`);
+  if (def.open === false) {
+    throw new Error(
+      `PR ${pr} (${def.dir}) is not meant to be opened as a PR — it records a follow-up action against ` +
+        `an already-open PR instead. See docs/parity/trial-runbook.md for how to run it.`,
+    );
+  }
   return def;
 }
 
@@ -166,4 +172,6 @@ function main(): void {
   }
 }
 
-main();
+if (require.main === module) {
+  main();
+}

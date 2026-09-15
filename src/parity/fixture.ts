@@ -15,6 +15,8 @@ export type PrDef = {
   base: string;
   branch: string;
   expects: string[];
+  /** false for a series entry that records a follow-up action rather than a PR to open. Defaults to true. */
+  open?: boolean;
 };
 
 export function loadPrSeries(root: string): PrDef[] {

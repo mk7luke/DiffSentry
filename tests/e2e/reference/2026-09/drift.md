@@ -78,7 +78,9 @@ work at all — they are capabilities, and no amount of formatting reaches them.
 
 Walked against every surface in `../CODERABBIT-FORMAT.md`. Counts are over the
 September corpus: 15 walkthroughs, 25 review summaries, 76 inline comments,
-5 chat replies.
+5 in the `chat` bucket (`classifySurface`'s residual fallthrough — see
+`src/parity/corpus.ts:52` — not a verified count of chat replies; CodeRabbit's
+5 are 2 real replies and 3 service notices, see Surface 4).
 
 ## Surface 1: Walkthrough (issue comment)
 
@@ -116,7 +118,7 @@ September corpus: 15 walkthroughs, 25 review summaries, 76 inline comments,
 
 | Element | Verdict | Detail |
 |---|---|---|
-| `**Actionable comments posted: N**` | unchanged | 21/25 (the other 4 are empty incremental bodies, as the rubric describes) |
+| `**Actionable comments posted: N**` | unchanged | 21/25. The capture script skips any review with a falsy body (`scripts/capture-corpus.ts:86`), so an empty body cannot be in this corpus — the 4 without the wrapper are alternative openings, not empty bodies: 1 nitpick-only collapse, 2 `[!CAUTION]` outside-diff callouts, and 1 `[!NOTE]` Quiet-mode notice. A 5th body opens with a `<!-- coderabbit-cli-agent-hint:v3 -->` comment but still carries the wrapper a few lines down, so it counts toward the 21 |
 | `🧹 Nitpick comments (N)` collapse, per-file nesting | unchanged | 4/25 |
 | Nitpick entry format | **changed** | April: `` `21-21`: **Bold title.** ``. September: `` `177-186`: _📐 Maintainability & Code Quality_ \| _🔵 Trivial_ \| _💤 Low value_ `` then the bold title — the inline metadata header propagated into the nitpick collapse |
 | `🤖 Prompt for all review comments with AI agents` | unchanged | 22/25 |
@@ -184,8 +186,8 @@ changes in this PR` banner sitting inside the walkthrough comment.
 | Separate in-progress comment | **never existed** | The rubric's `> :eyes: **DiffSentry** is reviewing this pull request…` line describes DiffSentry's own behaviour, not an observed CodeRabbit one |
 | Separate final-status comment | **never existed** | 0 across both corpora |
 | `> [!NOTE] ## Reviews paused` | unchanged | Same text and same two checkboxes as April (`▶️ Resume reviews`, `🔍 Trigger review`); still inside the walkthrough comment |
-| `✅ Actions performed` collapse on chat replies | **removed** | 1/1 in April, **0/5** in September. Chat replies are now plain prose |
-| **`_You are interacting with an AI system._` footer** | **added** | 23 occurrences across inline replies and chat, as `_italic_` or `<sub>`. **0 in April** |
+| `✅ Actions performed` collapse on chat replies | **removed** | 1/1 in April, **0/2** in September (of the 5 in the `chat` bucket, only 2 — `chat.md`'s Analysis-chain reply and its `I will review the changes in #2124` reply — are real chat replies; the other 3 are service notices: rate-limit, draft-skip, skip-review). Real chat replies are now plain prose |
+| **`_You are interacting with an AI system._` footer** | **added** | 25 occurrences across inline replies and chat — 24 as `_italic_`, 1 as `<sub>` (`inline.md` 24, `chat.md` 1). **0 in April** |
 | **`✅ Review thread resolved.`** | **added** | 7 occurrences; also a failure form: `I couldn't resolve this review thread on the repository platform, so it remains open. Please retry or resolve it manually.` |
 | **`> [!WARNING] ## Review limit reached`** | **added** | A whole comment CodeRabbit posts when quota is exhausted: `**Next included review available in 59 minutes.**`, a link to `app.coderabbit.ai/dashboard/review-capacity`, and a `View limit details` collapse. `coderabbit/chat.md`, `TechValleyCenterOfGravity/door-sync#62` |
 
@@ -214,7 +216,7 @@ capability work and which are a line of rendering.
 | S12 | `**Priority:**` axis (`➖ Normal` / `⬇️ Low`) | 14/15 walkthroughs | 0 | small: one prompt field |
 | S13 | Effort axis on inline findings (`⚡ Quick win` / `🏗️ Heavy lift` / `💤 Low value`) | 52/52 findings | 0 of 8 | small: one enum + prompt field |
 | S14 | Category axis on inline findings (six engineering domains) | 52/52 findings | 0 of 8 — DiffSentry emits an issue *type*, not a domain | small: one enum + prompt field. Cheapest item with the largest visual effect |
-| S15 | `_You are interacting with an AI system._` disclosure footer | 23 occurrences | 0 | trivial: one line |
+| S15 | `_You are interacting with an AI system._` disclosure footer | 25 occurrences | 0 | trivial: one line |
 
 ## Presentational: same information, different rendering — 11
 

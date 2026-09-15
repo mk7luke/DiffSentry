@@ -55,8 +55,12 @@ supports nor refutes that.
 
 ### 1.1 DiffSentry's AI-agent prompt is missing a prompt-injection guard
 
-This is a **security defect**, not cosmetic parity, and it is the top row of
-the backlog.
+This is a **real prompt-injection exposure**, not cosmetic parity, and it is
+the top row of the backlog. But the fix below is a **mitigation, not a
+control**: it changes how the attacker-controlled text is labeled, not what
+the downstream agent can read. It stays the top adopt row because it is
+cheap, correct, and strictly better than the status quo — not because
+shipping it closes the exposure.
 
 CodeRabbit's `🤖 Prompt for AI Agents` block opens with four sentences:
 
@@ -82,18 +86,45 @@ DiffSentry emits **14 `🤖 Prompt for AI Agents` blocks plus 2 bulk
 (`grep -c "Prompt for AI Agents"` → inline 8, review-summary 6;
 `grep -c "Prompt for all review comments"` → review-summary 2).
 
-Why this is security and not styling: the block exists **to be pasted into a
-coding agent**, and its payload is assembled from finding text, file paths and
-code taken from the pull request. On any repository that accepts outside
-contributions — the case a self-hoster running a public OSS repo is in by
-definition — a contributor controls that text. A comment or identifier crafted
-to read as an instruction is carried, verbatim and with DiffSentry's authority,
-into a Claude/Cursor/Copilot session that has write access to the developer's
-machine. The one-sentence preamble tells the agent to verify; it never tells
-the agent that the surrounding text is data rather than instruction.
+Why this matters, and why it is not a fix by itself: the block exists **to be
+pasted into a coding agent**, and its payload is assembled from finding text,
+file paths and code taken from the pull request. On any repository that
+accepts outside contributions — the case a self-hoster running a public OSS
+repo is in by definition — a contributor controls that text. A comment or
+identifier crafted to read as an instruction is carried, verbatim and with
+DiffSentry's authority, into a Claude/Cursor/Copilot session that has write
+access to the developer's machine. The one-sentence preamble tells the agent
+to verify; it never tells the agent that the surrounding text is data rather
+than instruction. Hardening it is **defense-in-depth**: free, unambiguously
+correct, and not a substitute for anything else — the agent still reads the
+same attacker-controlled repository regardless of what the preamble says, and
+nothing here prevents a sufficiently crafted payload from attempting to
+override it anyway. Ship it because it costs nothing and is strictly better,
+not because it closes the door.
 
-The fix is one string in one known file. It is the cheapest item in this
-document and the only one with a security consequence.
+The fix is **not** one string in one file — four coordinated edits are
+needed, all verified against the current source:
+
+1. `src/ai/parse.ts:288` — the guard `trimmed.startsWith("Verify each
+   finding")` decides whether the preamble gets prepended. A new preamble
+   stops matching this guard, so the old one-liner would be double-prepended
+   alongside it.
+2. `src/ai/parse.ts:290` — the per-finding preamble string itself.
+3. `src/review-body.ts:247` — a **separately hardcoded copy** of the same
+   sentence, opening the bulk "Prompt for all review comments" block (the 2
+   blocks counted above). This is the **largest attacker-controlled
+   payload** DiffSentry emits: every finding on the PR concatenated into one
+   agent prompt. A fix that touches only `parse.ts` hardens the 14 small
+   per-finding blocks and leaves the 2 bulk blocks — the single biggest
+   payload — unhardened.
+4. `src/review-body.ts:252` — `.replace(/^Verify each finding[^\n]*\n*/i,
+   "")` strips the child preamble from each bullet before it is folded into
+   the bulk block. If the new preamble text does not start with "Verify each
+   finding", this strip stops matching too, and the old sentence survives,
+   duplicated, inside every bullet of the bulk block.
+
+All four must move together, or the bulk block — the block with the largest
+payload — ships unhardened while the small ones look fixed.
 
 **Disposition: adopt** (row A1).
 
@@ -165,7 +196,7 @@ Sorted so the highest-value work is first, not the longest list.
 
 | # | Gap | CodeRabbit | DiffSentry | Evidence | Reason |
 |---|---|---|---|---|---|
-| **A1** | **Prompt-injection hardening of the AI-agent prompt preamble** | Four-sentence untrusted-data preamble, **86** occurrences; 0 in April | One sentence, **16** occurrences; 0 of the hardened text | `src/ai/parse.ts:290`; `2026-09/coderabbit/inline.md` (48), `review-summary.md` (38); `2026-09/diffsentry/inline.md` (8), `review-summary.md` (8); April: `tests/e2e/reference/coderabbit-inline-comments.md` (0 hardened, 18 old) | **Security.** The block is designed to be pasted into an agent with write access, and its payload is PR-controlled text. A self-hoster reviewing outside contributions carries the whole exposure. One string, one file. See §1.1. |
+| **A1** | **Prompt-injection hardening of the AI-agent prompt preamble** | Four-sentence untrusted-data preamble, **86** occurrences; 0 in April | One sentence, **16** occurrences; 0 of the hardened text | `src/ai/parse.ts:288,290`, `src/review-body.ts:247,252`; `2026-09/coderabbit/inline.md` (48), `review-summary.md` (38); `2026-09/diffsentry/inline.md` (8), `review-summary.md` (8); April: `tests/e2e/reference/coderabbit-inline-comments.md` (0 hardened, 18 old) | **Defense-in-depth, not a control.** The block is designed to be pasted into an agent with write access, and its payload is PR-controlled text; hardening it is cheap and correct but does not change what the agent can read. Four coordinated edits, not one string — `parse.ts:288,290` and `review-body.ts:247,252` — because the bulk block in the second file carries the largest single payload. See §1.1. |
 | **A2** | Category axis on inline findings | Six engineering domains on **52/52** findings: `🎯 Functional Correctness` (32), `🩺 Stability & Availability` (14), `🔒 Security & Privacy` (10), `🗄️ Data Integrity & Integration` (6), `🚀 Performance & Scalability` (5), `📐 Maintainability & Code Quality` (4) | 0 of 8 — DiffSentry emits an issue *type* (`Potential issue`/`Security`), not a domain | `2026-09/drift.md` Surface 3, "Category axis"; **CodeRabbit 76, DiffSentry 8** | A domain tells a maintainer *which of their concerns* a finding touches; a type tells them only that it is a finding. One enum plus one prompt field, and the largest visual effect per unit of work in this document. |
 | **A3** | Effort axis on inline findings | `⚡ Quick win` (61), `🏗️ Heavy lift` (7), `💤 Low value` (2) on **52/52** findings | 0 of 8 | `2026-09/drift.md` Surface 3, "Effort axis"; **CodeRabbit 76, DiffSentry 8** | A solo self-hoster triages against their own afternoon. "Is this two minutes or two days" is the scarcer signal, and it is one enum plus one prompt field. |
 | **A4** | Risk verdict above the fold | `**Merge Risk:** _🟠 High_ · up to \`50f8b\`` plus prose rationale at top level, **15/15**, outside every `<details>` | `## Risk Assessment` with `**Score: 5/100** — 🟢 Low` and a factor table, **10/10** — but the fifth section down *inside* the collapsed walkthrough | `grep -c "Merge Risk"` → `2026-09/coderabbit/walkthrough.md` 15, `diffsentry/walkthrough.md` 0; `screenshots/coderabbit/walkthrough-collapsed.png` vs `screenshots/diffsentry/walkthrough-collapsed.png` | DiffSentry **already computes this**. Moving it outside the collapse is a rendering change, and it is most of the felt difference at zero clicks — the DiffSentry screenshot shows three collapsed rows and nothing else. |

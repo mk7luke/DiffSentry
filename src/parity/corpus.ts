@@ -15,7 +15,13 @@ export type CapturedComment = {
   url: string;
 };
 
-/** A login is botty if it carries the `[bot]` suffix GitHub appends to Apps. */
+/**
+ * A login is botty if it carries the `[bot]` suffix GitHub appends to Apps.
+ * This only detects REST-style logins. This repo has been bitten before by
+ * REST reporting `diffsentry[bot]` while GraphQL reports `diffsentry` with
+ * no suffix — fed a GraphQL-sourced login, every comment here would
+ * silently classify as `other`.
+ */
 export function isBotAuthor(login: string): boolean {
   return login.toLowerCase().endsWith("[bot]");
 }
@@ -49,6 +55,9 @@ export function classifySurface(c: CapturedComment): Surface {
   // containing "review status" (both bots' "<!-- ... for review status -->"
   // boilerplate) rather than hardcoding either bot's exact wording.
   if (/<!--[^>]*(?:review[ -]status|status\s*-->)/i.test(body)) return "status";
+  // Residual bucket: "none of the above matched", not "verified to be a
+  // chat reply". It also catches service notices (rate-limit, draft-skip,
+  // skip-review) and, for DiffSentry, every auto-generated release note.
   return "chat";
 }
 
