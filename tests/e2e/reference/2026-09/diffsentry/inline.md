@@ -1,11 +1,11 @@
 # Inline comments
 
-## diffsentry[bot] · inline · 2026-08-22T06:55:50Z
+## diffsentry[bot] · inline · inline · 2026-08-22T06:55:50Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#discussion_r3835448654
 - Location: tests/unit/markdown.test.ts:?
 
-```markdown
+````markdown
 _⚠️ Potential issue_ | _🟡 Minor_
 
 **<img> without alt attribute**
@@ -32,16 +32,16 @@ In tests/unit/markdown.test.ts at line 48, the line matches the "<img> without a
 <!-- diffsentry-severity:minor -->
 
 <!-- This is an auto-generated reply by DiffSentry -->
-```
+````
 
 ---
 
-## diffsentry[bot] · inline · 2026-08-22T06:55:50Z
+## diffsentry[bot] · inline · inline · 2026-08-22T06:55:50Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#discussion_r3835448692
 - Location: src/dashboard/markdown.ts:76
 
-```markdown
+````markdown
 _🔒 Security_ | _🟡 Minor_
 
 **Sanitize the parser-error fallback before returning HTML.**
@@ -80,16 +80,16 @@ In src/dashboard/markdown.ts around line 53, route the escaped plaintext fallbac
 <!-- diffsentry-severity:minor -->
 
 <!-- This is an auto-generated reply by DiffSentry -->
-```
+````
 
 ---
 
-## diffsentry[bot] · inline · 2026-08-22T06:59:43Z
+## diffsentry[bot] · inline · inline · 2026-08-22T06:59:43Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#discussion_r3835459274
 - Location: tests/unit/markdown.test.ts:?
 
-```markdown
+````markdown
 _⚠️ Potential issue_ | _🟡 Minor_
 
 **<img> without alt attribute**
@@ -116,16 +116,16 @@ In tests/unit/markdown.test.ts at line 48, the line matches the "<img> without a
 <!-- diffsentry-severity:minor -->
 
 <!-- This is an auto-generated reply by DiffSentry -->
-```
+````
 
 ---
 
-## diffsentry[bot] · inline · 2026-08-22T07:04:02Z
+## diffsentry[bot] · inline · inline · 2026-08-22T07:04:02Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#discussion_r3835470398
 - Location: src/dashboard/markdown.ts:1
 
-```markdown
+````markdown
 _⚠️ Potential issue_ | _🟠 Major_
 
 **The claimed `input[type=checkbox]` restriction is not enforced by the sanitizer configuration.**
@@ -148,16 +148,16 @@ Reconcile the PR description with the actual diff. The claimed `input[type=check
 <!-- diffsentry-severity:major -->
 
 <!-- This is an auto-generated reply by DiffSentry -->
-```
+````
 
 ---
 
-## diffsentry[bot] · inline · 2026-08-22T08:19:17Z
+## diffsentry[bot] · inline · inline · 2026-08-22T08:19:17Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#discussion_r3835601409
 - Location: src/dashboard/markdown.ts:1
 
-```markdown
+````markdown
 _⚠️ Potential issue_ | _🟠 Major_
 
 **The claimed http/https/mailto-only URL policy may still permit data: image sources.**
@@ -182,16 +182,16 @@ Reconcile the PR description with the actual diff. The claimed http/https/mailto
 <!-- diffsentry-severity:major -->
 
 <!-- This is an auto-generated reply by DiffSentry -->
-```
+````
 
 ---
 
-## diffsentry[bot] · inline · 2026-08-22T08:39:32Z
+## diffsentry[bot] · inline · inline · 2026-08-22T08:39:32Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#discussion_r3835636520
 - Location: tests/unit/markdown.test.ts:?
 
-```markdown
+````markdown
 _⚠️ Potential issue_ | _🟡 Minor_
 
 **<img> without alt attribute**
@@ -218,16 +218,16 @@ In tests/unit/markdown.test.ts at line 65, the line matches the "<img> without a
 <!-- diffsentry-severity:minor -->
 
 <!-- This is an auto-generated reply by DiffSentry -->
-```
+````
 
 ---
 
-## diffsentry[bot] · inline · 2026-08-22T08:39:33Z
+## diffsentry[bot] · inline · inline · 2026-08-22T08:39:33Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#discussion_r3835636534
 - Location: tests/unit/markdown.test.ts:?
 
-```markdown
+````markdown
 _⚠️ Potential issue_ | _🟡 Minor_
 
 **<img> without alt attribute**
@@ -254,16 +254,16 @@ In tests/unit/markdown.test.ts at line 66, the line matches the "<img> without a
 <!-- diffsentry-severity:minor -->
 
 <!-- This is an auto-generated reply by DiffSentry -->
-```
+````
 
 ---
 
-## diffsentry[bot] · inline · 2026-09-05T04:31:49Z
+## diffsentry[bot] · inline · inline · 2026-09-05T04:31:49Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/147#discussion_r3939446548
 - Location: src/learnings.ts:1
 
-```markdown
+````markdown
 _⚠️ Potential issue_ | _🟠 Major_
 
 **The new learnings path validation breaks the documented global learnings scope.**
@@ -286,6 +286,6 @@ Reconcile the PR description with the actual diff. The new learnings path valida
 <!-- diffsentry-severity:major -->
 
 <!-- This is an auto-generated reply by DiffSentry -->
-```
+````
 
 ---

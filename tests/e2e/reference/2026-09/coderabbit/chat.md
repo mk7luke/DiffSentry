@@ -1,6 +1,6 @@
 # Chat replies
 
-## coderabbitai[bot] · chat · 2026-09-15T18:08:51Z
+## coderabbitai[bot] · chat · issue · 2026-09-15T18:08:51Z
 
 - Source: https://github.com/TechValleyCenterOfGravity/door-sync/pull/62#issuecomment-5685504259
 - Location: —
@@ -84,12 +84,12 @@ Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=gi
 
 ---
 
-## coderabbitai[bot] · chat · 2026-09-15T18:33:35Z
+## coderabbitai[bot] · chat · issue · 2026-09-15T18:33:35Z
 
 - Source: https://github.com/cryostatio/cryostat/pull/1764#issuecomment-5685898584
 - Location: —
 
-```markdown
+````markdown
 <!-- This is an auto-generated reply by CodeRabbit -->
 > [!TIP]
 > For best results, initiate chat on the files or code changes.
@@ -272,16 +272,16 @@ Length of output: 3421
 - `#1793` — Close remote snapshots when local snapshot persistence fails
 
 _You are interacting with an AI system._
-```
+````
 
 ---
 
-## coderabbitai[bot] · chat · 2026-09-15T17:02:31Z
+## coderabbitai[bot] · chat · issue · 2026-09-15T17:02:31Z
 
 - Source: https://github.com/ViceVerse-cz/Serein/pull/230#issuecomment-5684522840
 - Location: —
 
-```markdown
+````markdown
 <!-- This is an auto-generated comment: summarize by coderabbit.ai -->
 <!-- This is an auto-generated comment: skip review by coderabbit.ai -->
 
@@ -312,11 +312,11 @@ _You are interacting with an AI system._
 <sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
 
 <!-- tips_end -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · chat · 2026-09-15T18:30:51Z
+## coderabbitai[bot] · chat · issue · 2026-09-15T18:30:51Z
 
 - Source: https://github.com/LerianStudio/helm/pull/2124#issuecomment-5685849157
 - Location: —
@@ -338,7 +338,7 @@ Review finished.
 
 ---
 
-## coderabbitai[bot] · chat · 2026-09-15T17:48:31Z
+## coderabbitai[bot] · chat · issue · 2026-09-15T17:48:31Z
 
 - Source: https://github.com/Ysopking/Lifeos-new/pull/277#issuecomment-5685194525
 - Location: —

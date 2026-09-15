@@ -1,6 +1,6 @@
 # Review summaries
 
-## diffsentry[bot] · review-summary · 2026-08-22T06:55:51Z
+## diffsentry[bot] · review-summary · review · 2026-08-22T06:55:51Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#pullrequestreview-4999415215
 - Location: —
@@ -11,12 +11,12 @@
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-08-22T06:59:44Z
+## diffsentry[bot] · review-summary · review · 2026-08-22T06:59:44Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#pullrequestreview-4999429681
 - Location: —
 
-```markdown
+````markdown
 **Actionable comments posted: 0**
 
 The sanitizer migration correctly replaces the bypassable regex blacklist with parse-and-rebuild allowlisting, and the configured URL and attribute restrictions address the described XSS vectors. The accompanying regression and preservation tests cover the important dangerous schemes, raw HTML sinks, and supported markdown features. No actionable issues were found in the incremental changes.
@@ -141,11 +141,11 @@ Reviewing files that changed from [`27aef17`](https://github.com/mk7luke/DiffSen
 </details>
 
 <!-- This is an auto-generated comment by DiffSentry for review status -->
-```
+````
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-08-22T07:04:03Z
+## diffsentry[bot] · review-summary · review · 2026-08-22T07:04:03Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#pullrequestreview-4999445075
 - Location: —
@@ -156,7 +156,7 @@ Reviewing files that changed from [`27aef17`](https://github.com/mk7luke/DiffSen
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-08-22T08:19:18Z
+## diffsentry[bot] · review-summary · review · 2026-08-22T08:19:18Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#pullrequestreview-4999657660
 - Location: —
@@ -167,12 +167,12 @@ Reviewing files that changed from [`27aef17`](https://github.com/mk7luke/DiffSen
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-08-22T08:39:34Z
+## diffsentry[bot] · review-summary · review · 2026-08-22T08:39:34Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#pullrequestreview-4999773923
 - Location: —
 
-```markdown
+````markdown
 **Actionable comments posted: 0**
 
 The sanitizer migration is well-scoped and materially improves the legacy dashboard's stored-XSS posture by switching from regex stripping to parse-and-rebuild allowlisting. The configured tag, attribute, scheme, and input-control policies match the stated rendering requirements, and the regression tests cover the previously exploitable encoding and malformed-tag cases. No actionable issues were found in the incremental diff.
@@ -338,11 +338,11 @@ Reviewing files that changed from [`c3c1224`](https://github.com/mk7luke/DiffSen
 </details>
 
 <!-- This is an auto-generated comment by DiffSentry for review status -->
-```
+````
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-08-22T08:46:14Z
+## diffsentry[bot] · review-summary · review · 2026-08-22T08:46:14Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#pullrequestreview-4999784058
 - Location: —
@@ -404,7 +404,7 @@ Reviewing files that changed from [`ba78377`](https://github.com/mk7luke/DiffSen
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-09-05T04:31:00Z
+## diffsentry[bot] · review-summary · review · 2026-09-05T04:31:00Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#pullrequestreview-5119783076
 - Location: —
@@ -466,7 +466,7 @@ Reviewing files that changed from [`00b6d50`](https://github.com/mk7luke/DiffSen
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-09-14T21:01:06Z
+## diffsentry[bot] · review-summary · review · 2026-09-14T21:01:06Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#pullrequestreview-5202857430
 - Location: —
@@ -528,7 +528,7 @@ Reviewing files that changed from [`8c70b78`](https://github.com/mk7luke/DiffSen
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-08-22T08:08:17Z
+## diffsentry[bot] · review-summary · review · 2026-08-22T08:08:17Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/147#pullrequestreview-4999601091
 - Location: —
@@ -539,7 +539,7 @@ Reviewing files that changed from [`8c70b78`](https://github.com/mk7luke/DiffSen
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-09-05T04:31:50Z
+## diffsentry[bot] · review-summary · review · 2026-09-05T04:31:50Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/147#pullrequestreview-5119784671
 - Location: —
@@ -550,7 +550,7 @@ Reviewing files that changed from [`8c70b78`](https://github.com/mk7luke/DiffSen
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-09-05T22:21:46Z
+## diffsentry[bot] · review-summary · review · 2026-09-05T22:21:46Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/147#pullrequestreview-5123235772
 - Location: —
@@ -652,7 +652,7 @@ Reviewing files that changed from [`33bbbc2`](https://github.com/mk7luke/DiffSen
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-09-14T20:58:53Z
+## diffsentry[bot] · review-summary · review · 2026-09-14T20:58:53Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/147#pullrequestreview-5202837962
 - Location: —
@@ -755,7 +755,7 @@ Reviewing files that changed from [`232a7c4`](https://github.com/mk7luke/DiffSen
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-09-14T21:20:39Z
+## diffsentry[bot] · review-summary · review · 2026-09-14T21:20:39Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/147#pullrequestreview-5203017310
 - Location: —
@@ -858,7 +858,7 @@ Reviewing files that changed from [`ba47196`](https://github.com/mk7luke/DiffSen
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-09-14T21:39:12Z
+## diffsentry[bot] · review-summary · review · 2026-09-14T21:39:12Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/165#pullrequestreview-5203176956
 - Location: —
@@ -905,7 +905,7 @@ Reviewing files at [`94e9faf`](https://github.com/mk7luke/DiffSentry/commit/94e9
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-09-14T21:34:32Z
+## diffsentry[bot] · review-summary · review · 2026-09-14T21:34:32Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/164#pullrequestreview-5203140081
 - Location: —
@@ -952,7 +952,7 @@ Reviewing files at [`10bd8b1`](https://github.com/mk7luke/DiffSentry/commit/10bd
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-09-14T21:03:15Z
+## diffsentry[bot] · review-summary · review · 2026-09-14T21:03:15Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/163#pullrequestreview-5202874934
 - Location: —
@@ -999,7 +999,7 @@ Reviewing files at [`74bc328`](https://github.com/mk7luke/DiffSentry/commit/74bc
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-08-31T15:38:38Z
+## diffsentry[bot] · review-summary · review · 2026-08-31T15:38:38Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/156#pullrequestreview-5068332724
 - Location: —
@@ -1046,7 +1046,7 @@ Reviewing files at [`874649b`](https://github.com/mk7luke/DiffSentry/commit/8746
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-09-07T15:38:19Z
+## diffsentry[bot] · review-summary · review · 2026-09-07T15:38:19Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/156#pullrequestreview-5133664269
 - Location: —
@@ -1093,7 +1093,7 @@ Reviewing files that changed from [`874649b`](https://github.com/mk7luke/DiffSen
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-08-22T06:54:24Z
+## diffsentry[bot] · review-summary · review · 2026-08-22T06:54:24Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/145#pullrequestreview-4999410380
 - Location: —
@@ -1142,7 +1142,7 @@ Reviewing files at [`5c4ece5`](https://github.com/mk7luke/DiffSentry/commit/5c4e
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-09-05T04:30:23Z
+## diffsentry[bot] · review-summary · review · 2026-09-05T04:30:23Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/145#pullrequestreview-5119781835
 - Location: —
@@ -1197,7 +1197,7 @@ Reviewing files that changed from [`5c4ece5`](https://github.com/mk7luke/DiffSen
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-08-28T18:47:33Z
+## diffsentry[bot] · review-summary · review · 2026-08-28T18:47:33Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/152#pullrequestreview-5054083705
 - Location: —
@@ -1247,7 +1247,7 @@ Reviewing files at [`2177b7b`](https://github.com/mk7luke/DiffSentry/commit/2177
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-08-28T20:33:37Z
+## diffsentry[bot] · review-summary · review · 2026-08-28T20:33:37Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/153#pullrequestreview-5054874967
 - Location: —
@@ -1297,7 +1297,7 @@ Reviewing files at [`27cf08e`](https://github.com/mk7luke/DiffSentry/commit/27cf
 
 ---
 
-## diffsentry[bot] · review-summary · 2026-08-28T06:23:26Z
+## diffsentry[bot] · review-summary · review · 2026-08-28T06:23:26Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/150#pullrequestreview-5048434754
 - Location: —

@@ -1,11 +1,11 @@
 # Inline comments
 
-## coderabbitai[bot] · inline · 2026-09-15T18:27:02Z
+## coderabbitai[bot] · inline · inline · 2026-09-15T18:27:02Z
 
 - Source: https://github.com/janlampert08-dev/strado/pull/249#discussion_r4018892721
 - Location: docs/audit/README.md:?
 
-```markdown
+````markdown
 _🔒 Security & Privacy_ | _🛡️ Analyzed with Security Review_ | _🟠 Major_ | _🏗️ Heavy lift_
 
 <details>
@@ -136,16 +136,16 @@ review. Visit https://docs.coderabbit.ai/cli?utm_source=ghpr
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commit 917641d
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-15T18:27:02Z
+## coderabbitai[bot] · inline · inline · 2026-09-15T18:27:02Z
 
 - Source: https://github.com/janlampert08-dev/strado/pull/249#discussion_r4018892732
 - Location: supabase/migrations/0096_fahrtstart_serverseitig.sql:185
 
-```markdown
+````markdown
 _🗄️ Data Integrity & Integration_ | _🟠 Major_ | _🏗️ Heavy lift_
 
 **Make ticket redemption and completion persistence atomic.**
@@ -225,16 +225,16 @@ review. Visit https://docs.coderabbit.ai/cli?utm_source=ghpr
 <!-- cr-comment:v1:12eedf7c769f3dddb229abb0 -->
 
 <!-- This is an auto-generated comment by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-15T18:27:02Z
+## coderabbitai[bot] · inline · inline · 2026-09-15T18:27:02Z
 
 - Source: https://github.com/janlampert08-dev/strado/pull/249#discussion_r4018892739
 - Location: supabase/migrations/0096_fahrtstart_serverseitig.sql:198
 
-```markdown
+````markdown
 _🔒 Security & Privacy_ | _🛡️ Analyzed with Security Review_ | _🟠 Major_ | _🏗️ Heavy lift_
 
 <!-- cr-reachability -->
@@ -284,16 +284,16 @@ review. Visit https://docs.coderabbit.ai/cli?utm_source=ghpr
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commit 917641d
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-08-17T20:50:08Z
+## coderabbitai[bot] · inline · inline · 2026-08-17T20:50:08Z
 
 - Source: https://github.com/Strategy11/formidable-forms/pull/3246#discussion_r3798706074
 - Location: js/src/admin/admin.js:11345
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 <details>
@@ -505,16 +505,16 @@ and Advanced Fields lists, rather than only the first match.
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commit b3daad5
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-08-17T20:50:08Z
+## coderabbitai[bot] · inline · inline · 2026-08-17T20:50:08Z
 
 - Source: https://github.com/Strategy11/formidable-forms/pull/3246#discussion_r3798706083
 - Location: resources/scss/admin/components/builder/_insert-fields.scss:?
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟠 Major_ | _⚡ Quick win_
 
 **Increase the hover override selector specificity.**
@@ -557,16 +557,16 @@ transparent background and no-shadow behavior.
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commits eb6df97 to a2a8591
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T19:09:56Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T19:09:56Z
 
 - Source: https://github.com/Strategy11/formidable-forms/pull/3246#discussion_r3972079008
 - Location: js/src/admin/fieldListHoverPill.js:169
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 **Ignore descendant-to-descendant mouseover events.**
@@ -651,16 +651,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- cr-comment:v1:6040292d51e294440ce7b939 -->
 
 <!-- This is an auto-generated comment by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-08-30T09:56:25Z
+## coderabbitai[bot] · inline · inline · 2026-08-30T09:56:25Z
 
 - Source: https://github.com/sumx21t-3310/FloatSoda/pull/228#discussion_r3889043535
 - Location: samples/FloatSoda.Samples.GestureDetector/GestureDetectorDemo.cs:?
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 **`PointerEventPhase.Cancel` 後にもドラッグ状態を解除してください。**
@@ -694,11 +694,11 @@ mechanism so canceled drags restore the non-dragging UI state.
 <!-- This is an auto-generated reply by CodeRabbit -->
 
 ✅ Addressed in commit 5b2ba61
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-08-30T14:34:27Z
+## coderabbitai[bot] · inline · inline · 2026-08-30T14:34:27Z
 
 - Source: https://github.com/sumx21t-3310/FloatSoda/pull/228#discussion_r3889641694
 - Location: samples/FloatSoda.Samples.GestureDetector/GestureDetectorDemo.cs:?
@@ -717,12 +717,12 @@ mechanism so canceled drags restore the non-dragging UI state.
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-02T14:16:53Z
+## coderabbitai[bot] · inline · inline · 2026-09-02T14:16:53Z
 
 - Source: https://github.com/cryostatio/cryostat/pull/1764#discussion_r3915066252
 - Location: src/main/java/io/cryostat/ConfigProperties.java:110
 
-```markdown
+````markdown
 _📐 Maintainability & Code Quality_ | _🟡 Minor_ | _⚡ Quick win_
 
 **Document the configuration key rename.**
@@ -757,16 +757,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- cr-comment:v1:f27ce449d3d90ddd6b5dd544 -->
 
 <!-- This is an auto-generated reply by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-02T14:16:53Z
+## coderabbitai[bot] · inline · inline · 2026-09-02T14:16:53Z
 
 - Source: https://github.com/cryostatio/cryostat/pull/1764#discussion_r3915066261
 - Location: src/main/java/io/cryostat/recordings/analysis/JfrView.java:83
 
-```markdown
+````markdown
 _🩺 Stability & Availability_ | _🟠 Major_ | _⚡ Quick win_
 
 **Add `@Blocking` to `view()`.**
@@ -823,16 +823,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 ✅ Addressed in commits 585a219 to cdd3e71
 
 <!-- This is an auto-generated comment by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-02T14:16:53Z
+## coderabbitai[bot] · inline · inline · 2026-09-02T14:16:53Z
 
 - Source: https://github.com/cryostatio/cryostat/pull/1764#discussion_r3915066273
 - Location: src/main/java/io/cryostat/recordings/analysis/JfrView.java:107
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 **Assert that the archived recording exists before loading it.**
@@ -897,16 +897,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- cr-comment:v1:3afdd9c2f9d8d921c5c9c4c1 -->
 
 <!-- This is an auto-generated reply by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-02T14:16:53Z
+## coderabbitai[bot] · inline · inline · 2026-09-02T14:16:53Z
 
 - Source: https://github.com/cryostatio/cryostat/pull/1764#discussion_r3915066291
 - Location: src/main/java/io/cryostat/recordings/analysis/JfrView.java:?
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 **Use a fixed locale for the `truncate` comparison.**
@@ -967,11 +967,11 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commits 585a219 to cdd3e71
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-02T14:19:46Z
+## coderabbitai[bot] · inline · inline · 2026-09-02T14:19:46Z
 
 - Source: https://github.com/cryostatio/cryostat/pull/1764#discussion_r3915094978
 - Location: src/main/java/io/cryostat/ConfigProperties.java:110
@@ -988,12 +988,12 @@ _You are interacting with an AI system._
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-02T14:22:28Z
+## coderabbitai[bot] · inline · inline · 2026-09-02T14:22:28Z
 
 - Source: https://github.com/cryostatio/cryostat/pull/1764#discussion_r3915123048
 - Location: src/main/java/io/cryostat/recordings/analysis/JfrView.java:83
 
-```markdown
+````markdown
 <details>
 <summary>🧩 Analysis chain</summary>
 
@@ -1036,16 +1036,16 @@ That behavior is the reason `@Blocking` is needed here. The `.map(...)` continua
 _You are interacting with an AI system._
 
 <!-- This is an auto-generated reply by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-02T14:27:05Z
+## coderabbitai[bot] · inline · inline · 2026-09-02T14:27:05Z
 
 - Source: https://github.com/cryostatio/cryostat/pull/1764#discussion_r3915167981
 - Location: src/main/java/io/cryostat/recordings/analysis/JfrView.java:107
 
-```markdown
+````markdown
 <details>
 <summary>🧩 Analysis chain</summary>
 
@@ -1098,16 +1098,16 @@ The proposed assertion is redundant. It also introduces the check-then-retrieve 
 _You are interacting with an AI system._
 
 <!-- This is an auto-generated reply by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-03T15:01:16Z
+## coderabbitai[bot] · inline · inline · 2026-09-03T15:01:16Z
 
 - Source: https://github.com/cryostatio/cryostat/pull/1764#discussion_r3925834738
 - Location: src/main/java/io/cryostat/diagnostic/DiagnosticsHelper.java:?
 
-```markdown
+````markdown
 _🩺 Stability & Availability_ | _🟠 Major_ | _🏗️ Heavy lift_
 
 <details>
@@ -1328,16 +1328,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commit 8d2096e
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-03T15:01:16Z
+## coderabbitai[bot] · inline · inline · 2026-09-03T15:01:16Z
 
 - Source: https://github.com/cryostatio/cryostat/pull/1764#discussion_r3925834763
 - Location: src/main/java/io/cryostat/events/EventTemplates.java:151
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 <details>
@@ -1406,16 +1406,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commit 8d2096e
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-15T18:29:34Z
+## coderabbitai[bot] · inline · inline · 2026-09-15T18:29:34Z
 
 - Source: https://github.com/cryostatio/cryostat/pull/1764#discussion_r4018914568
 - Location: schema/openapi.yaml:2416
 
-```markdown
+````markdown
 _🗄️ Data Integrity & Integration_ | _🟡 Minor_ | _⚡ Quick win_
 
 **Document authentication for both JFR view routes.**
@@ -1483,16 +1483,16 @@ _Source: Linters/SAST tools_
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commit 76b5f0b
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T12:49:13Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T12:49:13Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3968512253
 - Location: administration/server/app.ts:?
 
-```markdown
+````markdown
 _🩺 Stability & Availability_ | _🟠 Major_ | _⚡ Quick win_
 
 **Configure `trust proxy` and make the login limiter capacity-aware.**
@@ -1532,16 +1532,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- This is an auto-generated reply by CodeRabbit -->
 
 ✅ Addressed in commit 09c6c1d
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T12:49:13Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T12:49:13Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3968512270
 - Location: administration/server/app.ts:134
 
-```markdown
+````markdown
 _🗄️ Data Integrity & Integration_ | _🟠 Major_ | _⚡ Quick win_
 
 **Operation state changes are read-then-write, so two writers overwrite each other.** `store.transition` in `administration/server/store.ts` writes `state` unconditionally. Both call sites read the operation in one transaction and write the new state in another, so a cancel and a worker claim can each discard the other. Add a compare-and-set transition to `Store` and use it at both sites.
@@ -1605,16 +1605,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- This is an auto-generated reply by CodeRabbit -->
 
 ✅ Addressed in commit 09c6c1d
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T12:49:13Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T12:49:13Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3968512293
 - Location: administration/server/services.ts:50
 
-```markdown
+````markdown
 _🔒 Security & Privacy_ | _🛡️ Analyzed with Security Review_ | _🟠 Major_ | _⚡ Quick win_
 
 <details>
@@ -1732,16 +1732,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 ✅ Addressed in commits 09c6c1d to c8ac082
 
 <!-- This is an auto-generated reply by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T12:49:13Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T12:49:13Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3968512314
 - Location: administration/server/store.ts:?
 
-```markdown
+````markdown
 _🔒 Security & Privacy_ | _🛡️ Analyzed with Security Review_ | _🟡 Minor_ | _⚡ Quick win_
 
 <details>
@@ -1892,16 +1892,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- This is an auto-generated reply by CodeRabbit -->
 
 ✅ Addressed in commit 09c6c1d
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T12:49:13Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T12:49:13Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3968512371
 - Location: administration/server/store.ts:239
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟠 Major_ | _⚡ Quick win_
 
 **Order the operations page by request time, not by random UUID.**
@@ -2001,16 +2001,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- This is an auto-generated reply by CodeRabbit -->
 
 ✅ Addressed in commit 09c6c1d
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T12:49:13Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T12:49:13Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3968512389
 - Location: administration/src/App.svelte:79
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 **Clear `error` at the start of each load.**
@@ -2082,16 +2082,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 ✅ Confirmed as addressed by @Ashex
 
 <!-- This is an auto-generated comment by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T12:49:13Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T12:49:13Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3968512417
 - Location: administration/tests/management.test.ts:?
 
-```markdown
+````markdown
 _🩺 Stability & Availability_ | _🟠 Major_ | _⚡ Quick win_
 
 <details>
@@ -2221,16 +2221,16 @@ _Source: Pipeline failures_
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commits a3a7a76 to 15f77d5
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T12:49:14Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T12:49:14Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3968512434
 - Location: administration/tests/management.test.ts:?
 
-```markdown
+````markdown
 _🩺 Stability & Availability_ | _🟡 Minor_ | _⚡ Quick win_
 
 **Poll for the job state before asserting it.**
@@ -2293,16 +2293,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- This is an auto-generated reply by CodeRabbit -->
 
 ✅ Addressed in commit 09c6c1d
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T12:49:14Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T12:49:14Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3968512460
 - Location: cmd/relay/control.go:170
 
-```markdown
+````markdown
 _🔒 Security & Privacy_ | _🛡️ Analyzed with Security Review_ | _🟠 Major_ | _⚡ Quick win_
 
 <details>
@@ -2425,16 +2425,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 ✅ Addressed in commits 09c6c1d to c8ac082
 
 <!-- This is an auto-generated comment by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T12:49:14Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T12:49:14Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3968512484
 - Location: cmd/relay/main.go:?
 
-```markdown
+````markdown
 _🩺 Stability & Availability_ | _🟠 Major_ | _⚡ Quick win_
 
 **Start the control listener after relay initialization completes.**
@@ -2470,16 +2470,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- This is an auto-generated reply by CodeRabbit -->
 
 ✅ Addressed in commit 09c6c1d
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T12:49:14Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T12:49:14Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3968512502
 - Location: cmd/relay/relay/rate_policy.go:?
 
-```markdown
+````markdown
 _🚀 Performance & Scalability_ | _🟠 Major_ | _⚡ Quick win_
 
 **Do not hold `rates.mu` during the database write.**
@@ -2536,16 +2536,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- This is an auto-generated reply by CodeRabbit -->
 
 ✅ Addressed in commit 09c6c1d
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T12:49:14Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T12:49:14Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3968512523
 - Location: cmd/relay/relay/rate_scheduler.go:?
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 <details>
@@ -2646,16 +2646,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- This is an auto-generated reply by CodeRabbit -->
 
 ✅ Addressed in commit 09c6c1d
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T12:49:14Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T12:49:14Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3968512535
 - Location: jetstream/internal/hypercerts/jobs/jobs.go:273
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 **One receipt map holds two receipt kinds with only one namespace prefix.** `RequestOnce` keys receipts by the raw `requestID` and stores a job ID, while `TransitionOnce` keys receipts by `"action/" + requestID` and stores `"<state>:<id>"`. A request ID that starts with `action/` collides across the two paths, and the mismatched value shape then returns `ErrConflict` permanently for a valid command.
@@ -2720,16 +2720,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 ✅ Confirmed as addressed by @Ashex
 
 <!-- This is an auto-generated comment by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T15:46:04Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T15:46:04Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3970367332
 - Location: administration/src/AccountQuota.svelte:17
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 **Adopt the applied limit when it matches the requested draft.**
@@ -2797,16 +2797,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- This is an auto-generated reply by CodeRabbit -->
 
 ✅ Addressed in commit 09c6c1d
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T15:46:04Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T15:46:04Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3970367350
 - Location: cmd/relay/relay/source_quota_test.go:54
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🔴 Critical_ | _⚡ Quick win_
 
 <details>
@@ -2939,16 +2939,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- cr-comment:v1:c00e5528601cc90175412700 -->
 
 <!-- This is an auto-generated reply by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T15:46:04Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T15:46:04Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3970367361
 - Location: jetstream/internal/hypercerts/selection/selection_test.go:?
 
-```markdown
+````markdown
 _🩺 Stability & Availability_ | _🟡 Minor_ | _⚡ Quick win_
 
 **Check the reopened store close error.**
@@ -3027,16 +3027,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- This is an auto-generated reply by CodeRabbit -->
 
 ✅ Addressed in commit 09c6c1d
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T16:48:41Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T16:48:41Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3970937568
 - Location: administration/server/app.ts:62
 
-```markdown
+````markdown
 _🗄️ Data Integrity & Integration_ | _🟡 Minor_ | _⚡ Quick win_
 
 <details>
@@ -3141,11 +3141,11 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commit 09c6c1d
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T17:10:26Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T17:10:26Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3971107419
 - Location: administration/server/app.ts:134
@@ -3172,7 +3172,7 @@ _You are interacting with an AI system._
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T17:10:28Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T17:10:28Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3971107682
 - Location: cmd/relay/relay/rate_policy.go:?
@@ -3187,7 +3187,7 @@ _You are interacting with an AI system._
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T17:10:29Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T17:10:29Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3971107757
 - Location: cmd/relay/relay/rate_scheduler.go:?
@@ -3204,7 +3204,7 @@ _You are interacting with an AI system._
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T17:10:36Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T17:10:36Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3971108618
 - Location: administration/src/AccountQuota.svelte:17
@@ -3231,7 +3231,7 @@ _You are interacting with an AI system._
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T17:10:38Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T17:10:38Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3971108737
 - Location: jetstream/internal/hypercerts/jobs/jobs.go:273
@@ -3260,7 +3260,7 @@ _You are interacting with an AI system._
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T17:10:47Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T17:10:47Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3971109972
 - Location: jetstream/internal/hypercerts/selection/selection_test.go:?
@@ -3285,12 +3285,12 @@ _You are interacting with an AI system._
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T17:10:52Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T17:10:52Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3971110588
 - Location: cmd/relay/relay/source_quota_test.go:54
 
-```markdown
+````markdown
 <details>
 <summary>🧩 Analysis chain</summary>
 
@@ -3343,11 +3343,11 @@ Learning: In `cmd/relay/relay/sources_test.go`, `newSourceRelay` returns `source
 _You are interacting with an AI system._
 
 <!-- This is an auto-generated reply by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T17:11:06Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T17:11:06Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3971112264
 - Location: administration/src/App.svelte:79
@@ -3376,7 +3376,7 @@ _You are interacting with an AI system._
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T17:11:09Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T17:11:09Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3971112689
 - Location: cmd/relay/main.go:?
@@ -3403,7 +3403,7 @@ _You are interacting with an AI system._
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T17:11:09Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T17:11:09Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3971112723
 - Location: administration/server/store.ts:?
@@ -3428,12 +3428,12 @@ _You are interacting with an AI system._
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T17:11:18Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T17:11:18Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3971113828
 - Location: administration/server/services.ts:50
 
-```markdown
+````markdown
 <details>
 <summary>🧩 Analysis chain</summary>
 
@@ -3481,16 +3481,16 @@ Please restrict plaintext HTTP to known private-network endpoints, such as Railw
 _You are interacting with an AI system._
 
 <!-- This is an auto-generated reply by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T17:11:32Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T17:11:32Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3971115857
 - Location: cmd/relay/control.go:170
 
-```markdown
+````markdown
 <details>
 <summary>🧩 Analysis chain</summary>
 
@@ -3560,11 +3560,11 @@ Learning: For the Railway deployment of `hypercerts-relay`, management listeners
 _You are interacting with an AI system._
 
 <!-- This is an auto-generated reply by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T17:11:43Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T17:11:43Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3971117359
 - Location: administration/tests/management.test.ts:?
@@ -3589,12 +3589,12 @@ _You are interacting with an AI system._
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T17:11:56Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T17:11:56Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3971118992
 - Location: administration/server/app.ts:?
 
-```markdown
+````markdown
 <details>
 <summary>🧩 Analysis chain</summary>
 
@@ -3669,11 +3669,11 @@ Thank you for using CodeRabbit!
 _You are interacting with an AI system._
 
 <!-- This is an auto-generated reply by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T17:13:12Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T17:13:12Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3971128173
 - Location: administration/server/store.ts:239
@@ -3698,12 +3698,12 @@ _You are interacting with an AI system._
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T17:16:57Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T17:16:57Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3971155263
 - Location: administration/server/services.ts:50
 
-```markdown
+````markdown
 <details>
 <summary>🧩 Analysis chain</summary>
 
@@ -3770,16 +3770,16 @@ Thank you for using CodeRabbit!
 _You are interacting with an AI system._
 
 <!-- This is an auto-generated reply by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T19:46:13Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T19:46:13Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r3972377653
 - Location: administration/src/Collections.svelte:23
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 **Treat an applied policy that matches the draft as the operator's own change.**
@@ -3845,16 +3845,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commits f0958ad to 896cd06
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-15T10:21:43Z
+## coderabbitai[bot] · inline · inline · 2026-09-15T10:21:43Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r4014513644
 - Location: administration/server/store.ts:?
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 **Bind the fallback handle to the operation actor.**
@@ -3923,16 +3923,16 @@ review. Visit https://docs.coderabbit.ai/cli?utm_source=ghpr
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commits be74021 to 618aae4
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-15T10:21:43Z
+## coderabbitai[bot] · inline · inline · 2026-09-15T10:21:43Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r4014513688
 - Location: administration/src/App.svelte:181
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 **Prevent concurrent audit page loads.**
@@ -3997,16 +3997,16 @@ review. Visit https://docs.coderabbit.ai/cli?utm_source=ghpr
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commits be74021 to 618aae4
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-15T10:21:43Z
+## coderabbitai[bot] · inline · inline · 2026-09-15T10:21:43Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r4014513706
 - Location: administration/src/Sources.svelte:32
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟠 Major_ | _⚡ Quick win_
 
 **Remove the `afterUpdate` selection synchronization.**
@@ -4055,16 +4055,16 @@ review. Visit https://docs.coderabbit.ai/cli?utm_source=ghpr
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commits 63e8e68 to 9790eba
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-15T10:21:43Z
+## coderabbitai[bot] · inline · inline · 2026-09-15T10:21:43Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r4014513721
 - Location: administration/tests/browser-server.ts:151
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 **Preserve the job reason in the browser fixture.**
@@ -4133,16 +4133,16 @@ _Source: Learnings_
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commits be74021 to 618aae4
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-15T10:21:44Z
+## coderabbitai[bot] · inline · inline · 2026-09-15T10:21:44Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r4014513739
 - Location: jetstream/internal/hypercerts/jobs/jobs_test.go:67
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 **Wait for cancellation before the processor returns.**
@@ -4205,16 +4205,16 @@ review. Visit https://docs.coderabbit.ai/cli?utm_source=ghpr
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commits be74021 to 618aae4
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-15T10:21:44Z
+## coderabbitai[bot] · inline · inline · 2026-09-15T10:21:44Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r4014513754
 - Location: jetstream/internal/hypercerts/jobs/pds.go:?
 
-```markdown
+````markdown
 _🚀 Performance & Scalability_ | _🟠 Major_ | _🏗️ Heavy lift_
 
 **Avoid the second full `ListRepos` traversal.**
@@ -4252,16 +4252,16 @@ review. Visit https://docs.coderabbit.ai/cli?utm_source=ghpr
 <!-- cr-comment:v1:c202ad3905f8eb42c6af266c -->
 
 <!-- This is an auto-generated comment by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-15T17:01:42Z
+## coderabbitai[bot] · inline · inline · 2026-09-15T17:01:42Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r4018174998
 - Location: tests/acceptance/Dockerfile.relay:9
 
-```markdown
+````markdown
 _🔒 Security & Privacy_ | _🛡️ Analyzed with Security Review_ | _🟡 Minor_ | _⚡ Quick win_
 
 <details>
@@ -4361,16 +4361,16 @@ review. Visit https://docs.coderabbit.ai/cli?utm_source=ghpr
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commits be74021 to 618aae4
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-15T17:01:42Z
+## coderabbitai[bot] · inline · inline · 2026-09-15T17:01:42Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#discussion_r4018175004
 - Location: tests/acceptance/README.md:?
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 **Require Go 1.26.6 or later.**
@@ -4406,16 +4406,16 @@ review. Visit https://docs.coderabbit.ai/cli?utm_source=ghpr
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commits be74021 to 618aae4
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-15T02:46:02Z
+## coderabbitai[bot] · inline · inline · 2026-09-15T02:46:02Z
 
 - Source: https://github.com/hyperpolymath/natsci-studio/pull/90#discussion_r4011449209
 - Location: setup.sh:142
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟠 Major_ | _⚡ Quick win_
 
 **Expose Cargo's install directory before the `just` check.**
@@ -4462,16 +4462,16 @@ review. Visit https://docs.coderabbit.ai/cli?utm_source=ghpr.
 <!-- cr-comment:v1:bf3c159913af65bc8fe283c7 -->
 
 <!-- This is an auto-generated comment by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-15T18:28:35Z
+## coderabbitai[bot] · inline · inline · 2026-09-15T18:28:35Z
 
 - Source: https://github.com/manaflow-ai/cmux/pull/12686#discussion_r4018905960
 - Location: workers/iroh-v2/scripts/deploy-production.sh:?
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🔴 Critical_ | _⚡ Quick win_
 
 **Remove `--fail-with-body` from the expected-error probe.**
@@ -4622,16 +4622,16 @@ review. Visit https://docs.coderabbit.ai/cli?utm_source=ghpr
 <!-- This is an auto-generated comment by CodeRabbit -->
 
 ✅ Addressed in commit faf3b3e
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-15T18:33:27Z
+## coderabbitai[bot] · inline · inline · 2026-09-15T18:33:27Z
 
 - Source: https://github.com/LerianStudio/helm/pull/2124#discussion_r4018949059
 - Location: charts/reporter/tests/test_crm_config.py:113
 
-```markdown
+````markdown
 _📐 Maintainability & Code Quality_ | _🔵 Trivial_ | _⚡ Quick win_
 
 **Add a failing chart-managed CRM Secret case.**
@@ -4708,16 +4708,16 @@ review. Visit https://docs.coderabbit.ai/cli?utm_source=ghpr
 <!-- cr-comment:v1:2d5415425276f56b2a4f6f8f -->
 
 <!-- This is an auto-generated comment by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T21:07:41Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T21:07:41Z
 
 - Source: https://github.com/elanthia-online/lich-5/pull/1575#discussion_r3973029971
 - Location: lib/common/script.rb:3111
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 **Add the post-read recheck to `gets?`.**
@@ -4770,16 +4770,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- cr-comment:v1:e3371065654515e24b73900a -->
 
 <!-- This is an auto-generated comment by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T21:07:42Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T21:07:42Z
 
 - Source: https://github.com/elanthia-online/lich-5/pull/1575#discussion_r3973030015
 - Location: spec/lib/game_execution_guard_spec.rb:118
 
-```markdown
+````markdown
 _🩺 Stability & Availability_ | _🟡 Minor_ | _⚡ Quick win_
 
 <details>
@@ -4850,16 +4850,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- cr-comment:v1:1cf66a8bdfa97a3b025472bf -->
 
 <!-- This is an auto-generated comment by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-11T08:41:12Z
+## coderabbitai[bot] · inline · inline · 2026-09-11T08:41:12Z
 
 - Source: https://github.com/openshift/release/pull/83792#discussion_r3987390840
 - Location: ci-operator/config/openshift/operator-framework-olm/openshift-operator-framework-olm-release-5.1__periodics.yaml:412
 
-```markdown
+````markdown
 _🎯 Functional Correctness_ | _🟠 Major_ | _⚡ Quick win_
 
 <details>
@@ -4958,16 +4958,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 <!-- cr-comment:v1:697eddf22ee24dd6d7ee0fd7 -->
 
 <!-- This is an auto-generated comment by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-05T20:04:20Z
+## coderabbitai[bot] · inline · inline · 2026-09-05T20:04:20Z
 
 - Source: https://github.com/scylladb/scylladb/pull/31495#discussion_r3941900642
 - Location: test/pylib/s3_proxy.py:?
 
-```markdown
+````markdown
 _🩺 Stability & Availability_ | _🟠 Major_ | _⚡ Quick win_
 
 <details>
@@ -5063,11 +5063,11 @@ When `policy.should_forward` is true, `InjectingHandler.process_request()` calls
 <!-- This is an auto-generated reply by CodeRabbit -->
 
 ✅ Addressed in commits e93108d to 7a0db0d
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-08T18:08:35Z
+## coderabbitai[bot] · inline · inline · 2026-09-08T18:08:35Z
 
 - Source: https://github.com/scylladb/scylladb/pull/31495#discussion_r3960861967
 - Location: test/pylib/s3_proxy.py:?
@@ -5084,7 +5084,7 @@ _You are interacting with an AI system._
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-12T17:56:08Z
+## coderabbitai[bot] · inline · inline · 2026-09-12T17:56:08Z
 
 - Source: https://github.com/scylladb/scylladb/pull/31495#discussion_r3997064995
 - Location: test/boost/sstable_compaction_test.cc:6002
@@ -5105,7 +5105,7 @@ _🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-12T17:56:08Z
+## coderabbitai[bot] · inline · inline · 2026-09-12T17:56:08Z
 
 - Source: https://github.com/scylladb/scylladb/pull/31495#discussion_r3997064997
 - Location: test/boost/sstable_datafile_test.cc:3230
@@ -5128,7 +5128,7 @@ Without an S3 server, `s3_fixture` creates no bucket or environment variables. T
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-12T17:56:08Z
+## coderabbitai[bot] · inline · inline · 2026-09-12T17:56:08Z
 
 - Source: https://github.com/scylladb/scylladb/pull/31495#discussion_r3997065001
 - Location: test/pylib/object_storage.py:89
@@ -5151,7 +5151,7 @@ When `--s3-server-address` is set, `create_s3_server()` stores the CLI credentia
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-12T17:57:44Z
+## coderabbitai[bot] · inline · inline · 2026-09-12T17:57:44Z
 
 - Source: https://github.com/scylladb/scylladb/pull/31495#discussion_r3997071679
 - Location: test/pylib/object_storage.py:89
@@ -5166,7 +5166,7 @@ _You are interacting with an AI system._
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-12T18:03:48Z
+## coderabbitai[bot] · inline · inline · 2026-09-12T18:03:48Z
 
 - Source: https://github.com/scylladb/scylladb/pull/31495#discussion_r3997086197
 - Location: test/boost/sstable_compaction_test.cc:6002
@@ -5179,7 +5179,7 @@ Use this command on a human-authored review finding. CodeRabbit findings already
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-12T18:03:55Z
+## coderabbitai[bot] · inline · inline · 2026-09-12T18:03:55Z
 
 - Source: https://github.com/scylladb/scylladb/pull/31495#discussion_r3997086475
 - Location: test/boost/sstable_datafile_test.cc:3230
@@ -5194,12 +5194,12 @@ _You are interacting with an AI system._
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-09T13:59:45Z
+## coderabbitai[bot] · inline · inline · 2026-09-09T13:59:45Z
 
 - Source: https://github.com/flowglad/onton/pull/423#discussion_r3969286435
 - Location: lib/worktree_backend.ml:125
 
-```markdown
+````markdown
 _🔒 Security & Privacy_ | _🛡️ Analyzed with Security Review_ | _🟠 Major_ | _⚡ Quick win_
 
 <details>
@@ -5267,16 +5267,16 @@ review. Visit https://docs.coderabbit.ai/cli.
 ✅ Confirmed as addressed by @subsetpark
 
 <!-- This is an auto-generated comment by CodeRabbit -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · inline · 2026-09-15T18:33:45Z
+## coderabbitai[bot] · inline · inline · 2026-09-15T18:33:45Z
 
 - Source: https://github.com/flowglad/onton/pull/423#discussion_r4018951683
 - Location: lib/worktree_backend.ml:125
 
-```markdown
+````markdown
 <details>
 <summary>🧩 Analysis chain</summary>
 
@@ -5329,6 +5329,6 @@ Thank you for using CodeRabbit!
 _You are interacting with an AI system._
 
 <!-- This is an auto-generated reply by CodeRabbit -->
-```
+````
 
 ---

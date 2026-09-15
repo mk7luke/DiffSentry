@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
+import fs from "node:fs";
 import {
   classifySurface,
   selectForSpread,
   scrubSecrets,
   renderCorpusMarkdown,
+  parseCorpusMarkdown,
   type CapturedComment,
   type Candidate,
 } from "../../src/parity/corpus.js";
@@ -149,4 +151,89 @@ describe("renderCorpusMarkdown", () => {
   it("says so explicitly when nothing was captured", () => {
     expect(renderCorpusMarkdown("Empty", [])).toContain("_No comments captured._");
   });
+});
+
+describe("parseCorpusMarkdown", () => {
+  it("round-trips a variety of comments through render then parse", () => {
+    const comments: CapturedComment[] = [
+      // Body containing a ``` fenced block (e.g. a diff or prompt block).
+      {
+        kind: "review",
+        body: "Some prose.\n\n```diff\n-old\n+new\n```\n\nMore prose.",
+        author: "coderabbitai[bot]",
+        createdAt: "2026-09-01T00:00:00Z",
+        url: "https://x/1",
+      },
+      // Body containing a longer ~~~~ (four-backtick) run, which must force
+      // a five-backtick outer fence.
+      {
+        kind: "issue",
+        body: "Nested fence below:\n\n````\nouter\n```\ninner\n```\n````\n\ndone.",
+        author: "coderabbitai[bot]",
+        createdAt: "2026-09-02T00:00:00Z",
+        url: "https://x/2",
+      },
+      // Inline comment with path + line.
+      {
+        kind: "inline",
+        body: "_:warning: Potential issue_",
+        author: "diffsentry[bot]",
+        path: "src/index.ts",
+        line: 42,
+        createdAt: "2026-09-03T00:00:00Z",
+        url: "https://x/3",
+      },
+      // Issue comment with no path (rendered as "—" Location).
+      {
+        kind: "issue",
+        body: "@someone thanks for flagging this.",
+        author: "diffsentry[bot]",
+        createdAt: "2026-09-04T00:00:00Z",
+        url: "https://x/4",
+      },
+      // A body containing its own "## " heading, which must not be mistaken
+      // for the start of the next entry.
+      {
+        kind: "issue",
+        body: "Some notes.\n\n## Not a real entry header\n\nMore notes.",
+        author: "coderabbitai[bot]",
+        createdAt: "2026-09-05T00:00:00Z",
+        url: "https://x/5",
+      },
+    ];
+
+    const rendered = renderCorpusMarkdown("Round trip", comments);
+    expect(parseCorpusMarkdown(rendered)).toEqual(comments);
+  });
+
+  it("uses a five-backtick fence when the body contains a four-backtick run", () => {
+    const body = "````\nouter\n````";
+    const rendered = renderCorpusMarkdown("T", [
+      { kind: "issue", body, author: "a", createdAt: "2026-09-01T00:00:00Z", url: "u" },
+    ]);
+    expect(rendered).toContain("`````markdown");
+  });
+
+  it("parses the empty '_No comments captured._' marker as no comments", () => {
+    expect(parseCorpusMarkdown(renderCorpusMarkdown("Empty", []))).toEqual([]);
+  });
+
+  it("parses the committed empty status.md fixture", () => {
+    const text = fs.readFileSync("tests/e2e/reference/2026-09/coderabbit/status.md", "utf8");
+    expect(parseCorpusMarkdown(text)).toEqual([]);
+  });
+
+  for (const [bot, file] of [
+    ["coderabbit", "walkthrough.md"],
+    ["diffsentry", "review-summary.md"],
+  ] as const) {
+    it(`round-trips the real committed ${bot}/${file} byte-identically`, () => {
+      const filePath = `tests/e2e/reference/2026-09/${bot}/${file}`;
+      const original = fs.readFileSync(filePath, "utf8");
+      const parsed = parseCorpusMarkdown(original);
+      const title = /^# (.*)$/m.exec(original)?.[1] ?? "";
+      const rerendered = renderCorpusMarkdown(title, parsed);
+      expect(rerendered).toBe(original);
+    });
+  }
 });

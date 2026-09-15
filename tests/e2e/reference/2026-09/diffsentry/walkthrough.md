@@ -1,11 +1,11 @@
 # Walkthroughs
 
-## diffsentry[bot] · walkthrough · 2026-08-22T06:55:45Z
+## diffsentry[bot] · walkthrough · issue · 2026-08-22T06:55:45Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#issuecomment-5378765564
 - Location: —
 
-```markdown
+````markdown
 <!-- DiffSentry Walkthrough -->
 <!-- walkthrough_start -->
 
@@ -165,16 +165,16 @@ Ranked by `git blame` weight on the touched lines + CODEOWNERS overlap.
 <!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":146,"updatedAt":"2026-09-14T21:01:00.330Z"}-->
 <!-- diffsentry-state:H4sIAAAAAAAAA72TUWvbMBDHv4q4ZzeRZTuODXsoY2thYStN9rIu0LN0jm+xLSMpybzS7z5MV1g7uu1hDAk9HD/974773x0coYwjaNGHazoyncisG4QSsFBY6HyZ1oU0VFEaV1jF9cLkdYpJjGmm46ygHCKouaV1gx7KO3h9ef7+4s3qw8WsM1CCXmRpXsusinNMdF1ABAPqPe5o9sXbHkpQOVZ5beJaJYVSSBDBiaq5d3recjXv0O2NPfWz4KEEqSRVKk21XCiDaCCCCTTom8qiM89wMhmpTCW5XCpcmCl7IB/8/NBz+IklH358SJJlJrOlRMrjPEvgPoLB+kDmLfc7coPjfgJvto/xK7eiI7XvaJzCL1fzOWwaErpF7siIW+6HQ7gJ40CvdEN6X9mv21vhyAfHOrDtBXvR2yCor63TZEQ1itCQ8Nhz4G/khLZ9zbuDwwmfQQT/IcVftteEMMynx8875DbYM9u3o/h4vRKDbVmPosNR+MBtKwZyHQdhMGApuMMdCW8PTpP/tad/pbt98Ky/claT92Sm0T1x7iOx3vMwkFlzxy263074D+Z6prhxfGRsJ8UnC/Gy+7cRHAaDgcx5mPZGqsWZLM7idKPiUsallLMkkZ8gAsd+f8k+WDdCeSOjLIrldLOHs73/DvPhVZr2AwAA-->
 <!-- internal_state_end -->
-```
+````
 
 ---
 
-## diffsentry[bot] · walkthrough · 2026-08-22T08:08:14Z
+## diffsentry[bot] · walkthrough · issue · 2026-08-22T08:08:14Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/147#issuecomment-5379183772
 - Location: —
 
-```markdown
+````markdown
 <!-- DiffSentry Walkthrough -->
 <!-- walkthrough_start -->
 
@@ -377,16 +377,16 @@ This change spans several distinct cohorts. Splitting it into smaller PRs would 
 <!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":147,"updatedAt":"2026-09-14T21:20:34.848Z"}-->
 <!-- diffsentry-state:H4sIAAAAAAAAA62WTW/bRhCG/4rBs2Tt94duQZsmQdukiHNqmsPs7Ky0tUyy5MquEeS/F4xImbHpoAUK6EQ9mtXsDt9nP1e31ZavqgP05T3dZrqjeLWHaluxhKBSAKE4esMJvcOgNRCSIi6TkwKQkq1WVcoHutpDX20/Vz+8fvH21ctf3r26vInVtgIk6YQOQUQjBYpqVb1/+eLHX1+evibDggxSCC8UKBOrVRUb7De/vnn1/sWHN+/eXp04JnQEDYhJBkVmKNMCXsOOLv/sm7raViJor7hhJIAbHqhaVT12uS395ibvOii07m+aa7osfbWtlInMCUVguAEbh3X7DjeQN1CXfde0GU+gY4ZDkhKC9UFb9QA2LdWQT5T1OtmUtLAEAox8oFro+nFN4YAxxQVD7oOBWam2y5jr3QljIaBk3huVIujkJqzNG8CSm7o/cegjOakCS4EL59OMw6ZOeSwnMamAwiRBnpnovsH6MkLSkMIYGI8QgdQMihl2ddOXjOO6yYSgrPNKKZOc1DN2X0o7FlTcS0wouVcyAJtBB4KuzvVuLOcQWXCcO4zKa5i3UTclp4wwazo4SQk9dw6StSBndNutY07pxAGTkWsTUQqVmJ7/ya45FupOmDeOmE02ogYtRJhjxwONi3LhvSHmJCLZRH5G9VTKQy/gguVKO6OS9mTsHNxDN9VLgpKUTDCJTHKYH0lprmnqVeuYhLFCSR5NcHyG3VHYN831CCoLTpugrLeKuJhAbCI1dzV107I+OI8+WRMBk8Az9jAsggdmUZmYhOSkpmOL0O9DA13cwLHsT6gBQKUNgQsauMYn6F9H6vLUslWkIhorjbGG+fiE/noqI2wCxqAkKWmdZYYmuMupTK14rU0CzV1C46eN3nXQ7tfY1IX+HkmmyKCPQ1Y5HpOYyGOOdMj1+Yi9cDomppi1OnIYsdz3x3MLpD1qH5X03kY7NdxR26zne5iclNLKoIJRJAw/c0O4rkMT78d6LGiHgSLTLjGib7hpQBkqZaS2VlqtU5xGry9QMq6hhsN9n6fpE1oSk1w7F4ADndmmgx1tIjTjuLBog0Ak5p0LzjzmwjgL0nCFKUgXufXnfCn37bQjQRlGNkQm0UR+PoU7OFwPGXrcjaMihXZMWbLMqJTimTsN8SbmvoWCI8wBkgze8pC8EW54Je8obB6lPemgKOqYIBmUio/UUPaQwyY13Q2MExBE0sYZgOSMJ4YztCM4lHxDm2NPL2+pLlelI7i5LP3fXzeAMCblvDApJjUd5KP8IiOV99JKUjaCHF7mQn3pN8c6lwd43ULZr3tIVO4vB2DKKY2MQEFURg3++7Kq2qYvFH/K9Y66tsv1AH78ND3/rfuFbunwM90Pj5/8oz/Khz1d1HR3cX56MSx9cQuHHL9G6UXoCK77i7Kni9jg8YbqQvFid2gCHGY/67Fp6bJaVf9/zU+nO0P/W9cg9T3FoZVvbg4TcXWd25biVb7JB+gG7OH6sHhX+I72lx2/IPSn9l5S9aKXlyT81LjP6vWpS58R53csuajEJf8tyG7ZbEsaW3LWsqCWbPRYPd+Rx/OmeKSFZxywFPiP033hzV5M98Uof5rbz4b0YiIvxe+jrF0M1udT9D9E0HO5+e9C8tFb+qHLtxkOw1v6TV4/d4tYiPZPq+rYRigUX5Qhg5kwa+bXXH0QfCvYVqpLp9zv1arqcn/9Og/bdl9tP0q5Umol/UoMn09f/gFIN2lX2AwAAA==-->
 <!-- internal_state_end -->
-```
+````
 
 ---
 
-## diffsentry[bot] · walkthrough · 2026-09-14T21:39:08Z
+## diffsentry[bot] · walkthrough · issue · 2026-09-14T21:39:08Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/165#issuecomment-5671170406
 - Location: —
 
-```markdown
+````markdown
 <!-- DiffSentry Walkthrough -->
 <!-- walkthrough_start -->
 
@@ -517,16 +517,16 @@ No elevated risk signals detected.
 <!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":165,"updatedAt":"2026-09-14T21:39:07.867Z"}-->
 <!-- diffsentry-state:H4sIAAAAAAAAA4WNvW7CMBRG3+XOIdhxwD9bl6pSO6CGqYjBjq+JFUMi2ySKEO9eVQWpW9dz9H3nBhMoWkDQKX/i5HFG23QaFMgapdOuFZTWuiVOcMuYa03F6tYa4yilGy4EgwKcD9h0OoG6QXnyubua9TzE3oVhTuugDQaM5XIOoIBxQg3dVEYKjtpKuBcwDimjffWXE8Yx+ktOoA7HJ9/FD5wwvOPywD+5tItDiymhBXX4J/qcNL0fR7SNP/ug45+vh9hHP3kdfsV1tDqjfcmgoCLVdkXkitb7iiomFeGl2PIvKCD61L/5lIe4gDqQ4/0bgMPMp1EBAAA=-->
 <!-- internal_state_end -->
-```
+````
 
 ---
 
-## diffsentry[bot] · walkthrough · 2026-09-14T21:34:28Z
+## diffsentry[bot] · walkthrough · issue · 2026-09-14T21:34:28Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/164#issuecomment-5671121598
 - Location: —
 
-```markdown
+````markdown
 <!-- DiffSentry Walkthrough -->
 <!-- walkthrough_start -->
 
@@ -664,16 +664,16 @@ No elevated risk signals detected.
 <!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":164,"updatedAt":"2026-09-14T21:34:28.105Z"}-->
 <!-- diffsentry-state:H4sIAAAAAAAAA5WOvW6DMBRG3+XOQDD/8dalqtQOUcnUKIPNvYCFwcg2IBTl3auqidS16znS+b4brMBZAFo4/0mroo2w7gVwYLHESrKCyrRheZ5kKCqUmJVNRUUhWomsaFmeQQCt0lT3wgG/QdQp3y/ysBk7tNps7oA004RCGh+KxZtwJNtRtI8aOMgyPjJsEtGmrJCyhHsAs3Ge8FVNHdnZqsk74Jfrk5/sB62k32l/4J9xd7KmIecIgV/+deEZqAc1z4S1GpUW9k/5Ic5WrUroX7HMKDzhiwcOSZwUYXwMWXZOGE8znlQRi/MvCMAqN7wp543dgV/i6/0b14Zdk20BAAA=-->
 <!-- internal_state_end -->
-```
+````
 
 ---
 
-## diffsentry[bot] · walkthrough · 2026-09-14T21:03:11Z
+## diffsentry[bot] · walkthrough · issue · 2026-09-14T21:03:11Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/163#issuecomment-5670772902
 - Location: —
 
-```markdown
+````markdown
 <!-- DiffSentry Walkthrough -->
 <!-- walkthrough_start -->
 
@@ -816,11 +816,11 @@ No elevated risk signals detected.
 <!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":163,"updatedAt":"2026-09-14T21:03:10.652Z"}-->
 <!-- diffsentry-state:H4sIAAAAAAAAA5WOsW6DMBRF/+XNQIwhFLxlqSq1Q1QyNcrw4D0SC4OR7YBQlH+vqiZS167nSOfeG8yg0ggM+vDJs+aFqb4gKHjJmzaTpWzzasuiqphLbhkxa7o2Iywlym2HeQMRdNpwfUEP6gbJWYfLtdks1vWdsYvfEE88EjY2xHgNNh7YnTlZBwMKREFdS7JESSwLyuEewWR9YHrV45nd5PQYPKjj6cn37oNnNu+8PvDPuN8727L3TKCO/7rwDNS9niamWg/aoPtTfoiD07NG8yuuE2Fg2gVQIIUsYlHFaX6QqRKZSkVSbOUXROC079+0D9atoI7idP8GTEVTi20BAAA=-->
 <!-- internal_state_end -->
-```
+````
 
 ---
 
-## diffsentry[bot] · walkthrough · 2026-08-31T15:38:32Z
+## diffsentry[bot] · walkthrough · issue · 2026-08-31T15:38:32Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/156#issuecomment-5480684750
 - Location: —
@@ -958,12 +958,12 @@ Ranked by `git blame` weight on the touched lines + CODEOWNERS overlap.
 
 ---
 
-## diffsentry[bot] · walkthrough · 2026-08-22T06:54:20Z
+## diffsentry[bot] · walkthrough · issue · 2026-08-22T06:54:20Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/145#issuecomment-5378746936
 - Location: —
 
-```markdown
+````markdown
 <!-- DiffSentry Walkthrough -->
 <!-- walkthrough_start -->
 
@@ -1130,16 +1130,16 @@ Ranked by `git blame` weight on the touched lines + CODEOWNERS overlap.
 <!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":145,"updatedAt":"2026-09-05T04:30:17.520Z"}-->
 <!-- diffsentry-state:H4sIAAAAAAAAA42PUWvCMBSF/8t9rvY2bdMmbzI2hckm06eJD2lzswarLUmsiPjfhzgZGwz2evjO4XxnGEAmEbTKhzcaLB1JLxsFEsqCV6zI0ShMM+SsEGVR5nlmsFKIRhlWp4YyAREY29KyUR7kGR5mk5fp4/x1Ot5pkKBFWRphBCEqqgWDCLyr4yNVTddtY219r0LdjIMHCTznJqlrLtKEaY4VRBDIBx8f9jbEvlW+GX03yIdbLWcmNbxME8WLqtQElwj6zgfST3b/Qa53dn8F15t7vnBzGqh9ptNXfDXwC9fV5D1pkOufHndiubV9T3ppd7ZV7or9JfOf579WV84OVrW3Q4deq0B6EkACQ8ZHKEaYrzCTKcqkGOcM3yECZ/12Zn3o3AnkGiPcXD4B6FSxPtIBAAA=-->
 <!-- internal_state_end -->
-```
+````
 
 ---
 
-## diffsentry[bot] · walkthrough · 2026-08-28T18:47:28Z
+## diffsentry[bot] · walkthrough · issue · 2026-08-28T18:47:28Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/152#issuecomment-5456436689
 - Location: —
 
-```markdown
+````markdown
 <!-- DiffSentry Walkthrough -->
 <!-- walkthrough_start -->
 
@@ -1292,16 +1292,16 @@ Ranked by `git blame` weight on the touched lines + CODEOWNERS overlap.
 <!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":152,"updatedAt":"2026-08-28T18:47:27.954Z"}-->
 <!-- diffsentry-state:H4sIAAAAAAAAA42RzWrDMBCE32XPTmLJViT51ksptIfQ9NTQg37WyRLXNlrFJZS8ewlJoLQUep2ZZeZjP2GCRhTQOc7POBF+YFzvHDQghdZee1kq56yuWyuq6CtTWdGiFKKUUYeolgIKaKnD9c4xNJ/AIdGYecGYD+M8MzSgvAmVlbqStcYYPRTAKSzcSItIbtsPnCnwNYsmVLEyUqilV0pfs2HoW9peIkJbY1XrLaqAS2+ggIyceXHoKV96Z9hPs8l1FF2moZ+f/ctx6VodrZK+LkNdRQWnAsaBM8Z76reYxkT9Obh5u+mr9IQTdo94vMpnWl6lISAzRmg2v5n/BPxJ8//pt+L1nsYR45reqXPp26Kr8ZJoItddjMMYXcZ4l8//LOVyVpqZNC/CNLVupJ5bVb9CAYl4/0Cch3SEZlO+nb4AL4M5KhYCAAA=-->
 <!-- internal_state_end -->
-```
+````
 
 ---
 
-## diffsentry[bot] · walkthrough · 2026-08-28T20:33:32Z
+## diffsentry[bot] · walkthrough · issue · 2026-08-28T20:33:32Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/153#issuecomment-5457475219
 - Location: —
 
-```markdown
+````markdown
 <!-- DiffSentry Walkthrough -->
 <!-- walkthrough_start -->
 
@@ -1476,16 +1476,16 @@ Ranked by `git blame` weight on the touched lines + CODEOWNERS overlap.
 <!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":153,"updatedAt":"2026-08-28T20:33:31.526Z"}-->
 <!-- diffsentry-state:H4sIAAAAAAAAA42RwU7DMAyG38Xndkuapsl644KQ4IDYTkwc0sTtrJU2irMhNPHuaNqQEAiJ6/9/lv3JJzhCKwsYHecnPBK+YVjvHLRQGd8Li1paaRtT91jbzjeV0d3KSAxKa+z9qjZQQE8jrneOoT0B+0Qx85IxH+IiM7QgOmV93wXd1N5Z3UMBnPzSRVoGcsM0cybPFzbU1shgjROVMKGurqyfp56GC9J0wkhlsPFe9Z2QUEBGzrw8TJSvZDlQ3h260sVYUlic+8uwVth5J+uVWXldKwUfBcSZM4ZbmgZMMdF0BrcvX/ljesAjjvf4fo3PtvyYZo/MGKDd/nb+U/Cnzf9P/1q83lOMGNb0SqNL3y66FptER3LjpTjE4DKGm3z+p6iaUtiysptKtEq1Si501TxDAYl4f0ec5/QO7Va8fHwCKmxskRYCAAA=-->
 <!-- internal_state_end -->
-```
+````
 
 ---
 
-## diffsentry[bot] · walkthrough · 2026-08-28T06:23:21Z
+## diffsentry[bot] · walkthrough · issue · 2026-08-28T06:23:21Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/150#issuecomment-5449190960
 - Location: —
 
-```markdown
+````markdown
 <!-- DiffSentry Walkthrough -->
 <!-- walkthrough_start -->
 
@@ -1638,6 +1638,6 @@ Ranked by `git blame` weight on the touched lines + CODEOWNERS overlap.
 <!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":150,"updatedAt":"2026-08-28T06:23:20.807Z"}-->
 <!-- diffsentry-state:H4sIAAAAAAAAA42QXWvjMBBF/8s824ksy5aqt7CbbaEfW5o+bejDWBolQ13bSEpKKf3vS0gC3YVCX+85A/fOO+zBVgX0mPID7Zleya+2CBawUUpjqxukoLxpTKW6oLSQwnVGmE44vBBYOyggcE+rLSaw7/DjanF3ubz5fTl78WDBYWiq4HyrjDSBCAp4WC5+3i6P+CK03pFQMjhXVUFDASm6OU4894ybYUyZXZrldHCxq6V23ss6uKo6u24cAm+OikE0oaHWKR3aphNQQKaU03w3cD6Z5YbzdteVOE0l+9mBH48JO9SdCtqZuqpNDR8FTGPK5H/xsKE4RR4O4vrpnN/HG9pTf01vp/jwiHQfR0cpkQe7/vcdn7d/OfT/Vd+fcC6weuZpIr/iF+4xfmp2Ao+R94z9Eewmj5n8IoMFKWRbClNK8yhaK2srxcwI/QcKiJyerzjlMb6BXYunj78c/FYVOQIAAA==-->
 <!-- internal_state_end -->
-```
+````
 
 ---

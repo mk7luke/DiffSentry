@@ -6,19 +6,25 @@
  *   npx tsx scripts/capture-corpus.ts --bot "coderabbitai[bot]" --out tests/e2e/reference/2026-09/coderabbit
  *   npx tsx scripts/capture-corpus.ts --bot "diffsentry[bot]" --repo mk7luke/DiffSentry --out tests/e2e/reference/2026-09/diffsentry
  *
- * --from-raw <path> re-buckets an existing raw.json instead of scraping:
- * no network calls, no PR selection, just re-classify and regenerate the
- * .md files and manifest.json counts. `gh search`'s "most-recently-updated"
- * ordering means every re-scrape silently draws a different PR sample out
- * from under a fixed set of counts — that's what turned a routine classifier
- * fix into a data regression once already (task-5-report.md, fix round 3).
- * Once scraped, treat the corpus as a fixed artifact and use this mode to
- * verify future classifier changes against it.
+ * --from-md <corpusDir> re-buckets an existing corpus's .md files instead
+ * of scraping: no network calls, no PR selection, just re-classify and
+ * regenerate the .md files and manifest.json counts. `gh search`'s
+ * "most-recently-updated" ordering means every re-scrape silently draws a
+ * different PR sample out from under a fixed set of counts — that's what
+ * turned a routine classifier fix into a data regression once already
+ * (task-5-report.md, fix round 3). Once scraped, treat the corpus as a
+ * fixed artifact and use this mode to verify future classifier changes
+ * against it.
  *
- *   npx tsx scripts/capture-corpus.ts --from-raw /tmp/old/raw.json --out tests/e2e/reference/2026-09/coderabbit
+ *   npx tsx scripts/capture-corpus.ts --from-md tests/e2e/reference/2026-09/coderabbit --out tests/e2e/reference/2026-09/coderabbit
  *
- * (Reads a sibling manifest.json next to the given raw.json for `bot` and
- * the `prs` list, since raw.json alone doesn't carry per-PR language.)
+ * (Reads the corpus dir's manifest.json for `bot` and the `prs` list, and
+ * its walkthrough/review-summary/inline/status/chat .md files for the
+ * comments themselves — the .md files are the lossless source, there is no
+ * separate raw.json.)
+ *
+ * --from-raw <path-to-raw.json> is a deprecated alias kept for old captures
+ * made before .md became the source of truth; prefer --from-md.
  */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -27,7 +33,7 @@ import {
   classifySurface,
   selectForSpread,
   renderCorpusMarkdown,
-  scrubSecrets,
+  parseCorpusMarkdown,
   type CapturedComment,
   type Candidate,
   type Surface,
@@ -121,13 +127,30 @@ function writeCorpus(outDir: string, bot: string, capturedAt: string, prs: Manif
     counts: Object.fromEntries(Object.entries(buckets).map(([k, v]) => [k, v.length])),
   };
   fs.writeFileSync(path.join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
-  fs.writeFileSync(path.join(outDir, "raw.json"), scrubSecrets(JSON.stringify(all, null, 2)), "utf8");
 
   process.stderr.write(`wrote ${all.length} comments from ${prs.length} PRs to ${outDir}\n`);
 }
 
-/** --from-raw: re-bucket a previously captured raw.json with no network calls. */
+const SURFACE_FILES: Surface[] = ["walkthrough", "review-summary", "inline", "status", "chat"];
+
+/** --from-md: re-bucket a previously captured corpus's .md files with no network calls. */
+function rebucketFromMd(corpusDir: string, outDir: string): void {
+  const manifestPath = path.join(corpusDir, "manifest.json");
+  const prevManifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as { bot: string; capturedAt: string; prs: ManifestPr[] };
+
+  const all: CapturedComment[] = [];
+  for (const surface of SURFACE_FILES) {
+    const text = fs.readFileSync(path.join(corpusDir, `${surface}.md`), "utf8");
+    all.push(...parseCorpusMarkdown(text));
+  }
+
+  writeCorpus(outDir, prevManifest.bot, prevManifest.capturedAt, prevManifest.prs, all);
+  process.stderr.write(`re-bucketed from ${corpusDir} (captured ${prevManifest.capturedAt})\n`);
+}
+
+/** --from-raw (deprecated): re-bucket a previously captured raw.json with no network calls. */
 function rebucketFromRaw(rawPath: string, outDir: string): void {
+  process.stderr.write("--from-raw is deprecated; use --from-md <corpusDir> instead\n");
   const all = JSON.parse(fs.readFileSync(rawPath, "utf8")) as CapturedComment[];
   const manifestPath = path.join(path.dirname(rawPath), "manifest.json");
   const prevManifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as { bot: string; capturedAt: string; prs: ManifestPr[] };
@@ -139,6 +162,10 @@ function rebucketFromRaw(rawPath: string, outDir: string): void {
 function main(): void {
   const outDir = arg("out");
 
+  if (process.argv.includes("--from-md")) {
+    rebucketFromMd(arg("from-md"), outDir);
+    return;
+  }
   if (process.argv.includes("--from-raw")) {
     rebucketFromRaw(arg("from-raw"), outDir);
     return;

@@ -1,6 +1,6 @@
 # Chat replies
 
-## diffsentry[bot] · chat · 2026-08-22T08:46:25Z
+## diffsentry[bot] · chat · issue · 2026-08-22T08:46:25Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#issuecomment-5379390553
 - Location: —
@@ -24,7 +24,7 @@
 
 ---
 
-## diffsentry[bot] · chat · 2026-08-22T08:08:31Z
+## diffsentry[bot] · chat · issue · 2026-08-22T08:08:31Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/147#issuecomment-5379185765
 - Location: —
@@ -53,7 +53,7 @@
 
 ---
 
-## diffsentry[bot] · chat · 2026-09-14T21:40:13Z
+## diffsentry[bot] · chat · issue · 2026-09-14T21:40:13Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/165#issuecomment-5671181715
 - Location: —
@@ -73,7 +73,7 @@
 
 ---
 
-## diffsentry[bot] · chat · 2026-09-14T15:40:05Z
+## diffsentry[bot] · chat · issue · 2026-09-14T15:40:05Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/160#issuecomment-5666582096
 - Location: —
@@ -91,7 +91,7 @@ No user-visible changes. This PR updates runtime and development dependencies on
 
 ---
 
-## diffsentry[bot] · chat · 2026-09-14T15:39:46Z
+## diffsentry[bot] · chat · issue · 2026-09-14T15:39:46Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/161#issuecomment-5666577769
 - Location: —
@@ -109,7 +109,7 @@ No user-visible changes. This update only refreshes web application dependencies
 
 ---
 
-## diffsentry[bot] · chat · 2026-09-14T21:35:40Z
+## diffsentry[bot] · chat · issue · 2026-09-14T21:35:40Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/164#issuecomment-5671134443
 - Location: —
@@ -130,7 +130,7 @@ No user-visible changes. This update only refreshes web application dependencies
 
 ---
 
-## diffsentry[bot] · chat · 2026-09-14T21:04:25Z
+## diffsentry[bot] · chat · issue · 2026-09-14T21:04:25Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/163#issuecomment-5670786560
 - Location: —
@@ -150,7 +150,7 @@ No user-visible changes. This update only refreshes web application dependencies
 
 ---
 
-## diffsentry[bot] · chat · 2026-08-31T15:39:45Z
+## diffsentry[bot] · chat · issue · 2026-08-31T15:39:45Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/156#issuecomment-5480700075
 - Location: —
@@ -168,7 +168,7 @@ No user-visible changes. This updates the pinned TruffleHog action used by the r
 
 ---
 
-## diffsentry[bot] · chat · 2026-09-07T15:38:55Z
+## diffsentry[bot] · chat · issue · 2026-09-07T15:38:55Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/159#issuecomment-5572916949
 - Location: —
@@ -186,7 +186,7 @@ No user-visible changes. This update only refreshes web application dependencies
 
 ---
 
-## diffsentry[bot] · chat · 2026-09-07T15:38:15Z
+## diffsentry[bot] · chat · issue · 2026-09-07T15:38:15Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/158#issuecomment-5572910072
 - Location: —
@@ -204,7 +204,7 @@ This release only updates development and runtime dependencies; it has no user-v
 
 ---
 
-## diffsentry[bot] · chat · 2026-08-31T15:39:05Z
+## diffsentry[bot] · chat · issue · 2026-08-31T15:39:05Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/155#issuecomment-5480691700
 - Location: —
@@ -222,7 +222,7 @@ No user-visible changes. This PR updates frontend dependencies only.
 
 ---
 
-## diffsentry[bot] · chat · 2026-08-31T15:38:03Z
+## diffsentry[bot] · chat · issue · 2026-08-31T15:38:03Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/154#issuecomment-5480678281
 - Location: —
@@ -240,7 +240,7 @@ This release contains dependency updates only and has no user-visible changes.
 
 ---
 
-## diffsentry[bot] · chat · 2026-08-22T06:54:33Z
+## diffsentry[bot] · chat · issue · 2026-08-22T06:54:33Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/145#issuecomment-5378750082
 - Location: —
@@ -260,7 +260,7 @@ This release contains dependency updates only and has no user-visible changes.
 
 ---
 
-## diffsentry[bot] · chat · 2026-08-24T15:39:01Z
+## diffsentry[bot] · chat · issue · 2026-08-24T15:39:01Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/149#issuecomment-5397604219
 - Location: —
@@ -278,7 +278,7 @@ No user-visible changes. This PR updates web build and sanitization dependencies
 
 ---
 
-## diffsentry[bot] · chat · 2026-08-24T15:38:42Z
+## diffsentry[bot] · chat · issue · 2026-08-24T15:38:42Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/148#issuecomment-5397600546
 - Location: —
@@ -296,7 +296,7 @@ This release contains dependency updates only and has no user-visible changes.
 
 ---
 
-## diffsentry[bot] · chat · 2026-08-28T20:41:26Z
+## diffsentry[bot] · chat · issue · 2026-08-28T20:41:26Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/152#issuecomment-5457543822
 - Location: —
@@ -324,7 +324,7 @@ This release contains dependency updates only and has no user-visible changes.
 
 ---
 
-## diffsentry[bot] · chat · 2026-08-28T20:33:49Z
+## diffsentry[bot] · chat · issue · 2026-08-28T20:33:49Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/153#issuecomment-5457477756
 - Location: —
@@ -353,7 +353,7 @@ This release contains dependency updates only and has no user-visible changes.
 
 ---
 
-## diffsentry[bot] · chat · 2026-08-28T06:23:37Z
+## diffsentry[bot] · chat · issue · 2026-08-28T06:23:37Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/150#issuecomment-5449192980
 - Location: —

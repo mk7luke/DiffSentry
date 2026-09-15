@@ -1,11 +1,11 @@
 # Walkthroughs
 
-## coderabbitai[bot] · walkthrough · 2026-09-15T18:15:18Z
+## coderabbitai[bot] · walkthrough · issue · 2026-09-15T18:15:18Z
 
 - Source: https://github.com/janlampert08-dev/strado/pull/249#issuecomment-5685603014
 - Location: —
 
-```markdown
+````markdown
 <!-- This is an auto-generated comment: summarize by coderabbit.ai -->
 <!-- review_stack_entry_start -->
 
@@ -186,16 +186,16 @@ Docstring coverage is 73.33% which is insufficient. The required threshold is 80
 <sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
 
 <!-- tips_end -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · walkthrough · 2026-09-15T17:58:02Z
+## coderabbitai[bot] · walkthrough · issue · 2026-09-15T17:58:02Z
 
 - Source: https://github.com/marionettejs/marionette/pull/525#issuecomment-5685337819
 - Location: —
 
-```markdown
+````markdown
 <!-- This is an auto-generated comment: summarize by coderabbit.ai -->
 <!-- review_stack_entry_start -->
 
@@ -400,16 +400,16 @@ Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=gi
 <sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
 
 <!-- tips_end -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · walkthrough · 2026-08-17T20:46:09Z
+## coderabbitai[bot] · walkthrough · issue · 2026-08-17T20:46:09Z
 
 - Source: https://github.com/Strategy11/formidable-forms/pull/3246#issuecomment-5320049974
 - Location: —
 
-```markdown
+````markdown
 <!-- This is an auto-generated comment: summarize by coderabbit.ai -->
 <!-- review_stack_entry_start -->
 
@@ -590,11 +590,11 @@ Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=gi
 <sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
 
 <!-- tips_end -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · walkthrough · 2026-08-30T09:54:11Z
+## coderabbitai[bot] · walkthrough · issue · 2026-08-30T09:54:11Z
 
 - Source: https://github.com/sumx21t-3310/FloatSoda/pull/228#issuecomment-5467994747
 - Location: —
@@ -827,12 +827,12 @@ Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=gi
 
 ---
 
-## coderabbitai[bot] · walkthrough · 2026-09-01T19:11:00Z
+## coderabbitai[bot] · walkthrough · issue · 2026-09-01T19:11:00Z
 
 - Source: https://github.com/cryostatio/cryostat/pull/1764#issuecomment-5499049020
 - Location: —
 
-```markdown
+````markdown
 <!-- This is an auto-generated comment: summarize by coderabbit.ai -->
 <!-- This is an auto-generated comment: review paused by coderabbit.ai -->
 
@@ -1003,16 +1003,16 @@ Docstring coverage is 13.95% which is insufficient. The required threshold is 80
 <sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
 
 <!-- tips_end -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · walkthrough · 2026-09-09T12:31:28Z
+## coderabbitai[bot] · walkthrough · issue · 2026-09-09T12:31:28Z
 
 - Source: https://github.com/hypercerts-org/hypercerts-relay/pull/22#issuecomment-5601867075
 - Location: —
 
-```markdown
+````markdown
 <!-- This is an auto-generated comment: summarize by coderabbit.ai -->
 <!-- review_stack_entry_start -->
 
@@ -1210,11 +1210,11 @@ Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=gi
 <sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
 
 <!-- tips_end -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · walkthrough · 2026-09-15T02:34:17Z
+## coderabbitai[bot] · walkthrough · issue · 2026-09-15T02:34:17Z
 
 - Source: https://github.com/hyperpolymath/natsci-studio/pull/90#issuecomment-5673805560
 - Location: —
@@ -1362,12 +1362,12 @@ Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=gi
 
 ---
 
-## coderabbitai[bot] · walkthrough · 2026-09-15T18:23:27Z
+## coderabbitai[bot] · walkthrough · issue · 2026-09-15T18:23:27Z
 
 - Source: https://github.com/manaflow-ai/cmux/pull/12686#issuecomment-5685730267
 - Location: —
 
-```markdown
+````markdown
 <!-- This is an auto-generated comment: summarize by coderabbit.ai -->
 <!-- review_stack_entry_start -->
 
@@ -1591,16 +1591,16 @@ Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=gi
 <sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
 
 <!-- tips_end -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · walkthrough · 2026-09-15T18:09:24Z
+## coderabbitai[bot] · walkthrough · issue · 2026-09-15T18:09:24Z
 
 - Source: https://github.com/LerianStudio/helm/pull/2124#issuecomment-5685512344
 - Location: —
 
-```markdown
+````markdown
 <!-- This is an auto-generated comment: summarize by coderabbit.ai -->
 <!-- review_stack_entry_start -->
 
@@ -1691,11 +1691,11 @@ Chart-managed CRM deployments lack regression coverage for missing required Secr
 <sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
 
 <!-- tips_end -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · walkthrough · 2026-09-09T18:29:13Z
+## coderabbitai[bot] · walkthrough · issue · 2026-09-09T18:29:13Z
 
 - Source: https://github.com/elanthia-online/lich-5/pull/1575#issuecomment-5606788886
 - Location: —
@@ -1857,7 +1857,7 @@ Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=gi
 
 ---
 
-## coderabbitai[bot] · walkthrough · 2026-09-09T20:54:52Z
+## coderabbitai[bot] · walkthrough · issue · 2026-09-09T20:54:52Z
 
 - Source: https://github.com/NVIDIA/cuopt/pull/1877#issuecomment-5608610755
 - Location: —
@@ -2022,7 +2022,7 @@ The timeout adjustments match the stated CI-stability goal, and no actionable re
 
 ---
 
-## coderabbitai[bot] · walkthrough · 2026-08-21T07:15:49Z
+## coderabbitai[bot] · walkthrough · issue · 2026-08-21T07:15:49Z
 
 - Source: https://github.com/openshift/release/pull/83792#issuecomment-5366468342
 - Location: —
@@ -2142,7 +2142,7 @@ Docstring coverage is 0.00% which is insufficient. The required threshold is 80.
 
 ---
 
-## coderabbitai[bot] · walkthrough · 2026-09-05T20:04:16Z
+## coderabbitai[bot] · walkthrough · issue · 2026-09-05T20:04:16Z
 
 - Source: https://github.com/scylladb/scylladb/pull/31495#issuecomment-5554440020
 - Location: —
@@ -2243,12 +2243,12 @@ Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=gi
 
 ---
 
-## coderabbitai[bot] · walkthrough · 2026-09-09T13:44:42Z
+## coderabbitai[bot] · walkthrough · issue · 2026-09-09T13:44:42Z
 
 - Source: https://github.com/flowglad/onton/pull/423#issuecomment-5602894082
 - Location: —
 
-```markdown
+````markdown
 <!-- This is an auto-generated comment: summarize by coderabbit.ai -->
 <!-- review_stack_entry_start -->
 
@@ -2479,11 +2479,11 @@ Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=gi
 <sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
 
 <!-- tips_end -->
-```
+````
 
 ---
 
-## coderabbitai[bot] · walkthrough · 2026-09-14T14:15:36Z
+## coderabbitai[bot] · walkthrough · issue · 2026-09-14T14:15:36Z
 
 - Source: https://github.com/PostHog/posthog/pull/100274#issuecomment-5665400151
 - Location: —

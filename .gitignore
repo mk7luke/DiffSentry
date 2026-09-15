@@ -23,3 +23,7 @@ scripts/local/
 .codesurf/mcp-server.json
 # Never install the parity fixture's own dependencies into this checkout
 tests/e2e/reference/2026-09/fixture-repo/node_modules/
+# The corpus .md files are the lossless source (src/parity/corpus.ts);
+# raw.json duplicated their content and was removed. --from-md re-buckets
+# from the .md files instead, so a stray raw.json should never get committed.
+tests/e2e/reference/**/raw.json

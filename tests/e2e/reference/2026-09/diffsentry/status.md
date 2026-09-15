@@ -1,6 +1,6 @@
 # Status comments
 
-## diffsentry[bot] · status · 2026-08-22T06:55:04Z
+## diffsentry[bot] · status · issue · 2026-08-22T06:55:04Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#issuecomment-5378757163
 - Location: —
@@ -12,7 +12,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-22T06:55:53Z
+## diffsentry[bot] · status · issue · 2026-08-22T06:55:53Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#issuecomment-5378766713
 - Location: —
@@ -38,7 +38,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-22T08:07:12Z
+## diffsentry[bot] · status · issue · 2026-08-22T08:07:12Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/147#issuecomment-5379176999
 - Location: —
@@ -63,7 +63,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-22T08:08:18Z
+## diffsentry[bot] · status · issue · 2026-08-22T08:08:18Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/147#issuecomment-5379184376
 - Location: —
@@ -89,7 +89,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-09-14T21:38:40Z
+## diffsentry[bot] · status · issue · 2026-09-14T21:38:40Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/165#issuecomment-5671165635
 - Location: —
@@ -101,7 +101,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-09-14T21:39:14Z
+## diffsentry[bot] · status · issue · 2026-09-14T21:39:14Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/165#issuecomment-5671171409
 - Location: —
@@ -127,7 +127,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-09-14T15:37:16Z
+## diffsentry[bot] · status · issue · 2026-09-14T15:37:16Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/160#issuecomment-5666542405
 - Location: —
@@ -149,7 +149,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-09-14T15:37:56Z
+## diffsentry[bot] · status · issue · 2026-09-14T15:37:56Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/161#issuecomment-5666551967
 - Location: —
@@ -171,7 +171,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-09-14T21:33:59Z
+## diffsentry[bot] · status · issue · 2026-09-14T21:33:59Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/164#issuecomment-5671116513
 - Location: —
@@ -183,7 +183,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-09-14T21:34:34Z
+## diffsentry[bot] · status · issue · 2026-09-14T21:34:34Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/164#issuecomment-5671122649
 - Location: —
@@ -209,7 +209,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-09-14T21:02:41Z
+## diffsentry[bot] · status · issue · 2026-09-14T21:02:41Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/163#issuecomment-5670767117
 - Location: —
@@ -221,7 +221,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-09-14T21:03:17Z
+## diffsentry[bot] · status · issue · 2026-09-14T21:03:17Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/163#issuecomment-5670773993
 - Location: —
@@ -247,7 +247,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-31T15:38:00Z
+## diffsentry[bot] · status · issue · 2026-08-31T15:38:00Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/156#issuecomment-5480677517
 - Location: —
@@ -259,7 +259,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-31T15:38:41Z
+## diffsentry[bot] · status · issue · 2026-08-31T15:38:41Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/156#issuecomment-5480686608
 - Location: —
@@ -285,7 +285,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-09-07T15:37:19Z
+## diffsentry[bot] · status · issue · 2026-09-07T15:37:19Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/159#issuecomment-5572900471
 - Location: —
@@ -307,7 +307,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-09-07T15:36:33Z
+## diffsentry[bot] · status · issue · 2026-09-07T15:36:33Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/158#issuecomment-5572892171
 - Location: —
@@ -329,7 +329,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-31T15:36:57Z
+## diffsentry[bot] · status · issue · 2026-08-31T15:36:57Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/155#issuecomment-5480661705
 - Location: —
@@ -351,7 +351,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-31T15:36:35Z
+## diffsentry[bot] · status · issue · 2026-08-31T15:36:35Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/154#issuecomment-5480655647
 - Location: —
@@ -373,7 +373,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-22T06:53:56Z
+## diffsentry[bot] · status · issue · 2026-08-22T06:53:56Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/145#issuecomment-5378741578
 - Location: —
@@ -385,7 +385,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-22T06:54:26Z
+## diffsentry[bot] · status · issue · 2026-08-22T06:54:26Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/145#issuecomment-5378748332
 - Location: —
@@ -411,7 +411,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-24T15:37:01Z
+## diffsentry[bot] · status · issue · 2026-08-24T15:37:01Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/149#issuecomment-5397580081
 - Location: —
@@ -433,7 +433,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-24T15:36:40Z
+## diffsentry[bot] · status · issue · 2026-08-24T15:36:40Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/148#issuecomment-5397575657
 - Location: —
@@ -455,7 +455,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-28T18:46:57Z
+## diffsentry[bot] · status · issue · 2026-08-28T18:46:57Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/152#issuecomment-5456431649
 - Location: —
@@ -467,7 +467,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-28T18:47:35Z
+## diffsentry[bot] · status · issue · 2026-08-28T18:47:35Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/152#issuecomment-5456437838
 - Location: —
@@ -493,7 +493,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-28T20:32:56Z
+## diffsentry[bot] · status · issue · 2026-08-28T20:32:56Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/153#issuecomment-5457469882
 - Location: —
@@ -505,7 +505,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-28T20:33:39Z
+## diffsentry[bot] · status · issue · 2026-08-28T20:33:39Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/153#issuecomment-5457476293
 - Location: —
@@ -531,7 +531,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-28T06:22:46Z
+## diffsentry[bot] · status · issue · 2026-08-28T06:22:46Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/150#issuecomment-5449186485
 - Location: —
@@ -543,7 +543,7 @@
 
 ---
 
-## diffsentry[bot] · status · 2026-08-28T06:23:28Z
+## diffsentry[bot] · status · issue · 2026-08-28T06:23:28Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/150#issuecomment-5449191810
 - Location: —

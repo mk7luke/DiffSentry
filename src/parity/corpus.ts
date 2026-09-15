@@ -130,6 +130,20 @@ export function scrubSecrets(text: string): string {
   return out;
 }
 
+/**
+ * Longest run of consecutive backticks anywhere in `s`, or 0 if none. Used
+ * to size a fence that can safely wrap the text (CommonMark: a fence must
+ * be longer than any backtick run it encloses, or the enclosed text can
+ * itself be read as a closing fence).
+ */
+function longestBacktickRun(s: string): number {
+  let max = 0;
+  for (const run of s.match(/`+/g) ?? []) {
+    if (run.length > max) max = run.length;
+  }
+  return max;
+}
+
 export function renderCorpusMarkdown(title: string, comments: CapturedComment[]): string {
   const lines: string[] = [`# ${title}`, ""];
   if (comments.length === 0) {
@@ -138,19 +152,93 @@ export function renderCorpusMarkdown(title: string, comments: CapturedComment[])
   }
   for (const c of comments) {
     const where = c.path ? `${c.path}:${c.line ?? "?"}` : "—";
+    const body = scrubSecrets(c.body);
+    // Bodies routinely contain their own fenced blocks (CodeRabbit's
+    // "Prompt for AI Agents" blocks, nested diff fences in "Analysis
+    // chain" sections). A fixed ``` delimiter would be ambiguous — the
+    // fence must outrun the longest backtick run already inside the body,
+    // per CommonMark's rule for nesting fenced code.
+    const fence = "`".repeat(Math.max(3, longestBacktickRun(body) + 1));
     lines.push(
-      `## ${c.author} · ${classifySurface(c)} · ${c.createdAt}`,
+      `## ${c.author} · ${classifySurface(c)} · ${c.kind} · ${c.createdAt}`,
       "",
       `- Source: ${c.url}`,
       `- Location: ${where}`,
       "",
-      "```markdown",
-      scrubSecrets(c.body),
-      "```",
+      `${fence}markdown`,
+      body,
+      fence,
       "",
       "---",
       "",
     );
   }
   return lines.join("\n");
+}
+
+const EMPTY_MARKER = "_No comments captured._";
+// Matches a rendered entry header: "## <author> · <surface> · <kind> · <createdAt>".
+// `surface` is dropped on parse — it's derived from `kind` (+ body) by
+// classifySurface, and re-deriving it is the entire point of --from-md:
+// baking today's surface into stored data would defeat re-bucketing after
+// a classifier change.
+const HEADER_RE = /^## (.*?) · (.*?) · (issue|review|inline) · (.*)$/;
+
+/**
+ * Inverse of renderCorpusMarkdown. Pure, no IO. Recovers every field a
+ * CapturedComment needs to be re-classified and re-bucketed, including
+ * `kind` (read from the header, not inferred from `surface`).
+ */
+export function parseCorpusMarkdown(text: string): CapturedComment[] {
+  const lines = text.split("\n");
+  const comments: CapturedComment[] = [];
+  let i = 0;
+  while (i < lines.length && !lines[i].startsWith("## ")) {
+    if (lines[i].trim() === EMPTY_MARKER) return [];
+    i++;
+  }
+
+  while (i < lines.length) {
+    const header = HEADER_RE.exec(lines[i]);
+    if (!header) throw new Error(`parseCorpusMarkdown: malformed entry header: ${JSON.stringify(lines[i])}`);
+    const [, author, , kind, createdAt] = header;
+    i++; // consume header
+    i++; // blank line
+
+    const sourceLine = lines[i++];
+    const url = sourceLine.replace(/^- Source: /, "");
+    const locationLine = lines[i++];
+    const location = locationLine.replace(/^- Location: /, "");
+    let path: string | undefined;
+    let line: number | undefined;
+    if (location !== "—") {
+      const idx = location.lastIndexOf(":");
+      path = location.slice(0, idx);
+      const lineStr = location.slice(idx + 1);
+      line = lineStr === "?" ? undefined : Number(lineStr);
+    }
+
+    i++; // blank line
+    const fenceOpen = lines[i++];
+    const fenceMatch = /^(`{3,})markdown$/.exec(fenceOpen);
+    if (!fenceMatch) throw new Error(`parseCorpusMarkdown: expected a fenced code block, got: ${JSON.stringify(fenceOpen)}`);
+    const closeFence = fenceMatch[1];
+
+    const bodyLines: string[] = [];
+    while (lines[i] !== closeFence) {
+      if (i >= lines.length) throw new Error("parseCorpusMarkdown: unterminated fenced code block");
+      bodyLines.push(lines[i]);
+      i++;
+    }
+    i++; // consume closing fence
+    const body = bodyLines.join("\n");
+
+    i++; // blank line
+    i++; // "---"
+    i++; // blank line
+
+    comments.push({ kind: kind as CapturedComment["kind"], body, author, path, line, createdAt, url });
+  }
+
+  return comments;
 }
