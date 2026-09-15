@@ -27,6 +27,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     **Checks: Read** permission. Events an App is not subscribed to are never
     delivered, so without this the feature is silent.
 
+- The CodeRabbit parity reference has been refreshed and then argued with. No
+  shipped behavior changes here — this is the evidence base the comment-shape
+  work is decided from, and the old one had gone stale enough to be misleading.
+  - **A wider, dated corpus.** `tests/e2e/reference/2026-09/` captures 18
+    CodeRabbit PRs across 17 languages (121 comments) and 18 DiffSentry PRs on
+    this repository (87 comments), via `npm run capture:coderabbit` /
+    `capture:diffsentry`. The files directly under `tests/e2e/reference/` are
+    now explicitly the **frozen April 2026 baseline** — one PR, one repo, one
+    language — kept so drift has a fixed point to be measured against rather
+    than being silently overwritten. Provenance, per-surface counts and the
+    secret-scrubbing pattern set are in `2026-09/README.md`.
+  - **Ten rendered screenshots** (`2026-09/screenshots/`), both bots, captured
+    logged out at 1280px, recording what raw Markdown cannot: whether a
+    `<details>` starts collapsed, whether a suggestion gets GitHub's apply
+    affordance, and how much comment a reader wades through before reaching
+    content. The capture *procedure* is committed rather than the tooling —
+    Playwright stays out of `package.json` for a handful of captures a year.
+  - **A drift analysis** (`2026-09/drift.md`) walking the format rubric surface
+    by surface against the new corpus. Verdict: CodeRabbit's comment shape moved
+    materially since April, concentrated in three places — the inline finding
+    header was replaced outright (April's entire type vocabulary appears **zero
+    times** in 76 September inline comments), a `Merge Risk` verdict moved above
+    the fold in 15/15 walkthroughs, and two April surfaces were dropped. It
+    counts 15 structural and 11 presentational differences against DiffSentry.
+  - **A decided gap backlog** (`docs/parity/gap-backlog.md`): every gap
+    classified `adopt` (18), `adapt-lighter` (7) or `decline` (8), each with a
+    reason, on the rule that CodeRabbit doing something is never itself a reason
+    to copy it. `adapt-lighter` rows name the value *and* the lighter mechanism
+    that delivers it on one operator's machine; the `decline` column is seeded
+    from surfaces that exist only because CodeRabbit sells seats (the
+    `Included review availability` quota line is the single most frequent
+    CodeRabbit element in the corpus, at 24/25 review bodies). It also records
+    seven places where observation contradicts
+    `docs/parity/CodeRabbit-parity-brief.md`'s priority ordering and gives the
+    corrected order.
+  - **A fixture repository and a ten-PR series**
+    (`tests/e2e/reference/2026-09/fixture-repo/`, `.../pr-series/`): a small
+    but real TypeScript/Python service, plus ten PR definitions loaded and
+    validated by `src/parity/fixture.ts`. Each PR is a change with an honest
+    reason to exist, with the planted problem riding inside it, so a reviewer
+    cannot tell which change is there to provoke a specific finding.
+  - **A trial runbook** (`docs/parity/trial-runbook.md`) for the one phase an
+    agent cannot perform: the GitHub OAuth grant and CodeRabbit terms
+    acceptance. No payment details are required at any point.
+  - **Two corrections worth carrying out of this work.** CodeRabbit's
+    `🤖 Prompt for AI Agents` block now opens by telling the agent to treat
+    finding text, file paths and code as untrusted data and never to follow
+    instructions embedded in them (86 occurrences; **0 in April**).
+    DiffSentry's preamble at `src/ai/parse.ts:290` still says only "Verify each
+    finding against the current code and only fix it if needed" — and that
+    block is built to be pasted into a coding agent, from text a pull request
+    author controls. It is logged as the top row of the backlog and is a
+    security fix, not cosmetic parity. Separately,
+    `tests/e2e/reference/CODERABBIT-FORMAT.md`'s "Surface 4" claimed CodeRabbit
+    posts standalone status comments; the April data it was derived from
+    contains three issue comments in total and no such comment, and the
+    section's own bullets are annotated "DiffSentry already does this". The
+    rubric documented DiffSentry inside a CodeRabbit reference, and
+    DiffSentry's 28 standalone status comments were built to it. That is a
+    product decision the owner now gets to make with correct information, not a
+    gap in either direction.
+  - `tests/e2e/reference/CODERABBIT-FORMAT.md` was **extended, not replaced**:
+    the April gap tables stay as the record of what was believed, marked
+    `[corrected 2026-09]` wherever September proves a specific claim wrong
+    (`🔵 Trivial` not `🟢`; `🪄 Autofix` renamed rather than removed; effort
+    level 5 is `Critical`), with a current September gap table appended after
+    them. Deleting the April reading would have hidden how a claim like
+    Surface 4 survived five months.
+
 ### Changed
 
 - Internal clean-up pass (dead code + deduplication). No intended behavior
