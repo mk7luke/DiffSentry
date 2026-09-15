@@ -1,6 +1,6 @@
 {
   "bot": "diffsentry[bot]",
-  "capturedAt": "2026-09-15T18:37:40.303Z",
+  "capturedAt": "2026-09-15T18:51:27.219Z",
   "prs": [
     {
       "repo": "mk7luke/DiffSentry",
@@ -115,8 +115,8 @@
     "walkthrough": 10,
     "review-summary": 18,
     "inline": 8,
-    "status": 0,
-    "chat": 51,
+    "status": 28,
+    "chat": 23,
     "other": 0
   }
 }

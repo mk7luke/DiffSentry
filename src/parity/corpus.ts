@@ -25,9 +25,20 @@ export function classifySurface(c: CapturedComment): Surface {
   if (c.kind === "inline") return "inline";
 
   const body = c.body;
-  if (/<!--\s*\w+[ -]review[ -]status\s*-->/i.test(body)) return "status";
+  // Precedence matters here, not just matching: both bots edit their
+  // in-progress "review status" comment in place as the review completes,
+  // so a finished walkthrough or review summary can still carry the status
+  // marker it was born with. Check terminal shapes (walkthrough,
+  // review-summary) before falling back to status, or a completed review
+  // gets miscounted as still "in progress". Don't reorder this without
+  // re-reading that behaviour.
   if (/^#{1,3}\s*Walkthrough\s*$/im.test(body)) return "walkthrough";
   if (/\*\*Actionable comments posted:\s*\d+\*\*/i.test(body)) return "review-summary";
+  // Bot-agnostic: matches an HTML comment ending in "status" (DiffSentry's
+  // "<!-- DiffSentry Status -->" / "<!-- ... Sticky Status -->") or
+  // containing "review status" (both bots' "<!-- ... for review status -->"
+  // boilerplate) rather than hardcoding either bot's exact wording.
+  if (/<!--[^>]*(?:review[ -]status|status\s*-->)/i.test(body)) return "status";
   return "chat";
 }
 
