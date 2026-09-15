@@ -229,12 +229,19 @@ reviews:
         mode: "warning"
         instructions: "If src/safety-scanner.ts or src/pattern-checks.ts gained a new rule, verify tests/e2e/scenarios/ has a scenario covering it."
 
-  # Built-in performance/footgun heuristics. Leave on — they're tuned for
-  # JS/TS and this project IS JS/TS. The a11y/i18n ones fire on JSX, which
-  # now exists in web/ (the React dashboard SPA): a11y stays valuable there,
-  # but i18n is a false positive for this single-maintainer English app — the
-  # web/** path_instructions above tell the bot to skip the i18n flag.
-  builtin_patterns: true
+  # Built-in performance/footgun heuristics. OFF as of 2026-09-15: the signal
+  # they produced was not worth the volume. The a11y rules in particular fire
+  # on any `<img>` in any reviewed file — including Markdown and captured test
+  # fixtures, which are not JSX and cannot carry an alt attribute meaningfully
+  # — and a single PR touching documentation drew dozens of them. The
+  # heuristics are path-scoped internally but not scoped to *source*, so prose
+  # and reference data get treated as code.
+  #
+  # What this gives up: the perf/footgun checks on real src/ and web/ code.
+  # That is the accepted cost. The rules worth keeping are expressed directly
+  # as `anti_patterns` below, which are repo-specific, tested, and quiet.
+  # Revisit if the built-ins gain per-path scoping.
+  builtin_patterns: false
 
   # Repo-specific anti-patterns. Each one is grounded in something I
   # actually saw in the codebase or in the project's coding norms.
