@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { applyTemplatePath, loadPrSeries, validatePrSeries, type PrDef } from "../../src/parity/fixture.js";
+import { applyTemplatePath, loadPrSeries, resolveCopyTarget, validatePrSeries, type PrDef } from "../../src/parity/fixture.js";
 import { findPr } from "../../scripts/fixture-open-pr.js";
 
 function def(over: Partial<PrDef> = {}): PrDef {
@@ -191,5 +191,54 @@ describe("none of the other PRs in the series need a deletes entry", () => {
     for (const d of defs) {
       expect(d.deletes ?? [], `${d.dir} should not declare deletes`).toEqual([]);
     }
+  });
+});
+
+describe("resolveCopyTarget", () => {
+  // copyFilesTree (scripts/fixture-open-pr.ts) routes every destination it
+  // writes to through this before mkdirSync/copyFileSync, so a fixture
+  // entry can't land outside the target checkout.
+  const destDir = path.join(path.sep, "tmp", "foo");
+
+  it("resolves a plain relative path inside destDir", () => {
+    expect(resolveCopyTarget(destDir, path.join("src", "index.ts"))).toBe(path.join(destDir, "src", "index.ts"));
+  });
+
+  it("rejects a leading ..", () => {
+    expect(() => resolveCopyTarget(destDir, path.join("..", "escape.txt"))).toThrow(/\.\./);
+  });
+
+  it("rejects a traversal that only escapes after normalisation", () => {
+    // A naive check on the literal string (e.g. a bare .includes("..")
+    // on the whole path, or a check that runs only after path.join
+    // collapses "a/../../escape.txt") could miss this; resolveCopyTarget
+    // rejects it up front because the path has a ".." segment at all,
+    // regardless of where.
+    expect(() => resolveCopyTarget(destDir, path.join("a", "..", "..", "escape.txt"))).toThrow(/\.\./);
+  });
+
+  it("rejects an absolute path", () => {
+    expect(() => resolveCopyTarget(destDir, path.join(path.sep, "etc", "passwd"))).toThrow(/absolute|\.\./i);
+  });
+
+  it("rejects a resolved path that only shares destDir as a string prefix", () => {
+    // A relative path that lands in a sibling directory can only reach
+    // that sibling via a ".." segment, so it's already caught by the
+    // no-".."  guard above — but resolveCopyTarget's bounds check is
+    // written as a separator-aware comparison (`resolved === destDir ||
+    // resolved.startsWith(destDir + path.sep)`) rather than a bare
+    // `resolved.startsWith(destDir)`, specifically so this case — landing
+    // in `/tmp/foo-evil`, which "starts with" `/tmp/foo` as a raw string
+    // but is not inside it — is rejected on its own merits too, not just
+    // by the ".." guard happening to fire first.
+    const relPath = path.join("..", "foo-evil", "x.txt");
+    expect(path.resolve(destDir, relPath)).toBe(`${destDir}-evil${path.sep}x.txt`);
+    expect(() => resolveCopyTarget(destDir, relPath)).toThrow();
+  });
+
+  it("bounds-checks the path a .tmpl suffix strips to, still landing inside destDir", () => {
+    const relPath = applyTemplatePath(path.join("sub", "package.json.tmpl"));
+    expect(relPath).toBe(path.join("sub", "package.json"));
+    expect(resolveCopyTarget(destDir, relPath)).toBe(path.join(destDir, "sub", "package.json"));
   });
 });

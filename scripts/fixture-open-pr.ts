@@ -32,7 +32,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { applyTemplatePath, loadPrSeries, validatePrSeries, type PrDef } from "../src/parity/fixture.js";
+import { applyTemplatePath, loadPrSeries, resolveCopyTarget, validatePrSeries, type PrDef } from "../src/parity/fixture.js";
 
 const DEFAULT_ROOT = "tests/e2e/reference/2026-09/fixture-repo/pr-series";
 
@@ -128,15 +128,51 @@ function remoteBranchExists(dir: string, branch: string): boolean {
  * `src/parity/fixture.ts`) lands in the fixture checkout under its real
  * name. Walks the tree itself (rather than `fs.cpSync`'s built-in
  * recursion) because `cpSync` has no per-file rename hook.
+ *
+ * Every destination this function writes to is bounds-checked with
+ * `resolveCopyTarget` against `destDir` (the root passed in by the caller —
+ * `destDir` here is always that fixed root, tracked across recursive calls
+ * via `relPrefix`, never a moving target), matching the same
+ * no-absolute/no-`..` invariant `validatePrSeries` enforces on a PR's
+ * `deletes` list. Without it, a `files/` tree entry — committed to this
+ * repo, or supplied via a user-controlled `--root` pointed at an untrusted
+ * pr-series — could otherwise write outside the fixture clone.
+ *
+ * The bounds check runs *after* `applyTemplatePath` strips a trailing
+ * `.tmpl`, not before: what actually needs to stay inside `destDir` is the
+ * path this function is about to write to, and that's the post-strip path.
+ * Stripping never introduces or removes a `..` segment (it only trims a
+ * fixed suffix off the final path segment), so the two orders agree on
+ * every input here; post-strip is chosen because it validates the real
+ * write target rather than an intermediate name that's never touched on
+ * disk.
+ *
+ * Refuses any symlink encountered in the tree, rather than following it.
+ * `entry.isDirectory()`/`isFile()` are false for a symlink dirent (Node
+ * reports the entry's own type, not its target's), so a symlinked
+ * directory would already fail to recurse and a symlinked file would fall
+ * into the file branch — where `copyFileSync` follows it and copies
+ * whatever it points to. The destination stays inside `destDir` either
+ * way (dest is always built from `destDir` + this tree's own relative
+ * path, never from the symlink's target), so this isn't a write-outside-
+ * destDir vector — but a symlink can still point at an arbitrary file
+ * outside the fixture tree (e.g. `~/.ssh/id_rsa`) whose *contents* would
+ * then be copied in, committed, and pushed to the (public) fixture repo.
+ * Refusing symlinks outright avoids that disclosure.
  */
-function copyFilesTree(srcDir: string, destDir: string): void {
+function copyFilesTree(srcDir: string, destDir: string, relPrefix = ""): void {
   for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+    const relPath = path.join(relPrefix, entry.name);
     const src = path.join(srcDir, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new Error(`fixture entry ${JSON.stringify(relPath)} is a symlink — refusing to copy it`);
+    }
     if (entry.isDirectory()) {
-      copyFilesTree(src, path.join(destDir, entry.name));
+      resolveCopyTarget(destDir, relPath);
+      copyFilesTree(src, destDir, relPath);
       continue;
     }
-    const dest = path.join(destDir, applyTemplatePath(entry.name));
+    const dest = resolveCopyTarget(destDir, applyTemplatePath(relPath));
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.copyFileSync(src, dest);
   }

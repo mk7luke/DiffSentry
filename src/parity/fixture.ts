@@ -46,6 +46,32 @@ export function applyTemplatePath(relPath: string): string {
   return relPath.endsWith(".tmpl") ? relPath.slice(0, -".tmpl".length) : relPath;
 }
 
+/**
+ * Resolves `relPath` (a path from a PR's `files/` tree) against `destDir`,
+ * throwing if `relPath` isn't a well-formed repo-relative path — the same
+ * invariant `validatePrSeries` already enforces on a PR's `deletes` list,
+ * applied here to every path `copyFilesTree` (in
+ * `scripts/fixture-open-pr.ts`) is about to write to — or if the resolved
+ * destination doesn't stay strictly inside `destDir`.
+ *
+ * The inside-`destDir` check resolves both sides with `path.resolve` and
+ * does a separator-aware prefix comparison, not a bare string `startsWith`:
+ * a naive `startsWith(destDir)` would wrongly accept a sibling directory
+ * that merely shares `destDir` as a string prefix (`/tmp/foo-evil` "starts
+ * with" `/tmp/foo`, but is not inside it).
+ */
+export function resolveCopyTarget(destDir: string, relPath: string): string {
+  if (!relPath || path.isAbsolute(relPath) || relPath.split(/[\\/]/).includes("..")) {
+    throw new Error(`fixture entry ${JSON.stringify(relPath)} must be a non-empty repo-relative path with no ".." segment`);
+  }
+  const resolvedDestDir = path.resolve(destDir);
+  const resolved = path.resolve(resolvedDestDir, relPath);
+  if (resolved !== resolvedDestDir && !resolved.startsWith(resolvedDestDir + path.sep)) {
+    throw new Error(`fixture entry ${JSON.stringify(relPath)} resolves to ${resolved}, outside ${resolvedDestDir}`);
+  }
+  return resolved;
+}
+
 export function loadPrSeries(root: string): PrDef[] {
   return fs
     .readdirSync(root)
