@@ -54,7 +54,10 @@ export const REPO_CONFIG_SCHEMA: JsonSchema = {
       additionalProperties: false,
       properties: {
         profile: { type: "string", enum: ["chill", "assertive"], description: "Overall review strictness." },
-        request_changes_workflow: { type: "boolean", description: "Use REQUEST_CHANGES instead of COMMENT." },
+        request_changes_workflow: {
+          type: "boolean",
+          description: "Allow reviews to post REQUEST_CHANGES. Default true. Set false to always post COMMENT instead, so DiffSentry never blocks a merge.",
+        },
         high_level_summary: { type: "boolean", description: "Post a high-level summary comment." },
         auto_apply_labels: { type: "boolean", description: "Apply suggested labels automatically." },
         auto_assign_reviewers: { type: "boolean", description: "Assign suggested reviewers automatically." },
