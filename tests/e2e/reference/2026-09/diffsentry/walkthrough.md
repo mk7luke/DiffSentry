@@ -380,3 +380,1264 @@ This change spans several distinct cohorts. Splitting it into smaller PRs would 
 ```
 
 ---
+
+## diffsentry[bot] · walkthrough · 2026-09-14T21:39:08Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/165#issuecomment-5671170406
+- Location: —
+
+```markdown
+<!-- DiffSentry Walkthrough -->
+<!-- walkthrough_start -->
+
+<details>
+<summary>📝 Walkthrough</summary>
+
+## Walkthrough
+
+Updated the labeler workflow to queue concurrent runs instead of cancelling active ones. This prevented cancelled label checks from persisting in PR status rollups and blocking Dependabot auto-merge.
+
+## Changes
+
+|Cohort / File(s)|Summary|
+|---|---|
+|**Labeler Concurrency Control** <br> `.github/workflows/labeler.yml`|Adjusted labeler workflow concurrency so new synchronize events queue behind active labeling runs rather than cancelling them. The added comments document why preserving completed checks avoids stale CANCELLED rollup nodes that block strict auto-merge validation.|
+
+## Sequence Diagram(s)
+
+```mermaid
+sequenceDiagram
+    participant PR as Dependabot PR
+    participant Merge as Auto-merge workflow
+    participant GitHub as GitHub Actions
+    participant Labeler as Label PRs workflow
+    PR->>Merge: PR falls behind main
+    Merge->>GitHub: update branch
+    GitHub->>Labeler: Trigger synchronize event
+    Note over Labeler: New run queues if a labeler run is active
+    Labeler-->>GitHub: Complete Apply path labels check
+    GitHub-->>Merge: Status rollup contains completed checks
+    Merge->>GitHub: Continue merge evaluation
+```
+
+## Estimated code review effort
+
+🎯 2 (Simple) | ⏱️ ~10 minutes
+
+## Suggested Labels
+
+`bug`, `dependencies`
+
+## Risk Assessment
+
+**Score: 0/100** — 🟢 Low
+
+No elevated risk signals detected.
+
+## Linked Issues
+
+- [#160](https://github.com/mk7luke/DiffSentry/pull/160) — build(deps): bump the server-minor-patch group across 1 directory with 9 updates 🟢
+- [#163](https://github.com/mk7luke/DiffSentry/pull/163) — fix(ci): accept Dependabot's GraphQL login in the auto-merge author guard 🔴
+- [#164](https://github.com/mk7luke/DiffSentry/pull/164) — fix(ci): wake auto-merge on every workflow that can finish after CI 🔴
+
+</details>
+
+<!-- walkthrough_end -->
+
+<!-- pre_merge_checks_walkthrough_start -->
+
+<details>
+<summary>🚥 Pre-merge checks | ✅ 5 | ❌ 0</summary>
+
+<details>
+<summary>✅ Passed checks (5 passed)</summary>
+
+| Check name | Status | Explanation |
+|---|---|---|
+| PR Title | ✅ Passed | Uses Conventional Commits prefix `fix(ci):`; the text after it starts with imperative verb “stop”, is under 72 characters, and has no trailing period. |
+| PR Description | ✅ Passed | The description meets the requirements. It clearly explains what changed (labeler runs now queue instead of cancelling in-progress runs) and why (cancelled labeler checks remain in the PR status rollup and block Dependabot auto-merge). It also links related PRs/issues via #163, #164, and #160. |
+| Schema bump | ✅ Passed | src/storage/db.ts is not changed in this PR; it only updates .github/workflows/labeler.yml. |
+| Provider parity | ✅ Passed | `src/ai/anthropic.ts` is not changed in this PR; the only shown change is `.github/workflows/labeler.yml`. No corresponding OpenAI provider updates are required. |
+| Pattern test coverage | ✅ Passed | No changes to src/safety-scanner.ts or src/pattern-checks.ts are included in this PR; it only changes .github/workflows/labeler.yml, so no new e2e scenario is required. |
+
+</details>
+
+<sub>✏️ Tip: You can configure your own custom pre-merge checks in your `.diffsentry.yaml`.</sub>
+
+</details>
+
+<!-- pre_merge_checks_walkthrough_end -->
+
+<!-- finishing_touch_checkbox_start -->
+
+<details>
+<summary>✨ Finishing Touches</summary>
+
+<details>
+<summary>🧪 Generate unit tests (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "ddce10db-13ec-49f6-9191-bf74dc5cca5d"} -->   Create PR with unit tests
+
+</details>
+
+<details>
+<summary>📝 Generate docstrings (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "eaaef667-3f3a-462f-9f81-b647deae98a9"} -->   Push docstring commit to this branch
+
+</details>
+
+<details>
+<summary>🧹 Simplify (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "c2b0db77-37dd-4387-bbf5-1125904a6dbc"} -->   Push simplification commit to this branch
+
+</details>
+
+<details>
+<summary>🪄 Autofix unresolved comments (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "d7949b69-c088-49e5-bcdf-3dfa8e871943"} -->   Push autofix commit to this branch
+
+</details>
+
+</details>
+
+<!-- finishing_touch_checkbox_end -->
+
+<!-- tips_start -->
+
+---
+
+<sub>Comment `@diffsentry help` to get the list of available commands and usage tips.</sub>
+
+<!-- tips_end -->
+
+<!-- internal_state_start -->
+<!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":165,"updatedAt":"2026-09-14T21:39:07.867Z"}-->
+<!-- diffsentry-state:H4sIAAAAAAAAA4WNvW7CMBRG3+XOIdhxwD9bl6pSO6CGqYjBjq+JFUMi2ySKEO9eVQWpW9dz9H3nBhMoWkDQKX/i5HFG23QaFMgapdOuFZTWuiVOcMuYa03F6tYa4yilGy4EgwKcD9h0OoG6QXnyubua9TzE3oVhTuugDQaM5XIOoIBxQg3dVEYKjtpKuBcwDimjffWXE8Yx+ktOoA7HJ9/FD5wwvOPywD+5tItDiymhBXX4J/qcNL0fR7SNP/ug45+vh9hHP3kdfsV1tDqjfcmgoCLVdkXkitb7iiomFeGl2PIvKCD61L/5lIe4gDqQ4/0bgMPMp1EBAAA=-->
+<!-- internal_state_end -->
+```
+
+---
+
+## diffsentry[bot] · walkthrough · 2026-09-14T21:34:28Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/164#issuecomment-5671121598
+- Location: —
+
+```markdown
+<!-- DiffSentry Walkthrough -->
+<!-- walkthrough_start -->
+
+<details>
+<summary>📝 Walkthrough</summary>
+
+## Walkthrough
+
+Expanded Dependabot auto-merge wake-up triggers to cover every independent PR workflow that can complete after CI. It also allowed pull_request_target labeler runs and cancelled triggering runs to invoke the existing rollup-based merge decision.
+
+## Changes
+
+|Cohort / File(s)|Summary|
+|---|---|
+|**Auto-Merge Wake Triggers** <br> `.github/workflows/dependabot-auto-merge.yml`|Updated the auto-merge workflow to run after all independent workflows contributing to a Dependabot PR's check rollup. The merge job now relies on the existing rollup validation instead of the triggering workflow's conclusion, preventing missed retries when CI finishes before other checks or when Label PRs is cancelled.|
+
+## Sequence Diagram(s)
+
+```mermaid
+sequenceDiagram
+    participant PR as Dependabot PR
+    participant CI as CI Workflow
+    participant CodeQL as CodeQL Workflow
+    participant Labeler as Label PRs Workflow
+    participant Merge as Auto-Merge Workflow
+    participant Rollup as PR Check Rollup
+    CI-->>Merge: workflow completed
+    Merge->>Rollup: Read all PR checks
+    Rollup-->>Merge: Checks still pending
+    Merge-->>Merge: Exit without merging
+    CodeQL-->>Merge: workflow completed
+    Merge->>Rollup: Read all PR checks
+    Rollup-->>Merge: Checks still pending or green
+    Labeler-->>Merge: workflow completed or cancelled
+    Merge->>Rollup: Read all PR checks
+    Rollup-->>Merge: All checks green
+    Merge-->>PR: Merge Dependabot update
+```
+
+## Estimated code review effort
+
+🎯 2 (Simple) | ⏱️ ~15 minutes
+
+## Suggested Labels
+
+`bug`, `ci`
+
+## Risk Assessment
+
+**Score: 0/100** — 🟢 Low
+
+No elevated risk signals detected.
+
+## Linked Issues
+
+- [#143](https://github.com/mk7luke/DiffSentry/pull/143) — ci: merge Dependabot's minor/patch groups once CI is green 🔴
+- [#160](https://github.com/mk7luke/DiffSentry/pull/160) — build(deps): bump the server-minor-patch group across 1 directory with 9 updates 🟢
+- [#161](https://github.com/mk7luke/DiffSentry/pull/161) — build(deps): bump the spa-minor-patch group across 1 directory with 16 updates 🟢
+- [#163](https://github.com/mk7luke/DiffSentry/pull/163) — fix(ci): accept Dependabot's GraphQL login in the auto-merge author guard 🔴
+
+</details>
+
+<!-- walkthrough_end -->
+
+<!-- pre_merge_checks_walkthrough_start -->
+
+<details>
+<summary>🚥 Pre-merge checks | ✅ 5 | ❌ 0</summary>
+
+<details>
+<summary>✅ Passed checks (5 passed)</summary>
+
+| Check name | Status | Explanation |
+|---|---|---|
+| PR Title | ✅ Passed | Uses the Conventional Commits prefix "fix(ci):" and the remaining title begins with the imperative verb "wake". It is under 72 characters and has no trailing period. |
+| PR Description | ✅ Passed | The description meets the requirements. It clearly explains what changed (the auto-merge workflow now wakes on CI, CodeQL, Dependency audit, and Label PRs, and accepts both pull_request and pull_request_target workflow runs) and why (to avoid races where CI finishes before independent checks, leaving no later trigger to retry merging). It also links related PRs/issues via #163, #160, #161, and #143. |
+| Schema bump | ✅ Passed | src/storage/db.ts is not changed in this PR; it only modifies .github/workflows/dependabot-auto-merge.yml. |
+| Provider parity | ✅ Passed | This PR only modifies `.github/workflows/dependabot-auto-merge.yml`; it does not change `src/ai/anthropic.ts`, so no corresponding request/response contract updates are required in `openai.ts` or `openai-compatible.ts`. |
+| Pattern test coverage | ✅ Passed | Neither src/safety-scanner.ts nor src/pattern-checks.ts is changed in this PR; it only modifies .github/workflows/dependabot-auto-merge.yml, so no new scanner/pattern rule requires an E2E scenario. |
+
+</details>
+
+<sub>✏️ Tip: You can configure your own custom pre-merge checks in your `.diffsentry.yaml`.</sub>
+
+</details>
+
+<!-- pre_merge_checks_walkthrough_end -->
+
+<!-- finishing_touch_checkbox_start -->
+
+<details>
+<summary>✨ Finishing Touches</summary>
+
+<details>
+<summary>🧪 Generate unit tests (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "df63157f-a50e-4ee9-a1cc-ced4e149500c"} -->   Create PR with unit tests
+
+</details>
+
+<details>
+<summary>📝 Generate docstrings (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "819d5b8f-3720-427c-9232-9e8f263c9ec3"} -->   Push docstring commit to this branch
+
+</details>
+
+<details>
+<summary>🧹 Simplify (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "a8cb42e4-66e9-409b-a0be-20421bc8fc66"} -->   Push simplification commit to this branch
+
+</details>
+
+<details>
+<summary>🪄 Autofix unresolved comments (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "02be67ab-70f8-4395-932e-777d78591a15"} -->   Push autofix commit to this branch
+
+</details>
+
+</details>
+
+<!-- finishing_touch_checkbox_end -->
+
+<!-- tips_start -->
+
+---
+
+<sub>Comment `@diffsentry help` to get the list of available commands and usage tips.</sub>
+
+<!-- tips_end -->
+
+<!-- internal_state_start -->
+<!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":164,"updatedAt":"2026-09-14T21:34:28.105Z"}-->
+<!-- diffsentry-state:H4sIAAAAAAAAA5WOvW6DMBRG3+XOQDD/8dalqtQOUcnUKIPNvYCFwcg2IBTl3auqidS16znS+b4brMBZAFo4/0mroo2w7gVwYLHESrKCyrRheZ5kKCqUmJVNRUUhWomsaFmeQQCt0lT3wgG/QdQp3y/ysBk7tNps7oA004RCGh+KxZtwJNtRtI8aOMgyPjJsEtGmrJCyhHsAs3Ge8FVNHdnZqsk74Jfrk5/sB62k32l/4J9xd7KmIecIgV/+deEZqAc1z4S1GpUW9k/5Ic5WrUroX7HMKDzhiwcOSZwUYXwMWXZOGE8znlQRi/MvCMAqN7wp543dgV/i6/0b14Zdk20BAAA=-->
+<!-- internal_state_end -->
+```
+
+---
+
+## diffsentry[bot] · walkthrough · 2026-09-14T21:03:11Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/163#issuecomment-5670772902
+- Location: —
+
+```markdown
+<!-- DiffSentry Walkthrough -->
+<!-- walkthrough_start -->
+
+<details>
+<summary>📝 Walkthrough</summary>
+
+## Walkthrough
+
+Fixed the Dependabot auto-merge author guard to recognize the login formats returned by both GraphQL and REST. This allowed eligible Dependabot pull requests to proceed instead of silently exiting successfully.
+
+## Changes
+
+|Cohort / File(s)|Summary|
+|---|---|
+|**Dependabot Author Guard** <br> `.github/workflows/dependabot-auto-merge.yml`|Updated the workflow's author validation to support the different bot-login renderings returned by GitHub APIs and the gh CLI. Added inline documentation explaining why the prior GraphQL-versus-REST comparison never matched.|
+
+## Sequence Diagram(s)
+
+```mermaid
+sequenceDiagram
+    participant CI as CI workflow
+    participant Merge as Auto-merge workflow
+    participant GH as GitHub CLI GraphQL
+    CI->>Merge: CI completion triggers workflow
+    Merge->>GH: Query PR author
+    GH-->>Merge: app/dependabot
+    Merge->>Merge: Accept supported Dependabot login
+    Merge->>GH: Continue approval and merge checks
+```
+
+## Estimated code review effort
+
+🎯 2 (Simple) | ⏱️ ~10 minutes
+
+## Suggested Labels
+
+`bug`, `dependencies`
+
+## Risk Assessment
+
+**Score: 0/100** — 🟢 Low
+
+No elevated risk signals detected.
+
+## ✍️ Commit Message Coach
+
+1 of 1 commit message could be stronger.
+
+| Commit | Subject | Issues |
+|---|---|---|
+| `74bc328` | 🟡 fix(ci): accept Dependabot's GraphQL login in the auto-merge author guard | Subject is 73 characters — keep under 72 to avoid truncation. |
+
+<sub>Tip: imperative mood (`Add user lookup`), under 72 chars, no trailing period. Conventional Commits like `feat:` / `fix:` are also fine.</sub>
+
+## Linked Issues
+
+- [#143](https://github.com/mk7luke/DiffSentry/pull/143) — ci: merge Dependabot's minor/patch groups once CI is green 🔴
+- [#160](https://github.com/mk7luke/DiffSentry/pull/160) — build(deps): bump the server-minor-patch group across 1 directory with 9 updates 🟢
+- [#161](https://github.com/mk7luke/DiffSentry/pull/161) — build(deps): bump the spa-minor-patch group across 1 directory with 16 updates 🟢
+
+</details>
+
+<!-- walkthrough_end -->
+
+<!-- pre_merge_checks_walkthrough_start -->
+
+<details>
+<summary>🚥 Pre-merge checks | ✅ 4 | ❌ 1</summary>
+
+### ❌ Failed checks (1 warning)
+
+| Check name | Status | Explanation | Resolution |
+|---|---|---|---|
+| PR Title | ⚠️ Warning | Title uses the imperative verb "accept" and has no trailing period, but it is 73 characters long, exceeding the under-72-character limit. | Address before merging or downgrade to non-blocking. |
+
+<details>
+<summary>✅ Passed checks (4 passed)</summary>
+
+| Check name | Status | Explanation |
+|---|---|---|
+| PR Description | ✅ Passed | The description meets the requirements. It clearly explains what changed (the author guard now accepts `app/dependabot`, `dependabot[bot]`, and `dependabot`) and why (the GraphQL-derived author login did not match the REST-only bracketed spelling, causing auto-merge to exit without merging). It also links the related PRs/issues by referencing #143, #160, and #161. |
+| Schema bump | ✅ Passed | src/storage/db.ts is not changed in this PR; it only updates the Dependabot auto-merge workflow guard. |
+| Provider parity | ✅ Passed | This PR only changes `.github/workflows/dependabot-auto-merge.yml`; it does not modify `src/ai/anthropic.ts`, so no corresponding updates to `openai.ts` or `openai-compatible.ts` are required. |
+| Pattern test coverage | ✅ Passed | No changes to src/safety-scanner.ts or src/pattern-checks.ts are included in this PR; it only modifies .github/workflows/dependabot-auto-merge.yml. No new scanner/pattern rule requires an E2E scenario. |
+
+</details>
+
+<sub>✏️ Tip: You can configure your own custom pre-merge checks in your `.diffsentry.yaml`.</sub>
+
+</details>
+
+<!-- pre_merge_checks_walkthrough_end -->
+
+<!-- finishing_touch_checkbox_start -->
+
+<details>
+<summary>✨ Finishing Touches</summary>
+
+<details>
+<summary>🧪 Generate unit tests (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "fabad762-d00c-42bd-a004-7b18545e0000"} -->   Create PR with unit tests
+
+</details>
+
+<details>
+<summary>📝 Generate docstrings (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "0c5f09a7-7b2b-4de5-94c4-f3abad485064"} -->   Push docstring commit to this branch
+
+</details>
+
+<details>
+<summary>🧹 Simplify (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "01f198c7-e07b-4c62-b7bc-6753563da5e1"} -->   Push simplification commit to this branch
+
+</details>
+
+<details>
+<summary>🪄 Autofix unresolved comments (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "fbaf1424-50d8-46aa-91f9-25c06ddeb2f1"} -->   Push autofix commit to this branch
+
+</details>
+
+</details>
+
+<!-- finishing_touch_checkbox_end -->
+
+<!-- tips_start -->
+
+---
+
+<sub>Comment `@diffsentry help` to get the list of available commands and usage tips.</sub>
+
+<!-- tips_end -->
+
+<!-- internal_state_start -->
+<!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":163,"updatedAt":"2026-09-14T21:03:10.652Z"}-->
+<!-- diffsentry-state:H4sIAAAAAAAAA5WOsW6DMBRF/+XNQIwhFLxlqSq1Q1QyNcrw4D0SC4OR7YBQlH+vqiZS167nSOfeG8yg0ggM+vDJs+aFqb4gKHjJmzaTpWzzasuiqphLbhkxa7o2Iywlym2HeQMRdNpwfUEP6gbJWYfLtdks1vWdsYvfEE88EjY2xHgNNh7YnTlZBwMKREFdS7JESSwLyuEewWR9YHrV45nd5PQYPKjj6cn37oNnNu+8PvDPuN8727L3TKCO/7rwDNS9niamWg/aoPtTfoiD07NG8yuuE2Fg2gVQIIUsYlHFaX6QqRKZSkVSbOUXROC079+0D9atoI7idP8GTEVTi20BAAA=-->
+<!-- internal_state_end -->
+```
+
+---
+
+## diffsentry[bot] · walkthrough · 2026-08-31T15:38:32Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/156#issuecomment-5480684750
+- Location: —
+
+```markdown
+<!-- DiffSentry Walkthrough -->
+<!-- walkthrough_start -->
+
+<details>
+<summary>📝 Walkthrough</summary>
+
+## Walkthrough
+
+Updated the pinned TruffleHog GitHub Action from v3.97.0 to v3.97.4. The secret-scanning workflow now uses the corresponding immutable commit SHA while preserving verified-results-only scanning.
+
+## Changes
+
+|Cohort / File(s)|Summary|
+|---|---|
+|**Secret Scan Dependency** <br> `.github/workflows/secret-scan.yml`|Bumped the TruffleHog action used by the repository secret-scanning workflow from v3.97.0 to v3.97.4. The action remained SHA-pinned for supply-chain integrity, and its existing verified-secret filtering configuration was unchanged.|
+
+## Estimated code review effort
+
+🎯 1 (Trivial) | ⏱️ ~5 minutes
+
+## Suggested Labels
+
+`dependencies`, `security`
+
+## Risk Assessment
+
+**Score: 7/100** — 🟢 Low
+
+| Factor | Weight | Detail |
+|---|---|---|
+| High-risk paths touched | +7 | `.github/workflows/secret-scan.yml` |
+
+## 🏷️ PR Title Coach
+
+🟡 **build(deps): bump trufflesecurity/trufflehog from 3.97.0 to 3.97.4 in the actions group across 1 directory**
+
+- Title is 106 characters — keep under 80 for readability in lists and notification subjects.
+
+<sub>Tip: imperative verb + concrete object, under 80 chars, no trailing period. `feat:` / `fix:` prefixes are also fine.</sub>
+
+## 👤 Suggested Reviewers
+
+Ranked by `git blame` weight on the touched lines + CODEOWNERS overlap.
+
+- @mk7luke — `owner` — owns 1 file(s)
+
+</details>
+
+<!-- walkthrough_end -->
+
+<!-- pre_merge_checks_walkthrough_start -->
+
+<details>
+<summary>🚥 Pre-merge checks | ✅ 3 | ❌ 2</summary>
+
+### ❌ Failed checks (2 warnings)
+
+| Check name | Status | Explanation | Resolution |
+|---|---|---|---|
+| PR Title | ⚠️ Warning | The title uses the imperative verb "bump" after the Conventional Commits prefix and has no trailing period, but it exceeds the 72-character limit. | Address before merging or downgrade to non-blocking. |
+| PR Description | ⚠️ Warning | The description clearly states what changed: `trufflesecurity/trufflehog` is bumped from 3.97.0 to 3.97.4, and it includes upstream release/commit links. However, it does not include a sentence explaining why this repository should take the update (for example, to obtain security fixes, detector improvements, or compatibility/reliability fixes). | Address before merging or downgrade to non-blocking. |
+
+<details>
+<summary>✅ Passed checks (3 passed)</summary>
+
+| Check name | Status | Explanation |
+|---|---|---|
+| Schema bump | ✅ Passed | src/storage/db.ts is not changed in the provided PR diff. This PR only updates the pinned trufflesecurity/trufflehog GitHub Action in .github/workflows/secret-scan.yml. |
+| Provider parity | ✅ Passed | src/ai/anthropic.ts was not changed in this PR. The only change updates the pinned TruffleHog GitHub Action in .github/workflows/secret-scan.yml, so no corresponding updates to openai.ts or openai-compatible.ts are required. |
+| Pattern test coverage | ✅ Passed | No changes to src/safety-scanner.ts or src/pattern-checks.ts are included in this PR. It only updates the pinned TruffleHog GitHub Action in .github/workflows/secret-scan.yml, so no new e2e scenario is required. |
+
+</details>
+
+<sub>✏️ Tip: You can configure your own custom pre-merge checks in your `.diffsentry.yaml`.</sub>
+
+</details>
+
+<!-- pre_merge_checks_walkthrough_end -->
+
+<!-- finishing_touch_checkbox_start -->
+
+<details>
+<summary>✨ Finishing Touches</summary>
+
+<details>
+<summary>🧪 Generate unit tests (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "fd99ebf2-8df1-4958-a969-c41a42aad718"} -->   Create PR with unit tests
+
+</details>
+
+<details>
+<summary>📝 Generate docstrings (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "2a257634-3be8-411b-a25d-54154b83b203"} -->   Push docstring commit to this branch
+
+</details>
+
+<details>
+<summary>🧹 Simplify (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "1d376455-f487-4312-b2a7-018b24790dd1"} -->   Push simplification commit to this branch
+
+</details>
+
+<details>
+<summary>🪄 Autofix unresolved comments (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "434e8df5-7de5-42a5-93b9-aabca342b7f6"} -->   Push autofix commit to this branch
+
+</details>
+
+</details>
+
+<!-- finishing_touch_checkbox_end -->
+
+<!-- tips_start -->
+
+---
+
+<sub>Comment `@diffsentry help` to get the list of available commands and usage tips.</sub>
+
+<!-- tips_end -->
+
+<!-- internal_state_start -->
+<!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":156,"updatedAt":"2026-09-07T15:38:15.371Z"}-->
+<!-- diffsentry-state:H4sIAAAAAAAAA42NsW6DMBRF/+XNQGxTG/CWparUDlHJVJTB2I9g4QCyHRCK8u9V1UTq2PUc3XtusICkCTgV4icuFlc0da9AAmek01xUrCStqnjeCsK7iuZYEc6wpFwV+gU5hwQ667DuVQB5g+xsY39td+vkh85Na9gF1B5jGrQas+3iQEKndMlzJbATRrSshHsC8xQimlc7ntHP3o4xgGxOT37wH7ige8ftgX+S4eAnjSGgAdn8I/yc1YOdZzS1vVin/J+/hzh6u1jlfsV1Niqi2UeQwAgTKalSUhwpl3kpKc/ygn5BAt6G4c2GOPkNZFMkxen+DVKYFKZbAQAA-->
+<!-- internal_state_end -->
+```
+
+---
+
+## diffsentry[bot] · walkthrough · 2026-08-22T06:54:20Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/145#issuecomment-5378746936
+- Location: —
+
+```markdown
+<!-- DiffSentry Walkthrough -->
+<!-- walkthrough_start -->
+
+<details>
+<summary>📝 Walkthrough</summary>
+
+## Walkthrough
+
+Hardened edited walkthrough checkbox handling by requiring the edited comment to be bot-authored before dispatching Finishing Touches commands. Added regression coverage for forged user comments, legitimate bot comments, and non-changing checkbox edits.
+
+## Changes
+
+|Cohort / File(s)|Summary|
+|---|---|
+|**Webhook Authorization Guard** <br> `src/webhook/dispatch.ts`|Restricted actionable Finishing Touches checkbox edits to comments authored by bots. This prevents users from forging the plain-text walkthrough marker and dispatching autofix or other code-generation commands through an edited comment.|
+|**Security Regression Tests** <br> `tests/unit/slash-dispatch.test.ts`|Added coverage for the vulnerable forged-comment flow and preserved expected behavior for bot walkthrough comments. The tests also verify that edits without newly checked boxes remain ignored.|
+|**Security Changelog Entry** <br> `CHANGELOG.md`|Recorded the authorization issue and its impact, including the prior ability to trigger codegen commands against a pull request branch via a forged comment.|
+
+## Sequence Diagram(s)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant GitHub
+    participant Webhook as Webhook Dispatcher
+    participant Bot as DiffSentry Bot
+    User->>GitHub: Edit forged comment with walkthrough marker and checked box
+    GitHub->>Webhook: issue_comment.edited payload
+    Webhook->>Webhook: Verify comment author type is Bot
+    Webhook-->>GitHub: Ignore user-authored comment
+    Note over Bot: No codegen command or branch commit is triggered
+```
+
+## Estimated code review effort
+
+🎯 2 (Simple) | ⏱️ ~15 minutes
+
+## Suggested Labels
+
+`bug`, `security`, `test`
+
+## Risk Assessment
+
+**Score: 0/100** — 🟢 Low
+
+No elevated risk signals detected.
+
+## Test Coverage Signal
+
+🟢 9 prod / 50 test lines added.
+
+| Source files changed | Test files changed | Source lines + | Test lines + |
+|---|---|---|---|
+| 1 | 1 | 9 | 50 |
+
+## ✍️ Commit Message Coach
+
+1 of 2 commit messages could be stronger.
+
+| Commit | Subject | Issues |
+|---|---|---|
+| `b3e81a5` | 🟡 fix(webhook): require bot authorship before honoring Finishing Touches checkbox edits | Subject is 85 characters — keep under 72 to avoid truncation. |
+
+<sub>Tip: imperative mood (`Add user lookup`), under 72 chars, no trailing period. Conventional Commits like `feat:` / `fix:` are also fine.</sub>
+
+## 🏷️ PR Title Coach
+
+🟡 **fix(webhook): require bot authorship before honoring Finishing Touches checkbox edits**
+
+- Title is 85 characters — keep under 80 for readability in lists and notification subjects.
+
+<sub>Tip: imperative verb + concrete object, under 80 chars, no trailing period. `feat:` / `fix:` prefixes are also fine.</sub>
+
+## 👤 Suggested Reviewers
+
+Ranked by `git blame` weight on the touched lines + CODEOWNERS overlap.
+
+- @mk7luke — `owner` — owns 1 file(s)
+
+## Possibly related PRs
+
+- [mk7luke/DiffSentry#147](https://github.com/mk7luke/DiffSentry/pull/147) — refactor: remove dead code and consolidate duplicated helpers
+- [mk7luke/DiffSentry#146](https://github.com/mk7luke/DiffSentry/pull/146) — fix(dashboard): sanitize rendered markdown with an allowlist
+
+</details>
+
+<!-- walkthrough_end -->
+
+<!-- pre_merge_checks_walkthrough_start -->
+
+<details>
+<summary>🚥 Pre-merge checks | ✅ 4 | ❌ 1</summary>
+
+### ❌ Failed checks (1 warning)
+
+| Check name | Status | Explanation | Resolution |
+|---|---|---|---|
+| PR Title | ⚠️ Warning | The title uses an imperative verb (“require”) and has no trailing period, but it is 76 characters long, exceeding the 72-character limit. | Address before merging or downgrade to non-blocking. |
+
+<details>
+<summary>✅ Passed checks (4 passed)</summary>
+
+| Check name | Status | Explanation |
+|---|---|---|
+| PR Description | ✅ Passed | The description clearly explains what changed (the edited-comment checkbox dispatch now requires the comment author to be a bot) and why (to prevent users from forging the walkthrough marker and triggering codegen/autofix commits). No related issue or PR link is provided, but the requirement only calls for one if applicable. |
+| Schema bump | ✅ Passed | src/storage/db.ts is not changed in this PR, so no schema-version migration check is required. |
+| Provider parity | ✅ Passed | No changes to src/ai/anthropic.ts are shown in this PR; the visible change is limited to CHANGELOG.md, so there is no Anthropic request/response contract change requiring corresponding updates to openai.ts or openai-compatible.ts. |
+| Pattern test coverage | ✅ Passed | No changes to src/safety-scanner.ts or src/pattern-checks.ts are shown in this PR, so no new safety/pattern rule requires an E2E scenario. |
+
+</details>
+
+<sub>✏️ Tip: You can configure your own custom pre-merge checks in your `.diffsentry.yaml`.</sub>
+
+</details>
+
+<!-- pre_merge_checks_walkthrough_end -->
+
+<!-- finishing_touch_checkbox_start -->
+
+<details>
+<summary>✨ Finishing Touches</summary>
+
+<details>
+<summary>🧪 Generate unit tests (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "e76cdeaf-8baa-464b-b63d-34dffbeebba0"} -->   Create PR with unit tests
+
+</details>
+
+<details>
+<summary>📝 Generate docstrings (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "8ae00bcb-79c5-4299-9ce6-3d49b5eaa0cd"} -->   Push docstring commit to this branch
+
+</details>
+
+<details>
+<summary>🧹 Simplify (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "a26d1335-cfbe-4d29-9f58-067e0e0556cc"} -->   Push simplification commit to this branch
+
+</details>
+
+<details>
+<summary>🪄 Autofix unresolved comments (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "237de86e-5a49-4222-a751-3c752796eebd"} -->   Push autofix commit to this branch
+
+</details>
+
+</details>
+
+<!-- finishing_touch_checkbox_end -->
+
+<!-- tips_start -->
+
+---
+
+<sub>Comment `@diffsentry help` to get the list of available commands and usage tips.</sub>
+
+<!-- tips_end -->
+
+<!-- internal_state_start -->
+<!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":145,"updatedAt":"2026-09-05T04:30:17.520Z"}-->
+<!-- diffsentry-state:H4sIAAAAAAAAA42PUWvCMBSF/8t9rvY2bdMmbzI2hckm06eJD2lzswarLUmsiPjfhzgZGwz2evjO4XxnGEAmEbTKhzcaLB1JLxsFEsqCV6zI0ShMM+SsEGVR5nlmsFKIRhlWp4YyAREY29KyUR7kGR5mk5fp4/x1Ot5pkKBFWRphBCEqqgWDCLyr4yNVTddtY219r0LdjIMHCTznJqlrLtKEaY4VRBDIBx8f9jbEvlW+GX03yIdbLWcmNbxME8WLqtQElwj6zgfST3b/Qa53dn8F15t7vnBzGqh9ptNXfDXwC9fV5D1pkOufHndiubV9T3ppd7ZV7or9JfOf579WV84OVrW3Q4deq0B6EkACQ8ZHKEaYrzCTKcqkGOcM3yECZ/12Zn3o3AnkGiPcXD4B6FSxPtIBAAA=-->
+<!-- internal_state_end -->
+```
+
+---
+
+## diffsentry[bot] · walkthrough · 2026-08-28T18:47:28Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/152#issuecomment-5456436689
+- Location: —
+
+```markdown
+<!-- DiffSentry Walkthrough -->
+<!-- walkthrough_start -->
+
+<details>
+<summary>📝 Walkthrough</summary>
+
+## Walkthrough
+
+Centralized GitHub App ID validation in a shared predicate and applied it across runtime config, diagnostics, and the interactive setup flow. Added setup validator coverage to reject Client IDs and app slugs while preserving valid numeric values.
+
+## Changes
+
+|Cohort / File(s)|Summary|
+|---|---|
+|**Shared App ID Validation** <br> `src/config.ts`, `src/api/diagnostics.ts`|Introduced a canonical trimmed numeric GitHub App ID predicate and routed runtime loading and diagnostics through it. This removed duplicated regex logic and aligned validation behavior across server-facing paths.|
+|**Interactive Setup Validation** <br> `scripts/setup.ts`|Updated setup to reject blank and non-numeric App IDs at prompt time, with actionable guidance distinguishing App IDs from Client IDs and slugs. The final .env content validation now also catches invalid hand-edited values.|
+|**Setup Validator Tests** <br> `tests/unit/setup-env-validation.test.ts`|Added focused tests confirming valid numeric formats are accepted and invalid or empty App ID values produce the expected validation results.|
+
+## Sequence Diagram(s)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Setup as Setup CLI
+    participant Validator as App ID Predicate
+    participant Env as .env File
+    User->>Setup: Enter App ID
+    Setup->>Validator: Validate trimmed value
+    alt Numeric App ID
+        Validator-->>Setup: Valid
+        Setup->>Env: Write GITHUB_APP_ID
+    else Blank or non-numeric value
+        Validator-->>Setup: Invalid
+        Setup-->>User: Show requirement or correction guidance
+        Setup-->>User: Re-prompt for App ID
+    end
+```
+
+## Estimated code review effort
+
+🎯 2 (Simple) | ⏱️ ~15 minutes
+
+## Suggested Labels
+
+`bug`, `test`, `refactor`
+
+## Risk Assessment
+
+**Score: 0/100** — 🟢 Low
+
+No elevated risk signals detected.
+
+## Test Coverage Signal
+
+🟢 45 prod / 37 test lines added.
+
+| Source files changed | Test files changed | Source lines + | Test lines + |
+|---|---|---|---|
+| 3 | 1 | 45 | 37 |
+
+## 👤 Suggested Reviewers
+
+Ranked by `git blame` weight on the touched lines + CODEOWNERS overlap.
+
+- @kaleabgirma — `blame` — 6 touched line(s)
+
+## Possibly related PRs
+
+- [mk7luke/DiffSentry#147](https://github.com/mk7luke/DiffSentry/pull/147) — refactor: remove dead code and consolidate duplicated helpers
+
+## Linked Issues
+
+- [#150](https://github.com/mk7luke/DiffSentry/pull/150) — Reject non-numeric GITHUB_APP_ID at boot 🔴
+- [#151](https://github.com/mk7luke/DiffSentry/issues/151) — [Bug] npm run setup still accepts a non-numeric GITHUB_APP_ID 🟢
+
+</details>
+
+<!-- walkthrough_end -->
+
+<!-- pre_merge_checks_walkthrough_start -->
+
+<details>
+<summary>🚥 Pre-merge checks | ✅ 5 | ❌ 0</summary>
+
+<details>
+<summary>✅ Passed checks (5 passed)</summary>
+
+| Check name | Status | Explanation |
+|---|---|---|
+| PR Title | ✅ Passed | Title uses the imperative verb "Validate", is under 72 characters, and has no trailing period. |
+| PR Description | ✅ Passed | The description meets the requirements. It clearly explains what changed (a shared isValidGitHubAppId predicate is exported and used by config loading, diagnostics, and setup validation) and why (to prevent npm run setup from accepting non-numeric Client IDs or app slugs that later cause GitHub JWT issuer failures). It also links the related issue via “Fixes #151” and references the preceding PR, #150. |
+| Schema bump | ✅ Passed | src/storage/db.ts is not among the changed files shown, so this schema-versioning check is not applicable to this PR. |
+| Provider parity | ✅ Passed | src/ai/anthropic.ts is not among the changed files in this PR, so no request/response contract change requires corresponding updates to openai.ts or openai-compatible.ts. |
+| Pattern test coverage | ✅ Passed | Neither src/safety-scanner.ts nor src/pattern-checks.ts was changed in this PR, so no new scanner/pattern rule requires an E2E scenario. |
+
+</details>
+
+<sub>✏️ Tip: You can configure your own custom pre-merge checks in your `.diffsentry.yaml`.</sub>
+
+</details>
+
+<!-- pre_merge_checks_walkthrough_end -->
+
+<!-- finishing_touch_checkbox_start -->
+
+<details>
+<summary>✨ Finishing Touches</summary>
+
+<details>
+<summary>🧪 Generate unit tests (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "8978e068-b34a-4028-adb3-e060abd12077"} -->   Create PR with unit tests
+
+</details>
+
+<details>
+<summary>📝 Generate docstrings (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "17f3ad8c-ffa3-4408-8081-6a97dca71f82"} -->   Push docstring commit to this branch
+
+</details>
+
+<details>
+<summary>🧹 Simplify (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "8372b6ae-da17-4271-9993-9ca8b49b435f"} -->   Push simplification commit to this branch
+
+</details>
+
+<details>
+<summary>🪄 Autofix unresolved comments (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "7a2a18a8-fe99-4639-972c-b93a9fc39dd1"} -->   Push autofix commit to this branch
+
+</details>
+
+</details>
+
+<!-- finishing_touch_checkbox_end -->
+
+<!-- tips_start -->
+
+---
+
+<sub>Comment `@diffsentry help` to get the list of available commands and usage tips.</sub>
+
+<!-- tips_end -->
+
+<!-- internal_state_start -->
+<!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":152,"updatedAt":"2026-08-28T18:47:27.954Z"}-->
+<!-- diffsentry-state:H4sIAAAAAAAAA42RzWrDMBCE32XPTmLJViT51ksptIfQ9NTQg37WyRLXNlrFJZS8ewlJoLQUep2ZZeZjP2GCRhTQOc7POBF+YFzvHDQghdZee1kq56yuWyuq6CtTWdGiFKKUUYeolgIKaKnD9c4xNJ/AIdGYecGYD+M8MzSgvAmVlbqStcYYPRTAKSzcSItIbtsPnCnwNYsmVLEyUqilV0pfs2HoW9peIkJbY1XrLaqAS2+ggIyceXHoKV96Z9hPs8l1FF2moZ+f/ctx6VodrZK+LkNdRQWnAsaBM8Z76reYxkT9Obh5u+mr9IQTdo94vMpnWl6lISAzRmg2v5n/BPxJ8//pt+L1nsYR45reqXPp26Kr8ZJoItddjMMYXcZ4l8//LOVyVpqZNC/CNLVupJ5bVb9CAYl4/0Cch3SEZlO+nb4AL4M5KhYCAAA=-->
+<!-- internal_state_end -->
+```
+
+---
+
+## diffsentry[bot] · walkthrough · 2026-08-28T20:33:32Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/153#issuecomment-5457475219
+- Location: —
+
+```markdown
+<!-- DiffSentry Walkthrough -->
+<!-- walkthrough_start -->
+
+<details>
+<summary>📝 Walkthrough</summary>
+
+## Walkthrough
+
+Centralized GitHub App ID validation and enforced numeric IDs across runtime configuration, diagnostics, and interactive setup. Added tests covering the shared validator and setup environment validation.
+
+## Changes
+
+|Cohort / File(s)|Summary|
+|---|---|
+|**Shared App ID Validation** <br> `src/config.ts`, `src/api/diagnostics.ts`|Introduced a canonical numeric GitHub App ID predicate and reused it in boot-time configuration and diagnostics checks to keep validation behavior consistent.|
+|**Interactive Setup Validation** <br> `scripts/setup.ts`|Updated setup prompts to reject non-numeric App IDs immediately and extended .env validation with an actionable error explaining that the App ID, rather than Client ID, is required.|
+|**Validation Test Coverage** <br> `tests/unit/config-github-app-id.test.ts`|Added unit tests for the exported predicate, whitespace handling, invalid Client ID-like values, and setup environment validation.|
+
+## Sequence Diagram(s)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Setup as Interactive Setup
+    participant Validator as App ID Validator
+    User->>Setup: Enter App ID
+    Setup->>Validator: Validate input
+    alt Numeric App ID
+        Validator-->>Setup: Valid
+        Setup-->>User: Continue setup
+    else Non-numeric App ID
+        Validator-->>Setup: Invalid
+        Setup-->>User: Show guidance and re-prompt
+    end
+```
+
+## Estimated code review effort
+
+🎯 2 (Simple) | ⏱️ ~15 minutes
+
+## Suggested Labels
+
+`bug`, `enhancement`, `test`
+
+## Risk Assessment
+
+**Score: 0/100** — 🟢 Low
+
+No elevated risk signals detected.
+
+## Test Coverage Signal
+
+🟢 25 prod / 32 test lines added.
+
+| Source files changed | Test files changed | Source lines + | Test lines + |
+|---|---|---|---|
+| 3 | 1 | 25 | 32 |
+
+## ✍️ Commit Message Coach
+
+1 of 1 commit message could be stronger.
+
+| Commit | Subject | Issues |
+|---|---|---|
+| `27cf08e` | 🟡 fix(setup): validate GITHUB_APP_ID as numeric in interactive setup and env validator | Subject is 84 characters — keep under 72 to avoid truncation. |
+
+<sub>Tip: imperative mood (`Add user lookup`), under 72 chars, no trailing period. Conventional Commits like `feat:` / `fix:` are also fine.</sub>
+
+## 🏷️ PR Title Coach
+
+🟡 **fix(setup): validate GITHUB_APP_ID as numeric in interactive setup and env validator**
+
+- Title is 84 characters — keep under 80 for readability in lists and notification subjects.
+
+<sub>Tip: imperative verb + concrete object, under 80 chars, no trailing period. `feat:` / `fix:` prefixes are also fine.</sub>
+
+## 👤 Suggested Reviewers
+
+Ranked by `git blame` weight on the touched lines + CODEOWNERS overlap.
+
+- @mk7luke — `blame` + `owner` — 3 touched line(s), owns 4 file(s)
+- @kaleabgirma — `blame` — 3 touched line(s)
+
+## Possibly related PRs
+
+- [mk7luke/DiffSentry#152](https://github.com/mk7luke/DiffSentry/pull/152) — Validate GITHUB_APP_ID in npm run setup via a shared predicate
+- [mk7luke/DiffSentry#147](https://github.com/mk7luke/DiffSentry/pull/147) — refactor: remove dead code and consolidate duplicated helpers
+
+## Linked Issues
+
+- [#151](https://github.com/mk7luke/DiffSentry/issues/151) — [Bug] npm run setup still accepts a non-numeric GITHUB_APP_ID 🟢
+
+</details>
+
+<!-- walkthrough_end -->
+
+<!-- pre_merge_checks_walkthrough_start -->
+
+<details>
+<summary>🚥 Pre-merge checks | ✅ 4 | ❌ 1</summary>
+
+### ❌ Failed checks (1 warning)
+
+| Check name | Status | Explanation | Resolution |
+|---|---|---|---|
+| PR Title | ⚠️ Warning | The title uses an imperative verb (“validate”) and has no trailing period, but it exceeds the 72-character limit (84 characters). | Address before merging or downgrade to non-blocking. |
+
+<details>
+<summary>✅ Passed checks (4 passed)</summary>
+
+| Check name | Status | Explanation |
+|---|---|---|
+| PR Description | ✅ Passed | The description meets the requirements: it explains what changed (centralized numeric GitHub App ID validation across config, diagnostics, setup, and tests) and why (to prevent non-numeric/Client IDs, fixing #151). It also links the related issue via “Fixes #151.” |
+| Schema bump | ✅ Passed | src/storage/db.ts is not changed in this PR, so the schema-versioning check does not apply. |
+| Provider parity | ✅ Passed | No changes to src/ai/anthropic.ts are shown in this PR, so no corresponding request/response contract updates are required in openai.ts or openai-compatible.ts. |
+| Pattern test coverage | ✅ Passed | Neither src/safety-scanner.ts nor src/pattern-checks.ts is changed in this PR, so no new scanner/pattern rule requires an E2E scenario. |
+
+</details>
+
+<sub>✏️ Tip: You can configure your own custom pre-merge checks in your `.diffsentry.yaml`.</sub>
+
+</details>
+
+<!-- pre_merge_checks_walkthrough_end -->
+
+<!-- finishing_touch_checkbox_start -->
+
+<details>
+<summary>✨ Finishing Touches</summary>
+
+<details>
+<summary>🧪 Generate unit tests (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "8d18dfb2-528e-4249-a880-b6309b6b3c10"} -->   Create PR with unit tests
+
+</details>
+
+<details>
+<summary>📝 Generate docstrings (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "d4b1e0bb-4ea9-42eb-8219-09833f456044"} -->   Push docstring commit to this branch
+
+</details>
+
+<details>
+<summary>🧹 Simplify (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "c9c8c361-6c17-41de-8309-c1b68c061c4f"} -->   Push simplification commit to this branch
+
+</details>
+
+<details>
+<summary>🪄 Autofix unresolved comments (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "d0f7ee61-3fa4-419e-abe3-fd97ffbe8753"} -->   Push autofix commit to this branch
+
+</details>
+
+</details>
+
+<!-- finishing_touch_checkbox_end -->
+
+<!-- tips_start -->
+
+---
+
+<sub>Comment `@diffsentry help` to get the list of available commands and usage tips.</sub>
+
+<!-- tips_end -->
+
+<!-- internal_state_start -->
+<!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":153,"updatedAt":"2026-08-28T20:33:31.526Z"}-->
+<!-- diffsentry-state:H4sIAAAAAAAAA42RwU7DMAyG38Xndkuapsl644KQ4IDYTkwc0sTtrJU2irMhNPHuaNqQEAiJ6/9/lv3JJzhCKwsYHecnPBK+YVjvHLRQGd8Li1paaRtT91jbzjeV0d3KSAxKa+z9qjZQQE8jrneOoT0B+0Qx85IxH+IiM7QgOmV93wXd1N5Z3UMBnPzSRVoGcsM0cybPFzbU1shgjROVMKGurqyfp56GC9J0wkhlsPFe9Z2QUEBGzrw8TJSvZDlQ3h260sVYUlic+8uwVth5J+uVWXldKwUfBcSZM4ZbmgZMMdF0BrcvX/ljesAjjvf4fo3PtvyYZo/MGKDd/nb+U/Cnzf9P/1q83lOMGNb0SqNL3y66FptER3LjpTjE4DKGm3z+p6iaUtiysptKtEq1Si501TxDAYl4f0ec5/QO7Va8fHwCKmxskRYCAAA=-->
+<!-- internal_state_end -->
+```
+
+---
+
+## diffsentry[bot] · walkthrough · 2026-08-28T06:23:21Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/150#issuecomment-5449190960
+- Location: —
+
+```markdown
+<!-- DiffSentry Walkthrough -->
+<!-- walkthrough_start -->
+
+<details>
+<summary>📝 Walkthrough</summary>
+
+## Walkthrough
+
+Added boot-time validation for numeric GitHub App IDs and normalized surrounding whitespace before using the value in JWT claims. Updated diagnostics, documentation, changelog coverage, and unit tests so invalid IDs fail clearly instead of causing downstream GitHub authentication errors.
+
+## Changes
+
+|Cohort / File(s)|Summary|
+|---|---|
+|**Configuration Validation** <br> `src/config.ts`, `tests/unit/config-github-app-id.test.ts`|Added startup validation requiring GITHUB_APP_ID to contain only digits and stored its trimmed value for JWT issuance. Tests covered successful normalization and rejection of common invalid App ID formats.|
+|**Diagnostics Feedback** <br> `src/api/diagnostics.ts`|Updated the diagnostics check to assess whether the configured App ID is numeric rather than merely present. Invalid values now receive an explanation of the JWT issuer requirement and a Client ID versus App ID hint.|
+|**Documentation Updates** <br> `README.md`, `CHANGELOG.md`|Clarified the required numeric App ID in the environment-variable documentation and recorded the behavior change under the unreleased fixes.|
+
+## Sequence Diagram(s)
+
+```mermaid
+sequenceDiagram
+    participant Env as Environment
+    participant Config as loadConfig
+    participant App as Application
+    Env->>Config: Provide GITHUB_APP_ID
+    Config->>Config: Trim and validate digits only
+    alt Numeric App ID
+        Config-->>App: Return normalized configuration
+    else Missing or non-numeric ID
+        Config-->>App: Throw actionable startup error
+    end
+```
+
+## Estimated code review effort
+
+🎯 2 (Simple) | ⏱️ ~15 minutes
+
+## Suggested Labels
+
+`bug`, `docs`, `test`
+
+## Risk Assessment
+
+**Score: 0/100** — 🟢 Low
+
+No elevated risk signals detected.
+
+## Test Coverage Signal
+
+🟢 23 prod / 47 test lines added.
+
+| Source files changed | Test files changed | Source lines + | Test lines + |
+|---|---|---|---|
+| 2 | 1 | 23 | 47 |
+
+## 🧭 Description Drift
+
+- ℹ️ **The PR description claims `.env.example` was updated, but no `.env.example` change is present in the provided diff.**
+  - Under “Changes,” the description says the README env table, `.env.example`, and `CHANGELOG.md` were updated. The provided changes include `README.md` and `CHANGELOG.md`, but do not include a `.env.example` diff.
+
+<sub>Compares PR description claims to the actual diff. Update the description (or the code) so they tell the same story.</sub>
+
+## 👤 Suggested Reviewers
+
+Ranked by `git blame` weight on the touched lines + CODEOWNERS overlap.
+
+- @mk7luke — `blame` + `owner` — 6 touched line(s), owns 5 file(s)
+
+## Possibly related PRs
+
+- [mk7luke/DiffSentry#147](https://github.com/mk7luke/DiffSentry/pull/147) — refactor: remove dead code and consolidate duplicated helpers
+- [mk7luke/DiffSentry#146](https://github.com/mk7luke/DiffSentry/pull/146) — fix(dashboard): sanitize rendered markdown with an allowlist
+- [mk7luke/DiffSentry#145](https://github.com/mk7luke/DiffSentry/pull/145) — fix(webhook): require bot authorship before honoring Finishing Touches checkbox edits
+
+</details>
+
+<!-- walkthrough_end -->
+
+<!-- pre_merge_checks_walkthrough_start -->
+
+<details>
+<summary>🚥 Pre-merge checks | ✅ 5 | ❌ 0</summary>
+
+<details>
+<summary>✅ Passed checks (5 passed)</summary>
+
+| Check name | Status | Explanation |
+|---|---|---|
+| PR Title | ✅ Passed | The title uses the imperative verb "Reject," is under 72 characters, and has no trailing period. |
+| PR Description | ✅ Passed | The description meets the requirements. The Summary clearly explains what changed (startup validation and trimmed persistence of numeric GITHUB_APP_ID values, plus matching diagnostics behavior) and why (GitHub requires the JWT iss claim to be an integer; invalid values otherwise fail later with an opaque 401). The Related issues section explicitly states none, so no issue/PR link is applicable. |
+| Schema bump | ✅ Passed | src/storage/db.ts is not changed in this PR, so the schema-versioning check does not apply. |
+| Provider parity | ✅ Passed | No changes to src/ai/anthropic.ts are present in the provided PR diff, so there is no Anthropic request/response contract change requiring corresponding updates to openai.ts or openai-compatible.ts. |
+| Pattern test coverage | ✅ Passed | Neither src/safety-scanner.ts nor src/pattern-checks.ts is changed in this PR, so no new rule requires an e2e scenario. |
+
+</details>
+
+<sub>✏️ Tip: You can configure your own custom pre-merge checks in your `.diffsentry.yaml`.</sub>
+
+</details>
+
+<!-- pre_merge_checks_walkthrough_end -->
+
+<!-- finishing_touch_checkbox_start -->
+
+<details>
+<summary>✨ Finishing Touches</summary>
+
+<details>
+<summary>🧪 Generate unit tests (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "3a602b55-bf70-4c90-9c22-cf7470e57e7c"} -->   Create PR with unit tests
+
+</details>
+
+<details>
+<summary>📝 Generate docstrings (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "58fc8d38-f5fc-4fe9-8151-86241d381069"} -->   Push docstring commit to this branch
+
+</details>
+
+<details>
+<summary>🧹 Simplify (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "9b012555-26a2-46cc-9f18-61889bb6d897"} -->   Push simplification commit to this branch
+
+</details>
+
+<details>
+<summary>🪄 Autofix unresolved comments (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "845a1001-a9c9-4226-a182-389eeec0f261"} -->   Push autofix commit to this branch
+
+</details>
+
+</details>
+
+<!-- finishing_touch_checkbox_end -->
+
+<!-- tips_start -->
+
+---
+
+<sub>Comment `@diffsentry help` to get the list of available commands and usage tips.</sub>
+
+<!-- tips_end -->
+
+<!-- internal_state_start -->
+<!-- diffsentry-state-ref:{"v":1,"db":true,"owner":"mk7luke","repo":"DiffSentry","number":150,"updatedAt":"2026-08-28T06:23:20.807Z"}-->
+<!-- diffsentry-state:H4sIAAAAAAAAA42QXWvjMBBF/8s824ksy5aqt7CbbaEfW5o+bejDWBolQ13bSEpKKf3vS0gC3YVCX+85A/fOO+zBVgX0mPID7Zleya+2CBawUUpjqxukoLxpTKW6oLSQwnVGmE44vBBYOyggcE+rLSaw7/DjanF3ubz5fTl78WDBYWiq4HyrjDSBCAp4WC5+3i6P+CK03pFQMjhXVUFDASm6OU4894ybYUyZXZrldHCxq6V23ss6uKo6u24cAm+OikE0oaHWKR3aphNQQKaU03w3cD6Z5YbzdteVOE0l+9mBH48JO9SdCtqZuqpNDR8FTGPK5H/xsKE4RR4O4vrpnN/HG9pTf01vp/jwiHQfR0cpkQe7/vcdn7d/OfT/Vd+fcC6weuZpIr/iF+4xfmp2Ao+R94z9Eewmj5n8IoMFKWRbClNK8yhaK2srxcwI/QcKiJyerzjlMb6BXYunj78c/FYVOQIAAA==-->
+<!-- internal_state_end -->
+```
+
+---

@@ -802,3 +802,499 @@ Reviewing files that changed from [`ba47196`](https://github.com/mk7luke/DiffSen
 ```
 
 ---
+
+## diffsentry[bot] · review-summary · 2026-09-14T21:39:12Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/165#pullrequestreview-5203176956
+- Location: —
+
+```markdown
+**Actionable comments posted: 0**
+
+This is a focused, correct CI configuration change. Setting `cancel-in-progress` to `false` preserves labeler completion for synchronized Dependabot PRs and avoids leaving cancelled check-rollup entries that block strict auto-merge evaluation. The added rationale accurately documents the non-obvious interaction and the trade-off is appropriate for this idempotent workflow.
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: `.diffsentry.yaml`
+
+**Review profile**: ASSERTIVE
+
+**Run ID**: `c7b72836-d04e-4cf4-8095-d3649de1d09e`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files at [`94e9faf`](https://github.com/mk7luke/DiffSentry/commit/94e9fafc8114ac0f87d33fcb234cdbbf11157883) (base SHA unavailable).
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (1)</summary>
+
+* `.github/workflows/labeler.yml`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by DiffSentry for review status -->
+```
+
+---
+
+## diffsentry[bot] · review-summary · 2026-09-14T21:34:32Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/164#pullrequestreview-5203140081
+- Location: —
+
+```markdown
+**Actionable comments posted: 0**
+
+The workflow trigger expansion correctly addresses the described race by waking auto-merge after each independent PR check workflow completes. Removing the triggering run's conclusion filter is safe because the existing rollup validation remains the merge authority, and the event guard now correctly includes the labeler's `pull_request_target` runs. No actionable issues found in the provided change.
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: `.diffsentry.yaml`
+
+**Review profile**: ASSERTIVE
+
+**Run ID**: `8d69cedb-3a65-4a94-b5cf-63f2edb60d03`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files at [`10bd8b1`](https://github.com/mk7luke/DiffSentry/commit/10bd8b16e73c15524da8dbd47c8e66afbd16f154) (base SHA unavailable).
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (1)</summary>
+
+* `.github/workflows/dependabot-auto-merge.yml`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by DiffSentry for review status -->
+```
+
+---
+
+## diffsentry[bot] · review-summary · 2026-09-14T21:03:15Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/163#pullrequestreview-5202874934
+- Location: —
+
+```markdown
+**Actionable comments posted: 0**
+
+The author guard now accepts the GraphQL-rendered `app/dependabot` login as well as the REST and bare variants, directly resolving the workflow's false rejection of Dependabot PRs. The shell `case` expression is correctly quoted and preserves the intended no-op behavior for non-Dependabot authors. No actionable issues were found in the supplied change.
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: `.diffsentry.yaml`
+
+**Review profile**: ASSERTIVE
+
+**Run ID**: `a371b44f-25b7-41bf-a53b-8890b3a8742f`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files at [`74bc328`](https://github.com/mk7luke/DiffSentry/commit/74bc3282c495e099ee8eceaa3bfc3da82a25fa4b) (base SHA unavailable).
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (1)</summary>
+
+* `.github/workflows/dependabot-auto-merge.yml`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by DiffSentry for review status -->
+```
+
+---
+
+## diffsentry[bot] · review-summary · 2026-08-31T15:38:38Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/156#pullrequestreview-5068332724
+- Location: —
+
+```markdown
+**Actionable comments posted: 0**
+
+This Dependabot update correctly advances `trufflesecurity/trufflehog` from v3.97.0 to v3.97.1 and updates the immutable commit SHA consistently with the version comment. The workflow remains pinned to a full commit digest, preserving supply-chain integrity. No issues found.
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: `.diffsentry.yaml`
+
+**Review profile**: ASSERTIVE
+
+**Run ID**: `6ea2900c-5704-4691-b885-5bbe01b6d8a7`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files at [`874649b`](https://github.com/mk7luke/DiffSentry/commit/874649b178ea46f43fb0bcc6891934a176f3f572) (base SHA unavailable).
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (1)</summary>
+
+* `.github/workflows/secret-scan.yml`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by DiffSentry for review status -->
+```
+
+---
+
+## diffsentry[bot] · review-summary · 2026-09-07T15:38:19Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/156#pullrequestreview-5133664269
+- Location: —
+
+```markdown
+**Actionable comments posted: 0**
+
+This dependency update correctly advances the TruffleHog action from v3.97.0 to v3.97.4 while retaining immutable commit-SHA pinning. The trailing version comment matches the pinned release, and the workflow configuration is otherwise unchanged.
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: `.diffsentry.yaml`
+
+**Review profile**: ASSERTIVE
+
+**Run ID**: `001aec25-baaf-4204-bf1b-1a09d2064e7d`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from [`874649b`](https://github.com/mk7luke/DiffSentry/commit/874649b178ea46f43fb0bcc6891934a176f3f572) to [`520fc56`](https://github.com/mk7luke/DiffSentry/commit/520fc569280ba953b605f913e9052e815a7c4e55). Previously-reviewed commits are not re-reviewed.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (1)</summary>
+
+* `.github/workflows/secret-scan.yml`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by DiffSentry for review status -->
+```
+
+---
+
+## diffsentry[bot] · review-summary · 2026-08-22T06:54:24Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/145#pullrequestreview-4999410380
+- Location: —
+
+```markdown
+**Actionable comments posted: 0**
+
+The bot-author guard correctly closes the forged walkthrough-marker path before checkbox edits can dispatch Finishing Touches commands. The regression tests cover the exploit, the intended bot-authored path, and no-op checkbox edits. No correctness, security, or maintainability issues were found in the proposed changes.
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: `.diffsentry.yaml`
+
+**Review profile**: ASSERTIVE
+
+**Run ID**: `2c2d4aad-27a9-4da5-9358-b2a159a063b3`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files at [`5c4ece5`](https://github.com/mk7luke/DiffSentry/commit/5c4ece55398c54ae455cf515dbbfa5e16816042b) (base SHA unavailable).
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (3)</summary>
+
+* `CHANGELOG.md`
+* `src/webhook/dispatch.ts`
+* `tests/unit/slash-dispatch.test.ts`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by DiffSentry for review status -->
+```
+
+---
+
+## diffsentry[bot] · review-summary · 2026-09-05T04:30:23Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/145#pullrequestreview-5119781835
+- Location: —
+
+```markdown
+**Actionable comments posted: 0**
+
+The incremental change updates only the changelog, while the previously reviewed implementation and regression tests correctly enforce bot authorship before honoring walkthrough checkbox edits. The documented security impact and behavior align with the supplied code context, and no additional issues are present in the newly changed file.
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: `.diffsentry.yaml`
+
+**Review profile**: ASSERTIVE
+
+**Run ID**: `7ebfd526-3401-42dd-a87b-edb317fb3bfe`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from [`5c4ece5`](https://github.com/mk7luke/DiffSentry/commit/5c4ece55398c54ae455cf515dbbfa5e16816042b) to [`876b275`](https://github.com/mk7luke/DiffSentry/commit/876b2750fa03406279878554f0ba00faf2c3fe49). Previously-reviewed commits are not re-reviewed.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (1)</summary>
+
+* `CHANGELOG.md`
+
+</details>
+
+<details>
+<summary>🚧 Files skipped from review as they are similar to previous changes (2)</summary>
+
+* `src/webhook/dispatch.ts`
+* `tests/unit/slash-dispatch.test.ts`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by DiffSentry for review status -->
+```
+
+---
+
+## diffsentry[bot] · review-summary · 2026-08-28T18:47:33Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/152#pullrequestreview-5054083705
+- Location: —
+
+```markdown
+**Actionable comments posted: 0**
+
+This PR correctly centralizes GitHub App ID validation and applies the shared predicate to configuration loading, diagnostics, and setup-time validation. The interactive setup flow now prevents invalid Client IDs and slugs from being written, while the added validator tests cover the important accepted and rejected `.env` cases. No correctness, security, or maintainability issues were found in the provided changes.
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: `.diffsentry.yaml`
+
+**Review profile**: ASSERTIVE
+
+**Run ID**: `acbd0d86-2d58-4c86-aa47-1e8d598dd179`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files at [`2177b7b`](https://github.com/mk7luke/DiffSentry/commit/2177b7b205aa974f913db38391fe21102d7cd561) (base SHA unavailable).
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (4)</summary>
+
+* `scripts/setup.ts`
+* `src/api/diagnostics.ts`
+* `src/config.ts`
+* `tests/unit/setup-env-validation.test.ts`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by DiffSentry for review status -->
+```
+
+---
+
+## diffsentry[bot] · review-summary · 2026-08-28T20:33:37Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/153#pullrequestreview-5054874967
+- Location: —
+
+```markdown
+**Actionable comments posted: 0**
+
+The PR cleanly centralizes GitHub App ID validation and applies the shared predicate consistently in runtime configuration, diagnostics, and interactive setup. The added tests cover numeric, whitespace-padded, empty, and Client-ID-like inputs along with `.env` validation behavior. No correctness, security, or maintainability issues were found in the provided changes.
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: `.diffsentry.yaml`
+
+**Review profile**: ASSERTIVE
+
+**Run ID**: `45509a04-c3f2-4afa-a886-688a836411d1`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files at [`27cf08e`](https://github.com/mk7luke/DiffSentry/commit/27cf08e51818674fe48bc6275b971ed355efc947) (base SHA unavailable).
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (4)</summary>
+
+* `scripts/setup.ts`
+* `src/api/diagnostics.ts`
+* `src/config.ts`
+* `tests/unit/config-github-app-id.test.ts`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by DiffSentry for review status -->
+```
+
+---
+
+## diffsentry[bot] · review-summary · 2026-08-28T06:23:26Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/150#pullrequestreview-5048434754
+- Location: —
+
+```markdown
+**Actionable comments posted: 0**
+
+This PR correctly validates and normalizes `GITHUB_APP_ID` during configuration loading, aligns the diagnostics check with the same numeric requirement, and documents the distinction from a GitHub Client ID. The validation preserves the intended string representation for JWT construction while preventing whitespace and non-numeric values from reaching the `iss` claim. The focused tests cover valid, trimmed, missing, and representative invalid inputs.
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: `.diffsentry.yaml`
+
+**Review profile**: ASSERTIVE
+
+**Run ID**: `8834558d-d203-4229-8894-446a2df0d59e`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files at [`a5447a6`](https://github.com/mk7luke/DiffSentry/commit/a5447a675aef4d85814bf47020cb808b0ca90a3c) (base SHA unavailable).
+
+</details>
+
+<details>
+<summary>⛔ Files ignored due to path filters (1)</summary>
+
+* `.env.example` is excluded by `!.env.example`
+
+</details>
+<details>
+<summary>📒 Files selected for processing (5)</summary>
+
+* `CHANGELOG.md`
+* `README.md`
+* `src/api/diagnostics.ts`
+* `src/config.ts`
+* `tests/unit/config-github-app-id.test.ts`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by DiffSentry for review status -->
+```
+
+---

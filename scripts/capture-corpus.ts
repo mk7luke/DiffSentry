@@ -88,7 +88,12 @@ function main(): void {
   const limit = Number(arg("limit", "18"));
   const repoFilter = process.argv.includes("--repo") ? arg("repo") : null;
 
-  const selected = selectForSpread(findCandidates(bot, limit, repoFilter), { limit, maxPerRepo: 2 });
+  // maxPerRepo: 2 exists to stop one repo dominating a multi-repo sweep (the
+  // failure mode that produced the stale April corpus). When --repo scopes
+  // the run to a single repository, that same cap would truncate the whole
+  // capture instead of spreading it, so let it grow to `limit` in that case.
+  const maxPerRepo = repoFilter ? limit : 2;
+  const selected = selectForSpread(findCandidates(bot, limit, repoFilter), { limit, maxPerRepo });
   if (selected.length === 0) throw new Error(`no candidate PRs found for ${bot}`);
 
   const all: CapturedComment[] = [];
