@@ -282,7 +282,7 @@ function renderAutofixSection(): string {
   const idNewPr = randomUUID();
   return [
     `<details>`,
-    `<summary>🪄 Autofix</summary>`,
+    `<summary>🪄 Autofix (Beta)</summary>`,
     "",
     "Fix all unresolved DiffSentry comments on this PR:",
     "",
