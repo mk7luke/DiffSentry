@@ -16,6 +16,8 @@
     "dev": "tsx watch src/index.ts",
     "dev:web": "npm --prefix web run dev",
     "e2e": "tsx tests/e2e/cli.ts",
+    "capture:coderabbit": "tsx scripts/capture-corpus.ts --bot \"coderabbitai[bot]\" --out tests/e2e/reference/2026-09/coderabbit",
+    "capture:diffsentry": "tsx scripts/capture-corpus.ts --bot \"diffsentry[bot]\" --repo mk7luke/DiffSentry --out tests/e2e/reference/2026-09/diffsentry",
     "backfill": "node dist/cli/backfill.js",
     "backfill:dev": "tsx src/cli/backfill.ts",
     "smoke:dashboard": "tsx scripts/smoke-dashboard.ts",
