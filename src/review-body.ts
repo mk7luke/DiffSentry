@@ -121,10 +121,11 @@ export function isVisiblyActionable(c: ReviewComment): boolean {
 export function reconcileApproval(
   approval: ReviewResult["approval"],
   comments: ReviewComment[],
+  requestChangesWorkflow = true,
 ): ReviewResult["approval"] {
-  if (approval === "REQUEST_CHANGES" && !comments.some(isVisiblyActionable)) {
-    return "COMMENT";
-  }
+  if (approval !== "REQUEST_CHANGES") return approval;
+  if (!requestChangesWorkflow) return "COMMENT";
+  if (!comments.some(isVisiblyActionable)) return "COMMENT";
   return approval;
 }
 

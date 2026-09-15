@@ -23,7 +23,7 @@ import { LearningsStore, synthesizeLearning, extractFindingMeta, type FindingCon
 import { parseIssueReferences, fetchLinkedIssues, formatIssuesForWalkthrough } from "./issues.js";
 import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-merge.js";
 import { generateDocstrings, generateTests, simplifyCode, autofix } from "./finishing-touches.js";
-import { formatReviewBody, reconcileApproval } from "./review-body.js";
+import { formatReviewBody, reconcileApproval, isVisiblyActionable } from "./review-body.js";
 import { encodeState, encodeStateRef, extractState, replaceState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
 import { assessRisk, renderRiskBlock, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion, renderConfidenceAggregate, computeReviewerDeltas, renderReviewerDeltaBlock, calibrateSeverities, resolveSeverityCalibration, renderSeverityCalibrationBlock, type CalibrationResult } from "./insights.js";
 import { suggestReviewersFromBlame, renderSuggestedReviewers, combineReviewers, renderCombinedReviewers } from "./blame-reviewers.js";
@@ -2219,12 +2219,20 @@ export class Reviewer {
       // and the visible findings never contradict each other. Runs AFTER every
       // producer (AI, safety, pattern, static, calibration, drift) has merged
       // and after cross-review dedup/suppression, so it sees the final set.
-      // One-directional: only ever relaxes a block, never creates one.
-      const reconciledApproval = reconcileApproval(reviewResult.approval, reviewResult.comments);
+      // One-directional: only ever relaxes a block, never creates one. Also
+      // honours reviews.request_changes_workflow (default true): when a repo
+      // has explicitly opted out of blocking merges, REQUEST_CHANGES is always
+      // relaxed to COMMENT regardless of what backs it.
+      const requestChangesWorkflow = repoConfig.reviews?.request_changes_workflow !== false;
+      const noActionableFinding = !reviewResult.comments.some(isVisiblyActionable);
+      const reconciledApproval = reconcileApproval(reviewResult.approval, reviewResult.comments, requestChangesWorkflow);
       if (reconciledApproval !== reviewResult.approval) {
+        const reason = !requestChangesWorkflow
+          ? "reviews.request_changes_workflow is disabled for this repo"
+          : "no actionable finding survived to back the block";
         log.info(
-          { from: reviewResult.approval, to: reconciledApproval, totalComments: reviewResult.comments.length },
-          "Downgrading REQUEST_CHANGES → COMMENT: no actionable finding survived to back the block",
+          { from: reviewResult.approval, to: reconciledApproval, totalComments: reviewResult.comments.length, requestChangesWorkflow, noActionableFinding },
+          `Downgrading REQUEST_CHANGES → COMMENT: ${reason}`,
         );
         reviewResult.approval = reconciledApproval;
       }

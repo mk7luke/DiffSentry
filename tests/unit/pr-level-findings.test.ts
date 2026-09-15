@@ -313,3 +313,33 @@ describe("reconcileApproval invariant", () => {
     expect(reconcileApproval("COMMENT", [])).toBe("COMMENT");
   });
 });
+
+describe("reconcileApproval requestChangesWorkflow flag", () => {
+  const issue: ReviewComment = {
+    path: "src/a.ts", line: 3, side: "RIGHT", body: "x", type: "issue", severity: "major", title: "T.",
+  };
+
+  it("downgrades REQUEST_CHANGES to COMMENT when the workflow is disabled, even with an actionable finding", () => {
+    expect(reconcileApproval("REQUEST_CHANGES", [issue], false)).toBe("COMMENT");
+  });
+
+  it("preserves REQUEST_CHANGES when the workflow is enabled and an actionable finding backs it", () => {
+    expect(reconcileApproval("REQUEST_CHANGES", [issue], true)).toBe("REQUEST_CHANGES");
+  });
+
+  it("preserves REQUEST_CHANGES by default (flag omitted) when an actionable finding backs it", () => {
+    expect(reconcileApproval("REQUEST_CHANGES", [issue])).toBe("REQUEST_CHANGES");
+  });
+
+  it("still downgrades when there is no actionable finding, regardless of the flag", () => {
+    expect(reconcileApproval("REQUEST_CHANGES", [], true)).toBe("COMMENT");
+    expect(reconcileApproval("REQUEST_CHANGES", [], false)).toBe("COMMENT");
+  });
+
+  it("never turns COMMENT or APPROVE into REQUEST_CHANGES, regardless of the flag", () => {
+    expect(reconcileApproval("COMMENT", [issue], false)).toBe("COMMENT");
+    expect(reconcileApproval("COMMENT", [issue], true)).toBe("COMMENT");
+    expect(reconcileApproval("APPROVE", [issue], false)).toBe("APPROVE");
+    expect(reconcileApproval("APPROVE", [issue], true)).toBe("APPROVE");
+  });
+});
