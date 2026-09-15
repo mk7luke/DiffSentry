@@ -21,3 +21,5 @@ scripts/local/
 # Playwright MCP visual-QA artifacts / transient snapshots
 .playwright-mcp/
 .codesurf/mcp-server.json
+# Never install the parity fixture's own dependencies into this checkout
+tests/e2e/reference/2026-09/fixture-repo/node_modules/

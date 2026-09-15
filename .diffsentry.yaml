@@ -61,6 +61,17 @@ reviews:
     - "!.contex/**"
     - "!.omc/**"
     - "!tests/e2e/runs/**"
+    - "!tests/e2e/reference/**"
+    # The parity fixture (tests/e2e/reference/2026-09/fixture-repo/) holds
+    # deliberately-planted vulnerabilities and a documentation credential,
+    # fed to CodeRabbit/DiffSentry as review test input — same rationale
+    # .github/codeql/codeql-config.yml already uses for excluding this path.
+    #
+    # CAVEAT: this repo loads .diffsentry.yaml from the DEFAULT BRANCH, so
+    # this exclusion does NOT suppress findings on the PR that introduces
+    # it — that PR is reviewed under the default branch's *prior* config,
+    # before this line exists. DiffSentry is expected to flag the planted
+    # fixtures on that PR; those findings are expected noise, not defects.
 
   # Per-area instructions. Paths are grounded in `src/` as it exists today.
   path_instructions:
