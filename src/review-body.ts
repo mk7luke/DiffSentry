@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { Confidence, ReviewComment, ReviewResult } from "./types.js";
-import { renderAiAgentPromptBlock, renderSuggestionBlock } from "./ai/parse.js";
+import {
+  AI_AGENT_PROMPT_PREAMBLE,
+  renderAiAgentPromptBlock,
+  renderSuggestionBlock,
+  stripAiAgentPromptPreamble,
+} from "./ai/parse.js";
 
 export type ReviewBodyMeta = {
   profile: string;
@@ -245,13 +250,16 @@ function renderBulkAiPrompt(comments: ReviewComment[]): string {
     byFile.set(c.path, arr);
   }
 
-  const sections: string[] = ["Verify each finding against the current code and only fix it if needed.", ""];
+  // This is the largest attacker-controlled payload DiffSentry emits — every
+  // finding on the PR concatenated into one prompt — so it carries the same
+  // hardened preamble as the per-finding blocks, once at the top. Each bullet
+  // is stripped of its own copy: both sides go through `ai/parse.ts`, so the
+  // preamble here and the pattern that removes it there cannot drift apart.
+  const sections: string[] = [AI_AGENT_PROMPT_PREAMBLE, ""];
   for (const [path, items] of byFile) {
     sections.push(`In \`${path}\`:`);
     for (const c of items) {
-      const oneLine = (c.aiAgentPrompt ?? "")
-        .replace(/^Verify each finding[^\n]*\n*/i, "")
-        .trim();
+      const oneLine = stripAiAgentPromptPreamble(c.aiAgentPrompt ?? "");
       sections.push(`- Line ${c.line}: ${oneLine}`);
     }
     sections.push("");

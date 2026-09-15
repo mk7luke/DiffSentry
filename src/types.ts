@@ -309,6 +309,32 @@ export type CommentType =
   | "security";
 export type CommentSeverity = "critical" | "major" | "minor" | "trivial";
 
+/**
+ * Which engineering concern a finding touches — a different axis from
+ * {@link CommentType}, which says what *kind of remark* it is. "Refactor
+ * suggestion" and "Potential issue" can both be about data integrity; the type
+ * tells a maintainer nothing about which of their concerns is in play.
+ *
+ * The six values and their glyphs are CodeRabbit's, read off the captured
+ * corpus rather than invented: `tests/e2e/reference/2026-09/coderabbit/`,
+ * where they carry 52 of 52 findings.
+ */
+export type CommentCategory =
+  | "functional_correctness"
+  | "stability_availability"
+  | "security_privacy"
+  | "data_integrity"
+  | "performance_scalability"
+  | "maintainability";
+
+/**
+ * Roughly what acting on a finding costs. A solo maintainer triages against
+ * their own afternoon, so "is this two minutes or two days" is a scarcer signal
+ * than severity — severity says how bad it is if ignored, not whether it can be
+ * cleared before lunch. Values from the same corpus as {@link CommentCategory}.
+ */
+export type CommentEffort = "quick_win" | "heavy_lift" | "low_value";
+
 // ─── File Change ───────────────────────────────────────────────
 export interface FileChange {
   filename: string;
@@ -328,6 +354,13 @@ export interface ReviewComment {
   body: string;
   type?: CommentType;
   severity?: CommentSeverity;
+  /** Engineering domain the finding touches. Optional: a model that omits it,
+   *  or names a value outside the enum, yields a shorter header rather than a
+   *  broken one. */
+  category?: CommentCategory;
+  /** Rough cost of acting on the finding. Optional on the same terms as
+   *  {@link ReviewComment.category}. */
+  effort?: CommentEffort;
   // CodeRabbit-style metadata used by the renderer.
   title?: string;
   suggestion?: string;

@@ -9,6 +9,7 @@ import {
   parseThreadFingerprint,
   isBlockingSeverity,
   isDiffSentryComment,
+  DIFFSENTRY_COMMENT_FOOTER,
 } from "./thread-severity.js";
 
 type Logger = typeof logger;
@@ -17,6 +18,40 @@ type Logger = typeof logger;
  *  from `DiffSentry / Pre-Merge`, which reports the pre-merge checks and is
  *  driven by something other than review threads. */
 export const REVIEW_STATUS_CONTEXT = "DiffSentry";
+
+/**
+ * Disclosure carried by every conversational reply DiffSentry posts.
+ *
+ * Findings announce themselves: a metadata header and a severity marker are
+ * nobody's idea of a human comment. Replies don't — a chat answer is prose in
+ * the same voice as the rest of the thread, and on a public repo the audience
+ * includes drive-by contributors with no idea a bot is installed. Saying so is
+ * one line and right regardless of what any other bot does.
+ *
+ * Wording and placement are CodeRabbit's, read off
+ * `tests/e2e/reference/2026-09/coderabbit/inline.md`: italic, its own
+ * paragraph, last visible line before the auto-generated marker. It sits on 23
+ * of 23 reply comments there and 0 of 51 findings — a reply footer, despite
+ * living in a file named for inline comments.
+ */
+export const AI_DISCLOSURE = "_You are interacting with an AI system._";
+
+/**
+ * A reply body carrying exactly one disclosure.
+ *
+ * Goes last, but ahead of the auto-generated marker when the body already ends
+ * with one — the marker is machine-readable chrome, and a human-facing line
+ * printed after it reads as a stray. Same order CodeRabbit uses.
+ */
+export function withAiDisclosure(body: string): string {
+  const trimmed = body.trimEnd();
+  if (trimmed.includes(AI_DISCLOSURE)) return trimmed;
+  if (trimmed.endsWith(DIFFSENTRY_COMMENT_FOOTER)) {
+    const head = trimmed.slice(0, -DIFFSENTRY_COMMENT_FOOTER.length).trimEnd();
+    return `${head}\n\n${AI_DISCLOSURE}\n\n${DIFFSENTRY_COMMENT_FOOTER}`;
+  }
+  return `${trimmed}\n\n${AI_DISCLOSURE}`;
+}
 
 /** Resolution tallies for a PR's review threads, split by author so callers can
  *  reason about DiffSentry's own feedback independently of humans'. */
@@ -1325,6 +1360,10 @@ export class GitHubClient {
     kind: "issue" | "review_thread" = "issue"
   ): Promise<void> {
     const octokit = await this.getInstallationOctokit(installationId);
+    // Every conversational reply DiffSentry posts goes through here, and only
+    // conversational replies do — so this is the one place the disclosure can
+    // be attached without a second emitter to keep in step.
+    const disclosed = withAiDisclosure(body);
     if (kind === "review_thread") {
       // Reply inside the existing review thread so the conversation stays
       // collapsed under the diff hunk instead of fragmenting into a new
@@ -1335,7 +1374,7 @@ export class GitHubClient {
           repo,
           pull_number: pullNumber,
           comment_id: commentId,
-          body,
+          body: disclosed,
         });
         return;
       } catch (err) {
@@ -1348,7 +1387,7 @@ export class GitHubClient {
       owner,
       repo,
       issue_number: pullNumber,
-      body,
+      body: disclosed,
     });
   }
 

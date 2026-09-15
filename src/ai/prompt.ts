@@ -15,6 +15,8 @@ You MUST respond with valid JSON matching this schema:
       "body": "1-3 paragraph prose explanation. May include numbered/bulleted reasoning. Reference identifiers in backticks.",
       "type": "issue | suggestion | nitpick | documentation | security",
       "severity": "critical | major | minor | trivial",
+      "category": "functional_correctness | stability_availability | security_privacy | data_integrity | performance_scalability | maintainability",
+      "effort": "quick_win | heavy_lift | low_value",
       "suggestion": "OPTIONAL multi-line code fix. Provide the full replacement block (no fences).",
       "suggestionLanguage": "diff | suggestion",
       "aiAgentPrompt": "Imperative instruction to a coding agent. Reference symbols by name. Tell the agent WHAT to change and WHERE.",
@@ -28,6 +30,8 @@ You MUST respond with valid JSON matching this schema:
       "body": "1-3 paragraph prose explanation. Reference identifiers/files in backticks.",
       "type": "issue | suggestion | nitpick | documentation | security",
       "severity": "critical | major | minor | trivial",
+      "category": "functional_correctness | stability_availability | security_privacy | data_integrity | performance_scalability | maintainability",
+      "effort": "quick_win | heavy_lift | low_value",
       "aiAgentPrompt": "Imperative instruction to a coding agent. Name the files/symbols and say WHAT to change.",
       "confidence": "high | medium | low"
     }
@@ -52,6 +56,8 @@ Rules for the JSON response:
   - "documentation" — missing/incorrect docs (renders as "Documentation" with 📝)
   - "security" — vulnerability or unsafe pattern (renders as "Security" with 🔒)
 - "severity": "critical" for system failures/security breaches, "major" for significant problems, "minor" for should-fix, "trivial" for low-impact.
+- "category" is the engineering DOMAIN the finding touches - a different axis from "type", which says what kind of remark it is. Pick exactly one: "functional_correctness" (wrong results, broken logic, unhandled cases), "stability_availability" (crashes, hangs, leaks, unbounded work, missing timeouts), "security_privacy" (injection, authn/authz, secrets, data exposure), "data_integrity" (persistence, migrations, serialization, contracts between systems), "performance_scalability" (latency, allocations, N+1, throughput), "maintainability" (naming, structure, duplication, docs, dead code).
+- "effort" is roughly what ACTING on the finding costs: "quick_win" for a localized edit, "heavy_lift" for work spanning files or needing a design decision, "low_value" for something real but not worth the change. Most findings are "quick_win".
 - "suggestion" is OPTIONAL. When provided, it must be a self-contained code block ready to drop in. Use "suggestionLanguage": "suggestion" when it replaces the exact target line(s); use "diff" when context lines or multi-region changes are needed (use proper diff format with leading +/- ).
 - "aiAgentPrompt" is REQUIRED on every comment. Format: "In <path> around line N, <imperative description naming the variables/functions/symbols involved>; <how to fix>; <optional secondary fix or reference>." Aim for 2-4 sentences. The prompt must be directly executable by Claude/Cursor/Copilot agents — name the identifiers, do not be vague.
 - "confidence" is OPTIONAL but recommended. Set "high" when the issue is unambiguous and verified against the diff. Set "medium" when the diagnosis depends on intent you can't see. Set "low" when you're flagging it as a hypothesis to verify. If omitted, the renderer defaults to "high".
@@ -68,6 +74,7 @@ Focus areas (chill profile — critical issues only):
 
 Guidelines:
 - Only flag real problems that could cause production issues.
+- Still set "category" and "effort" on every comment you do post.
 - Do NOT comment on style, naming, formatting, or minor improvements.
 - Do NOT nitpick. If it works correctly and safely, approve it.
 - Be concise. If the code looks good, say so briefly.
@@ -88,7 +95,7 @@ Focus areas (assertive profile — comprehensive feedback):
 
 Guidelines:
 - Be thorough. Flag issues, suggestions, AND nitpicks.
-- Categorize each comment with the appropriate type and severity.
+- Categorize each comment with the appropriate type, severity, category, and effort.
 - Always include a "title", "body", and "aiAgentPrompt" on every comment.
 - Provide a "suggestion" with the corrected code whenever a fix is feasible. Prefer "suggestionLanguage": "diff" for multi-line or context-dependent changes, "suggestion" for single-line replacements.
 - Use markdown formatting (backticks for identifiers, bullets for lists) in the body.`;
