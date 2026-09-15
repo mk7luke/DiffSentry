@@ -1,5 +1,16 @@
 # Review summaries
 
+## diffsentry[bot] · review-summary · 2026-08-22T06:55:51Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/146#pullrequestreview-4999415215
+- Location: —
+
+```markdown
+<sub>🛡️ This DiffSentry review has been superseded by a newer one. Its findings, if still present, appear there.</sub>
+```
+
+---
+
 ## diffsentry[bot] · review-summary · 2026-08-22T06:59:44Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/146#pullrequestreview-4999429681
@@ -130,6 +141,28 @@ Reviewing files that changed from [`27aef17`](https://github.com/mk7luke/DiffSen
 </details>
 
 <!-- This is an auto-generated comment by DiffSentry for review status -->
+```
+
+---
+
+## diffsentry[bot] · review-summary · 2026-08-22T07:04:03Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/146#pullrequestreview-4999445075
+- Location: —
+
+```markdown
+<sub>🛡️ This DiffSentry review has been superseded by a newer one. Its findings, if still present, appear there.</sub>
+```
+
+---
+
+## diffsentry[bot] · review-summary · 2026-08-22T08:19:18Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/146#pullrequestreview-4999657660
+- Location: —
+
+```markdown
+<sub>🛡️ This DiffSentry review has been superseded by a newer one. Its findings, if still present, appear there.</sub>
 ```
 
 ---
@@ -491,6 +524,28 @@ Reviewing files that changed from [`8c70b78`](https://github.com/mk7luke/DiffSen
 </details>
 
 <!-- This is an auto-generated comment by DiffSentry for review status -->
+```
+
+---
+
+## diffsentry[bot] · review-summary · 2026-08-22T08:08:17Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/147#pullrequestreview-4999601091
+- Location: —
+
+```markdown
+<sub>🛡️ This DiffSentry review has been superseded by a newer one. Its findings, if still present, appear there.</sub>
+```
+
+---
+
+## diffsentry[bot] · review-summary · 2026-09-05T04:31:50Z
+
+- Source: https://github.com/mk7luke/DiffSentry/pull/147#pullrequestreview-5119784671
+- Location: —
+
+```markdown
+<sub>🛡️ This DiffSentry review has been superseded by a newer one. Its findings, if still present, appear there.</sub>
 ```
 
 ---

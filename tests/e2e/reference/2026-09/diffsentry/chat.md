@@ -24,39 +24,6 @@
 
 ---
 
-## diffsentry[bot] · chat · 2026-08-22T06:55:51Z
-
-- Source: https://github.com/mk7luke/DiffSentry/pull/146#pullrequestreview-4999415215
-- Location: —
-
-```markdown
-<sub>🛡️ This DiffSentry review has been superseded by a newer one. Its findings, if still present, appear there.</sub>
-```
-
----
-
-## diffsentry[bot] · chat · 2026-08-22T07:04:03Z
-
-- Source: https://github.com/mk7luke/DiffSentry/pull/146#pullrequestreview-4999445075
-- Location: —
-
-```markdown
-<sub>🛡️ This DiffSentry review has been superseded by a newer one. Its findings, if still present, appear there.</sub>
-```
-
----
-
-## diffsentry[bot] · chat · 2026-08-22T08:19:18Z
-
-- Source: https://github.com/mk7luke/DiffSentry/pull/146#pullrequestreview-4999657660
-- Location: —
-
-```markdown
-<sub>🛡️ This DiffSentry review has been superseded by a newer one. Its findings, if still present, appear there.</sub>
-```
-
----
-
 ## diffsentry[bot] · chat · 2026-08-22T08:08:31Z
 
 - Source: https://github.com/mk7luke/DiffSentry/pull/147#issuecomment-5379185765
@@ -82,28 +49,6 @@
 - Database migration 8 removes the unused `saved_views` table; anyone querying that table directly must remove or replace those queries before upgrading.
 
 <sub>Drafted automatically once the review of `0fca4fb` came back green, every check passed and every review thread was resolved, and rewritten in place on later commits. Re-run by hand with `@diffsentry release-notes`, or set `release_notes.auto: false` in `.diffsentry.yaml` to stop.</sub>
-```
-
----
-
-## diffsentry[bot] · chat · 2026-08-22T08:08:17Z
-
-- Source: https://github.com/mk7luke/DiffSentry/pull/147#pullrequestreview-4999601091
-- Location: —
-
-```markdown
-<sub>🛡️ This DiffSentry review has been superseded by a newer one. Its findings, if still present, appear there.</sub>
-```
-
----
-
-## diffsentry[bot] · chat · 2026-09-05T04:31:50Z
-
-- Source: https://github.com/mk7luke/DiffSentry/pull/147#pullrequestreview-5119784671
-- Location: —
-
-```markdown
-<sub>🛡️ This DiffSentry review has been superseded by a newer one. Its findings, if still present, appear there.</sub>
 ```
 
 ---

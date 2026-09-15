@@ -1,20 +1,31 @@
 # Chat replies
 
-## coderabbitai[bot] · chat · 2026-09-10T02:30:48Z
+## coderabbitai[bot] · chat · 2026-09-15T18:08:51Z
 
-- Source: https://github.com/iiio2/realseo/pull/16#issuecomment-5611763611
+- Source: https://github.com/TechValleyCenterOfGravity/door-sync/pull/62#issuecomment-5685504259
 - Location: —
 
 ```markdown
 <!-- This is an auto-generated comment: summarize by coderabbit.ai -->
-<!-- This is an auto-generated comment: skip review by coderabbit.ai -->
+<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->
 
-> [!IMPORTANT]
-> ## Review skipped
+> [!WARNING]
+> ## Review limit reached
 > 
-> Bot user detected.
+> **Next included review available in 59 minutes.**
 > 
-> To trigger a single review, invoke the `@coderabbitai review` command.
+> [Check out review usage here](https://app.coderabbit.ai/dashboard/review-capacity?orgId=b0d1c2e3-1b0f-4a89-8cd3-f81f66f6a581).
+> 
+> <details>
+> <summary>View limit details</summary>
+> 
+> **Limit details:** You’ve used the included review currently available.
+> 
+> You've used all free OSS reviews for now. Wait for the free limit to reset to keep reviewing this public repository.
+> 
+> [Learn how review limits work](https://docs.coderabbit.ai/management/plans#rate-limits).
+> 
+> **Review configuration:**
 > 
 > <details>
 > <summary>⚙️ Run configuration</summary>
@@ -25,22 +36,35 @@
 > 
 > **Plan**: Advanced
 > 
-> **Run ID**: `c80aed13-afb4-4687-a0e8-c4cff98be79c`
+> **Run ID**: `b54d8969-b38f-4992-aa47-253eed4f64a4`
 > 
 > </details>
 > 
-> You can disable this status message by setting the `reviews.review_status` to `false` in the CodeRabbit configuration file.
+> <details>
+> <summary>📥 Commits</summary>
 > 
-> Use the checkbox below for a quick retry:
-> - [ ] <!-- {"checkboxId":"e9bb8d72-00e8-4f67-9cb2-caf3b22574fe"} --> 🔍 Trigger review
+> Reviewing files that changed from the base of the PR and between dcbb16b5450634be5373c7da56b4485820cb1230 and 1cebeb02874ead1386a2c501452a2c4d00ea99b4.
+> 
+> </details>
+> 
+> <details>
+> <summary>📒 Files selected for processing (3)</summary>
+> 
+> * `.github/workflows/release.yml`
+> * `deploy/rpi-image-gen/README.md`
+> * `packaging/deb/README.md`
+> 
+> </details>
+> 
+> </details>
 
-<!-- end of auto-generated comment: skip review by coderabbit.ai -->
+<!-- end of auto-generated comment: rate limited by coderabbit.ai -->
 
 <!-- tips_start -->
 
 ---
 
-Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=github&utm_campaign=iiio2/realseo&utm_content=16)! It's free for OSS, and your support helps us grow. If you like it, consider giving us a shout-out.
+Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=github&utm_campaign=TechValleyCenterOfGravity/door-sync&utm_content=62)! It's free for OSS, and your support helps us grow. If you like it, consider giving us a shout-out.
 
 <details>
 <summary>❤️ Share</summary>
@@ -60,380 +84,201 @@ Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=gi
 
 ---
 
-## coderabbitai[bot] · chat · 2026-09-15T18:30:44Z
+## coderabbitai[bot] · chat · 2026-09-15T18:33:35Z
 
-- Source: https://github.com/dzhalaevd/caxton/pull/49#issuecomment-5685847394
-- Location: —
-
-```markdown
-<!-- This is an auto-generated comment: summarize by coderabbit.ai -->
-<!-- This is an auto-generated comment: skip review by coderabbit.ai -->
-
-> [!IMPORTANT]
-> - [ ] <!-- {"checkboxId":"e9bb8d72-00e8-4f67-9cb2-caf3b22574fe"} --> 🔍 Trigger review
-> 
-> This repository does not receive automatic reviews because it has fewer than 10 stars.
-> 
-> <details>
-> <summary>⚙️ Run configuration</summary>
-> 
-> **Configuration used**: defaults
-> 
-> **Review profile**: CHILL
-> 
-> **Plan**: Advanced
-> 
-> **Run ID**: `dd8e5a7c-c715-4505-a897-4c8f6e724905`
-> 
-> </details>
-
-<!-- end of auto-generated comment: skip review by coderabbit.ai -->
-
-<!-- tips_start -->
-
----
-
-Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=github&utm_campaign=dzhalaevd/caxton&utm_content=49)! It's free for OSS, and your support helps us grow. If you like it, consider giving us a shout-out.
-
-<details>
-<summary>❤️ Share</summary>
-
-- [X](https://twitter.com/intent/tweet?text=I%20just%20used%20%40coderabbitai%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20the%20proprietary%20code.%20Check%20it%20out%3A&url=https%3A//coderabbit.ai)
-- [Mastodon](https://mastodon.social/share?text=I%20just%20used%20%40coderabbitai%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20the%20proprietary%20code.%20Check%20it%20out%3A%20https%3A%2F%2Fcoderabbit.ai)
-- [Reddit](https://www.reddit.com/submit?title=Great%20tool%20for%20code%20review%20-%20CodeRabbit&text=I%20just%20used%20CodeRabbit%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20proprietary%20code.%20Check%20it%20out%3A%20https%3A//coderabbit.ai)
-- [LinkedIn](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fcoderabbit.ai&mini=true&title=Great%20tool%20for%20code%20review%20-%20CodeRabbit&summary=I%20just%20used%20CodeRabbit%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20proprietary%20code)
-
-</details>
-
-
-<sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
-
-<!-- tips_end -->
-```
-
----
-
-## coderabbitai[bot] · chat · 2026-09-15T17:07:18Z
-
-- Source: https://github.com/BisonSchweizAG/commercetools-datalift/pull/176#issuecomment-5684592334
-- Location: —
-
-```markdown
-<!-- This is an auto-generated comment: summarize by coderabbit.ai -->
-<!-- This is an auto-generated comment: skip review by coderabbit.ai -->
-
-> [!IMPORTANT]
-> ## Review skipped
-> 
-> Bot user detected.
-> 
-> To trigger a single review, invoke the `@coderabbitai review` command.
-> 
-> <details>
-> <summary>⚙️ Run configuration</summary>
-> 
-> **Configuration used**: defaults
-> 
-> **Review profile**: CHILL
-> 
-> **Plan**: Advanced
-> 
-> **Run ID**: `5b10009e-6a92-4a37-ad7f-07c330abcc00`
-> 
-> </details>
-> 
-> You can disable this status message by setting the `reviews.review_status` to `false` in the CodeRabbit configuration file.
-> 
-> Use the checkbox below for a quick retry:
-> - [ ] <!-- {"checkboxId":"e9bb8d72-00e8-4f67-9cb2-caf3b22574fe"} --> 🔍 Trigger review
-
-<!-- end of auto-generated comment: skip review by coderabbit.ai -->
-
-<!-- tips_start -->
-
----
-
-Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=github&utm_campaign=BisonSchweizAG/commercetools-datalift&utm_content=176)! It's free for OSS, and your support helps us grow. If you like it, consider giving us a shout-out.
-
-<details>
-<summary>❤️ Share</summary>
-
-- [X](https://twitter.com/intent/tweet?text=I%20just%20used%20%40coderabbitai%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20the%20proprietary%20code.%20Check%20it%20out%3A&url=https%3A//coderabbit.ai)
-- [Mastodon](https://mastodon.social/share?text=I%20just%20used%20%40coderabbitai%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20the%20proprietary%20code.%20Check%20it%20out%3A%20https%3A%2F%2Fcoderabbit.ai)
-- [Reddit](https://www.reddit.com/submit?title=Great%20tool%20for%20code%20review%20-%20CodeRabbit&text=I%20just%20used%20CodeRabbit%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20proprietary%20code.%20Check%20it%20out%3A%20https%3A//coderabbit.ai)
-- [LinkedIn](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fcoderabbit.ai&mini=true&title=Great%20tool%20for%20code%20review%20-%20CodeRabbit&summary=I%20just%20used%20CodeRabbit%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20proprietary%20code)
-
-</details>
-
-
-<sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
-
-<!-- tips_end -->
-```
-
----
-
-## coderabbitai[bot] · chat · 2026-09-04T20:51:03Z
-
-- Source: https://github.com/dsx-ai-factory/infra-controller/pull/5605#issuecomment-5546303866
-- Location: —
-
-```markdown
-<!-- This is an auto-generated comment by CodeRabbit -->
-> [!NOTE]
-> GitHub couldn't provide a complete incremental comparison for this pull request, so CodeRabbit is performing a full review instead. This review may take a little longer.
-```
-
----
-
-## coderabbitai[bot] · chat · 2026-09-15T18:23:39Z
-
-- Source: https://github.com/open-feature/dart-sdk/pull/173#issuecomment-5685733395
-- Location: —
-
-```markdown
-<!-- This is an auto-generated comment: summarize by coderabbit.ai -->
-<!-- This is an auto-generated comment: skip review by coderabbit.ai -->
-
-> [!IMPORTANT]
-> ## Review skipped
-> 
-> Auto reviews are disabled on base/target branches other than the default branch.
-> 
-> 
-> 
-> Please check the settings in the CodeRabbit UI or the `.coderabbit.yaml` file in this repository. To trigger a single review, invoke the `@coderabbitai review` command.
-> 
-> <details>
-> <summary>⚙️ Run configuration</summary>
-> 
-> **Configuration used**: Organization UI
-> 
-> **Review profile**: CHILL
-> 
-> **Plan**: Advanced
-> 
-> **Run ID**: `91e05304-2a2b-460a-9728-ac5175db47a8`
-> 
-> </details>
-> 
-> You can disable this status message by setting the `reviews.review_status` to `false` in the CodeRabbit configuration file.
-> 
-> Use the checkbox below for a quick retry:
-> - [ ] <!-- {"checkboxId":"e9bb8d72-00e8-4f67-9cb2-caf3b22574fe"} --> 🔍 Trigger review
-
-<!-- end of auto-generated comment: skip review by coderabbit.ai -->
-
-<!-- tips_start -->
-
----
-
-
-
-
-<sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
-
-<!-- tips_end -->
-```
-
----
-
-## coderabbitai[bot] · chat · 2026-09-15T18:46:37Z
-
-- Source: https://github.com/Oichkatzelesfrettschen/discobsd-pico-unofficial/pull/73#issuecomment-5686130528
-- Location: —
-
-```markdown
-<!-- This is an auto-generated comment: summarize by coderabbit.ai -->
-<!-- This is an auto-generated comment: skip review by coderabbit.ai -->
-
-> [!IMPORTANT]
-> - [ ] <!-- {"checkboxId":"e9bb8d72-00e8-4f67-9cb2-caf3b22574fe"} --> 🔍 Trigger review
-> 
-> This repository does not receive automatic reviews because it has fewer than 10 stars.
-> 
-> <details>
-> <summary>⚙️ Run configuration</summary>
-> 
-> **Configuration used**: Organization UI
-> 
-> **Review profile**: ASSERTIVE
-> 
-> **Plan**: Advanced
-> 
-> **Run ID**: `48c2557b-180b-4d78-9a39-caeb5bb1c00c`
-> 
-> </details>
-
-<!-- end of auto-generated comment: skip review by coderabbit.ai -->
-
-<!-- tips_start -->
-
----
-
-Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=github&utm_campaign=Oichkatzelesfrettschen/discobsd-pico-unofficial&utm_content=73)! It's free for OSS, and your support helps us grow. If you like it, consider giving us a shout-out.
-
-<details>
-<summary>❤️ Share</summary>
-
-- [X](https://twitter.com/intent/tweet?text=I%20just%20used%20%40coderabbitai%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20the%20proprietary%20code.%20Check%20it%20out%3A&url=https%3A//coderabbit.ai)
-- [Mastodon](https://mastodon.social/share?text=I%20just%20used%20%40coderabbitai%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20the%20proprietary%20code.%20Check%20it%20out%3A%20https%3A%2F%2Fcoderabbit.ai)
-- [Reddit](https://www.reddit.com/submit?title=Great%20tool%20for%20code%20review%20-%20CodeRabbit&text=I%20just%20used%20CodeRabbit%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20proprietary%20code.%20Check%20it%20out%3A%20https%3A//coderabbit.ai)
-- [LinkedIn](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fcoderabbit.ai&mini=true&title=Great%20tool%20for%20code%20review%20-%20CodeRabbit&summary=I%20just%20used%20CodeRabbit%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20proprietary%20code)
-
-</details>
-
-
-<sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
-
-<!-- tips_end -->
-```
-
----
-
-## coderabbitai[bot] · chat · 2026-09-15T16:11:01Z
-
-- Source: https://github.com/LerianStudio/midaz/pull/2499#issuecomment-5683734204
+- Source: https://github.com/cryostatio/cryostat/pull/1764#issuecomment-5685898584
 - Location: —
 
 ```markdown
 <!-- This is an auto-generated reply by CodeRabbit -->
-<!-- CodeRabbit review command invocation: v2:cc42b82e7d430033a90d077ead07ee017cf1f39b4efd9d4a81c1f4a9e651c8ef -->
+> [!TIP]
+> For best results, initiate chat on the files or code changes.
+
 <details>
-<summary>⚠️ Action not completed</summary>
+<summary>🧩 Analysis chain</summary>
 
-Already reviewed the last commit. Use `@coderabbitai full review` to rerun a review of the entire changeset.
+🏁 Script executed:
 
-> Note: CodeRabbit is an incremental review system and does not re-review already reviewed commits. This command is applicable only when automatic reviews are paused.
+```shell
+#!/bin/bash
+set -euo pipefail
+
+gh api --paginate \
+  repos/cryostatio/cryostat/pulls/1764/comments \
+  --jq '.[] | select(.user.login == "coderabbitai") | select(.path == "src/main/java/io/cryostat/recordings/RecordingHelper.java") | {id, url: html_url, body, line, original_line, side, original_position, position, created_at}'
+```
+
+Length of output: 671
+
+---
+
+🏁 Script executed:
+
+```shell
+#!/bin/bash
+set -euo pipefail
+
+gh api --paginate repos/cryostatio/cryostat/pulls/1764/comments \
+  --jq '.[] | select((.path // "") | endswith("RecordingHelper.java")) | {user: .user.login, url: .html_url, body: .body, line: .line, original_line: .original_line, side: .side, original_position: .original_position, position: .position}'
+```
+
+Length of output: 477
+
+---
+
+🏁 Script executed:
+
+```shell
+#!/bin/bash
+set -euo pipefail
+
+echo "=== Reviews ==="
+gh api --paginate repos/cryostatio/cryostat/pulls/1764/reviews \
+  --jq '.[] | select(.user.login == "coderabbitai") | {id, html_url, body, submitted_at}' || true
+
+echo "=== Issue comments ==="
+gh api --paginate repos/cryostatio/cryostat/issues/1764/comments \
+  --jq '.[] | select(.user.login == "coderabbitai") | {id, html_url, body, created_at}' || true
+
+echo "=== RecordingHelper diff ==="
+git diff --unified=20 HEAD^ HEAD -- src/main/java/io/cryostat/recordings/RecordingHelper.java | sed -n '1,360p'
+```
+
+Length of output: 768
+
+---
+
+🏁 Script executed:
+
+```shell
+#!/bin/bash
+set -euo pipefail
+
+gh api --paginate repos/cryostatio/cryostat/pulls/1764/comments \
+  --jq '.[] | {user: .user.login, path, url: .html_url, body, line, original_line, position, original_position}'
+```
+
+Length of output: 38204
+
+---
+
+🏁 Script executed:
+
+```shell
+#!/bin/bash
+set -euo pipefail
+
+echo "=== CodeRabbit reviews containing RecordingHelper ==="
+gh api --paginate repos/cryostatio/cryostat/pulls/1764/reviews \
+  --jq '.[] | select(.user.login == "coderabbitai[bot]") | select(.body | test("RecordingHelper"; "i")) | {url: .html_url, body: .body, submitted_at}' || true
+
+echo "=== CodeRabbit issue comments containing RecordingHelper ==="
+gh api --paginate repos/cryostatio/cryostat/issues/1764/comments \
+  --jq '.[] | select(.user.login == "coderabbitai[bot]") | select(.body | test("RecordingHelper"; "i")) | {url: .html_url, body: .body, created_at}' || true
+
+echo "=== All matching bot-authored comment URLs ==="
+gh api --paginate repos/cryostatio/cryostat/pulls/1764/comments \
+  --jq '.[] | select(.user.login == "coderabbitai[bot]") | select(.body | test("RecordingHelper"; "i")) | {url: .html_url, path: .path, body: .body}' || true
+```
+
+Length of output: 77564
+
+---
+
+🏁 Script executed:
+
+```shell
+#!/bin/bash
+set -euo pipefail
+
+repo="cryostatio/cryostat"
+pr_url="https://github.com/cryostatio/cryostat/pull/1764"
+review_url="https://github.com/cryostatio/cryostat/pull/1764#pullrequestreview-5214216522"
+
+issue_one_body=$(cat <<EOF
+## Summary
+\`RecordingHelper.uploadSynthesizedRecording\` can leave an orphaned archive object when post-upload persistence fails.
+
+## Problem
+The method uploads the synthesized recording before it runs \`metadataService.get().create(...)\` in \`BUCKET\` mode and before it persists \`ArchivedRecordingInfo\`. If either post-upload operation fails, the remote object remains without a database record. The caller only owns local temporary-file cleanup.
+
+## Required change
+Add compensation inside \`src/main/java/io/cryostat/recordings/RecordingHelper.java\` in \`uploadSynthesizedRecording\`. If a post-upload metadata or archive-persistence step fails, delete the uploaded object with the same archive key.
+
+## Acceptance criteria
+- Delete the uploaded object when \`metadataService.get().create(...)\` fails after upload.
+- Delete the uploaded object when \`ArchivedRecordingInfo.persist()\` fails after upload.
+- Preserve and rethrow the original failure if remote-object deletion also fails.
+- Keep remote-object compensation in \`uploadSynthesizedRecording\`.
+- Add tests for both post-upload failure paths.
+
+## Source
+- Pull request: $pr_url
+- CodeRabbit review: $review_url
+- Requested by: `@andrewazores`
+EOF
+)
+
+issue_two_body=$(cat <<EOF
+## Summary
+The snapshot creation flow can leave a remote snapshot recording open when local creation or persistence fails.
+
+## Problem
+\`AgentJFRService.getSnapshotRecording()\` starts the remote snapshot before \`ActiveRecording.from(...)\`, \`recording.persist()\`, and \`lockedTarget.persist()\`. Existing cleanup covers snapshot validation only. If a local operation fails, the transaction can roll back while the remote recording represented by \`desc\` remains open.
+
+## Required change
+Update the snapshot creation flow in \`src/main/java/io/cryostat/recordings/RecordingHelper.java\` to close \`desc\` when a local construction or persistence operation fails. Use \`executeConnectedTask\` with \`safeCloseRecording\` for the cleanup.
+
+## Acceptance criteria
+- Close the remote snapshot if \`ActiveRecording.from(...)\` fails.
+- Close the remote snapshot if \`recording.persist()\` fails.
+- Close the remote snapshot if \`lockedTarget.persist()\` fails.
+- Isolate and log a cleanup connection failure.
+- Rethrow the original local-operation failure.
+- Add tests for the local-failure cleanup paths.
+
+## Source
+- Pull request: $pr_url
+- CodeRabbit review: $review_url
+- Requested by: `@andrewazores`
+EOF
+)
+
+url_one=$(gh issue create \
+  --repo "$repo" \
+  --title "Delete synthesized recording objects when post-upload persistence fails" \
+  --body "$issue_one_body" \
+  --assignee andrewazores)
+
+url_two=$(gh issue create \
+  --repo "$repo" \
+  --title "Close remote snapshots when local snapshot persistence fails" \
+  --body "$issue_two_body" \
+  --assignee andrewazores)
+
+printf 'Created issue 1: %s\n' "$url_one"
+printf 'Created issue 2: %s\n' "$url_two"
+```
+
+Length of output: 3421
+
+---
 
 </details>
+
+`@andrewazores`: Created and assigned the two follow-up issues:
+
+- `#1792` — Delete synthesized recording objects when post-upload persistence fails
+- `#1793` — Close remote snapshots when local snapshot persistence fails
+
+_You are interacting with an AI system._
 ```
 
 ---
 
-## coderabbitai[bot] · chat · 2026-09-15T16:57:38Z
+## coderabbitai[bot] · chat · 2026-09-15T17:02:31Z
 
-- Source: https://github.com/LerianStudio/midaz/pull/2499#issuecomment-5684451495
-- Location: —
-
-```markdown
-<!-- This is an auto-generated reply by CodeRabbit -->
-<!-- CodeRabbit review command invocation: v2:d7d6ce3d65ef12e9aed97e52f8e361ed0a6062ceff5bf8284d734f4f2ff18d51 -->
-<details>
-<summary>⚠️ Action not completed</summary>
-
-Already reviewed the last commit. Use `@coderabbitai full review` to rerun a review of the entire changeset.
-
-> Note: CodeRabbit is an incremental review system and does not re-review already reviewed commits. This command is applicable only when automatic reviews are paused.
-
-</details>
-```
-
----
-
-## coderabbitai[bot] · chat · 2026-09-15T17:10:51Z
-
-- Source: https://github.com/LerianStudio/midaz/pull/2499#issuecomment-5684643539
-- Location: —
-
-```markdown
-<!-- This is an auto-generated reply by CodeRabbit -->
-<!-- CodeRabbit review command invocation: v2:1f1e5952865087ce603fa182dc9096a119f368053474e34ebcc187f7a96d7b95 -->
-<details>
-<summary>⚠️ Action not completed</summary>
-
-Already reviewed the last commit. Use `@coderabbitai full review` to rerun a review of the entire changeset.
-
-> Note: CodeRabbit is an incremental review system and does not re-review already reviewed commits. This command is applicable only when automatic reviews are paused.
-
-</details>
-```
-
----
-
-## coderabbitai[bot] · chat · 2026-09-15T18:49:55Z
-
-- Source: https://github.com/LerianStudio/midaz/pull/2499#issuecomment-5686195430
-- Location: —
-
-```markdown
-<!-- This is an auto-generated reply by CodeRabbit -->
-<!-- CodeRabbit review command invocation: v2:58f5b400c7fadfe5d159ff2039408bd4c91a4f0d174eb29ce894ded576f9c3a1 -->
-<details>
-<summary>⚠️ Action not completed</summary>
-
-Already reviewed the last commit. Use `@coderabbitai full review` to rerun a review of the entire changeset.
-
-> Note: CodeRabbit is an incremental review system and does not re-review already reviewed commits. This command is applicable only when automatic reviews are paused.
-
-</details>
-```
-
----
-
-## coderabbitai[bot] · chat · 2026-09-09T21:07:23Z
-
-- Source: https://github.com/yacosta738/astro-cms/pull/123#issuecomment-5608759344
-- Location: —
-
-```markdown
-<!-- This is an auto-generated comment: summarize by coderabbit.ai -->
-<!-- This is an auto-generated comment: skip review by coderabbit.ai -->
-
-> [!IMPORTANT]
-> ## Review skipped
-> 
-> Bot user detected.
-> 
-> To trigger a single review, invoke the `@coderabbitai review` command.
-> 
-> <details>
-> <summary>⚙️ Run configuration</summary>
-> 
-> **Configuration used**: defaults
-> 
-> **Review profile**: CHILL
-> 
-> **Plan**: Advanced
-> 
-> **Run ID**: `9c0a6c60-fb08-420a-b95f-d528710fb0c6`
-> 
-> </details>
-> 
-> You can disable this status message by setting the `reviews.review_status` to `false` in the CodeRabbit configuration file.
-> 
-> Use the checkbox below for a quick retry:
-> - [ ] <!-- {"checkboxId":"e9bb8d72-00e8-4f67-9cb2-caf3b22574fe"} --> 🔍 Trigger review
-
-<!-- end of auto-generated comment: skip review by coderabbit.ai -->
-
-<!-- tips_start -->
-
----
-
-Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=github&utm_campaign=yacosta738/astro-cms&utm_content=123)! It's free for OSS, and your support helps us grow. If you like it, consider giving us a shout-out.
-
-<details>
-<summary>❤️ Share</summary>
-
-- [X](https://twitter.com/intent/tweet?text=I%20just%20used%20%40coderabbitai%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20the%20proprietary%20code.%20Check%20it%20out%3A&url=https%3A//coderabbit.ai)
-- [Mastodon](https://mastodon.social/share?text=I%20just%20used%20%40coderabbitai%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20the%20proprietary%20code.%20Check%20it%20out%3A%20https%3A%2F%2Fcoderabbit.ai)
-- [Reddit](https://www.reddit.com/submit?title=Great%20tool%20for%20code%20review%20-%20CodeRabbit&text=I%20just%20used%20CodeRabbit%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20proprietary%20code.%20Check%20it%20out%3A%20https%3A//coderabbit.ai)
-- [LinkedIn](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fcoderabbit.ai&mini=true&title=Great%20tool%20for%20code%20review%20-%20CodeRabbit&summary=I%20just%20used%20CodeRabbit%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20proprietary%20code)
-
-</details>
-
-
-<sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
-
-<!-- tips_end -->
-```
-
----
-
-## coderabbitai[bot] · chat · 2026-09-15T10:43:07Z
-
-- Source: https://github.com/scherenhaenden/BlazaresSpaces/pull/6#issuecomment-5678869498
+- Source: https://github.com/ViceVerse-cz/Serein/pull/230#issuecomment-5684522840
 - Location: —
 
 ```markdown
@@ -461,17 +306,7 @@ Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=gi
 
 ---
 
-Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=github&utm_campaign=scherenhaenden/BlazaresSpaces&utm_content=6)! It's free for OSS, and your support helps us grow. If you like it, consider giving us a shout-out.
 
-<details>
-<summary>❤️ Share</summary>
-
-- [X](https://twitter.com/intent/tweet?text=I%20just%20used%20%40coderabbitai%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20the%20proprietary%20code.%20Check%20it%20out%3A&url=https%3A//coderabbit.ai)
-- [Mastodon](https://mastodon.social/share?text=I%20just%20used%20%40coderabbitai%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20the%20proprietary%20code.%20Check%20it%20out%3A%20https%3A%2F%2Fcoderabbit.ai)
-- [Reddit](https://www.reddit.com/submit?title=Great%20tool%20for%20code%20review%20-%20CodeRabbit&text=I%20just%20used%20CodeRabbit%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20proprietary%20code.%20Check%20it%20out%3A%20https%3A//coderabbit.ai)
-- [LinkedIn](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fcoderabbit.ai&mini=true&title=Great%20tool%20for%20code%20review%20-%20CodeRabbit&summary=I%20just%20used%20CodeRabbit%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20proprietary%20code)
-
-</details>
 
 
 <sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
@@ -481,137 +316,31 @@ Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=gi
 
 ---
 
-## coderabbitai[bot] · chat · 2026-09-15T18:43:46Z
+## coderabbitai[bot] · chat · 2026-09-15T18:30:51Z
 
-- Source: https://github.com/9r4rxssx64-creator/CMCteams/pull/3792#issuecomment-5686079277
+- Source: https://github.com/LerianStudio/helm/pull/2124#issuecomment-5685849157
 - Location: —
 
 ```markdown
-<!-- This is an auto-generated comment: summarize by coderabbit.ai -->
-<!-- This is an auto-generated comment: skip review by coderabbit.ai -->
-
-> [!IMPORTANT]
-> ## Review skipped
-> 
-> Bot user detected.
-> 
-> To trigger a single review, invoke the `@coderabbitai review` command.
-> 
-> <details>
-> <summary>⚙️ Run configuration</summary>
-> 
-> **Configuration used**: Path: .coderabbit.yaml
-> 
-> **Review profile**: ASSERTIVE
-> 
-> **Plan**: Advanced
-> 
-> **Run ID**: `1a760ec1-c754-45f9-8dae-a98b5ef96ad6`
-> 
-> </details>
-> 
-> You can disable this status message by setting the `reviews.review_status` to `false` in the CodeRabbit configuration file.
-> 
-> Use the checkbox below for a quick retry:
-> - [ ] <!-- {"checkboxId":"e9bb8d72-00e8-4f67-9cb2-caf3b22574fe"} --> 🔍 Trigger review
-
-<!-- end of auto-generated comment: skip review by coderabbit.ai -->
-
-<!-- tips_start -->
-
----
-
-Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=github&utm_campaign=9r4rxssx64-creator/CMCteams&utm_content=3792)! It's free for OSS, and your support helps us grow. If you like it, consider giving us a shout-out.
+<!-- This is an auto-generated reply by CodeRabbit -->
+<!-- CodeRabbit review command invocation: v2:d1da317dc629c567cae560b88dbacd38990123f86336afd089dc8c94042d127d -->
+`@fredcamaral` I will review the changes in `#2124`.
 
 <details>
-<summary>❤️ Share</summary>
+<summary>✅ Action performed</summary>
 
-- [X](https://twitter.com/intent/tweet?text=I%20just%20used%20%40coderabbitai%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20the%20proprietary%20code.%20Check%20it%20out%3A&url=https%3A//coderabbit.ai)
-- [Mastodon](https://mastodon.social/share?text=I%20just%20used%20%40coderabbitai%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20the%20proprietary%20code.%20Check%20it%20out%3A%20https%3A%2F%2Fcoderabbit.ai)
-- [Reddit](https://www.reddit.com/submit?title=Great%20tool%20for%20code%20review%20-%20CodeRabbit&text=I%20just%20used%20CodeRabbit%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20proprietary%20code.%20Check%20it%20out%3A%20https%3A//coderabbit.ai)
-- [LinkedIn](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fcoderabbit.ai&mini=true&title=Great%20tool%20for%20code%20review%20-%20CodeRabbit&summary=I%20just%20used%20CodeRabbit%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20proprietary%20code)
+Review finished.
+
+> Note: CodeRabbit is an incremental review system and does not re-review already reviewed commits. This command is applicable only when automatic reviews are paused.
 
 </details>
-
-
-<sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
-
-<!-- tips_end -->
 ```
 
 ---
 
-## coderabbitai[bot] · chat · 2026-09-15T18:39:01Z
+## coderabbitai[bot] · chat · 2026-09-15T17:48:31Z
 
-- Source: https://github.com/LongevoHealth/longevo-wearables/pull/15#issuecomment-5685993045
-- Location: —
-
-```markdown
-<!-- This is an auto-generated comment: summarize by coderabbit.ai -->
-<!-- This is an auto-generated comment: skip review by coderabbit.ai -->
-
-> [!IMPORTANT]
-> ## Review skipped
-> 
-> Auto reviews are limited based on label configuration.
-> 
-> <details>
-> <summary>:label: Required labels (at least one) (2)</summary>
-> 
-> * ['!ON HOLD', '!WIP']
-> * ['RABBIT']
-> 
-> </details>
-> 
-> Please check the settings in the CodeRabbit UI or the `.coderabbit.yaml` file in this repository. To trigger a single review, invoke the `@coderabbitai review` command.
-> 
-> <details>
-> <summary>⚙️ Run configuration</summary>
-> 
-> **Configuration used**: Repository YAML (base), Organization UI (inherited)
-> 
-> **Review profile**: CHILL
-> 
-> **Plan**: Advanced
-> 
-> **Run ID**: `9a3b6899-b0d8-4bd7-a4bc-fa1e6a8dbc7b`
-> 
-> </details>
-> 
-> You can disable this status message by setting the `reviews.review_status` to `false` in the CodeRabbit configuration file.
-> 
-> Use the checkbox below for a quick retry:
-> - [ ] <!-- {"checkboxId":"e9bb8d72-00e8-4f67-9cb2-caf3b22574fe"} --> 🔍 Trigger review
-
-<!-- end of auto-generated comment: skip review by coderabbit.ai -->
-
-<!-- tips_start -->
-
----
-
-Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=github&utm_campaign=LongevoHealth/longevo-wearables&utm_content=15)! It's free for OSS, and your support helps us grow. If you like it, consider giving us a shout-out.
-
-<details>
-<summary>❤️ Share</summary>
-
-- [X](https://twitter.com/intent/tweet?text=I%20just%20used%20%40coderabbitai%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20the%20proprietary%20code.%20Check%20it%20out%3A&url=https%3A//coderabbit.ai)
-- [Mastodon](https://mastodon.social/share?text=I%20just%20used%20%40coderabbitai%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20the%20proprietary%20code.%20Check%20it%20out%3A%20https%3A%2F%2Fcoderabbit.ai)
-- [Reddit](https://www.reddit.com/submit?title=Great%20tool%20for%20code%20review%20-%20CodeRabbit&text=I%20just%20used%20CodeRabbit%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20proprietary%20code.%20Check%20it%20out%3A%20https%3A//coderabbit.ai)
-- [LinkedIn](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fcoderabbit.ai&mini=true&title=Great%20tool%20for%20code%20review%20-%20CodeRabbit&summary=I%20just%20used%20CodeRabbit%20for%20my%20code%20review%2C%20and%20it%27s%20fantastic%21%20It%27s%20free%20for%20OSS%20and%20offers%20a%20free%20trial%20for%20proprietary%20code)
-
-</details>
-
-
-<sub>Comment `@coderabbitai help` to get the list of available commands.</sub>
-
-<!-- tips_end -->
-```
-
----
-
-## coderabbitai[bot] · chat · 2026-09-12T23:06:41Z
-
-- Source: https://github.com/mydsoftware/AI-Agent-Manager/pull/2#issuecomment-5649293795
+- Source: https://github.com/Ysopking/Lifeos-new/pull/277#issuecomment-5685194525
 - Location: —
 
 ```markdown
@@ -626,23 +355,25 @@ Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=gi
 > <details>
 > <summary>⚙️ Run configuration</summary>
 > 
-> **Configuration used**: defaults
+> **Configuration used**: Organization UI
 > 
 > **Review profile**: CHILL
 > 
 > **Plan**: Advanced
 > 
-> **Run ID**: `27e5601b-8b70-472e-a9f7-0d5a029bf23f`
+> **Run ID**: `60a51e06-f568-4486-8237-408104a11a6c`
 > 
 > </details>
 
 <!-- end of auto-generated comment: skip review by coderabbit.ai -->
 
+> [!WARNING]
+> Billing warning: we have not been able to collect payment for this subscription for more than 72 hours. Please update the payment method or pay any pending invoices in Billing to avoid service interruption.
 <!-- tips_start -->
 
 ---
 
-Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=github&utm_campaign=mydsoftware/AI-Agent-Manager&utm_content=2)! It's free for OSS, and your support helps us grow. If you like it, consider giving us a shout-out.
+Thanks for using [CodeRabbit](https://coderabbit.ai?utm_source=oss&utm_medium=github&utm_campaign=Ysopking/Lifeos-new&utm_content=277)! It's free for OSS, and your support helps us grow. If you like it, consider giving us a shout-out.
 
 <details>
 <summary>❤️ Share</summary>

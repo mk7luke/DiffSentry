@@ -5,6 +5,20 @@
  *
  *   npx tsx scripts/capture-corpus.ts --bot "coderabbitai[bot]" --out tests/e2e/reference/2026-09/coderabbit
  *   npx tsx scripts/capture-corpus.ts --bot "diffsentry[bot]" --repo mk7luke/DiffSentry --out tests/e2e/reference/2026-09/diffsentry
+ *
+ * --from-raw <path> re-buckets an existing raw.json instead of scraping:
+ * no network calls, no PR selection, just re-classify and regenerate the
+ * .md files and manifest.json counts. `gh search`'s "most-recently-updated"
+ * ordering means every re-scrape silently draws a different PR sample out
+ * from under a fixed set of counts — that's what turned a routine classifier
+ * fix into a data regression once already (task-5-report.md, fix round 3).
+ * Once scraped, treat the corpus as a fixed artifact and use this mode to
+ * verify future classifier changes against it.
+ *
+ *   npx tsx scripts/capture-corpus.ts --from-raw /tmp/old/raw.json --out tests/e2e/reference/2026-09/coderabbit
+ *
+ * (Reads a sibling manifest.json next to the given raw.json for `bot` and
+ * the `prs` list, since raw.json alone doesn't carry per-PR language.)
  */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -82,9 +96,55 @@ function fetchComments(c: Candidate, bot: string): CapturedComment[] {
   return out;
 }
 
+type ManifestPr = { repo: string; number: number; language: string | null; url: string };
+
+/** Bucket comments by surface and write the .md files + manifest.json + raw.json for a corpus dir. */
+function writeCorpus(outDir: string, bot: string, capturedAt: string, prs: ManifestPr[], all: CapturedComment[]): void {
+  const buckets: Record<Surface, CapturedComment[]> = {
+    walkthrough: [], "review-summary": [], inline: [], status: [], chat: [], other: [],
+  };
+  for (const c of all) buckets[classifySurface(c)].push(c);
+
+  fs.mkdirSync(outDir, { recursive: true });
+  const titles: Record<string, string> = {
+    walkthrough: "Walkthroughs", "review-summary": "Review summaries",
+    inline: "Inline comments", status: "Status comments", chat: "Chat replies",
+  };
+  for (const [surface, title] of Object.entries(titles)) {
+    fs.writeFileSync(path.join(outDir, `${surface}.md`), renderCorpusMarkdown(title, buckets[surface as Surface]), "utf8");
+  }
+
+  const manifest = {
+    bot,
+    capturedAt,
+    prs,
+    counts: Object.fromEntries(Object.entries(buckets).map(([k, v]) => [k, v.length])),
+  };
+  fs.writeFileSync(path.join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
+  fs.writeFileSync(path.join(outDir, "raw.json"), scrubSecrets(JSON.stringify(all, null, 2)), "utf8");
+
+  process.stderr.write(`wrote ${all.length} comments from ${prs.length} PRs to ${outDir}\n`);
+}
+
+/** --from-raw: re-bucket a previously captured raw.json with no network calls. */
+function rebucketFromRaw(rawPath: string, outDir: string): void {
+  const all = JSON.parse(fs.readFileSync(rawPath, "utf8")) as CapturedComment[];
+  const manifestPath = path.join(path.dirname(rawPath), "manifest.json");
+  const prevManifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as { bot: string; capturedAt: string; prs: ManifestPr[] };
+
+  writeCorpus(outDir, prevManifest.bot, prevManifest.capturedAt, prevManifest.prs, all);
+  process.stderr.write(`re-bucketed from ${rawPath} (captured ${prevManifest.capturedAt})\n`);
+}
+
 function main(): void {
-  const bot = arg("bot");
   const outDir = arg("out");
+
+  if (process.argv.includes("--from-raw")) {
+    rebucketFromRaw(arg("from-raw"), outDir);
+    return;
+  }
+
+  const bot = arg("bot");
   const limit = Number(arg("limit", "18"));
   const repoFilter = process.argv.includes("--repo") ? arg("repo") : null;
 
@@ -102,30 +162,8 @@ function main(): void {
     all.push(...fetchComments(c, bot));
   }
 
-  const buckets: Record<Surface, CapturedComment[]> = {
-    walkthrough: [], "review-summary": [], inline: [], status: [], chat: [], other: [],
-  };
-  for (const c of all) buckets[classifySurface(c)].push(c);
-
-  fs.mkdirSync(outDir, { recursive: true });
-  const titles: Record<string, string> = {
-    walkthrough: "Walkthroughs", "review-summary": "Review summaries",
-    inline: "Inline comments", status: "Status comments", chat: "Chat replies",
-  };
-  for (const [surface, title] of Object.entries(titles)) {
-    fs.writeFileSync(path.join(outDir, `${surface}.md`), renderCorpusMarkdown(title, buckets[surface as Surface]), "utf8");
-  }
-
-  const manifest = {
-    bot,
-    capturedAt: new Date().toISOString(),
-    prs: selected.map((c) => ({ repo: c.repo, number: c.number, language: c.language, url: `https://github.com/${c.repo}/pull/${c.number}` })),
-    counts: Object.fromEntries(Object.entries(buckets).map(([k, v]) => [k, v.length])),
-  };
-  fs.writeFileSync(path.join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
-  fs.writeFileSync(path.join(outDir, "raw.json"), scrubSecrets(JSON.stringify(all, null, 2)), "utf8");
-
-  process.stderr.write(`wrote ${all.length} comments from ${selected.length} PRs to ${outDir}\n`);
+  const prs = selected.map((c) => ({ repo: c.repo, number: c.number, language: c.language, url: `https://github.com/${c.repo}/pull/${c.number}` }));
+  writeCorpus(outDir, bot, new Date().toISOString(), prs, all);
 }
 
 main();

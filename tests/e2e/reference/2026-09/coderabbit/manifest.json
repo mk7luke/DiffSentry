@@ -1,122 +1,122 @@
 {
   "bot": "coderabbitai[bot]",
-  "capturedAt": "2026-09-15T18:50:57.858Z",
+  "capturedAt": "2026-09-15T18:34:35.139Z",
   "prs": [
     {
-      "repo": "iiio2/realseo",
-      "number": 16,
+      "repo": "janlampert08-dev/strado",
+      "number": 249,
       "language": "TypeScript",
-      "url": "https://github.com/iiio2/realseo/pull/16"
+      "url": "https://github.com/janlampert08-dev/strado/pull/249"
     },
     {
-      "repo": "dzhalaevd/caxton",
-      "number": 49,
-      "language": "Python",
-      "url": "https://github.com/dzhalaevd/caxton/pull/49"
-    },
-    {
-      "repo": "helloextend/extend-for-woocommerce",
-      "number": 114,
-      "language": "PHP",
-      "url": "https://github.com/helloextend/extend-for-woocommerce/pull/114"
-    },
-    {
-      "repo": "BisonSchweizAG/commercetools-datalift",
-      "number": 176,
-      "language": "Java",
-      "url": "https://github.com/BisonSchweizAG/commercetools-datalift/pull/176"
-    },
-    {
-      "repo": "alpaka-group/alpaka3",
-      "number": 687,
-      "language": "C++",
-      "url": "https://github.com/alpaka-group/alpaka3/pull/687"
-    },
-    {
-      "repo": "tojemoc/sofie",
-      "number": 61,
-      "language": "Shell",
-      "url": "https://github.com/tojemoc/sofie/pull/61"
-    },
-    {
-      "repo": "dsx-ai-factory/infra-controller",
-      "number": 5605,
-      "language": "Rust",
-      "url": "https://github.com/dsx-ai-factory/infra-controller/pull/5605"
-    },
-    {
-      "repo": "nixel2007/opentelemetry-instrumentation-entity",
-      "number": 2,
-      "language": "1C Enterprise",
-      "url": "https://github.com/nixel2007/opentelemetry-instrumentation-entity/pull/2"
-    },
-    {
-      "repo": "webpack/webpack",
-      "number": 22122,
+      "repo": "marionettejs/marionette",
+      "number": 525,
       "language": "JavaScript",
-      "url": "https://github.com/webpack/webpack/pull/22122"
+      "url": "https://github.com/marionettejs/marionette/pull/525"
     },
     {
-      "repo": "mattermost/mattermost-developer-documentation",
-      "number": 1507,
-      "language": "CSS",
-      "url": "https://github.com/mattermost/mattermost-developer-documentation/pull/1507"
+      "repo": "TechValleyCenterOfGravity/door-sync",
+      "number": 62,
+      "language": "Python",
+      "url": "https://github.com/TechValleyCenterOfGravity/door-sync/pull/62"
     },
     {
-      "repo": "open-feature/dart-sdk",
-      "number": 173,
-      "language": "Dart",
-      "url": "https://github.com/open-feature/dart-sdk/pull/173"
+      "repo": "Strategy11/formidable-forms",
+      "number": 3246,
+      "language": "PHP",
+      "url": "https://github.com/Strategy11/formidable-forms/pull/3246"
     },
     {
-      "repo": "Oichkatzelesfrettschen/discobsd-pico-unofficial",
-      "number": 73,
-      "language": "C",
-      "url": "https://github.com/Oichkatzelesfrettschen/discobsd-pico-unofficial/pull/73"
+      "repo": "sumx21t-3310/FloatSoda",
+      "number": 228,
+      "language": "C#",
+      "url": "https://github.com/sumx21t-3310/FloatSoda/pull/228"
     },
     {
-      "repo": "LerianStudio/midaz",
-      "number": 2499,
+      "repo": "cryostatio/cryostat",
+      "number": 1764,
+      "language": "Java",
+      "url": "https://github.com/cryostatio/cryostat/pull/1764"
+    },
+    {
+      "repo": "hypercerts-org/hypercerts-relay",
+      "number": 22,
       "language": "Go",
-      "url": "https://github.com/LerianStudio/midaz/pull/2499"
+      "url": "https://github.com/hypercerts-org/hypercerts-relay/pull/22"
     },
     {
-      "repo": "yacosta738/astro-cms",
-      "number": 123,
-      "language": "MDX",
-      "url": "https://github.com/yacosta738/astro-cms/pull/123"
+      "repo": "hyperpolymath/natsci-studio",
+      "number": 90,
+      "language": "Just",
+      "url": "https://github.com/hyperpolymath/natsci-studio/pull/90"
     },
     {
-      "repo": "scherenhaenden/BlazaresSpaces",
-      "number": 6,
+      "repo": "ViceVerse-cz/Serein",
+      "number": 230,
+      "language": "Rust",
+      "url": "https://github.com/ViceVerse-cz/Serein/pull/230"
+    },
+    {
+      "repo": "manaflow-ai/cmux",
+      "number": 12686,
       "language": "Swift",
-      "url": "https://github.com/scherenhaenden/BlazaresSpaces/pull/6"
+      "url": "https://github.com/manaflow-ai/cmux/pull/12686"
     },
     {
-      "repo": "9r4rxssx64-creator/CMCteams",
-      "number": 3792,
-      "language": "HTML",
-      "url": "https://github.com/9r4rxssx64-creator/CMCteams/pull/3792"
+      "repo": "LerianStudio/helm",
+      "number": 2124,
+      "language": "Go Template",
+      "url": "https://github.com/LerianStudio/helm/pull/2124"
     },
     {
-      "repo": "LongevoHealth/longevo-wearables",
-      "number": 15,
+      "repo": "Ysopking/Lifeos-new",
+      "number": 277,
+      "language": "Kotlin",
+      "url": "https://github.com/Ysopking/Lifeos-new/pull/277"
+    },
+    {
+      "repo": "elanthia-online/lich-5",
+      "number": 1575,
+      "language": "Ruby",
+      "url": "https://github.com/elanthia-online/lich-5/pull/1575"
+    },
+    {
+      "repo": "NVIDIA/cuopt",
+      "number": 1877,
+      "language": "Cuda",
+      "url": "https://github.com/NVIDIA/cuopt/pull/1877"
+    },
+    {
+      "repo": "openshift/release",
+      "number": 83792,
+      "language": "Shell",
+      "url": "https://github.com/openshift/release/pull/83792"
+    },
+    {
+      "repo": "scylladb/scylladb",
+      "number": 31495,
+      "language": "C++",
+      "url": "https://github.com/scylladb/scylladb/pull/31495"
+    },
+    {
+      "repo": "flowglad/onton",
+      "number": 423,
+      "language": "OCaml",
+      "url": "https://github.com/flowglad/onton/pull/423"
+    },
+    {
+      "repo": "PostHog/posthog",
+      "number": 100274,
       "language": "Python",
-      "url": "https://github.com/LongevoHealth/longevo-wearables/pull/15"
-    },
-    {
-      "repo": "mydsoftware/AI-Agent-Manager",
-      "number": 2,
-      "language": "Python",
-      "url": "https://github.com/mydsoftware/AI-Agent-Manager/pull/2"
+      "url": "https://github.com/PostHog/posthog/pull/100274"
     }
   ],
   "counts": {
-    "walkthrough": 8,
-    "review-summary": 11,
-    "inline": 31,
+    "walkthrough": 15,
+    "review-summary": 25,
+    "inline": 76,
     "status": 0,
-    "chat": 15,
+    "chat": 5,
     "other": 0
   }
 }

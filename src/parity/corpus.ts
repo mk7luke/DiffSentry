@@ -22,18 +22,28 @@ export function isBotAuthor(login: string): boolean {
 
 export function classifySurface(c: CapturedComment): Surface {
   if (!isBotAuthor(c.author)) return "other";
+  // `kind` already tells us the surface for two of the three fetch
+  // endpoints — no body inspection needed, and body inspection is actively
+  // wrong here. A `pulls/comments` row is an inline comment by construction.
+  // A `pulls/reviews` row IS a review summary by construction: its opening
+  // text varies with the review's outcome (an "Actionable comments posted"
+  // wrapper, a bare "🧹 Nitpick comments" block, a "[!CAUTION] ... outside
+  // the diff" callout, a "[!NOTE] Quiet mode is enabled" callout are all
+  // real observed openings), so matching on prose misses whichever shape
+  // wasn't anticipated. Only `issues/comments` rows are ambiguous enough to
+  // need body heuristics — that endpoint carries walkthroughs, status
+  // comments, and chat replies alike.
   if (c.kind === "inline") return "inline";
+  if (c.kind === "review") return "review-summary";
 
   const body = c.body;
   // Precedence matters here, not just matching: both bots edit their
   // in-progress "review status" comment in place as the review completes,
-  // so a finished walkthrough or review summary can still carry the status
-  // marker it was born with. Check terminal shapes (walkthrough,
-  // review-summary) before falling back to status, or a completed review
-  // gets miscounted as still "in progress". Don't reorder this without
-  // re-reading that behaviour.
+  // so a finished walkthrough can still carry the status marker it was born
+  // with. Check the terminal shape (walkthrough) before falling back to
+  // status, or a completed review gets miscounted as still "in progress".
+  // Don't reorder this without re-reading that behaviour.
   if (/^#{1,3}\s*Walkthrough\s*$/im.test(body)) return "walkthrough";
-  if (/\*\*Actionable comments posted:\s*\d+\*\*/i.test(body)) return "review-summary";
   // Bot-agnostic: matches an HTML comment ending in "status" (DiffSentry's
   // "<!-- DiffSentry Status -->" / "<!-- ... Sticky Status -->") or
   // containing "review status" (both bots' "<!-- ... for review status -->"
