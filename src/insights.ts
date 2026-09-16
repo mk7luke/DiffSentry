@@ -167,7 +167,7 @@ function riskRationale(risk: RiskAssessment): string {
   const named =
     top.length === 1 ? top[0] : `${top.slice(0, -1).join(", ")} and ${top[top.length - 1]}`;
   const rest = ranked.length - top.length;
-  const more = rest > 0 ? `; ${rest} more factor${rest === 1 ? "" : "s"} below` : "";
+  const more = rest > 0 ? `, and ${rest} more factor${rest === 1 ? "" : "s"}` : "";
   return `Driven by ${named}${more}. Full breakdown in the walkthrough.`;
 }
 

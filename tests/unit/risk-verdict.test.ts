@@ -47,7 +47,7 @@ describe("risk verdict above the fold", () => {
       }),
     );
     expect(block).toContain(
-      "Driven by Critical findings (+20), Major findings (+10) and No new tests (+10); 1 more factor below.",
+      "Driven by Critical findings (+20), Major findings (+10) and No new tests (+10), and 1 more factor. Full breakdown in the walkthrough.",
     );
   });
 
