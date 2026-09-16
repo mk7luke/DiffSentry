@@ -1,4 +1,5 @@
 import type { WalkthroughResult, WalkthroughConfig } from "./types.js";
+import { CHANGE_TYPE_LABEL } from "./ai/parse.js";
 
 /** HTML comment marker used to find and upsert the walkthrough comment on a
  * PR. Single source of truth — both the reviewer (which posts the comment)
@@ -86,9 +87,17 @@ export function formatWalkthroughInner(
     sections.push(`## Sequence Diagram(s)\n\n${blocks}`);
   }
 
+  // The change-assessment pair: what kind of change this is, and what reading
+  // it costs. `**Change:**` is model-supplied and optional — a model that omits
+  // it (or names a value outside the enum, which the parser drops) leaves the
+  // effort line standing alone rather than printing a gap.
+  if (result.changeType) {
+    sections.push(`**Change:** ${CHANGE_TYPE_LABEL[result.changeType]}`);
+  }
+
   if (config.estimate_effort && result.effortEstimate !== undefined) {
     sections.push(
-      `## Estimated code review effort\n\n${formatEffortLine(result.effortEstimate, result.effortMinutes)}`,
+      `**Estimated code review effort:** ${formatEffortLine(result.effortEstimate, result.effortMinutes)}`,
     );
   }
 

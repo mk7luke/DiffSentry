@@ -335,6 +335,23 @@ export type CommentCategory =
  */
 export type CommentEffort = "quick_win" | "heavy_lift" | "low_value";
 
+/**
+ * What kind of change the whole pull request is — a walkthrough-level axis,
+ * not a per-finding one. One word answers the first question a maintainer asks
+ * of an unfamiliar PR, and DiffSentry has had no equivalent: its labels are
+ * suggestions for GitHub, its effort estimate is about reading cost.
+ *
+ * Three values, read off `tests/e2e/reference/2026-09/coderabbit/walkthrough.md`
+ * where `**Change:**` carries `Bug fix` (5), `Feature` (2) and `Other` (2)
+ * across 9 of 15 walkthroughs, and no fourth value appears.
+ *
+ * Deliberately *not* joined by a `**Priority:**` axis, which CodeRabbit also
+ * carries (14/15). DiffSentry already computes a risk verdict and now shows it
+ * above the fold; a second, model-authored priority would be a second verdict
+ * on the same comment, free to disagree with the first.
+ */
+export type ChangeType = "bug_fix" | "feature" | "other";
+
 // ─── File Change ───────────────────────────────────────────────
 export interface FileChange {
   filename: string;
@@ -429,6 +446,9 @@ export interface WalkthroughResult {
   summary: string;
   fileDescriptions: FileDescription[];
   cohorts?: ChangeCohort[];
+  /** What kind of change this PR is. Absent when the model omitted it or named
+   *  a value outside the enum — the walkthrough then renders without the line. */
+  changeType?: ChangeType;
   effortEstimate?: number; // 1-5
   effortMinutes?: number;
   sequenceDiagrams?: string[];

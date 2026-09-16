@@ -265,6 +265,7 @@ You MUST respond with valid JSON matching this schema:
       "summary": "Reworked npm scripts, added cross-env, updated electron-builder config."
     }
   ],
+  "changeType": "bug_fix",
   "effortEstimate": 3,
   "effortMinutes": 25,
   "sequenceDiagrams": [
@@ -282,6 +283,7 @@ Rules:
   - "label": 2-5 word category in title case (no emoji). Examples: "Build & Distribution", "Native rebuild / postinstall", "UI zoom IPC & persistence".
   - "files": array of file paths belonging to this cohort. Every changed file must appear in exactly one cohort.
   - "summary": 1-2 sentence description of what changed across these files.
+- "changeType": what kind of change the PR as a whole is — exactly one of "bug_fix", "feature", "other". Omit the field if none of the three fits; do not invent a fourth value.
 - "effortEstimate": 1-5 where 1=Trivial, 2=Simple, 3=Moderate, 4=Complex, 5=Very Complex.
 - "effortMinutes": rough integer estimate of review minutes (e.g. 5, 15, 30, 60, 120).
 - "sequenceDiagrams": array of 0-3 Mermaid sequenceDiagram blocks showing key flows introduced/modified. Omit (empty array) if the changes don't involve a clear interaction flow. Each entry is a complete sequenceDiagram (without surrounding triple backticks). Do NOT put semicolons (\`;\`) inside message labels — Mermaid treats them as statement terminators and the diagram will fail to render (e.g. write "TL/DR" or "summary" instead of "TL;DR").
