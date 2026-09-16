@@ -257,11 +257,15 @@ function tipsFooter(botName: string): string {
  * (`radioGroupId`) in exactly that place.
  *
  * `radioGroupId` is deliberately NOT emitted. GitHub renders no radio
- * semantics for it, so the only thing that could honour it is our own
- * dispatcher — which achieves the same result from `action`, by acting once
- * per touch. Emitting a group id nothing reads would be one more affordance
- * declared with nothing behind it, which is the defect this change exists to
- * close.
+ * semantics from it — both boxes stay independently tickable whether it is
+ * present or not — so the only thing that could honour it is our own parser,
+ * and the grouping it would name is the one `action` already names. That is
+ * the field exclusivity is keyed on: `newlyCheckedTriggers` in
+ * `webhook/checkbox.ts` runs at most one delivery per action, both within a
+ * single edit and across edits, reading the pre-edit body to see that a
+ * sibling box has already fired. A second key for the same grouping, read by
+ * nothing, would be one more affordance declared with nothing behind it —
+ * which is the defect this change exists to close.
  */
 export function finishingTouchesBlock(headBranch: string): string {
   const branchLabel = headBranch ? `\`${headBranch}\`` : "this branch";

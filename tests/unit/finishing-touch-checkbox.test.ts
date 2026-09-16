@@ -217,3 +217,52 @@ describe("the shape of a checkbox line", () => {
     expect(Date.now() - started).toBeLessThan(5_000);
   });
 });
+
+describe("one delivery per touch, across edits and not just within one", () => {
+  const stacked = { checkboxId: "s", action: "generate_docstrings", delivery: "stacked" };
+  const branch = { checkboxId: "b", action: "generate_docstrings", delivery: "branch" };
+  const pair = (s: boolean, b: boolean) =>
+    [box(s, stacked, "Create stacked PR"), box(b, branch, "Commit on current branch")].join("\n");
+
+  it("refuses the second destination when the first already ran in an earlier edit", () => {
+    // Edit 1 ticked the branch box and a commit was pushed. Edit 2 ticks the
+    // stacked box: a change of mind that arrives after the commit exists.
+    // Running it too would leave the user with both.
+    expect(newlyCheckedTriggers(pair(true, true), pair(false, true))).toEqual([]);
+  });
+
+  it("refuses it in the other direction too", () => {
+    expect(newlyCheckedTriggers(pair(true, true), pair(true, false))).toEqual([]);
+  });
+
+  it("lets an untick-then-tick actually change the destination", () => {
+    // Unticking is a no-op on its own …
+    expect(newlyCheckedTriggers(pair(false, false), pair(false, true))).toEqual([]);
+    // … and then the other box is free to fire.
+    expect(newlyCheckedTriggers(pair(true, false), pair(false, false))).toEqual([
+      { action: "generate_docstrings", delivery: "stacked" },
+    ]);
+  });
+
+  it("lets an untick-then-retick ask for a rerun of the same destination", () => {
+    expect(newlyCheckedTriggers(pair(false, true), pair(false, false))).toEqual([
+      { action: "generate_docstrings", delivery: "branch" },
+    ]);
+  });
+
+  it("does not let one touch veto another", () => {
+    const fix = { checkboxId: "f", action: "autofix", delivery: "stacked" };
+    const before = [pair(false, true), box(false, fix, "Create stacked PR")].join("\n");
+    const after = [pair(false, true), box(true, fix, "Create stacked PR")].join("\n");
+    expect(newlyCheckedTriggers(after, before)).toEqual([{ action: "autofix", delivery: "stacked" }]);
+  });
+
+  it("keeps the whole block quiet once every box has been ticked", () => {
+    const block = finishingTouchesBlock("feat/thing");
+    const allStacked = newlyCheckedTriggers(block.replace(/- \[ \]/g, "- [x]"), block);
+    expect(allStacked).toHaveLength(4);
+    // Every branch box is now the second tick of a touch that already ran.
+    const checkedAll = block.replace(/- \[ \]/g, "- [x]");
+    expect(newlyCheckedTriggers(checkedAll, checkedAll)).toEqual([]);
+  });
+});

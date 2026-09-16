@@ -221,3 +221,54 @@ describe("the 🪄 Autofix checkboxes in the review body", () => {
     expect(handled.map((h) => h.body)).toEqual(["@diffsentry autofix --stacked"]);
   });
 });
+
+describe("a second destination ticked in a second edit", () => {
+  const line = (m: string, checked: boolean, label: string) =>
+    `- [${checked ? "x" : " "}] <!-- ${m} --> ${label}`;
+  const bothBoxes = (commit: boolean, pr: boolean) =>
+    [
+      line(AUTOFIX_COMMIT, commit, "Push a commit to this branch (recommended)"),
+      line(AUTOFIX_PR, pr, "Create a new PR with the fixes"),
+    ].join("\n");
+
+  it("delivers once, not twice, when the user changes their mind after the commit", async () => {
+    // Edit 1: tick the commit box. A commit lands on the head branch.
+    await dispatchWebhookEvent(
+      makeDeps(),
+      "pull_request_review",
+      reviewPayload(bothBoxes(true, false), bothBoxes(false, false)),
+    );
+    await settle();
+    expect(handled.map((h) => h.body)).toEqual(["@diffsentry autofix"]);
+
+    // Edit 2: tick the stacked box as well. Without the cross-edit rule this
+    // opened a stacked PR carrying the same fixes the branch already has.
+    handled = [];
+    const res = await dispatchWebhookEvent(
+      makeDeps(),
+      "pull_request_review",
+      reviewPayload(bothBoxes(true, true), bothBoxes(true, false)),
+    );
+    await settle();
+    expect(res.status).toBe(200);
+    expect(handled).toEqual([]);
+  });
+
+  it("still lets the user switch destination by unticking first", async () => {
+    await dispatchWebhookEvent(
+      makeDeps(),
+      "pull_request_review",
+      reviewPayload(bothBoxes(false, false), bothBoxes(true, false)),
+    );
+    await settle();
+    expect(handled).toEqual([]);
+
+    await dispatchWebhookEvent(
+      makeDeps(),
+      "pull_request_review",
+      reviewPayload(bothBoxes(false, true), bothBoxes(false, false)),
+    );
+    await settle();
+    expect(handled.map((h) => h.body)).toEqual(["@diffsentry autofix --stacked"]);
+  });
+});
