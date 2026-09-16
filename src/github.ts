@@ -1049,7 +1049,11 @@ export class GitHubClient {
 
     await this.retireSupersededReviews(octokit, context, log);
 
-    const inlineComments = result.comments.filter((c) => c.line > 0 && c.path);
+    // `quietOverflow` findings are deliberately withheld from the inline stream
+    // under `reviews.profile: quiet` — they are rendered in the review body's
+    // `🟡 Other comments` bucket instead, so posting them here too would defeat
+    // the profile and duplicate every one of them.
+    const inlineComments = result.comments.filter((c) => c.line > 0 && c.path && !c.quietOverflow);
     // File-scoped findings: the model named a file but no line we could anchor
     // to the diff. GitHub still hosts these as real review threads — resolvable,
     // repliable, and collapsible like any inline comment — so they belong on the

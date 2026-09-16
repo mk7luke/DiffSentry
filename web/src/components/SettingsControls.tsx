@@ -16,7 +16,7 @@ import type {
 } from "../api/types";
 
 const LOG_LEVELS: LogLevel[] = ["trace", "debug", "info", "warn", "error", "fatal"];
-const PROFILES: Profile[] = ["chill", "assertive"];
+const PROFILES: Profile[] = ["chill", "assertive", "quiet"];
 
 function errMessage(e: unknown): string {
   return e instanceof ApiError ? e.message : "Something went wrong.";
@@ -119,7 +119,10 @@ function GlobalSettingsForm({ settings }: { settings: GlobalSettings }) {
               />
             </Row>
 
-            <Row title="Default profile" desc="“chill” keeps comments light; “assertive” is stricter.">
+            <Row
+              title="Default profile"
+              desc="“chill” keeps comments light; “assertive” is stricter; “quiet” posts only critical and major findings inline and groups the rest in the review body."
+            >
               <select
                 value={settings.defaultProfile}
                 disabled={update.isPending}

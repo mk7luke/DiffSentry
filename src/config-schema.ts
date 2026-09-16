@@ -53,7 +53,12 @@ export const REPO_CONFIG_SCHEMA: JsonSchema = {
       type: "object",
       additionalProperties: false,
       properties: {
-        profile: { type: "string", enum: ["chill", "assertive"], description: "Overall review strictness." },
+        profile: {
+          type: "string",
+          enum: ["chill", "assertive", "quiet"],
+          description:
+            "Overall review strictness. 'quiet' reviews at 'chill' depth but posts only critical/major findings inline, grouping the rest into one 'Other comments' bucket in the review body.",
+        },
         request_changes_workflow: {
           type: "boolean",
           description: "Allow reviews to post REQUEST_CHANGES. Default true. Set false to always post COMMENT instead, so DiffSentry never blocks a merge.",

@@ -95,6 +95,34 @@ export function isPrBodyFinding(c: ReviewComment): boolean {
   return c.prLevel === true && !c.path;
 }
 
+/**
+ * A file-level finding that landed there because GitHub could not host it on a
+ * line, not because the model scoped it to the file. The two are
+ * indistinguishable once both are `prLevel` + `path`, and they mean opposite
+ * things to a reader: one is "this concerns the file as a whole", the other is
+ * "this concerns a specific line we could not reach". Only the second belongs
+ * in the outside-diff callout. See ReviewComment.outsideDiff.
+ */
+export function isOutsideDiffFinding(c: ReviewComment): boolean {
+  return isFileLevelFinding(c) && c.outsideDiff !== undefined;
+}
+
+/**
+ * Under `reviews.profile: quiet`, the findings held back from the inline stream.
+ * Only critical and major findings keep an inline thread; everything else —
+ * including a finding carrying no severity at all — moves to the review body's
+ * `🟡 Other comments` bucket. Deliberately stricter than {@link isNitpick},
+ * which also sorts on `type`: quiet is a promise about what will interrupt you
+ * in the file view, and "major refactor suggestion" still interrupts.
+ *
+ * PR-level and file-level findings are exempt: they have no inline thread to
+ * withhold, so holding them back would only hide them.
+ */
+export function isQuietOverflow(c: ReviewComment): boolean {
+  if (c.prLevel) return false;
+  return !(c.severity === "critical" || c.severity === "major");
+}
+
 /** Confidence with the documented default applied (see ai/prompt.ts: an omitted
  *  confidence means the model was sure enough not to qualify the finding). */
 export function confidenceOf(c: ReviewComment): Confidence {
@@ -212,21 +240,26 @@ function renderUncertainPrLevelSection(prLevel: ReviewComment[]): string {
   ].join("\n");
 }
 
-function renderNitpicksSection(nitpicks: ReviewComment[]): string {
-  if (nitpicks.length === 0) return "";
+/**
+ * One collapse, grouped into a per-file sub-collapse. Shared by the nitpick
+ * bucket and the quiet-mode overflow bucket so the two read identically: a
+ * reader who has opened one already knows how the other is laid out.
+ */
+function renderBucketSection(comments: ReviewComment[], summary: string): string {
+  if (comments.length === 0) return "";
 
   const byFile = new Map<string, ReviewComment[]>();
-  for (const c of nitpicks) {
+  for (const c of comments) {
     const arr = byFile.get(c.path) ?? [];
     arr.push(c);
     byFile.set(c.path, arr);
   }
 
   const fileBlocks: string[] = [];
-  for (const [path, comments] of byFile) {
+  for (const [path, group] of byFile) {
     const block: string[] = [];
-    block.push(fileHeading(path, comments.length));
-    for (const c of comments) {
+    block.push(fileHeading(path, group.length));
+    for (const c of group) {
       block.push(renderNitpickEntry(c));
       block.push("");
     }
@@ -236,13 +269,77 @@ function renderNitpicksSection(nitpicks: ReviewComment[]): string {
 
   return [
     `<details>`,
-    `<summary>🧹 Nitpick comments (${nitpicks.length})</summary><blockquote>`,
+    `<summary>${summary} (${comments.length})</summary><blockquote>`,
     "",
     fileBlocks.join("\n"),
     "",
     `</blockquote></details>`,
   ].join("\n");
 }
+
+function renderNitpicksSection(nitpicks: ReviewComment[]): string {
+  return renderBucketSection(nitpicks, "🧹 Nitpick comments");
+}
+
+/**
+ * The quiet-profile overflow bucket, transcribed from the one captured review
+ * body that uses it (`tests/e2e/reference/2026-09/coderabbit/review-summary.md`):
+ * a `> [!NOTE]` explaining why the inline stream is short, then a single
+ * `🟡 Other comments (N)` collapse holding everything that was held back.
+ *
+ * The note is not decoration. Without it a quiet review looks like a review
+ * that found nothing, which is the one way this profile could do harm.
+ */
+function renderQuietOverflowSection(overflow: ReviewComment[]): string {
+  if (overflow.length === 0) return "";
+  return [
+    "> [!NOTE]",
+    "> Quiet mode is enabled, so only the most important comments were posted inline. Other review comments are grouped below.",
+    "",
+    renderBucketSection(overflow, "🟡 Other comments"),
+  ].join("\n");
+}
+
+/**
+ * Findings that named a line DiffSentry could not anchor to the diff, promoted
+ * to the top of the review body as a flat list.
+ *
+ * DiffSentry posts each of these as a real file-scoped review thread, which
+ * CodeRabbit does not — so reprinting the finding here (the shape backlog row
+ * A10 records) would say everything twice, the thing formatReviewBody exists to
+ * avoid. What the row is actually buying is severity, title and location at
+ * zero clicks, and a flat list delivers that better than a collapse does: it is
+ * promoted out of the `<details>` entirely rather than into a `<summary>`.
+ */
+function renderOutsideDiffCallout(outside: ReviewComment[]): string {
+  if (outside.length === 0) return "";
+  const rows = outside.map((c) => {
+    const severity = c.severity ? SEVERITY_PREVIEW[c.severity] : "";
+    const title = (c.title?.trim() || c.body.split("\n")[0].slice(0, 120)).replace(/\*\*/g, "");
+    const claimed = c.outsideDiff?.claimedLine;
+    const where = claimed !== null && claimed !== undefined ? `${c.path}:${claimed}` : c.path;
+    return `> * ${severity ? `_${severity}_ · ` : ""}${title} · \`${where}\``;
+  });
+  return [
+    "> [!CAUTION]",
+    "> Some comments are outside the diff and can't be posted inline due to GitHub limitations.",
+    ">",
+    `> **⚠️ Outside diff range comments (${outside.length})**`,
+    ">",
+    ...rows,
+    ">",
+    "> Each is posted as a file-scoped review thread you can reply to and resolve.",
+  ].join("\n");
+}
+
+/** Severity as it reads in a one-line preview — glyph plus label, matching the
+ *  inline header's vocabulary so the two surfaces never disagree. */
+const SEVERITY_PREVIEW: Record<NonNullable<ReviewComment["severity"]>, string> = {
+  critical: "🔴 Critical",
+  major: "🟠 Major",
+  minor: "🟡 Minor",
+  trivial: "🔵 Trivial",
+};
 
 function renderBulkAiPrompt(comments: ReviewComment[]): string {
   const withPrompts = comments.filter((c) => c.aiAgentPrompt && c.aiAgentPrompt.trim());
@@ -420,9 +517,15 @@ export function formatReviewBody(
   // a blocking review whose only finding is unanchored still reads honestly
   // instead of "Actionable comments posted: 0".
   const fileLevel = result.comments.filter(isFileLevelFinding);
+  const outsideDiff = result.comments.filter(isOutsideDiffFinding);
   const prBody = result.comments.filter(isPrBodyFinding);
   const inline = result.comments.filter((c) => !c.prLevel);
-  const nitpicks = inline.filter(isNitpick);
+  // Under the quiet profile the overflow findings are NOT posted inline (the
+  // reviewer tags them, submitReview skips them), so this body is the only
+  // place they appear. They are excluded from the nitpick collapse to keep
+  // them from being listed twice.
+  const quietOverflow = inline.filter((c) => c.quietOverflow);
+  const nitpicks = inline.filter((c) => !c.quietOverflow && isNitpick(c));
   const prBodyProminent = prBody.filter(isVisiblyActionable);
   const prBodyUncertain = prBody.filter((c) => !isVisiblyActionable(c));
   const actionableCount = [...inline, ...fileLevel, ...prBody].filter(isVisiblyActionable).length;
@@ -460,8 +563,16 @@ export function formatReviewBody(
     sections.push(result.summary.trim());
   }
 
+  // Above every collapse: the findings that wanted a line and could not get
+  // one. A reader who stops here has still seen what fell outside the diff.
+  const outsideDiffBlock = renderOutsideDiffCallout(outsideDiff);
+  if (outsideDiffBlock) sections.push(outsideDiffBlock);
+
   const prLevelBlock = renderPrLevelSection(prBodyProminent);
   if (prLevelBlock) sections.push(prLevelBlock);
+
+  const quietBlock = renderQuietOverflowSection(quietOverflow);
+  if (quietBlock) sections.push(quietBlock);
 
   const nitpicksBlock = renderNitpicksSection(nitpicks);
   if (nitpicksBlock) sections.push(nitpicksBlock);

@@ -104,9 +104,20 @@ Guidelines:
 - Provide a "suggestion" with the corrected code whenever a fix is feasible. Default to "suggestionLanguage": "suggestion" — a verbatim replacement for the anchored line — and reach for "diff" only when the fix genuinely spans lines beyond it.
 - Use markdown formatting (backticks for identifiers, bullets for lists) in the body.`;
 
+const PROFILE_INSTRUCTIONS: Record<"chill" | "assertive" | "quiet", string> = {
+  chill: CHILL_INSTRUCTIONS,
+  assertive: ASSERTIVE_INSTRUCTIONS,
+  // Quiet reviews at chill depth and differs only in DELIVERY: the renderer
+  // keeps non-blocking findings out of the inline stream and groups them into
+  // one bucket in the review body. Nothing about that belongs in the prompt —
+  // a model told to "be quiet" would silently drop findings, which is the
+  // opposite of what a bucket is for.
+  quiet: CHILL_INSTRUCTIONS,
+};
+
 function buildReviewSystemPrompt(repoConfig?: RepoConfig, learnings?: Learning[]): string {
   const profile = repoConfig?.reviews?.profile || "chill";
-  const instructions = profile === "assertive" ? ASSERTIVE_INSTRUCTIONS : CHILL_INSTRUCTIONS;
+  const instructions = PROFILE_INSTRUCTIONS[profile] ?? CHILL_INSTRUCTIONS;
   const tone = repoConfig?.tone_instructions
     ? `\n\nTone guidance: ${repoConfig.tone_instructions}`
     : "";

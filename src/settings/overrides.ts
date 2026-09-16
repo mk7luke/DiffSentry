@@ -20,8 +20,18 @@ import { logger, setLogLevel } from "../logger.js";
 
 export const GLOBAL_SCOPE = "global";
 
-export type Profile = "chill" | "assertive";
-export const PROFILES: readonly Profile[] = ["chill", "assertive"] as const;
+export const PROFILES = ["chill", "assertive", "quiet"] as const;
+export type Profile = (typeof PROFILES)[number];
+
+/**
+ * The single membership test for a review profile. Every read and validator in
+ * this file goes through it, so adding a profile is one edit to PROFILES rather
+ * than a hunt for the `v === "chill" || v === "assertive"` idiom — which is how
+ * `reviews.request_changes_workflow` became a key nothing read (see #168).
+ */
+export function isProfile(v: unknown): v is Profile {
+  return typeof v === "string" && (PROFILES as readonly string[]).includes(v);
+}
 
 export const LOG_LEVELS = ["trace", "debug", "info", "warn", "error", "fatal"] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
@@ -59,9 +69,9 @@ function vBool(v: unknown): Validated<boolean> {
   return typeof v === "boolean" ? { ok: true, value: v } : { ok: false, message: "must be a boolean" };
 }
 function vProfile(v: unknown): Validated<Profile> {
-  return v === "chill" || v === "assertive"
+  return isProfile(v)
     ? { ok: true, value: v }
-    : { ok: false, message: "must be 'chill' or 'assertive'" };
+    : { ok: false, message: `must be one of ${PROFILES.map((p) => `'${p}'`).join(", ")}` };
 }
 function vLogLevel(v: unknown): Validated<LogLevel> {
   return typeof v === "string" && (LOG_LEVELS as readonly string[]).includes(v)
@@ -109,7 +119,7 @@ function readBool(scope: string, key: string, dflt: boolean): boolean {
 }
 function readProfile(scope: string, key: string, dflt: Profile): Profile {
   const v = getSettingOverride<Profile>(scope, key);
-  return v === "chill" || v === "assertive" ? v : dflt;
+  return isProfile(v) ? v : dflt;
 }
 function readNum(scope: string, key: string): number | null {
   const v = getSettingOverride<number>(scope, key);
@@ -168,7 +178,7 @@ export function getRepoSettings(owner: string, repo: string): RepoSettings {
   const profile = getSettingOverride<Profile>(scope, "profile");
   return {
     autoReview: typeof autoReview === "boolean" ? autoReview : null,
-    profile: profile === "chill" || profile === "assertive" ? profile : null,
+    profile: isProfile(profile) ? profile : null,
     maxFiles: readNum(scope, "maxFiles"),
   };
 }
@@ -196,9 +206,9 @@ export function isAutoReviewEnabled(owner: string, repo: string): boolean {
  */
 export function resolveProfileOverride(owner: string, repo: string): Profile | null {
   const r = getSettingOverride<Profile>(repoScope(owner, repo), "profile");
-  if (r === "chill" || r === "assertive") return r;
+  if (isProfile(r)) return r;
   const g = getSettingOverride<Profile>(GLOBAL_SCOPE, "defaultProfile");
-  if (g === "chill" || g === "assertive") return g;
+  if (isProfile(g)) return g;
   return null;
 }
 

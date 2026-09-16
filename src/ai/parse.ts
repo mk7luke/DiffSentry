@@ -888,7 +888,13 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
     // still dropped as not worth the noise once they've slipped their line.
     if (typeof c.line !== "number" || c.line < 1) {
       if (severity === "critical" || severity === "major") {
-        comments.push(buildReviewComment(c, { path: c.path, line: 0, prLevel: true }));
+        // Tagged outsideDiff so the review body can say WHY this one has no
+        // line, rather than letting it read as a finding the model scoped to a
+        // file on purpose. See ReviewComment.outsideDiff.
+        comments.push({
+          ...buildReviewComment(c, { path: c.path, line: 0, prLevel: true }),
+          outsideDiff: { claimedLine: null },
+        });
         demotedCount++;
         log.info({ path: c.path, severity }, "Blocking finding with no line demoted to file-level");
       } else {
@@ -910,7 +916,10 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
       const anchor = nearestAnchor(line, info);
       if (anchor === null) {
         if (severity === "critical" || severity === "major") {
-          comments.push(buildReviewComment(c, { path: c.path, line: 0, prLevel: true }));
+          comments.push({
+            ...buildReviewComment(c, { path: c.path, line: 0, prLevel: true }),
+            outsideDiff: { claimedLine: line },
+          });
           demotedCount++;
           log.info(
             { path: c.path, line, severity },

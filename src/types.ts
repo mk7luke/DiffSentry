@@ -115,7 +115,15 @@ export interface IssueChatConfig {
 }
 
 export interface ReviewsConfig {
-  profile?: "chill" | "assertive";
+  /** How much of the review reaches the reader inline.
+   *  - "chill"      — only critical issues are raised at all (the default).
+   *  - "assertive"  — everything, including nitpicks.
+   *  - "quiet"      — review at chill depth, but post ONLY critical/major
+   *    findings as inline threads; everything else collapses into a single
+   *    `🟡 Other comments (N)` bucket in the review body. For a solo
+   *    maintainer an unfiltered inline stream is the thing that goes unread,
+   *    so the bucket is what keeps the rest of the review reachable. */
+  profile?: "chill" | "assertive" | "quiet";
   request_changes_workflow?: boolean;
   high_level_summary?: boolean;
   walkthrough?: WalkthroughConfig;
@@ -404,6 +412,19 @@ export interface ReviewComment {
    *                  which is why entry there additionally requires high
    *                  `confidence`. */
   prLevel?: boolean;
+  /** Set under `reviews.profile: quiet` on an inline finding held back from the
+   *  inline stream. The finding is NOT dropped — it renders in the review
+   *  body's `🟡 Other comments (N)` bucket instead of becoming its own thread,
+   *  so the PR's file view carries only the findings that block a merge. */
+  quietOverflow?: boolean;
+  /** Set when a finding could not be anchored to a diff line and became a
+   *  file-scoped thread instead — GitHub's limitation, not the model's
+   *  mistake. `claimedLine` is the line the model named (null when it named
+   *  none), kept so the review body's outside-diff callout can say where the
+   *  finding meant rather than printing a bare filename. Distinguishes these
+   *  from `prLevelComments` entries, which carry a path because the model
+   *  chose to scope them to a file. */
+  outsideDiff?: { claimedLine: number | null };
   /** Set by the pattern engine so callers can record the hit source without
    *  re-sniffing the rendered body. "builtin" = shipped heuristic; "custom" =
    *  a `.diffsentry.yaml` anti-pattern or an admin-authored command-center rule. */

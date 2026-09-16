@@ -513,7 +513,7 @@ export interface CostResponse {
 
 // ─── Settings (operator controls) ───────────────────────────────────
 
-export type Profile = "chill" | "assertive";
+export type Profile = "chill" | "assertive" | "quiet";
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal";
 
 export interface GlobalSettings {

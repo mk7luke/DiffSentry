@@ -475,7 +475,7 @@ DiffSentry's PR reviews are tailored to our code, not generic.
 DiffSentry is an AI PR-review bot. Its per-repo config supports:
 
   reviews:
-    profile: chill | assertive
+    profile: chill | assertive | quiet
     request_changes_workflow: bool
     high_level_summary: bool
     commit_status: bool                    # write the `DiffSentry` check at all
@@ -1171,7 +1171,7 @@ Keys and resolution (per-repo override **>** global default **>** file/env defau
 |---|---|---|
 | `pauseAll` | global | **Kill switch.** When on, the webhook queues **no** new reviews (PR opened/synchronize/ready-for-review) and the engine skips any trigger — chat `@bot review` and dashboard triggers included. Push auto-resolve still runs. |
 | `autoReview` | global + repo | Enable/disable **automatic** (webhook) reviews. A per-repo value wins over the global default (default `true`). |
-| `defaultProfile` / `profile` | global / repo | Review profile (`chill` \| `assertive`); overrides the `.diffsentry.yaml` `reviews.profile`. |
+| `defaultProfile` / `profile` | global / repo | Review profile (`chill` \| `assertive` \| `quiet`); overrides the `.diffsentry.yaml` `reviews.profile`. `quiet` reviews at `chill` depth but posts only critical/major findings as inline threads, grouping the rest into one `🟡 Other comments` bucket in the review body. |
 | `logLevel` | global | Process log level — applied to the running logger immediately **and** re-applied on restart (overrides `LOG_LEVEL`). |
 | `maxFiles` | global + repo | Cap on changed files sent to the model; overrides `MAX_FILES_PER_REVIEW`. Clear to revert to the env default. |
 

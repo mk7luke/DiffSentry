@@ -23,7 +23,7 @@ import { LearningsStore, synthesizeLearning, extractFindingMeta, type FindingCon
 import { parseIssueReferences, fetchLinkedIssues, formatIssuesForWalkthrough } from "./issues.js";
 import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-merge.js";
 import { generateDocstrings, generateTests, simplifyCode, autofix } from "./finishing-touches.js";
-import { formatReviewBody, reconcileApproval, isVisiblyActionable } from "./review-body.js";
+import { formatReviewBody, reconcileApproval, isVisiblyActionable, isQuietOverflow } from "./review-body.js";
 import { encodeState, encodeStateRef, extractState, replaceState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
 import { assessRisk, renderRiskVerdict, renderRiskFactors, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion, renderConfidenceAggregate, computeReviewerDeltas, renderReviewerDeltaBlock, calibrateSeverities, resolveSeverityCalibration, renderSeverityCalibrationBlock, type CalibrationResult } from "./insights.js";
 import { suggestReviewersFromBlame, renderSuggestedReviewers, combineReviewers, renderCombinedReviewers } from "./blame-reviewers.js";
@@ -2216,6 +2216,23 @@ export class Reviewer {
           const dropped = before - reviewResult.comments.length;
           if (dropped > 0) log.info({ dropped }, "Suppressed findings via triage feedback");
         }
+      }
+
+      // Quiet profile: hold everything but critical/major out of the inline
+      // stream. The findings are kept and still counted — they move to the
+      // review body's `🟡 Other comments` bucket (see renderQuietOverflowSection)
+      // rather than becoming their own thread in the file view. Done here,
+      // after every producer has merged and after dedup/suppression, so the tag
+      // sees the final set and the body's count matches what is withheld.
+      if ((repoConfig.reviews?.profile ?? "chill") === "quiet") {
+        let held = 0;
+        for (const c of reviewResult.comments) {
+          if (isQuietOverflow(c)) {
+            c.quietOverflow = true;
+            held++;
+          }
+        }
+        if (held > 0) log.info({ held }, "Quiet profile: findings grouped into the review body instead of posted inline");
       }
 
       // Invariant: a REQUEST_CHANGES verdict must be backed by at least one
