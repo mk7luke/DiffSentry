@@ -260,6 +260,7 @@ You MUST respond with valid JSON matching this schema:
   ],
   "cohorts": [
     {
+      "theme": "Packaging and release",
       "label": "Build & Distribution",
       "files": ["package.json", "README.md"],
       "summary": "Reworked npm scripts, added cross-env, updated electron-builder config."
@@ -280,6 +281,7 @@ Rules:
 - "summary" must be 1-2 short sentences in past tense (e.g. "Adds cross-platform build scripts and patches node-pty for Windows.").
 - "fileDescriptions" must cover ALL changed files (used as a fallback when cohorts omit a file).
 - "cohorts" groups changed files into 1-8 thematic clusters. Each cohort:
+  - "theme": 2-6 word sentence-case phrase naming the broader concern this cohort serves, with no emoji. Cohorts sharing a theme are rendered as one table under it, so use 1-3 themes for the whole PR and reuse the exact same string for every cohort in a theme. Omit the field when the PR only does one thing.
   - "label": 2-5 word category in title case (no emoji). Examples: "Build & Distribution", "Native rebuild / postinstall", "UI zoom IPC & persistence".
   - "files": array of file paths belonging to this cohort. Every changed file must appear in exactly one cohort.
   - "summary": 1-2 sentence description of what changed across these files.

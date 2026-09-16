@@ -463,6 +463,11 @@ export interface ChangeCohort {
   label: string;
   files: string[];
   summary: string;
+  /** Which broader concern this cohort belongs to. Cohorts sharing a theme are
+   *  rendered as one table under a bold theme line; cohorts without one fall
+   *  into a single untitled table, which is how the walkthrough looked before
+   *  themes existed. See renderChangesTable. */
+  theme?: string;
 }
 
 export interface FileDescription {

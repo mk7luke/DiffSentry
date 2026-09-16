@@ -30,17 +30,47 @@ function formatEffortLine(level: number, minutes?: number): string {
   return `🎯 ${clamped} (${word}) | ⏱️ ~${mins} minutes`;
 }
 
+/** `|Layer / File(s)|Summary|`, replacing `Cohort` — a ride-along rename with no
+ *  user value of its own, carried so the parity rubric holds one vocabulary
+ *  (backlog row A13). The grouping above it is the change that matters. */
+const CHANGES_TABLE_HEADER = "|Layer / File(s)|Summary|\n|---|---|";
+
+function cohortRow(c: { label: string; files: string[]; summary: string }): string {
+  const files = c.files.map((f) => `\`${f}\``).join(", ");
+  const cell = `**${c.label}** <br> ${files}`;
+  const summary = c.summary.replace(/\|/g, "\\|");
+  return `|${cell}|${summary}|`;
+}
+
+/**
+ * The changes table(s), grouped by theme.
+ *
+ * One table listing every cohort is fine on a five-file PR and unreadable on a
+ * fifty-file one, which is exactly where a walkthrough earns its place. The
+ * September corpus renders 19 tables across 14 walkthroughs, each under a bold
+ * theme line (`**Server-recorded ride timing**`), with the cohorts as its rows.
+ *
+ * Themes are model-supplied and optional. Cohorts are grouped in
+ * first-appearance order so the model's own ordering survives, and cohorts with
+ * no theme collect into a single untitled table — byte-for-byte the rendering
+ * this function produced before themes existed.
+ */
 function renderChangesTable(result: WalkthroughResult): string | null {
   const cohorts = result.cohorts;
   if (cohorts && cohorts.length > 0) {
-    const header = "|Cohort / File(s)|Summary|\n|---|---|";
-    const rows = cohorts.map((c) => {
-      const files = c.files.map((f) => `\`${f}\``).join(", ");
-      const cell = `**${c.label}** <br> ${files}`;
-      const summary = c.summary.replace(/\|/g, "\\|");
-      return `|${cell}|${summary}|`;
+    const groups = new Map<string, typeof cohorts>();
+    for (const c of cohorts) {
+      const key = c.theme?.trim() || "";
+      const bucket = groups.get(key);
+      if (bucket) bucket.push(c);
+      else groups.set(key, [c]);
+    }
+    const tables = Array.from(groups.entries()).map(([theme, members]) => {
+      const rows = members.map(cohortRow).join("\n");
+      const table = `${CHANGES_TABLE_HEADER}\n${rows}`;
+      return theme ? `**${theme}**\n\n${table}` : table;
     });
-    return `## Changes\n\n${header}\n${rows.join("\n")}`;
+    return `### Changes\n\n${tables.join("\n\n")}`;
   }
 
   if (result.fileDescriptions.length > 0) {
@@ -50,9 +80,9 @@ function renderChangesTable(result: WalkthroughResult): string | null {
     );
     const table = `${header}\n${rows.join("\n")}`;
     if (result.fileDescriptions.length > 10) {
-      return `## Changes\n\n<details>\n<summary>Changed files (${result.fileDescriptions.length})</summary>\n\n${table}\n\n</details>`;
+      return `### Changes\n\n<details>\n<summary>Changed files (${result.fileDescriptions.length})</summary>\n\n${table}\n\n</details>`;
     }
-    return `## Changes\n\n${table}`;
+    return `### Changes\n\n${table}`;
   }
 
   return null;

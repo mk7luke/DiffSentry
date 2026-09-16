@@ -34,7 +34,7 @@ module.exports = { add, divide };
     walkthroughContains: [
       "📝 Walkthrough",
       "## Walkthrough",
-      "## Changes",
+      "### Changes",
       "🎯",
       "minutes",
       "walkthrough_start",

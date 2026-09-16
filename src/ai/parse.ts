@@ -943,6 +943,12 @@ export function parseWalkthroughResponse(raw: string): WalkthroughResult {
           label: c.label,
           files: c.files.filter((f: any) => typeof f === "string"),
           summary: typeof c.summary === "string" ? c.summary : "",
+          // Optional and free-text, so it is only length-bounded — a theme is a
+          // rendered heading, and an essay in that slot is worse than none.
+          theme:
+            typeof c.theme === "string" && c.theme.trim().length > 0
+              ? c.theme.trim().slice(0, 80)
+              : undefined,
         }))
     : undefined;
 

@@ -63,7 +63,7 @@ export const scenario: Scenario = {
   waitFor: { walkthrough: true, review: true, timeoutMs: 240_000 },
   expect: {
     walkthroughContains: [
-      "Cohort / File(s)",
+      "Layer / File(s)",
       "🎯",
       "minutes",
     ],
