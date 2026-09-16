@@ -2282,6 +2282,7 @@ export class Reviewer {
         configUsed: hasYaml ? "`.diffsentry.yaml`" : "defaults",
         plan: undefined,
         botName: this.config.botName,
+        walkthroughPosted: walkthroughEnabled,
       });
 
       if (reviewResult.servedBy === "backup") {

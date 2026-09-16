@@ -30,6 +30,11 @@ export type ReviewBodyMeta = {
   botName: string;
   /** When set, this is an incremental review and lastReviewedSha was the previous head. */
   incrementalFromSha?: string;
+  /** Whether a walkthrough comment carries the prose summary for this PR. Only
+   *  `false` brings the narrative paragraph back into the review body — see
+   *  formatReviewBody. Undefined means "assume one was posted", which is the
+   *  default configuration and keeps every existing caller's rendering. */
+  walkthroughPosted?: boolean;
 };
 
 export const REVIEW_BODY_MARKER = "<!-- This is an auto-generated comment by DiffSentry for review status -->";
@@ -434,13 +439,24 @@ export function formatReviewBody(
 
   sections.push(`**Actionable comments posted: ${actionableCount}**`);
 
-  // Show the AI/synthesized summary — but suppress it on the parse-failure path
-  // when there are no findings at all, because the synthesized text there reads
-  // as "no actionable findings", which contradicts the banner above. When real
-  // (safety/pattern) findings exist, the synthesized summary accurately counts
-  // them, so it's still worth showing under the banner.
+  // The review body goes from its header straight into structured blocks.
+  //
+  // CodeRabbit has opened this way since April — 0 of 25 September review
+  // bodies carry a narrative paragraph. DiffSentry opened 18 of 23 with one.
+  // This is the densest surface either bot posts and the first one a reader
+  // lands on, so a paragraph in front of the structured blocks costs a scroll
+  // on every review; and the walkthrough comment already carries a 1-2 sentence
+  // prose summary on 10 of 10 PRs, which is the right home for narrative.
+  //
+  // So the paragraph moves rather than disappears — which is only true while a
+  // walkthrough is actually posted. With `reviews.walkthrough.enabled: false`
+  // there is no other narrative on the PR at all, so the paragraph stays.
+  //
+  // It is also suppressed on the parse-failure path when there are no findings:
+  // the synthesized text reads as "no actionable findings", which contradicts
+  // the banner above it.
   const suppressSummary = result.parseFailed && result.comments.length === 0;
-  if (!suppressSummary && result.summary && result.summary.trim()) {
+  if (meta.walkthroughPosted === false && !suppressSummary && result.summary?.trim()) {
     sections.push(result.summary.trim());
   }
 

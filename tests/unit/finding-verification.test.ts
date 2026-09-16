@@ -476,9 +476,14 @@ describe("review-body: honest parse-failure rendering", () => {
       summaryIsFallback: true,
       parseFailed: true,
     };
-    const body = formatReviewBody(result, meta);
+    // A14 moved the narrative paragraph into the walkthrough, so the body only
+    // carries it when no walkthrough will. The distinction this test protects —
+    // a *real* finding summary is not suppressed the way the misleading
+    // findingless one above is — is checked on that path.
+    const body = formatReviewBody(result, { ...meta, walkthroughPosted: false });
     expect(body).toContain("could not complete this review");
     expect(body).toContain("surfaced 1 finding");
+    expect(formatReviewBody(result, meta)).not.toContain("surfaced 1 finding");
   });
 
   it("renders no failure banner on a normal review", () => {
@@ -487,7 +492,7 @@ describe("review-body: honest parse-failure rendering", () => {
       comments: [],
       approval: "APPROVE",
     };
-    const body = formatReviewBody(result, meta);
+    const body = formatReviewBody(result, { ...meta, walkthroughPosted: false });
     expect(body).not.toContain("could not complete this review");
     expect(body).toContain("No concerns surfaced");
   });
