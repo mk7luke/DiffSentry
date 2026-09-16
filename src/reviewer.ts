@@ -205,6 +205,28 @@ export function dropContextOnlyFindings(
   return comments.filter((c) => c.prLevel || !c.path || !contextOnly.has(c.path));
 }
 
+/**
+ * What DiffSentry says when a review-thread conversation ends the finding.
+ *
+ * It already decides this and already acts on it — the judge below asks whether
+ * the exchange settled the suggestion, then collapses the thread. What it did
+ * not do was say so. A thread that folds shut mid-conversation with no word
+ * reads as a glitch, and the failure case was worse: when the mutation was
+ * refused the thread simply stayed open, looking to the author exactly like one
+ * DiffSentry had decided to leave open on purpose.
+ *
+ * This is NOT the same machinery as the `✅ Addressed in commit(s) …` note.
+ * That one is triggered by a push, needs per-finding commit state to say
+ * anything, and names commits. This one is triggered by a conversation, needs
+ * no persisted state at all, and is a receipt for a mutation just attempted.
+ * They share only an outcome. Both strings are transcribed from the captured
+ * corpus (`tests/e2e/reference/2026-09/coderabbit/inline.md:982`;
+ * `2026-09/drift.md:191` for the failure form).
+ */
+export const THREAD_RESOLVED_NOTE = "✅ Review thread resolved.";
+export const THREAD_RESOLVE_FAILED_NOTE =
+  "I couldn't resolve this review thread on the repository platform, so it remains open. Please retry or resolve it manually.";
+
 const WALKTHROUGH_START = "<!-- walkthrough_start -->";
 const WALKTHROUGH_END = "<!-- walkthrough_end -->";
 const STATUS_MARKER = "<!-- DiffSentry Status -->";
@@ -3022,7 +3044,13 @@ Output ONLY valid JSON (no fences, no prose):
           const rawConfig = await loadRepoConfig(octokit, owner, repo, context.defaultBranch || "HEAD");
           const repoConfig = mergeWithDefaults(rawConfig);
           const response = await this.ai.chat(context, command.message, repoConfig);
-          await reply(response);
+
+          // The outcome note is appended to the reply rather than posted after
+          // it, so the reader gets one comment saying both what DiffSentry
+          // thinks and what it did — which is the shape the corpus captures.
+          // The cost is that the reply waits on the judge below; one comment
+          // that tells the whole truth is worth one model call of latency.
+          let outcomeNote: string | null = null;
 
           // If the user replied inside a bot-started review thread, ask the AI
           // whether the exchange resolves the original suggestion (either by
@@ -3056,6 +3084,7 @@ Output ONLY valid JSON (no fences, no prose):
                   const ok = await this.github.resolveThreadById(
                     installationId, owner, repo, pullNumber, thread.threadId
                   );
+                  outcomeNote = ok ? THREAD_RESOLVED_NOTE : THREAD_RESOLVE_FAILED_NOTE;
                   if (ok) {
                     log.info({ threadId: thread.threadId }, "Auto-resolved thread after acknowledged reply");
                     // That may have been the last open thread — if so the
@@ -3073,6 +3102,8 @@ Output ONLY valid JSON (no fences, no prose):
               log.warn({ err }, "Thread-reply auto-resolve failed");
             }
           }
+
+          await reply(outcomeNote ? `${response}\n\n${outcomeNote}` : response);
           break;
         }
 
