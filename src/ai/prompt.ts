@@ -289,6 +289,7 @@ Rules:
 - "effortEstimate": 1-5 where 1=Trivial, 2=Simple, 3=Moderate, 4=Complex, 5=Very Complex.
 - "effortMinutes": rough integer estimate of review minutes (e.g. 5, 15, 30, 60, 120).
 - "sequenceDiagrams": array of 0-3 Mermaid sequenceDiagram blocks showing key flows introduced/modified. Omit (empty array) if the changes don't involve a clear interaction flow. Each entry is a complete sequenceDiagram (without surrounding triple backticks). Do NOT put semicolons (\`;\`) inside message labels — Mermaid treats them as statement terminators and the diagram will fail to render (e.g. write "TL/DR" or "summary" instead of "TL;DR").
+- Each diagram must use AT MOST 5 participants, and their displayed names must total AT MOST 64 characters across the whole diagram. GitHub renders these in a fixed-width comment column and Mermaid gives every participant its own column with no wrapping, so a sixth participant — or five verbose ones — runs off the right edge and is cut off where the reader sees it. Prefer the shortest name that is still unambiguous ("Sanitizer", not "Allowlist Sanitizer"; "Dashboard", not "Legacy Dashboard"), and merge or drop peripheral participants rather than adding a column.
 - "suggestedLabels": from common labels: bug, enhancement, refactor, docs, test, performance, security, breaking-change, dependencies. Only suggest what fits.
 - "suggestedReviewers": leave empty (no team data available).
 - "poem": short (4-6 line) poem starting with rabbit emoji. Each line ends with two trailing spaces. Empty string if not requested.
