@@ -114,7 +114,7 @@ export function formatWalkthroughInner(
       : [];
   if (config.sequence_diagrams && diagrams.length > 0) {
     const blocks = diagrams.map((d) => `\`\`\`mermaid\n${d}\n\`\`\``).join("\n\n");
-    sections.push(`## Sequence Diagram(s)\n\n${blocks}`);
+    sections.push(`### Sequence Diagram(s)\n\n${blocks}`);
   }
 
   // The change-assessment pair: what kind of change this is, and what reading
@@ -133,18 +133,18 @@ export function formatWalkthroughInner(
 
   if (config.suggested_labels && result.suggestedLabels?.length) {
     const labels = result.suggestedLabels.map((l) => `\`${l}\``).join(", ");
-    sections.push(`## Suggested Labels\n\n${labels}`);
+    sections.push(`**Suggested labels:** ${labels}`);
   }
 
   if (config.suggested_reviewers && result.suggestedReviewers?.length) {
     const reviewers = result.suggestedReviewers
       .map((r) => (r.startsWith("@") ? r : `@${r}`))
       .join(", ");
-    sections.push(`## Suggested Reviewers\n\n${reviewers}`);
+    sections.push(`**Suggested reviewers:** ${reviewers}`);
   }
 
   if (config.poem && result.poem) {
-    sections.push(`## Poem\n\n${result.poem}`);
+    sections.push(`**Poem**\n\n${result.poem}`);
   }
 
   return sections.join("\n\n");

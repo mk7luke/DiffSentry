@@ -96,5 +96,5 @@ export function formatIssuesForWalkthrough(issues: LinkedIssue[]): string {
     })
     .join("\n");
 
-  return `## Linked Issues\n\n${bullets}`;
+  return `**Linked issues**\n\n${bullets}`;
 }

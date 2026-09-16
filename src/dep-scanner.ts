@@ -120,10 +120,10 @@ export function scanDependencyChanges(files: FileChange[]): DepDelta[] {
 export function renderDepBlock(deltas: DepDelta[]): string {
   if (deltas.length === 0) return "";
   const lines: string[] = [];
-  lines.push("## 📦 Dependency Changes");
+  lines.push("**📦 Dependency changes**");
   lines.push("");
   for (const d of deltas) {
-    lines.push(`### \`${d.manifest}\``);
+    lines.push(`\`${d.manifest}\``);
     if (d.added.length) {
       lines.push("");
       lines.push("**Added**");

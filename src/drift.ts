@@ -140,7 +140,7 @@ export function applyDriftToApproval(
 export function renderDriftBlock(findings: DriftFinding[]): string {
   if (findings.length === 0) return "";
   const lines: string[] = [];
-  lines.push("## 🧭 Description Drift");
+  lines.push("**🧭 Description drift**");
   lines.push("");
   for (const f of findings) {
     const icon = f.level === "warning" ? "⚠️" : "ℹ️";
@@ -230,7 +230,7 @@ export function renderCommitCoachBlock(findings: CommitFinding[]): string {
   if (flagged.length === 0) return "";
 
   const lines: string[] = [];
-  lines.push("## ✍️ Commit Message Coach");
+  lines.push("**✍️ Commit message coach**");
   lines.push("");
   lines.push(`${flagged.length} of ${findings.length} commit message${findings.length === 1 ? "" : "s"} could be stronger.`);
   lines.push("");
@@ -351,7 +351,7 @@ export function renderTitleCoachBlock(title: string, finding: TitleFinding): str
   if (finding.level === "ok") return "";
   const icon = finding.level === "bad" ? "🔴" : "🟡";
   const lines: string[] = [];
-  lines.push("## 🏷️ PR Title Coach");
+  lines.push("**🏷️ PR title coach**");
   lines.push("");
   lines.push(`${icon} **${title}**`);
   lines.push("");
@@ -404,7 +404,7 @@ export function scanLicenseHeaders(
 export function renderLicenseHeaderBlock(offenders: string[], required: string): string {
   if (offenders.length === 0) return "";
   const lines: string[] = [];
-  lines.push("## 📜 Missing License Headers");
+  lines.push("**📜 Missing license headers**");
   lines.push("");
   lines.push(`${offenders.length} new source file${offenders.length === 1 ? "" : "s"} missing the required header:`);
   lines.push("");

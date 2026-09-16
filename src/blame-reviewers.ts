@@ -140,15 +140,22 @@ function parseChangedLeftLines(patch: string): Set<number> {
   return out;
 }
 
+/**
+ * One bold line, not a section.
+ *
+ * CodeRabbit writes `**Suggested reviewers:** \`claude\`` (4/15 walkthroughs);
+ * DiffSentry wrote a `##` heading, a sentence explaining the methodology, and a
+ * bullet per reviewer, on 7 of 10. Three names are not worth a horizontal rule,
+ * and the methodology sentence explained the same thing on every PR forever.
+ * The per-reviewer evidence survives in parentheses — that part is about *this*
+ * PR and is the reason to trust the suggestion.
+ */
 export function renderSuggestedReviewers(reviewers: ReviewerCandidate[]): string {
   if (reviewers.length === 0) return "";
-  const bullets = reviewers
-    .map(
-      (r) =>
-        `- @${r.login} — authored ${r.changedLinesAuthored} touched line(s) across ${r.filesAuthored} file(s)`,
-    )
-    .join("\n");
-  return `## Suggested Reviewers\n\nBased on \`git blame\` of the lines this PR modifies:\n\n${bullets}`;
+  const names = reviewers
+    .map((r) => `@${r.login} (${r.changedLinesAuthored} touched line(s) across ${r.filesAuthored} file(s))`)
+    .join(", ");
+  return `**Suggested reviewers:** ${names}`;
 }
 
 /**
@@ -203,17 +210,20 @@ export function combineReviewers(
     .slice(0, topN);
 }
 
+/** The ranked blame+CODEOWNERS list, on the same single bold line — see
+ *  {@link renderSuggestedReviewers} for why it stopped being a section. */
 export function renderCombinedReviewers(rows: CombinedReviewerRow[]): string {
   if (rows.length === 0) return "";
-  const bullets = rows
+  const names = rows
     .map((r) => {
-      const tags = r.sources.map((s) => `\`${s}\``).join(" + ");
+      const tags = r.sources.map((s) => `\`${s}\``).join("+");
       const teamSuffix = r.isTeam ? " (team)" : "";
       const detailParts: string[] = [];
       if (r.blameLines > 0) detailParts.push(`${r.blameLines} touched line(s)`);
       if (r.ownedFiles > 0) detailParts.push(`owns ${r.ownedFiles} file(s)`);
-      return `- @${r.login}${teamSuffix} — ${tags}${detailParts.length ? ` — ${detailParts.join(", ")}` : ""}`;
+      const detail = detailParts.length ? `, ${detailParts.join(", ")}` : "";
+      return `@${r.login}${teamSuffix} (${tags}${detail})`;
     })
-    .join("\n");
-  return `## 👤 Suggested Reviewers\n\nRanked by \`git blame\` weight on the touched lines + CODEOWNERS overlap.\n\n${bullets}`;
+    .join(", ");
+  return `**Suggested reviewers:** ${names}`;
 }

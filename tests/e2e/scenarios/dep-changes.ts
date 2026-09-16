@@ -25,7 +25,7 @@ export const scenario: Scenario = {
   waitFor: { walkthrough: true, review: true, timeoutMs: 240_000 },
   expect: {
     walkthroughContains: [
-      "📦 Dependency Changes",
+      "📦 Dependency changes",
       "lodash",
       "axios",
     ],

@@ -1605,7 +1605,7 @@ export class Reviewer {
             const bullets = relatedPRs
               .map((pr) => `- [${owner}/${repo}#${pr.number}](${pr.url}) — ${pr.title}`)
               .join("\n");
-            relatedPRsSection = `\n\n## Possibly related PRs\n\n${bullets}`;
+            relatedPRsSection = `\n\n**Possibly related PRs**\n\n${bullets}`;
           }
         } catch {
           // Best effort

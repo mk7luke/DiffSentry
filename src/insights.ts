@@ -239,7 +239,7 @@ export function renderCoverageBlock(c: CoverageSignal): string {
   if (c.productionFiles === 0 && c.testFiles === 0) return "";
   const icon = c.flag === "missing" ? "🔴" : c.flag === "warn" ? "🟡" : "🟢";
   const lines: string[] = [];
-  lines.push(`## Test Coverage Signal`);
+  lines.push(`**Test coverage signal**`);
   lines.push("");
   lines.push(`${icon} ${c.detail}`);
   lines.push("");
@@ -541,7 +541,7 @@ export function renderSeverityCalibrationBlock(result: CalibrationResult): strin
   if (result.adjustments.length === 0 && result.confidenceLowered === 0) return "";
   const arrow = (a: SeverityAdjustment) => (SEVERITY_ORDER.indexOf(a.to) > SEVERITY_ORDER.indexOf(a.from) ? "⬆️" : "⬇️");
   const lines: string[] = [];
-  lines.push("## ⚖️ Severity calibration");
+  lines.push("**⚖️ Severity calibration**");
   lines.push("");
   lines.push(
     "Some findings were re-weighted by **blast radius** (fan-in) and **test coverage** so severity reflects real risk, not just finding type:",
@@ -587,7 +587,7 @@ export function renderConfidenceAggregate(review: ReviewResult): string {
   }
   if (counts.medium === 0 && counts.low === 0) return "";
   const total = review.comments.length;
-  return `## 📊 Confidence breakdown\n\n${total} finding${total === 1 ? "" : "s"} — 🟢 ${counts.high} high · 🟡 ${counts.medium} medium · 🔴 ${counts.low} low. Treat the medium / low ones as hypotheses to verify.`;
+  return `**📊 Confidence breakdown**\n\n${total} finding${total === 1 ? "" : "s"} — 🟢 ${counts.high} high · 🟡 ${counts.medium} medium · 🔴 ${counts.low} low. Treat the medium / low ones as hypotheses to verify.`;
 }
 
 // ─── Reviewer-delta block (what changed since each reviewer last looked) ──
@@ -624,7 +624,7 @@ export function computeReviewerDeltas(opts: {
 export function renderReviewerDeltaBlock(deltas: ReviewerDelta[]): string {
   if (deltas.length === 0) return "";
   const lines: string[] = [];
-  lines.push("## 🔁 Changes since last reviewed");
+  lines.push("**🔁 Changes since last reviewed**");
   lines.push("");
   for (const d of deltas) {
     lines.push(`- @${d.reviewer}: ${d.filesChanged} file(s) changed since their last review`);
@@ -636,7 +636,7 @@ export function renderReviewerDeltaBlock(deltas: ReviewerDelta[]): string {
 
 export function renderSplitSuggestion(cohorts: Array<{ label: string; files: string[] }>): string {
   const lines: string[] = [];
-  lines.push(`## 💡 Suggested PR Split`);
+  lines.push(`**💡 Suggested PR split**`);
   lines.push("");
   lines.push(
     "This change spans several distinct cohorts. Splitting it into smaller PRs would make review faster and lower the chance of regressions slipping through. A natural split:",
