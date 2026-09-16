@@ -25,7 +25,7 @@ import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-m
 import { generateDocstrings, generateTests, simplifyCode, autofix } from "./finishing-touches.js";
 import { formatReviewBody, reconcileApproval, isVisiblyActionable } from "./review-body.js";
 import { encodeState, encodeStateRef, extractState, replaceState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
-import { assessRisk, renderRiskBlock, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion, renderConfidenceAggregate, computeReviewerDeltas, renderReviewerDeltaBlock, calibrateSeverities, resolveSeverityCalibration, renderSeverityCalibrationBlock, type CalibrationResult } from "./insights.js";
+import { assessRisk, renderRiskVerdict, renderRiskFactors, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion, renderConfidenceAggregate, computeReviewerDeltas, renderReviewerDeltaBlock, calibrateSeverities, resolveSeverityCalibration, renderSeverityCalibrationBlock, type CalibrationResult } from "./insights.js";
 import { suggestReviewersFromBlame, renderSuggestedReviewers, combineReviewers, renderCombinedReviewers } from "./blame-reviewers.js";
 import { loadCodeowners, ownersForFiles } from "./codeowners.js";
 import { findPriorBotThreadsForPaths, renderPriorDiscussionsBlock, diffWithOtherPR, renderDiffPRReply } from "./cross-pr.js";
@@ -1960,8 +1960,11 @@ export class Reviewer {
         const walkthroughConfig = repoConfig.reviews?.walkthrough || {};
         let inner = formatWalkthroughInner(walkthroughResult, walkthroughConfig);
 
-        // Insight blocks inside the walkthrough collapse
-        inner += "\n\n" + renderRiskBlock(risk);
+        // Insight blocks inside the walkthrough collapse. The risk *verdict*
+        // is not one of them — it is rendered at top level below, outside the
+        // collapse; only the factor table that justifies it belongs in here.
+        const riskFactors = renderRiskFactors(risk);
+        if (riskFactors) inner += "\n\n" + riskFactors;
         const covBlock = renderCoverageBlock(coverage);
         if (covBlock) inner += "\n\n" + covBlock;
         const calBlock = renderSeverityCalibrationBlock(calibration);
@@ -2024,6 +2027,11 @@ export class Reviewer {
 
         let walkthroughBody =
           WALKTHROUGH_MARKER + "\n" + WALKTHROUGH_START + "\n\n" + wrapped + "\n\n" + WALKTHROUGH_END;
+
+        // The merge-risk verdict, at top level and outside every <details>, so
+        // the one judgement DiffSentry has about the whole PR is readable at
+        // zero clicks. See renderRiskVerdict.
+        walkthroughBody += "\n\n" + renderRiskVerdict(risk, context.headSha);
 
         // Pre-merge checks block as sibling <details>
         if (preMergeBlock) {

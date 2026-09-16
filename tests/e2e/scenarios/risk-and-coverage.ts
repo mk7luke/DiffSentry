@@ -35,9 +35,9 @@ export function consumePasswordResetToken(token: string): string | null {
   waitFor: { walkthrough: true, review: true, timeoutMs: 240_000 },
   expect: {
     walkthroughContains: [
-      "## Risk Assessment",
-      "Score:",
-      "## Test Coverage Signal",
+      "**Merge Risk:**",
+      "**Risk factors**",
+      "**Test coverage signal**",
       "production code added with no test changes",
     ],
   },
