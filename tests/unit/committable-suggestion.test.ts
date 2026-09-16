@@ -77,6 +77,70 @@ describe("isCommittableSuggestion", () => {
     expect(isCommittableSuggestion(overruns, 54, INFO)).toBe(false);
   });
 
+  // R4's known false-negative class, closed. A block-scoped fix in a braces
+  // language ends on a delimiter that almost always recurs just below the
+  // anchor; treating that as overlap left the apply button working mainly for
+  // one-line edits. See isStructuralOnlyLine.
+  it("accepts a block-scoped fix that shares only a closing delimiter", () => {
+    // Right-side lines: 10 `list.forEach((x) => {`, 11 `  send(x);`,
+    // 12 `});`, 13 `flush();`, 14 `});`.
+    const info = getDiffLineInfo(
+      [
+        "@@ -10,5 +10,5 @@",
+        "+list.forEach((x) => {",
+        "   send(x);",
+        " });",
+        " flush();",
+        " });",
+      ].join("\n"),
+    );
+    const fix = ["list.forEach((x) => {", "  if (x != null) send(x);", "});"].join("\n");
+    expect(isCommittableSuggestion(fix, 10, info)).toBe(true);
+  });
+
+  it("still rejects when the shared line carries semantics", () => {
+    const info = getDiffLineInfo(
+      [
+        "@@ -10,4 +10,4 @@",
+        "+if (x) {",
+        "   send(x);",
+        " } else {",
+        " }",
+      ].join("\n"),
+    );
+    // `} else {` has letters, so it is not structural-only and still counts.
+    const fix = ["if (x != null) {", "  send(x);", "} else {"].join("\n");
+    expect(isCommittableSuggestion(fix, 10, info)).toBe(false);
+  });
+
+  // Pinned against the one real DiffSentry suggestion in the captured corpus
+  // (tests/e2e/reference/2026-09/diffsentry/inline.md:52) — the case R4 exists
+  // for. It must keep failing after the structural-line exclusion: it restates
+  // `SANITIZE_OPTIONS,` and a `.replace(…)` line, neither of which is
+  // structural-only. Only its trailing `);` would now be forgiven.
+  it("still catches the captured corpus case after the structural exclusion", () => {
+    const info = getDiffLineInfo(
+      [
+        "@@ -53,7 +53,7 @@",
+        "+    return sanitizeHtml(",
+        "       input",
+        "         .replace(/&/g, \"&amp;\")",
+        "         .replace(/\\n/g, \"<br>\"),",
+        "       SANITIZE_OPTIONS,",
+        "     );",
+      ].join("\n"),
+    );
+    const captured = [
+      "    return sanitizeHtml(",
+      "      input",
+      "        .replace(/&/g, \"&amp;\")",
+      "        .replace(/\\n/g, \"<br>\"),",
+      "      SANITIZE_OPTIONS,",
+      "    );",
+    ].join("\n");
+    expect(isCommittableSuggestion(captured, 53, info)).toBe(false);
+  });
+
   it("rejects a unified diff, whose markers would be committed literally", () => {
     const asDiff = [
       "-    return sanitizeHtml(marked.parse(input) as string, SANITIZE_OPTIONS);",

@@ -384,15 +384,39 @@ export function stripFencesPreservingIndent(input: string): string {
  *       line prefixes). Those characters would be committed literally.
  *   R3  The anchored line's source text is recoverable from the patch —
  *       without it there is nothing to check the replacement against.
- *   R4  No line of the suggestion restates a source line that FOLLOWS the
- *       anchor. A match is proof the model was rewriting a multi-line block
+ *   R4  No line of the suggestion restates a SEMANTIC source line that FOLLOWS
+ *       the anchor. A match is proof the model was rewriting a multi-line block
  *       our single-line anchor will not consume (this is exactly what the one
  *       captured DiffSentry suggestion does — it restates the `SANITIZE_OPTIONS,`
- *       and `);` lines below its anchor).
+ *       and `.replace(…)` lines below its anchor). Structural-only lines are
+ *       excluded from the comparison — see isStructuralOnlyLine.
  *   R5  The first suggestion line's indentation matches the anchored line's.
  *       Re-indentation is the most common way an applied suggestion breaks a
  *       file, and it is the one thing we can check exactly.
  */
+/**
+ * Whether a line carries no meaning on its own — blank, or nothing but
+ * delimiters (`}`, `});`, `)`, `],`, `};`).
+ *
+ * This exists to bound R4's known false-negative class, and removing it
+ * reopens that class: without it, R4 rejects the *default* shape of a
+ * block-scoped fix in any braces language. Guard a condition, wrap in
+ * try/catch, add an else — each ends on a lone `}` or `});`, and the same
+ * token almost always recurs within a few lines below the anchor, so the
+ * overlap check fires on a suggestion that is perfectly safe to commit. That
+ * would leave the apply button working mainly for one-line edits, which are
+ * the edits a reviewer minds retyping least.
+ *
+ * Deliberately narrow: "no word characters at all", so anything carrying
+ * semantics stays in the comparison. `} else {`, `} catch (e) {`, `}); // done`
+ * and even `</div>` all keep their letters and are still matched — restating
+ * one of those IS the overlap R4 guards against. The captured DiffSentry case
+ * is unaffected: it restates `SANITIZE_OPTIONS,` and `.replace(…)` lines.
+ */
+function isStructuralOnlyLine(trimmed: string): boolean {
+  return trimmed.length === 0 || !/[A-Za-z0-9_$]/.test(trimmed);
+}
+
 export function isCommittableSuggestion(
   suggestion: string,
   anchorLine: number,
@@ -412,15 +436,16 @@ export function isCommittableSuggestion(
   if (anchorText === undefined) return false; // R3
 
   // R4 — look ahead as far as the suggestion is long: that is the largest
-  // original block a replacement of this size could plausibly have meant.
+  // original block a replacement of this size could plausibly have meant. Only
+  // semantic lines are compared (see isStructuralOnlyLine); a shared closing
+  // brace is not evidence of anything.
   const body = new Set(
-    lines.map((l) => l.trim()).filter((l) => l.length > 0),
+    lines.map((l) => l.trim()).filter((l) => !isStructuralOnlyLine(l)),
   );
   for (let i = 1; i <= lines.length; i++) {
     const following = info.text.get(anchorLine + i);
     if (following === undefined) break;
-    const trimmed = following.trim();
-    if (trimmed.length > 0 && body.has(trimmed)) return false;
+    if (body.has(following.trim())) return false;
   }
 
   // R5 — indentation must match the line being replaced.
