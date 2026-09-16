@@ -1438,13 +1438,21 @@ export class GitHubClient {
    * A thread whose mutation failed is deliberately absent from all three: its
    * finding is still open on the PR, and retiring its state would let the next
    * pass post a duplicate beside it.
+   *
+   * `addressedNote` lets the caller leave a line on each thread naming the
+   * commits that landed since the finding was raised, before it is collapsed.
+   * The caller owns that text because only it holds the per-finding state the
+   * range is computed from; this method only knows which threads it closed.
+   * Returning null (or omitting the option) posts nothing, which is what
+   * happens for a thread whose fingerprint predates the state that records it.
    */
   async resolveAddressedThreads(
     installationId: number,
     owner: string,
     repo: string,
     pullNumber: number,
-    changedFiles: string[]
+    changedFiles: string[],
+    opts?: { addressedNote?: (fingerprint: string) => Promise<string | null> }
   ): Promise<{ resolved: number; fingerprints: string[]; paths: string[] }> {
     const octokit = await this.getInstallationOctokit(installationId);
     const log = logger.child({ owner, repo, pr: pullNumber });
@@ -1462,7 +1470,31 @@ export class GitHubClient {
         if (!changed.has(thread.path)) continue;
         if (!isOurBotThread(thread, botLogin)) continue;
 
+        // Absent on threads posted before fingerprints were stamped; those
+        // have nothing to un-suppress, but their file is re-read regardless.
+        const fp = parseThreadFingerprint(thread.comments?.nodes?.[0]?.body ?? "");
+
         try {
+          // Before the collapse, not after: a reader expanding a resolved
+          // thread should find the note as its last comment, and a mutation
+          // that fails must not leave an "addressed" claim on a thread that is
+          // still open. Best-effort — the note is an explanation, and losing it
+          // must not cost us the resolution it explains.
+          const note = fp && opts?.addressedNote ? await opts.addressedNote(fp) : null;
+          const headCommentId = thread.comments?.nodes?.[0]?.databaseId;
+          if (note && headCommentId) {
+            try {
+              await octokit.pulls.createReplyForReviewComment({
+                owner,
+                repo,
+                pull_number: pullNumber,
+                comment_id: headCommentId,
+                body: note,
+              });
+            } catch (err) {
+              log.warn({ err, threadId: thread.id }, "Failed to post addressed note");
+            }
+          }
           await octokit.graphql(`
             mutation($threadId: ID!) {
               resolveReviewThread(input: { threadId: $threadId }) {
@@ -1472,9 +1504,6 @@ export class GitHubClient {
           `, { threadId: thread.id });
           resolvedCount++;
           if (thread.path) paths.add(thread.path);
-          // Absent on threads posted before fingerprints were stamped; those
-          // have nothing to un-suppress, but their file is re-read regardless.
-          const fp = parseThreadFingerprint(thread.comments?.nodes?.[0]?.body ?? "");
           if (fp) fingerprints.push(fp);
         } catch (err) {
           log.warn({ err, threadId: thread.id }, "Failed to resolve thread");
@@ -1715,7 +1744,10 @@ export class GitHubClient {
   ): Promise<any[]> {
     const commentsBlock = includeAllComments
       ? `comments(first: 100) { nodes { databaseId body author { login __typename } } }`
-      : `comments(first: 1) { nodes { body author { login __typename } } }`;
+      // `databaseId` on the head comment is what `pulls.createReplyForReviewComment`
+      // needs to reply into the thread — see the addressed note in
+      // resolveAddressedThreads.
+      : `comments(first: 1) { nodes { databaseId body author { login __typename } } }`;
     const query = `
       query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
         repository(owner: $owner, name: $repo) {

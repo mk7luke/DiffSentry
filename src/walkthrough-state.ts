@@ -18,7 +18,17 @@ const STATE_REF_MARKER_START = "<!-- diffsentry-state-ref:";
  * round-trip through GitHub's markdown sanitizer.
  */
 export interface WalkthroughState {
-  /** Schema version for forward-compat. */
+  /** Schema version for forward-compat.
+   *
+   *  It has never been bumped and adding a field is not a reason to bump it.
+   *  `extractState` rejects anything whose `v` it doesn't recognise, so a bump
+   *  makes every blob written before it decode as `null` — a PR reviewed months
+   *  ago would lose its dedup set and re-post every finding it ever made. Every
+   *  field below is optional precisely so new ones can be added in place: an
+   *  old blob decodes with the new field absent, and a new blob decodes under
+   *  old code with the new field carried along unread. Bump `v` only for a
+   *  change that genuinely cannot be expressed as another optional field, and
+   *  then write the migration. */
   v: 1;
   /** SHA of the head commit at the most recent review. */
   lastReviewedSha?: string;
@@ -26,6 +36,18 @@ export interface WalkthroughState {
   fileShas?: Record<string, string>;
   /** Inline-comment fingerprints already posted (for dedup). */
   postedFingerprints?: string[];
+  /** Fingerprint → the head SHA the finding was FIRST raised against.
+   *
+   *  `lastReviewedSha` is per-review; this is per-finding, and the two differ
+   *  the moment a PR gets a second push. Without it we can say a thread was
+   *  closed but not which commits closed it, so `✅ Addressed in commit(s) …`
+   *  has no range to name. First raise wins: a finding re-raised on a later
+   *  push keeps its original SHA, because the commits that addressed it are
+   *  the ones after it was first said, not after it was last repeated.
+   *
+   *  Keyed by the same fingerprints as {@link WalkthroughState.postedFingerprints}
+   *  and pruned to them on every write, so it can never outgrow that list. */
+  findingShas?: Record<string, string>;
   /** Keys (`path \t title`) of PR-level findings already posted, for similarity
    *  dedup. Separate from postedFingerprints because a PR-level finding has no
    *  `path:line` to pin its fingerprint — see isRepeatPrLevelFinding in

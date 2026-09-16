@@ -25,6 +25,7 @@ import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-m
 import { generateDocstrings, generateTests, simplifyCode, autofix } from "./finishing-touches.js";
 import { formatReviewBody, reconcileApproval, isVisiblyActionable, isQuietOverflow } from "./review-body.js";
 import { encodeState, encodeStateRef, extractState, replaceState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
+import { addressedCommitRange, renderAddressedNote, stampRaisedShas } from "./addressed-commits.js";
 import { assessRisk, renderRiskVerdict, renderRiskFactors, assessCoverage, renderCoverageBlock, shouldSuggestSplit, renderSplitSuggestion, renderConfidenceAggregate, computeReviewerDeltas, renderReviewerDeltaBlock, calibrateSeverities, resolveSeverityCalibration, renderSeverityCalibrationBlock, type CalibrationResult } from "./insights.js";
 import { suggestReviewersFromBlame, renderSuggestedReviewers, combineReviewers, renderCombinedReviewers } from "./blame-reviewers.js";
 import { loadCodeowners, ownersForFiles } from "./codeowners.js";
@@ -461,8 +462,28 @@ export class Reviewer {
       const ctx = await this.github.getPRContext(installationId, owner, repo, pullNumber);
       const changedFiles = ctx.files.map((f) => f.filename);
       if (changedFiles.length === 0) return;
+
+      // One lazy read of the state, shared by the two things that need it: the
+      // addressed note, which runs while the threads are still open, and the
+      // retirement, which runs once they are closed. Shared so the two see the
+      // same snapshot, and lazy so a push that resolves nothing still costs
+      // nothing — `addressedNote` is only ever called for a thread about to be
+      // closed, so on the common quiet push neither the comment nor the commit
+      // list is fetched at all.
+      let statePromise: ReturnType<Reviewer["loadWalkthroughStateFor"]> | null = null;
+      const loadState = () =>
+        (statePromise ??= this.loadWalkthroughStateFor(installationId, owner, repo, pullNumber));
+
+      let notePromise: Promise<((fingerprint: string) => string | null) | undefined> | null = null;
+      const addressedNote = async (fingerprint: string): Promise<string | null> => {
+        notePromise ??= loadState().then((loaded) =>
+          this.buildAddressedNote(installationId, owner, repo, pullNumber, loaded?.state),
+        );
+        return (await notePromise)?.(fingerprint) ?? null;
+      };
+
       const { resolved, fingerprints, paths } = await this.github.resolveAddressedThreads(
-        installationId, owner, repo, pullNumber, changedFiles
+        installationId, owner, repo, pullNumber, changedFiles, { addressedNote }
       );
       if (resolved > 0) {
         log.info({ resolved }, "Push auto-resolve: closed addressed threads");
@@ -470,12 +491,63 @@ export class Reviewer {
         // this reads the state to build its dedup set and its skip list, and
         // either one left standing would suppress the re-raise of a finding
         // this just closed on nothing but a file having changed.
-        await this.retireResolvedThreadState(installationId, owner, repo, pullNumber, fingerprints, paths);
+        await this.retireResolvedThreadState(await loadState(), installationId, owner, repo, pullNumber, fingerprints, paths);
         await this.syncReviewCommitStatus(installationId, owner, repo, pullNumber, { headSha: ctx.headSha });
       }
     } catch (err) {
       log.warn({ err }, "Push auto-resolve failed");
     }
+  }
+
+  /**
+   * The walkthrough comment and the state it carries, preferring the database
+   * row the review pass writes first. Returns null when neither exists — a PR
+   * whose walkthrough predates state, or one DiffSentry has never reviewed.
+   */
+  private async loadWalkthroughStateFor(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+  ): Promise<{ comment: { id: number; body: string } | null; state: WalkthroughState } | null> {
+    const comment = await this.github
+      .findCommentByMarker(installationId, owner, repo, pullNumber, WALKTHROUGH_MARKER)
+      .catch(() => null);
+    const state = getWalkthroughState(owner, repo, pullNumber) ?? extractState(comment?.body);
+    if (!state) return null;
+    return { comment, state };
+  }
+
+  /**
+   * A function from a finding's fingerprint to the `✅ Addressed in commit(s) …`
+   * line for the thread carrying it, or undefined when no thread on this PR can
+   * produce one.
+   *
+   * Short-circuits before the commit fetch whenever the state holds no
+   * `findingShas` — the field is new, so every PR reviewed before it shipped
+   * lands here, and those PRs must cost exactly what they cost yesterday rather
+   * than an extra paginated API call per push forever.
+   */
+  private async buildAddressedNote(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    state: WalkthroughState | undefined,
+  ): Promise<((fingerprint: string) => string | null) | undefined> {
+    const findingShas = state?.findingShas;
+    if (!findingShas || Object.keys(findingShas).length === 0) return undefined;
+    let shas: string[];
+    try {
+      shas = (await this.github.listPRCommits(installationId, owner, repo, pullNumber)).map((c) => c.sha);
+    } catch (err) {
+      logger.child({ owner, repo, pr: pullNumber }).warn({ err }, "Could not list PR commits for the addressed note");
+      return undefined;
+    }
+    return (fingerprint: string) => {
+      const range = addressedCommitRange(findingShas[fingerprint], shas);
+      return range ? renderAddressedNote(range) : null;
+    };
   }
 
   /**
@@ -503,6 +575,7 @@ export class Reviewer {
    * `autoResolveOnPush` from reaching the commit-status sync.
    */
   private async retireResolvedThreadState(
+    loaded: { comment: { id: number; body: string } | null; state: WalkthroughState } | null,
     installationId: number,
     owner: string,
     repo: string,
@@ -513,17 +586,21 @@ export class Reviewer {
     if (fingerprints.length === 0 && paths.length === 0) return;
     const log = logger.child({ owner, repo, pr: pullNumber });
     try {
-      const comment = await this.github
-        .findCommentByMarker(installationId, owner, repo, pullNumber, WALKTHROUGH_MARKER)
-        .catch(() => null);
-      const priorState = getWalkthroughState(owner, repo, pullNumber) ?? extractState(comment?.body);
-      if (!priorState) return;
+      if (!loaded) return;
+      const { comment, state: priorState } = loaded;
 
       const retiringFps = new Set(fingerprints);
       const keptFps = (priorState.postedFingerprints ?? []).filter((fp) => !retiringFps.has(fp));
       const retiringPaths = new Set(paths);
       const keptShas = Object.fromEntries(
         Object.entries(priorState.fileShas ?? {}).filter(([path]) => !retiringPaths.has(path)),
+      );
+      // The raised-at SHA goes with the fingerprint it belongs to. Left behind,
+      // it would be stale the moment the finding is re-raised on a later push:
+      // the range would start from the first raise rather than the latest, and
+      // name commits the reader already saw the thread survive.
+      const keptFindingShas = Object.fromEntries(
+        Object.entries(priorState.findingShas ?? {}).filter(([fp]) => !retiringFps.has(fp)),
       );
 
       const droppedFps = (priorState.postedFingerprints ?? []).length - keptFps.length;
@@ -536,6 +613,7 @@ export class Reviewer {
         ...priorState,
         ...(priorState.postedFingerprints ? { postedFingerprints: keptFps } : {}),
         ...(priorState.fileShas ? { fileShas: keptShas } : {}),
+        ...(priorState.findingShas ? { findingShas: keptFindingShas } : {}),
         updatedAt: new Date().toISOString(),
       };
       saveWalkthroughState(owner, repo, pullNumber, nextState);
@@ -2054,16 +2132,20 @@ export class Reviewer {
         // Internal state blob (base64(gzip(JSON))) for incremental review.
         const riskHistory = (priorState?.riskHistory ?? []).slice(-19);
         riskHistory.push(risk.score);
+        const postedFingerprints = Array.from(
+          new Set([
+            ...(priorState?.postedFingerprints ?? []),
+            ...reviewResult.comments.map((c) => c.fingerprint).filter((x): x is string => !!x),
+          ]),
+        );
         const newState: WalkthroughState = {
           v: 1,
           lastReviewedSha: context.headSha,
           fileShas: { ...(priorState?.fileShas ?? {}), ...currentFileShas },
-          postedFingerprints: Array.from(
-            new Set([
-              ...(priorState?.postedFingerprints ?? []),
-              ...reviewResult.comments.map((c) => c.fingerprint).filter((x): x is string => !!x),
-            ]),
-          ),
+          postedFingerprints,
+          // Dates each finding so push auto-resolve can later name the commits
+          // that landed after it was raised. See stampRaisedShas.
+          findingShas: stampRaisedShas(priorState?.findingShas, postedFingerprints, context.headSha),
           // Trailing window, most-recent last: a PR-level finding that stopped
           // recurring 50 findings ago is not worth suppressing forever, and the
           // list is compared token-wise (not hashed), so it has to stay bounded.

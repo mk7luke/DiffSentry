@@ -31,18 +31,38 @@ function reviewerWith(opts: {
   paths?: string[];
   priorState?: Record<string, unknown>;
   comment?: { id: number; body: string } | null;
+  /** PR commits, oldest first, as `listPRCommits` returns them. */
+  commits?: string[];
 }) {
   const upsertComment = vi.fn().mockResolvedValue(undefined);
+  // Every note the reviewer produced for a thread that closed, in order — what
+  // GitHub would have posted as a reply before collapsing each thread.
+  const notes: (string | null)[] = [];
   const github = {
     getPRContext: vi.fn().mockResolvedValue({
       headSha: "abc123",
       files: [{ filename: "a.ts" }, { filename: "b.ts" }],
     }),
-    resolveAddressedThreads: vi.fn().mockResolvedValue({
-      resolved: Math.max(opts.fingerprints.length, opts.paths?.length ?? 0),
-      fingerprints: opts.fingerprints,
-      paths: opts.paths ?? ["a.ts"],
-    }),
+    listPRCommits: vi.fn().mockResolvedValue(
+      (opts.commits ?? []).map((sha) => ({ sha, message: "" })),
+    ),
+    // Stands in for the real method's loop: it asks the caller for a note on
+    // every thread it is about to close, then reports what it closed.
+    resolveAddressedThreads: vi.fn().mockImplementation(
+      async (
+        _inst: number, _o: string, _r: string, _n: number, _files: string[],
+        resolveOpts?: { addressedNote?: (fp: string) => Promise<string | null> },
+      ) => {
+        for (const fp of opts.fingerprints) {
+          notes.push(resolveOpts?.addressedNote ? await resolveOpts.addressedNote(fp) : null);
+        }
+        return {
+          resolved: Math.max(opts.fingerprints.length, opts.paths?.length ?? 0),
+          fingerprints: opts.fingerprints,
+          paths: opts.paths ?? ["a.ts"],
+        };
+      },
+    ),
     findCommentByMarker: vi.fn().mockResolvedValue(opts.comment ?? null),
     upsertComment,
   };
@@ -50,7 +70,7 @@ function reviewerWith(opts: {
   (reviewer as unknown as { github: unknown }).github = github;
   const syncReviewCommitStatus = vi.fn().mockResolvedValue(true);
   (reviewer as unknown as { syncReviewCommitStatus: unknown }).syncReviewCommitStatus = syncReviewCommitStatus;
-  return { reviewer, github, upsertComment, syncReviewCommitStatus };
+  return { reviewer, github, upsertComment, syncReviewCommitStatus, notes };
 }
 
 function walkthroughBody(state: Record<string, unknown>) {
@@ -208,5 +228,142 @@ describe("autoResolveOnPush", () => {
 
     expect(syncReviewCommitStatus).not.toHaveBeenCalled();
     expect(github.findCommentByMarker).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Resolving a thread says DiffSentry stopped worrying; it doesn't say what
+ * changed. On a PR with a dozen pushes that is the only question worth asking,
+ * because a thread closed for the wrong reason looks identical to one closed
+ * for the right one. The note names the commits so the claim is checkable.
+ *
+ * `findingShas` is what makes it possible — `lastReviewedSha` is per-review, and
+ * the two diverge the moment a PR gets a second push.
+ */
+describe("the addressed note", () => {
+  it("names the commits that landed after the finding was raised", async () => {
+    const { reviewer, notes } = reviewerWith({
+      fingerprints: ["aaa"],
+      commits: ["c0000000", "c1111111", "c2222222"],
+      comment: {
+        id: 9,
+        body: walkthroughBody({ postedFingerprints: ["aaa"], findingShas: { aaa: "c0000000" } }),
+      },
+    });
+
+    await reviewer.autoResolveOnPush(1, "o", "r", 7);
+
+    expect(notes).toEqual(["✅ Addressed in commits c111111 to c222222"]);
+  });
+
+  it("uses the singular form when a single commit landed", async () => {
+    const { reviewer, notes } = reviewerWith({
+      fingerprints: ["aaa"],
+      commits: ["c0000000", "c1111111"],
+      comment: {
+        id: 9,
+        body: walkthroughBody({ postedFingerprints: ["aaa"], findingShas: { aaa: "c0000000" } }),
+      },
+    });
+
+    await reviewer.autoResolveOnPush(1, "o", "r", 7);
+
+    expect(notes).toEqual(["✅ Addressed in commit c111111"]);
+  });
+
+  it("dates each finding from its own first raise, not the last review", async () => {
+    // The whole reason the field exists: two findings raised on different
+    // pushes get different ranges out of the same resolution pass.
+    const { reviewer, notes } = reviewerWith({
+      fingerprints: ["aaa", "bbb"],
+      commits: ["c0000000", "c1111111", "c2222222"],
+      comment: {
+        id: 9,
+        body: walkthroughBody({
+          postedFingerprints: ["aaa", "bbb"],
+          findingShas: { aaa: "c0000000", bbb: "c1111111" },
+        }),
+      },
+    });
+
+    await reviewer.autoResolveOnPush(1, "o", "r", 7);
+
+    expect(notes).toEqual([
+      "✅ Addressed in commits c111111 to c222222",
+      "✅ Addressed in commit c222222",
+    ]);
+  });
+
+  it("says nothing for a thread whose finding predates the field", async () => {
+    // Every PR reviewed before findingShas shipped lands here. Silence is the
+    // answer, and the commit list must not even be fetched.
+    const { reviewer, notes, github } = reviewerWith({
+      fingerprints: ["aaa"],
+      commits: ["c0000000", "c1111111"],
+      comment: { id: 9, body: walkthroughBody({ postedFingerprints: ["aaa"] }) },
+    });
+
+    await reviewer.autoResolveOnPush(1, "o", "r", 7);
+
+    expect(notes).toEqual([null]);
+    expect(github.listPRCommits).not.toHaveBeenCalled();
+  });
+
+  it("says nothing when the raised SHA is gone from the PR", async () => {
+    // Force-push. Naming a range from a rewritten history points the reader at
+    // a diff that never contained the fix.
+    const { reviewer, notes } = reviewerWith({
+      fingerprints: ["aaa"],
+      commits: ["d0000000", "d1111111"],
+      comment: {
+        id: 9,
+        body: walkthroughBody({ postedFingerprints: ["aaa"], findingShas: { aaa: "c0000000" } }),
+      },
+    });
+
+    await reviewer.autoResolveOnPush(1, "o", "r", 7);
+
+    expect(notes).toEqual([null]);
+  });
+
+  it("retires the raised SHA along with the fingerprint it belongs to", async () => {
+    // Left behind, it would date the next raise of the same finding from the
+    // first one — naming commits the reader already watched the thread survive.
+    const { reviewer, upsertComment } = reviewerWith({
+      fingerprints: ["aaa"],
+      commits: ["c0000000", "c1111111"],
+      comment: {
+        id: 9,
+        body: walkthroughBody({
+          postedFingerprints: ["aaa", "bbb"],
+          findingShas: { aaa: "c0000000", bbb: "c1111111" },
+        }),
+      },
+    });
+
+    await reviewer.autoResolveOnPush(1, "o", "r", 7);
+
+    const written = upsertComment.mock.calls[0][4] as string;
+    expect(extractState(written)?.findingShas).toEqual({ bbb: "c1111111" });
+    expect(extractState(written)?.postedFingerprints).toEqual(["bbb"]);
+  });
+
+  it("reads the walkthrough comment once, not once per closed thread", async () => {
+    const { reviewer, github } = reviewerWith({
+      fingerprints: ["aaa", "bbb"],
+      commits: ["c0000000", "c1111111"],
+      comment: {
+        id: 9,
+        body: walkthroughBody({
+          postedFingerprints: ["aaa", "bbb"],
+          findingShas: { aaa: "c0000000", bbb: "c0000000" },
+        }),
+      },
+    });
+
+    await reviewer.autoResolveOnPush(1, "o", "r", 7);
+
+    expect(github.findCommentByMarker).toHaveBeenCalledTimes(1);
+    expect(github.listPRCommits).toHaveBeenCalledTimes(1);
   });
 });
