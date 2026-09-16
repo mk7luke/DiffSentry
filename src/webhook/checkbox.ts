@@ -48,8 +48,26 @@ const LEGACY_LABELS: Array<{ label: string; trigger: CheckboxTrigger }> = [
   { label: "Create a new PR with the fixes", trigger: { action: "autofix", delivery: "stacked" } },
 ];
 
-/** `- [x] <!-- {json} --> label`, on any list marker and any indent. */
-const CHECKBOX_LINE = /^[ \t]*[-*][ \t]*\[([ xX])\][ \t]*(?:<!--([\s\S]*?)-->)?[ \t]*(.*)$/;
+/**
+ * The opening of a checkbox line: indent, list marker, the box itself, and the
+ * whitespace after it. `- [x]` and `*  [ ]` both qualify, on any indent.
+ *
+ * Only the opening. What follows — an optional `<!-- {json} -->` and then the
+ * label — is sliced off by hand below rather than matched, because the obvious
+ * regex for it (`[ \t]*(?:<!--([\s\S]*?)-->)?[ \t]*(.*)$`) puts two unbounded
+ * runs over the same class on either side of an optional group. Those two
+ * compete for every space and tab between them, so once the tail fails the
+ * engine tries every way of splitting that run — quadratic in its length
+ * (CodeQL `js/polynomial-redos`). The text being parsed is the body of an
+ * edited comment, which anyone who can comment on the PR controls, so its
+ * parse has to be linear by construction rather than merely fast on the shapes
+ * we ourselves emit. `indexOf` is linear and cannot backtrack; what is left in
+ * the pattern below has no two quantifiers that could compete for a character.
+ */
+const CHECKBOX_PREFIX = /^[ \t]*[-*][ \t]*\[([ xX])\][ \t]*/;
+
+const COMMENT_OPEN = "<!--";
+const COMMENT_CLOSE = "-->";
 
 interface ParsedBox {
   checked: boolean;
@@ -70,16 +88,34 @@ function triggerFrom(meta: unknown, label: string): CheckboxTrigger | null {
   return legacy ? { ...legacy.trigger } : null;
 }
 
+/** Split one line into box state, the raw HTML comment, and the label. */
+function parseLine(line: string): { checked: boolean; raw: string | null; label: string } | null {
+  const m = CHECKBOX_PREFIX.exec(line);
+  if (!m) return null;
+  let rest = line.slice(m[0].length);
+  let raw: string | null = null;
+  if (rest.startsWith(COMMENT_OPEN)) {
+    const close = rest.indexOf(COMMENT_CLOSE, COMMENT_OPEN.length);
+    // An unterminated `<!--` is not a comment — it stays part of the label,
+    // which is what the pattern this replaced did with it too.
+    if (close !== -1) {
+      raw = rest.slice(COMMENT_OPEN.length, close);
+      rest = rest.slice(close + COMMENT_CLOSE.length);
+    }
+  }
+  return { checked: m[1] !== " ", raw, label: rest.trim() };
+}
+
 function parseBoxes(body: string): ParsedBox[] {
   const boxes: ParsedBox[] = [];
   for (const line of body.split("\n")) {
-    const m = CHECKBOX_LINE.exec(line);
-    if (!m) continue;
-    const label = m[3].trim();
+    const parsed = parseLine(line);
+    if (!parsed) continue;
+    const { checked, raw, label } = parsed;
     let meta: unknown = null;
-    if (m[2]) {
+    if (raw) {
       try {
-        meta = JSON.parse(m[2].trim());
+        meta = JSON.parse(raw.trim());
       } catch {
         // Not our metadata — a plain HTML comment on somebody's task list.
       }
@@ -88,7 +124,7 @@ function parseBoxes(body: string): ParsedBox[] {
       meta && typeof meta === "object" && typeof (meta as { checkboxId?: unknown }).checkboxId === "string"
         ? (meta as { checkboxId: string }).checkboxId
         : null;
-    boxes.push({ checked: m[1] !== " ", id: checkboxId ?? label, trigger: triggerFrom(meta, label) });
+    boxes.push({ checked, id: checkboxId ?? label, trigger: triggerFrom(meta, label) });
   }
   return boxes;
 }

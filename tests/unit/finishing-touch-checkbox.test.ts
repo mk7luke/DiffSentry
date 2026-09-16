@@ -162,3 +162,58 @@ describe("every checkbox the finishing-touches block renders is routable", () =>
     expect(block).toContain("<summary>🪄 Autofix unresolved comments (beta)</summary>");
   });
 });
+
+describe("the shape of a checkbox line", () => {
+  const m = (delivery: string) =>
+    JSON.stringify({ checkboxId: `id-${delivery}`, action: "autofix", delivery });
+
+  it("recognises every marker, indent and tick the renderers can produce", () => {
+    const forms = [
+      `- [x] <!-- ${m("branch")} --> Push a commit to this branch (recommended)`,
+      `- [X] <!-- ${m("branch")} --> Push a commit to this branch (recommended)`,
+      `* [x] <!-- ${m("branch")} --> Push a commit to this branch (recommended)`,
+      `   - [x]   <!-- ${m("branch")} -->   Push a commit to this branch (recommended)`,
+      `\t-\t[x]\t<!-- ${m("branch")} -->\tPush a commit to this branch (recommended)`,
+      `- [x]<!-- ${m("branch")} -->Push a commit to this branch (recommended)`,
+    ];
+    for (const after of forms) {
+      const before = after.replace(/\[[xX]\]/, "[ ]");
+      expect(newlyCheckedTriggers(after, before)).toEqual([
+        { action: "autofix", delivery: "branch" },
+      ]);
+    }
+  });
+
+  it("falls back to the label when the comment is never closed", () => {
+    // `<!--` with no `-->` is not metadata; the whole tail is the label, and
+    // the legacy label table still routes it.
+    const after = `- [x] <!-- {"checkboxId": "z" Push a commit to this branch (recommended)`;
+    const before = after.replace("[x]", "[ ]");
+    expect(newlyCheckedTriggers(after, before)).toEqual([
+      { action: "autofix", delivery: "branch" },
+    ]);
+  });
+
+  it("ignores a line that only looks like one", () => {
+    const after = ["[x] not a list item", "- (x) wrong bracket", "- [y] not a tick"].join("\n");
+    expect(newlyCheckedTriggers(after, after.replace(/x/g, " "))).toEqual([]);
+  });
+
+  it("parses an adversarial body promptly", () => {
+    // The body of an edited comment is attacker-controlled. A run of tabs after
+    // the box used to be split every possible way between two competing
+    // quantifiers; parsing must stay linear in the body's length. The bound is
+    // deliberately loose — this guards against catastrophic backtracking, not
+    // against a slow machine.
+    const oneHugeLine = `- [ ] ${"\t".repeat(200_000)}`;
+    const manyLines = Array.from({ length: 2_000 }, () => `*[ ]${"\t".repeat(200)}`).join("\n");
+    const live = `- [x] <!-- ${m("stacked")} --> Create a new PR with the fixes`;
+
+    const started = Date.now();
+    expect(newlyCheckedTriggers(oneHugeLine, oneHugeLine)).toEqual([]);
+    expect(newlyCheckedTriggers(`${manyLines}\n${live}`, `${manyLines}\n${live.replace("[x]", "[ ]")}`)).toEqual([
+      { action: "autofix", delivery: "stacked" },
+    ]);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+});
