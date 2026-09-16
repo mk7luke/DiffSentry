@@ -109,4 +109,33 @@ describe("AI-agent prompt preamble", () => {
     expect(body).toContain(AI_AGENT_PROMPT_PREAMBLE);
     expect(body).not.toContain(LEGACY);
   });
+
+  it("keeps the strip guard in sync with the constant it guards", () => {
+    // The guard is built from AI_AGENT_PROMPT_PREAMBLE itself, so it strips the
+    // constant's own text exactly, no matter what that text says. A future edit
+    // to the constant cannot silently desync the two the way retyping a copy
+    // of it could.
+    expect(stripAiAgentPromptPreamble(AI_AGENT_PROMPT_PREAMBLE)).toBe("");
+    expect(stripAiAgentPromptPreamble(`${AI_AGENT_PROMPT_PREAMBLE}\n\nBody text.`)).toBe("Body text.");
+  });
+
+  it("does not swallow real instruction text that follows the preamble sentence on the same line", () => {
+    // Regression: the old guard used `[^\n]*` after the opener, which ate
+    // anything else on that line. A model-authored prompt that legitimately
+    // starts with the preamble sentence and carries its instruction right
+    // after it, on the same line, must keep that instruction.
+    const prompt = `${AI_AGENT_PROMPT_PREAMBLE} Also: rename the helper to isValid.`;
+    expect(stripAiAgentPromptPreamble(prompt)).toBe("Also: rename the helper to isValid.");
+  });
+
+  it("still strips the frozen legacy opener from prompts stored before the constant shipped", () => {
+    expect(stripAiAgentPromptPreamble(`${LEGACY}\n\nOld prompt body.`)).toBe("Old prompt body.");
+  });
+
+  it("never double-prefixes when applied twice", () => {
+    const once = withAiAgentPromptPreamble("In src/a.ts around line 7, add the null check.");
+    const twice = withAiAgentPromptPreamble(once);
+    expect(twice).toBe(once);
+    expect(twice.split(AI_AGENT_PROMPT_PREAMBLE)).toHaveLength(2);
+  });
 });

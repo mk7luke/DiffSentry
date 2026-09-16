@@ -42,12 +42,20 @@ export const AI_DISCLOSURE = "_You are interacting with an AI system._";
  * Goes last, but ahead of the auto-generated marker when the body already ends
  * with one — the marker is machine-readable chrome, and a human-facing line
  * printed after it reads as a stray. Same order CodeRabbit uses.
+ *
+ * Recognised by PLACEMENT — a trailing footer — not by mere presence anywhere
+ * in the body. Reply text is model-generated and PR-controlled prose that can
+ * quote or discuss the disclosure mid-message; a substring check there would
+ * let that quote stand in for the real footer and suppress it. Only the two
+ * arrangements this function itself produces (disclosure last, or disclosure
+ * immediately ahead of the auto-generated marker) count as "already present".
  */
 export function withAiDisclosure(body: string): string {
   const trimmed = body.trimEnd();
-  if (trimmed.includes(AI_DISCLOSURE)) return trimmed;
+  if (trimmed.endsWith(AI_DISCLOSURE)) return trimmed;
   if (trimmed.endsWith(DIFFSENTRY_COMMENT_FOOTER)) {
     const head = trimmed.slice(0, -DIFFSENTRY_COMMENT_FOOTER.length).trimEnd();
+    if (head.endsWith(AI_DISCLOSURE)) return trimmed;
     return `${head}\n\n${AI_DISCLOSURE}\n\n${DIFFSENTRY_COMMENT_FOOTER}`;
   }
   return `${trimmed}\n\n${AI_DISCLOSURE}`;
