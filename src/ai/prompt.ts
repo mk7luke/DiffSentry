@@ -58,7 +58,11 @@ Rules for the JSON response:
 - "severity": "critical" for system failures/security breaches, "major" for significant problems, "minor" for should-fix, "trivial" for low-impact.
 - "category" is the engineering DOMAIN the finding touches - a different axis from "type", which says what kind of remark it is. Pick exactly one: "functional_correctness" (wrong results, broken logic, unhandled cases), "stability_availability" (crashes, hangs, leaks, unbounded work, missing timeouts), "security_privacy" (injection, authn/authz, secrets, data exposure), "data_integrity" (persistence, migrations, serialization, contracts between systems), "performance_scalability" (latency, allocations, N+1, throughput), "maintainability" (naming, structure, duplication, docs, dead code).
 - "effort" is roughly what ACTING on the finding costs: "quick_win" for a localized edit, "heavy_lift" for work spanning files or needing a design decision, "low_value" for something real but not worth the change. Most findings are "quick_win".
-- "suggestion" is OPTIONAL. When provided, it must be a self-contained code block ready to drop in. Use "suggestionLanguage": "suggestion" when it replaces the exact target line(s); use "diff" when context lines or multi-region changes are needed (use proper diff format with leading +/- ).
+- "suggestion" is OPTIONAL but it is the most useful thing you can add to a finding: a "suggestion"-language block renders as a GitHub committable suggestion, which the reader applies with one click instead of retyping. Supply one whenever the fix is expressible as code.
+- "suggestionLanguage" decides whether that click exists, and GitHub replaces EXACTLY the one line you named in "line":
+  - "suggestion" — the block is the verbatim replacement for that single line: same leading indentation as the original, no diff markers, and it must not restate any line below the anchor. Most fixes are this shape (a corrected condition, a missing argument, a wrong identifier), so this is the default.
+  - "diff" — everything else: a fix that also rewrites lines below the anchor, several separate regions, or one that needs surrounding context to read. Use real diff format with leading +/-.
+  A "suggestion" block that overruns its anchored line is rejected and re-rendered as a diff, so choose honestly: an accurate "diff" is worth more than an optimistic "suggestion".
 - "aiAgentPrompt" is REQUIRED on every comment. Format: "In <path> around line N, <imperative description naming the variables/functions/symbols involved>; <how to fix>; <optional secondary fix or reference>." Aim for 2-4 sentences. The prompt must be directly executable by Claude/Cursor/Copilot agents — name the identifiers, do not be vague.
 - "confidence" is OPTIONAL but recommended. Set "high" when the issue is unambiguous and verified against the diff. Set "medium" when the diagnosis depends on intent you can't see. Set "low" when you're flagging it as a hypothesis to verify. If omitted, the renderer defaults to "high".
 - "approval": use APPROVE if no issues, REQUEST_CHANGES if there are critical/major issues, COMMENT for suggestions/nitpicks only.
@@ -79,7 +83,7 @@ Guidelines:
 - Do NOT nitpick. If it works correctly and safely, approve it.
 - Be concise. If the code looks good, say so briefly.
 - Always include a "title", "body", and "aiAgentPrompt" on every comment.
-- Provide a "suggestion" with the corrected code whenever a fix is feasible.`;
+- Provide a "suggestion" with the corrected code whenever a fix is feasible. You post few findings here, so each one should arrive with the fix attached — and as a committable "suggestion" wherever it replaces the anchored line.`;
 
 const ASSERTIVE_INSTRUCTIONS = `
 Focus areas (assertive profile — comprehensive feedback):
@@ -97,7 +101,7 @@ Guidelines:
 - Be thorough. Flag issues, suggestions, AND nitpicks.
 - Categorize each comment with the appropriate type, severity, category, and effort.
 - Always include a "title", "body", and "aiAgentPrompt" on every comment.
-- Provide a "suggestion" with the corrected code whenever a fix is feasible. Prefer "suggestionLanguage": "diff" for multi-line or context-dependent changes, "suggestion" for single-line replacements.
+- Provide a "suggestion" with the corrected code whenever a fix is feasible. Default to "suggestionLanguage": "suggestion" — a verbatim replacement for the anchored line — and reach for "diff" only when the fix genuinely spans lines beyond it.
 - Use markdown formatting (backticks for identifiers, bullets for lists) in the body.`;
 
 function buildReviewSystemPrompt(repoConfig?: RepoConfig, learnings?: Learning[]): string {

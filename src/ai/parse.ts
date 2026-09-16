@@ -22,15 +22,20 @@ const CONFIDENCE_TAG: Record<Confidence, string> = {
  *     comment on (added + surrounding context lines).
  *   - `added`: just the `+` (changed) line numbers, ascending. Preferred
  *     anchors when remapping a finding whose line drifted off the diff.
+ *   - `text`: the source text of each valid right-side line, with the diff's
+ *     leading marker stripped. Needed to decide whether a model's suggestion
+ *     really replaces the line it is anchored to — see isCommittableSuggestion.
  */
-interface DiffLineInfo {
+export interface DiffLineInfo {
   valid: Set<number>;
   added: number[];
+  text: Map<number, string>;
 }
 
 export function getDiffLineInfo(patch: string): DiffLineInfo {
   const valid = new Set<number>();
   const added: number[] = [];
+  const text = new Map<number, string>();
   let rightLine = 0;
 
   for (const line of patch.split("\n")) {
@@ -43,13 +48,15 @@ export function getDiffLineInfo(patch: string): DiffLineInfo {
     if (line.startsWith("+")) {
       valid.add(rightLine);
       added.push(rightLine); // ascending by construction
+      text.set(rightLine, line.slice(1));
       rightLine++;
     } else {
       valid.add(rightLine);
+      text.set(rightLine, line.startsWith(" ") ? line.slice(1) : line);
       rightLine++;
     }
   }
-  return { valid, added };
+  return { valid, added, text };
 }
 
 /**
@@ -336,13 +343,124 @@ export function stripFences(input: string): string {
   return s;
 }
 
+/**
+ * {@link stripFences} for payloads whose indentation is load-bearing.
+ *
+ * `stripFences` opens with `.trim()`, which eats the leading whitespace of the
+ * first content line. That is harmless for a JSON blob and harmless inside a
+ * ```diff fence, where every line already starts at column 0 with its marker —
+ * but a committable ```suggestion replaces a source line verbatim, so its
+ * indentation IS the payload. Trimming it produces a block that looks right in
+ * the comment and breaks the file when applied.
+ *
+ * Strips only whole fence lines and blank edges; never touches a content line.
+ */
+export function stripFencesPreservingIndent(input: string): string {
+  const lines = input.replace(/\r\n/g, "\n").split("\n");
+  const trimBlankEdges = () => {
+    while (lines.length > 0 && lines[0].trim() === "") lines.shift();
+    while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop();
+  };
+  trimBlankEdges();
+  if (lines.length > 0 && /^\s*```/.test(lines[0])) lines.shift();
+  if (lines.length > 0 && /^\s*```\s*$/.test(lines[lines.length - 1])) lines.pop();
+  trimBlankEdges();
+  return lines.join("\n");
+}
+
+/**
+ * GitHub applies a ```suggestion block by replacing **exactly** the line range
+ * the comment is anchored to. DiffSentry anchors every inline finding to a
+ * single line, so a committable suggestion must be a replacement for that one
+ * line and nothing else. When that does not hold, clicking "Commit suggestion"
+ * silently produces broken code — the model's replacement for a seven-line
+ * block lands on line one of seven and the other six stay put. That is strictly
+ * worse than no apply affordance, so the fence falls back to ```diff whenever
+ * any check below fails. Sound, not complete: a false negative costs a click,
+ * a false positive costs a broken commit.
+ *
+ *   R1  The suggestion is non-empty after fence-stripping.
+ *   R2  It carries no unified-diff markers (`@@` hunk headers, or `+`/`-`
+ *       line prefixes). Those characters would be committed literally.
+ *   R3  The anchored line's source text is recoverable from the patch —
+ *       without it there is nothing to check the replacement against.
+ *   R4  No line of the suggestion restates a source line that FOLLOWS the
+ *       anchor. A match is proof the model was rewriting a multi-line block
+ *       our single-line anchor will not consume (this is exactly what the one
+ *       captured DiffSentry suggestion does — it restates the `SANITIZE_OPTIONS,`
+ *       and `);` lines below its anchor).
+ *   R5  The first suggestion line's indentation matches the anchored line's.
+ *       Re-indentation is the most common way an applied suggestion breaks a
+ *       file, and it is the one thing we can check exactly.
+ */
+export function isCommittableSuggestion(
+  suggestion: string,
+  anchorLine: number,
+  info: DiffLineInfo,
+): boolean {
+  const cleaned = stripFencesPreservingIndent(suggestion);
+  const lines = cleaned.split("\n");
+  if (!cleaned.trim()) return false; // R1
+
+  // R2 — a diff pasted into a ```suggestion fence commits its own markers.
+  for (const l of lines) {
+    if (/^@@/.test(l)) return false;
+    if (/^[+-]/.test(l) && !/^[+-]{3}/.test(l)) return false;
+  }
+
+  const anchorText = info.text.get(anchorLine);
+  if (anchorText === undefined) return false; // R3
+
+  // R4 — look ahead as far as the suggestion is long: that is the largest
+  // original block a replacement of this size could plausibly have meant.
+  const body = new Set(
+    lines.map((l) => l.trim()).filter((l) => l.length > 0),
+  );
+  for (let i = 1; i <= lines.length; i++) {
+    const following = info.text.get(anchorLine + i);
+    if (following === undefined) break;
+    const trimmed = following.trim();
+    if (trimmed.length > 0 && body.has(trimmed)) return false;
+  }
+
+  // R5 — indentation must match the line being replaced.
+  const indentOf = (s: string) => /^[ \t]*/.exec(s)![0];
+  if (indentOf(lines[0]) !== indentOf(anchorText)) return false;
+
+  return true;
+}
+
+/**
+ * The caveat GitHub's apply affordance cannot carry itself. Transcribed from
+ * the captured CodeRabbit corpus (`tests/e2e/reference/2026-09/coderabbit/inline.md`),
+ * which pairs every committable fence with it: the block is one click from a
+ * commit, and the reader is the only check on what it replaces.
+ */
+const COMMITTABLE_SUGGESTION_CAVEAT = [
+  "> ‼️ **IMPORTANT**",
+  "> Review this before committing. Confirm that it replaces the highlighted line exactly, drops no lines, and indents correctly. Test the result.",
+].join("\n");
+
 export function renderSuggestionBlock(
   suggestion: string,
   language: "diff" | "suggestion",
   summary = "🔧 Proposed fix",
 ): string {
-  const cleaned = stripFences(suggestion);
-  return `<details>\n<summary>${summary}</summary>\n\n\`\`\`${language}\n${cleaned}\n\`\`\`\n\n</details>`;
+  if (language === "suggestion") {
+    return [
+      "<details>",
+      "<summary>📝 Committable suggestion</summary>",
+      "",
+      COMMITTABLE_SUGGESTION_CAVEAT,
+      "",
+      "```suggestion",
+      stripFencesPreservingIndent(suggestion),
+      "```",
+      "",
+      "</details>",
+    ].join("\n");
+  }
+  return `<details>\n<summary>${summary}</summary>\n\n\`\`\`${language}\n${stripFences(suggestion)}\n\`\`\`\n\n</details>`;
 }
 
 /**
@@ -643,6 +761,10 @@ export interface RawComment {
 export function buildReviewComment(
   c: RawComment,
   anchor: { path: string; line: number; prLevel: boolean },
+  /** The file's diff geometry, when the caller has it. Only used to decide
+   *  whether a suggestion can be offered as committable; omitting it is safe
+   *  and simply means the suggestion renders as a ```diff block. */
+  source?: DiffLineInfo,
 ): ReviewComment {
   const type = VALID_TYPES.includes(c.type as CommentType) ? (c.type as CommentType) : undefined;
   const severity = VALID_SEVERITIES.includes(c.severity as CommentSeverity) ? (c.severity as CommentSeverity) : undefined;
@@ -653,8 +775,22 @@ export function buildReviewComment(
   const effort = VALID_EFFORTS.includes(c.effort as CommentEffort) ? (c.effort as CommentEffort) : undefined;
   const title = typeof c.title === "string" && c.title.trim() ? c.title.trim() : undefined;
   const suggestion = typeof c.suggestion === "string" && c.suggestion.trim() ? c.suggestion : undefined;
+  // The committable fence is earned, never assumed. `diff` is the safe default
+  // because GitHub renders it with no apply affordance at all, so a wrong one
+  // costs a reader nothing; `suggestion` puts a one-click commit in front of
+  // them, so it is offered only where the replacement verifiably covers the
+  // anchored line and nothing past it. A finding with no line anchor —
+  // PR-level, file-level — has no range for GitHub to replace and can never
+  // qualify. See isCommittableSuggestion for the rules.
   const suggestionLanguage: "diff" | "suggestion" =
-    c.suggestionLanguage === "diff" ? "diff" : "suggestion";
+    suggestion !== undefined &&
+    c.suggestionLanguage !== "diff" &&
+    !anchor.prLevel &&
+    anchor.line > 0 &&
+    source !== undefined &&
+    isCommittableSuggestion(suggestion, anchor.line, source)
+      ? "suggestion"
+      : "diff";
   const aiAgentPrompt = typeof c.aiAgentPrompt === "string" && c.aiAgentPrompt.trim()
     ? c.aiAgentPrompt
     : undefined;
@@ -794,7 +930,7 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
       remappedCount++;
     }
 
-    comments.push(buildReviewComment(c, { path: c.path, line, prLevel: false }));
+    comments.push(buildReviewComment(c, { path: c.path, line, prLevel: false }, info));
   }
 
   // PR-level findings: the model's dedicated channel for issues not tied to a
@@ -837,7 +973,7 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
           : nearestAnchor(c.line, info)
         : null;
     if (line !== null) {
-      comments.push(buildReviewComment(c, { path: c.path!, line, prLevel: false }));
+      comments.push(buildReviewComment(c, { path: c.path!, line, prLevel: false }, info));
       prLevelPromoted++;
       continue;
     }
