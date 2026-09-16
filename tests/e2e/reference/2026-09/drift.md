@@ -157,7 +157,7 @@ DiffSentry 8 inline comments total — see the sample-size note above.
 | **`Reachability` / `Exploitability` / `CWE`** | **added** | 7 comments, behind a `<!-- cr-reachability -->` marker: `**Reachability:** External`, `**Exploitability:** Moderate`, `**CWE:** [CWE-345](https://cwe.mitre.org/data/definitions/345.html)`. **0 in April** |
 | **`🪛 <tool> (<version>)` attribution** | **added** | 8 occurrences, naming the analyser behind a finding: `🪛 Ruff (0.16.3)`, `🪛 golangci-lint (2.13.2)`, `🪛 Checkov (3.3.13)`, `🪛 Betterleaks (1.8.1)`, plus CI-derived forms `🪛 GitHub Check: SonarCloud Code Analysis` and `🪛 GitHub Actions: Verify administration / verify`. **0 in April** |
 | **`🧠 Learnings used`** | **added** | 1 occurrence, a collapse citing prior maintainer feedback with attribution: `Learnt from: Ashex / Repo: hypercerts-org/hypercerts-relay PR: 22 / File: cmd/relay/control.go:166-170 / Timestamp: 2026-09-09T17:11:30.140Z`. **0 in April** |
-| **`✅ Addressed in commits <sha> to <sha>`** | **unchanged** | 15 in September, **3 already in April**. Appended to the comment body by the bot (it sits after the `<!-- auto-generated reply -->` marker in `coderabbit/inline.md:559` and `:823`), not added by GitHub |
+| **`✅ Addressed in commit <sha>` / `commits <sha> to <sha>`** | **unchanged** | TWO forms, and the singular is the majority: singular 19 September / 3 April, range 15 / 3 — 34 and 6 in total. An earlier reading of this row counted only the range form. Appended to the comment body by the bot (it sits after the `<!-- auto-generated reply -->` marker in `coderabbit/inline.md:559` and `:823`), not added by GitHub |
 
 ## Surface 4: Status / control comments
 
@@ -211,7 +211,7 @@ capability work and which are a line of rendering.
 | S7 | Quiet-mode profile note + `🟡 Other comments (N)` bucket | 1 review body | 0 | small: a review-profile concept plus a bucket |
 | S8 | `> [!CAUTION]` outside-diff callout + per-finding preview summaries | 6 review bodies | 0 | small–moderate: requires tracking which findings fell outside the diff |
 | S9 | Quota surfaces — `Included review availability`, `> [!WARNING] ## Review limit reached` | 24/25 review bodies, 1 chat comment | 0 | not applicable; self-hosted has no plan quota |
-| S10 | `✅ Addressed in commits <sha> to <sha>` | 15 inline | 0 | small: needs per-finding resolution tracking across pushes |
+| S10 | `✅ Addressed in commit <sha>` / `commits <sha> to <sha>` | 34 inline (19 singular + 15 range) | 0 | small: needs per-finding resolution tracking across pushes |
 | S11 | `**Change:**` type classification (`Bug fix` / `Feature` / `Other`) | 9/15 walkthroughs | 0 | small: one prompt field |
 | S12 | `**Priority:**` axis (`➖ Normal` / `⬇️ Low`) | 14/15 walkthroughs | 0 | small: one prompt field |
 | S13 | Effort axis on inline findings (`⚡ Quick win` / `🏗️ Heavy lift` / `💤 Low value`) | 52/52 findings | 0 of 8 | small: one enum + prompt field |
