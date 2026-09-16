@@ -181,6 +181,19 @@ describe("the outside-diff callout", () => {
     );
   });
 
+  // Every real outside-diff finding is rated by construction (both
+  // `outsideDiff:` call sites in ai/parse.ts gate on critical/major), but the
+  // type still allows severity to be absent — this pins the defensive
+  // fallback so a future violation of that invariant still renders something
+  // severity-shaped instead of silently dropping a third of the row.
+  it("renders a neutral marker for a finding carrying no severity", () => {
+    const body = formatReviewBody(
+      result([outsideComment({ title: "Unrated finding.", severity: undefined })]),
+      META,
+    );
+    expect(body).toContain("> * _⚪ Unrated_ · Unrated finding. · `src/a.ts:501`");
+  });
+
   it("stays out of the body when every finding anchored", () => {
     const body = formatReviewBody(
       result([

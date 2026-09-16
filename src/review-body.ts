@@ -314,11 +314,19 @@ function renderQuietOverflowSection(overflow: ReviewComment[]): string {
 function renderOutsideDiffCallout(outside: ReviewComment[]): string {
   if (outside.length === 0) return "";
   const rows = outside.map((c) => {
-    const severity = c.severity ? SEVERITY_PREVIEW[c.severity] : "";
+    // Every finding that reaches this callout is demoted here specifically
+    // because it was rated critical/major (see the two `outsideDiff:` call
+    // sites in ai/parse.ts, both gated on that severity check) — so this row
+    // is never actually unrated today. But the type still allows
+    // `severity` to be absent, and A10's promise is severity, title and
+    // location at zero clicks; a future call site that breaks the invariant
+    // should not silently drop a third of that promise. Render a neutral
+    // marker rather than nothing.
+    const severity = c.severity ? SEVERITY_PREVIEW[c.severity] : "⚪ Unrated";
     const title = (c.title?.trim() || c.body.split("\n")[0].slice(0, 120)).replace(/\*\*/g, "");
     const claimed = c.outsideDiff?.claimedLine;
     const where = claimed !== null && claimed !== undefined ? `${c.path}:${claimed}` : c.path;
-    return `> * ${severity ? `_${severity}_ · ` : ""}${title} · \`${where}\``;
+    return `> * _${severity}_ · ${title} · \`${where}\``;
   });
   return [
     "> [!CAUTION]",

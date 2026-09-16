@@ -429,20 +429,37 @@ export function isCommittableSuggestion(
   // R2 — a diff pasted into a ```suggestion fence commits its own markers.
   for (const l of lines) {
     if (/^@@/.test(l)) return false;
-    if (/^[+-]/.test(l) && !/^[+-]{3}/.test(l)) return false;
+    if (/^[+-]/.test(l)) {
+      // A bare `---`/`+++` is legitimate suggestion content (a YAML document
+      // separator, a Markdown horizontal rule) and must stay permitted. But
+      // that is the ONLY thing this exemption may cover: `--- a/file` and
+      // `+++ b/file` are unified-diff FILE HEADERS — exactly what R2 exists to
+      // reject — so only the bare three-character line (trailing whitespace
+      // aside) is exempt, never a `---`/`+++` prefix with more after it.
+      if (/^(?:---|\+\+\+)[ \t]*$/.test(l)) continue;
+      return false;
+    }
   }
 
   const anchorText = info.text.get(anchorLine);
   if (anchorText === undefined) return false; // R3
 
-  // R4 — look ahead as far as the suggestion is long: that is the largest
-  // original block a replacement of this size could plausibly have meant. Only
-  // semantic lines are compared (see isStructuralOnlyLine); a shared closing
-  // brace is not evidence of anything.
+  // R4 — look ahead through every line the diff still shows us, not just as
+  // far as the suggestion is long. A short replacement can still overlap a
+  // FAR line: e.g. a 1-line suggestion that hoists a statement up by copying
+  // it verbatim into the anchor, while the original copy 3 lines below is
+  // never touched — GitHub only replaces the anchor line, so committing it
+  // leaves that statement running twice. Bounding the lookahead to the
+  // suggestion's own length would miss exactly that, so instead we walk until
+  // info.text runs out (the edge of the diff's visible context), which is the
+  // bound R4's own rule above already promises: "restates a source line that
+  // FOLLOWS the anchor," with no distance qualifier. Only semantic lines are
+  // compared (see isStructuralOnlyLine); a shared closing brace is not
+  // evidence of anything.
   const body = new Set(
     lines.map((l) => l.trim()).filter((l) => !isStructuralOnlyLine(l)),
   );
-  for (let i = 1; i <= lines.length; i++) {
+  for (let i = 1; ; i++) {
     const following = info.text.get(anchorLine + i);
     if (following === undefined) break;
     if (body.has(following.trim())) return false;

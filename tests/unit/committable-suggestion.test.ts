@@ -149,6 +149,51 @@ describe("isCommittableSuggestion", () => {
     expect(isCommittableSuggestion(asDiff, 52, INFO)).toBe(false);
   });
 
+  // R2 must still permit a bare `---`/`+++` (a YAML document separator, a
+  // Markdown rule) while rejecting an actual unified-diff FILE HEADER — the
+  // exact thing R2 exists to reject, and the shape a pasted diff always
+  // opens with.
+  it("permits a bare --- or +++ line", () => {
+    const info = getDiffLineInfo(["@@ -1,1 +1,1 @@", "+placeholder"].join("\n"));
+    expect(isCommittableSuggestion("---", 1, info)).toBe(true);
+    expect(isCommittableSuggestion("+++", 1, info)).toBe(true);
+    // Trailing whitespace on the marker line is still bare.
+    expect(isCommittableSuggestion("---  ", 1, info)).toBe(true);
+  });
+
+  it("rejects unified-diff file headers even though they start with --- or +++", () => {
+    const info = getDiffLineInfo(["@@ -1,1 +1,1 @@", "+placeholder"].join("\n"));
+    expect(isCommittableSuggestion("--- a/file", 1, info)).toBe(false);
+    expect(isCommittableSuggestion("+++ b/file", 1, info)).toBe(false);
+  });
+
+  it("rejects other diff-marker-prefixed lines", () => {
+    const info = getDiffLineInfo(["@@ -1,1 +1,1 @@", "+placeholder"].join("\n"));
+    expect(isCommittableSuggestion("-- x", 1, info)).toBe(false);
+    expect(isCommittableSuggestion("+ foo", 1, info)).toBe(false);
+  });
+
+  // R4's lookahead must not stop at the suggestion's own length: a suggestion
+  // shorter than the distance to the line it duplicates can still overlap
+  // destructively, because GitHub always replaces exactly the one anchored
+  // line — nothing bounds how far away the leftover duplicate can sit.
+  // Concretely: hoisting `cleanup();` up to the anchor while its original
+  // copy (2 lines below, outside a suggestion.length===1 window) is left in
+  // place would run it twice.
+  it("rejects a short suggestion that duplicates a source line beyond its own length", () => {
+    const info = getDiffLineInfo(
+      [
+        "@@ -10,5 +10,5 @@",
+        "+doSomething();",
+        " doSomethingElse();",
+        " cleanup();",
+      ].join("\n"),
+    );
+    // 1-line suggestion; the duplicated line ("cleanup();") is 2 lines below
+    // the anchor — beyond a lookahead bounded to the suggestion's length.
+    expect(isCommittableSuggestion("cleanup();", 10, info)).toBe(false);
+  });
+
   it("rejects a hunk header", () => {
     expect(isCommittableSuggestion("@@ -52,1 +52,1 @@\n    return 1;", 52, INFO)).toBe(false);
   });
