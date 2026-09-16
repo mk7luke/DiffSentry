@@ -394,6 +394,11 @@ export interface ReviewComment {
   fingerprint?: string;
   /** AI's self-rated confidence in this finding (default high). */
   confidence?: Confidence;
+  /** Repository Learnings the model said shaped this finding, resolved from the
+   *  1-based indices it returned. Rendered as the `🧠 Learnings used` collapse,
+   *  and kept on the comment so callers that re-render a body (the review-body
+   *  bulk blocks, the dashboard) don't have to re-resolve them. */
+  appliedLearnings?: Learning[];
   /** A finding NOT tied to a specific changed line — e.g. the diff contradicts
    *  the PR description, a claimed change is missing, or a cross-cutting concern
    *  spans the whole PR. These carry title/body/severity but no meaningful
@@ -625,12 +630,49 @@ export interface AIProvider {
 }
 
 // ─── Learnings ─────────────────────────────────────────────────
+/** Sentinel {@link Learning.repo} for cross-repo (global) learnings. Real
+ *  GitHub owners can never be "*", so a global learning never collides with a
+ *  per-repo one. Lives beside the field it constrains so every consumer can
+ *  recognise it without importing the store. */
+export const GLOBAL_REPO = "*";
+
 export interface Learning {
   id: string;
   repo: string;
   content: string;
   createdAt: string;
   path?: string; // optional file path scope
+  // ─── Provenance ──────────────────────────────────────────────
+  // Who taught this, where, and about what. A learning overrides the
+  // reviewer's default judgement, so a wrong one silences real findings
+  // indefinitely — and the only way a maintainer can decide whether to retire
+  // one is to see the conversation it came from. `path` is a matching glob and
+  // answers none of this; these three do.
+  //
+  // All optional, and absent on every learning stored before they existed as
+  // well as on ones added through the dashboard API, where there is no
+  // conversation to attribute. The renderer omits whichever lines are missing.
+  /** GitHub login of the maintainer whose note produced the learning. */
+  author?: string;
+  /** Number of the PR the note was left on. */
+  prNumber?: number;
+  /** Where the finding the note replied to sat: `path:line`, or
+   *  `path:start-end` when the finding spanned a range. */
+  sourceFile?: string;
+  /** `owner/name` of the repo the note was left on. Only meaningful on a
+   *  cross-repo learning, where {@link Learning.repo} is the `*` sentinel and
+   *  would otherwise be the whole trail back to the conversation. Left unset
+   *  on a per-repo learning, which already names its repo. */
+  sourceRepo?: string;
+}
+
+/** The conversational origin of a learning, recorded at the moment it is
+ *  taught. See the provenance fields on {@link Learning}. */
+export interface LearningOrigin {
+  author?: string;
+  prNumber?: number;
+  sourceFile?: string;
+  sourceRepo?: string;
 }
 
 // ─── Chat Command ──────────────────────────────────────────────

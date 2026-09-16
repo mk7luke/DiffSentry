@@ -185,7 +185,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     );
     this.track(response.usage, "review");
 
-    return parseReviewResponse(text, context);
+    return parseReviewResponse(text, context, learnings);
   }
 
   async generateWalkthrough(context: PRContext, repoConfig?: RepoConfig): Promise<WalkthroughResult> {

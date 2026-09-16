@@ -19,7 +19,7 @@ import {
   stripFences,
 } from "./ai/parse.js";
 import { verifyFindings } from "./ai/verify.js";
-import { LearningsStore, synthesizeLearning, extractFindingMeta, type FindingContext } from "./learnings.js";
+import { LearningsStore, synthesizeLearning, extractFindingMeta, formatFindingLocation, type FindingContext } from "./learnings.js";
 import { parseIssueReferences, fetchLinkedIssues, formatIssuesForWalkthrough } from "./issues.js";
 import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-merge.js";
 import { generateDocstrings, generateTests, simplifyCode, autofix } from "./finishing-touches.js";
@@ -2797,7 +2797,14 @@ export class Reviewer {
             saved = { content: rawNote };
           }
 
-          const stored = await this.learnings.addLearning(repoFullName, saved.content, saved.path);
+          // Provenance, recorded now because it is unrecoverable later: the
+          // rendered learning has no back-reference to the thread it came from,
+          // and a learning nobody can trace is one nobody can decide to retire.
+          const stored = await this.learnings.addLearning(repoFullName, saved.content, saved.path, {
+            author: findingCtx?.noteAuthor,
+            prNumber: pullNumber,
+            sourceFile: findingCtx?.findingLocation ?? findingCtx?.file,
+          });
           const scopeLine = stored.path
             ? `Scope: \`${stored.path}\``
             : "Scope: repo-wide";
@@ -3708,12 +3715,16 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
     const botLogin = this.config.botName.toLowerCase();
     let cursor: number | null = commentId;
     let lastSeen: { body?: string; path?: string } | null = null;
+    // The first hop is the note itself, so its author is the maintainer doing
+    // the teaching. Captured before the walk climbs past it.
+    let noteAuthor: string | undefined;
     for (let hop = 0; hop < 5 && cursor !== null; hop++) {
       const cur: Awaited<ReturnType<typeof octokit.pulls.getReviewComment>> =
         await octokit.pulls.getReviewComment({ owner, repo, comment_id: cursor });
       const data = cur.data;
       const author = (data.user?.login ?? "").toLowerCase();
       const isBot = data.user?.type === "Bot" && author.includes(botLogin);
+      if (hop === 0 && !isBot) noteAuthor = data.user?.login ?? undefined;
       if (isBot) {
         const meta = extractFindingMeta(data.body);
         return {
@@ -3721,6 +3732,8 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
           findingBody: data.body ?? undefined,
           findingTitle: meta.title,
           rule: meta.rule,
+          noteAuthor,
+          findingLocation: formatFindingLocation(data.path, data.start_line, data.line),
         };
       }
       lastSeen = { body: data.body ?? undefined, path: data.path ?? undefined };
@@ -3728,7 +3741,7 @@ After Why 5, write a single paragraph **"## Root cause"** stating the structural
     }
     // Couldn't find a bot ancestor — at least surface the file path so the
     // synthesizer can scope by directory.
-    return lastSeen?.path ? { file: lastSeen.path } : null;
+    return lastSeen?.path ? { file: lastSeen.path, noteAuthor } : null;
   }
 
   // ─── Issue Helpers ───────────────────────────────────────────

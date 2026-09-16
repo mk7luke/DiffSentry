@@ -3,12 +3,12 @@ import path from "path";
 import crypto from "crypto";
 import { minimatch } from "minimatch";
 import { stripFences } from "./ai/parse.js";
-import { AIProvider, Learning } from "./types.js";
+import { AIProvider, GLOBAL_REPO, Learning, LearningOrigin } from "./types.js";
 import { logger } from "./logger.js";
 
-/** Sentinel repo for cross-repo (global) learnings. Real GitHub owners can
- * never be "*", so a global learning never collides with a per-repo one. */
-export const GLOBAL_REPO = "*";
+// Re-exported from its home beside the `Learning.repo` field it constrains, so
+// this module stays the one import for everything about the learnings store.
+export { GLOBAL_REPO };
 
 /** Filename (at the store root) holding the global learnings array. GitHub
  * owner logins can't contain underscores, so this never shadows an owner dir. */
@@ -21,6 +21,19 @@ const GLOBAL_FILE = "__global__.json";
 const REPO_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
 export function validRepoSegment(s: string): boolean {
   return REPO_SEGMENT_RE.test(s) && s !== "." && s !== "..";
+}
+
+/** Keep only the provenance fields that carry something, so a learning taught
+ *  where none is knowable is stored exactly as it was before the fields
+ *  existed rather than gaining a row of `undefined`s. */
+function compactOrigin(origin?: LearningOrigin): LearningOrigin {
+  if (!origin) return {};
+  const out: LearningOrigin = {};
+  if (origin.author?.trim()) out.author = origin.author.trim();
+  if (typeof origin.prNumber === "number" && Number.isFinite(origin.prNumber)) out.prNumber = origin.prNumber;
+  if (origin.sourceFile?.trim()) out.sourceFile = origin.sourceFile.trim();
+  if (origin.sourceRepo?.trim()) out.sourceRepo = origin.sourceRepo.trim();
+  return out;
 }
 
 /** Apply an edit patch to a learning, returning the next value. Empty/blank
@@ -68,6 +81,7 @@ export class LearningsStore {
     repo: string,
     content: string,
     filePath?: string,
+    origin?: LearningOrigin,
   ): Promise<Learning> {
     const learning: Learning = {
       id: crypto.randomUUID(),
@@ -75,6 +89,7 @@ export class LearningsStore {
       content,
       createdAt: new Date().toISOString(),
       path: filePath,
+      ...compactOrigin(origin),
     };
 
     const learnings = await this.getLearnings(repo);
@@ -166,13 +181,14 @@ export class LearningsStore {
     }
   }
 
-  async addGlobalLearning(content: string, filePath?: string): Promise<Learning> {
+  async addGlobalLearning(content: string, filePath?: string, origin?: LearningOrigin): Promise<Learning> {
     const learning: Learning = {
       id: crypto.randomUUID(),
       repo: GLOBAL_REPO,
       content,
       createdAt: new Date().toISOString(),
       path: filePath,
+      ...compactOrigin(origin),
     };
     const learnings = await this.getGlobalLearnings();
     learnings.push(learning);
@@ -204,6 +220,10 @@ export class LearningsStore {
    * Move a per-repo learning into the global set. The repo entry is removed and
    * a fresh global entry (new id + timestamp) is created with the same content
    * and path. Returns the new global learning, or null if the source is gone.
+   *
+   * Provenance travels with it. Widening a learning's scope is exactly the
+   * moment it most needs to stay traceable — it now speaks for every repo, and
+   * it is answerable to the same conversation it always was.
    */
   async promoteToGlobal(repo: string, id: string): Promise<Learning | null> {
     const learnings = await this.getLearnings(repo);
@@ -211,7 +231,14 @@ export class LearningsStore {
     if (idx < 0) return null;
     const [src] = learnings.splice(idx, 1);
     await this.writeLearnings(repo, learnings);
-    return this.addGlobalLearning(src.content, src.path);
+    return this.addGlobalLearning(src.content, src.path, {
+      author: src.author,
+      prNumber: src.prNumber,
+      // The repo the note was left on. `repo` on a global learning is the "*"
+      // sentinel, so without this the trail back to the PR is broken.
+      sourceFile: src.sourceFile,
+      sourceRepo: src.sourceRepo ?? src.repo,
+    });
   }
 
   /**
@@ -282,11 +309,38 @@ export interface FindingContext {
   findingTitle?: string;
   /** Detected rule id if we can pull one out (e.g. "onclick-non-interactive"). */
   rule?: string;
+  // ─── Provenance ──────────────────────────────────────────────
+  // Carried alongside the synthesis inputs because this walk is the only place
+  // that reads the thread, and a second fetch to answer "who said this, where"
+  // would cost an API call to learn what we already had in hand.
+  /** Login of the maintainer whose note triggered the learning. */
+  noteAuthor?: string;
+  /** Where the bot finding sat, as `path:line` or `path:start-end`. */
+  findingLocation?: string;
 }
 
 export interface SynthesizedLearning {
   content: string;
   path?: string;
+}
+
+/**
+ * Where a review comment sits, as the `File:` line of a learning's provenance:
+ * `path:line`, or `path:start-end` when the finding spans a range.
+ *
+ * The range form matters more than it looks. A learning taught against a
+ * multi-line finding is usually about the shape of that whole block, and a
+ * reader sent to its first line alone has to guess how far the point extends.
+ */
+export function formatFindingLocation(
+  path: string | null | undefined,
+  startLine: number | null | undefined,
+  line: number | null | undefined,
+): string | undefined {
+  if (!path) return undefined;
+  if (typeof line !== "number") return path;
+  if (typeof startLine === "number" && startLine !== line) return `${path}:${startLine}-${line}`;
+  return `${path}:${line}`;
 }
 
 const SYNTHESIS_SYSTEM = `You convert a maintainer's short reaction to a code-review finding into a durable "learning" that an AI code reviewer should obey on future PRs.

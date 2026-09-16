@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { PRContext, ReviewComment, ReviewResult, WalkthroughResult, CommentType, CommentSeverity, CommentCategory, CommentEffort, ChangeType, Confidence } from "../types.js";
+import { PRContext, ReviewComment, ReviewResult, WalkthroughResult, CommentType, CommentSeverity, CommentCategory, CommentEffort, ChangeType, Confidence, Learning, GLOBAL_REPO } from "../types.js";
 import { logger } from "../logger.js";
 import {
   VALID_SEVERITIES,
@@ -598,6 +598,91 @@ function axisPart<K extends string>(
   return icon && label ? `_${icon} ${label}_` : "";
 }
 
+/**
+ * The `🧠 Learnings used` collapse: the learnings that shaped a finding, each
+ * with the conversation it came from.
+ *
+ * A learning overrides the reviewer's default judgement, so a wrong one
+ * silences real findings on every future PR — and until now it did so
+ * invisibly. This is what makes one correctable: a maintainer who disagrees
+ * with a finding can see which rule produced it, who taught it and where, and
+ * decide whether it still holds. A learning you cannot see is one you cannot
+ * retire.
+ *
+ * The block's shape is transcribed from the captured corpus
+ * (`tests/e2e/reference/2026-09/coderabbit/inline.md:3748`), down to `Repo:`
+ * and `PR:` sharing a line. Fields we don't hold are omitted rather than
+ * printed empty — a learning added through the dashboard API has no
+ * conversation to attribute, and a blank `Learnt from:` helps nobody.
+ *
+ * Lives here rather than in `learnings.ts` only to keep the import graph
+ * acyclic: that module already imports `stripFences` from this one.
+ */
+export function renderLearningsUsed(learnings: Learning[]): string {
+  if (learnings.length === 0) return "";
+  const entries = learnings.map((l) => {
+    // `repo` on a cross-repo learning is the "*" sentinel, which names nothing
+    // a reader can open; `sourceRepo` is the repo the note was actually left on.
+    const repo = l.sourceRepo ?? (l.repo === GLOBAL_REPO ? undefined : l.repo);
+    const repoLine = [repo ? `Repo: ${repo}` : "", l.prNumber ? `PR: ${l.prNumber}` : ""]
+      .filter(Boolean)
+      .join(" ");
+    return [
+      l.author ? `Learnt from: ${l.author}` : "",
+      repoLine,
+      l.sourceFile ? `File: ${l.sourceFile}` : "",
+      l.createdAt ? `Timestamp: ${l.createdAt}` : "",
+      `Learning: ${l.content}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  });
+
+  const block = entries.join("\n\n");
+  // A learning's content is free text a maintainer wrote. One containing a
+  // fence would close this one early and spill the rest of the provenance —
+  // and the finding body around it — into the reader's view as markup.
+  const fence = "`".repeat(Math.max(3, longestBacktickRun(block) + 1));
+  return [
+    "<details>",
+    "<summary>🧠 Learnings used</summary>",
+    "",
+    fence,
+    block,
+    fence,
+    "",
+    "</details>",
+  ].join("\n");
+}
+
+function longestBacktickRun(s: string): number {
+  return (s.match(/`+/g) ?? []).reduce((max, run) => Math.max(max, run.length), 0);
+}
+
+/**
+ * The learnings a model named on one finding, resolved against the numbered
+ * list it was shown.
+ *
+ * The model returns indices into that list, 1-based because that is how the
+ * prompt numbers them. Everything else — a non-array, a string, a float, an
+ * index past the end, a duplicate — drops out here. A wrong index would
+ * attribute a finding to a rule that had nothing to do with it, which is worse
+ * than attributing it to nothing.
+ */
+export function resolveAppliedLearnings(raw: unknown, learnings: Learning[] | undefined): Learning[] {
+  if (!Array.isArray(raw) || !learnings || learnings.length === 0) return [];
+  const seen = new Set<number>();
+  const out: Learning[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "number" || !Number.isInteger(entry)) continue;
+    if (entry < 1 || entry > learnings.length) continue;
+    if (seen.has(entry)) continue;
+    seen.add(entry);
+    out.push(learnings[entry - 1]);
+  }
+  return out;
+}
+
 export function renderInlineCommentBody(comment: {
   title?: string;
   body: string;
@@ -610,6 +695,7 @@ export function renderInlineCommentBody(comment: {
   aiAgentPrompt?: string;
   fingerprint?: string;
   confidence?: Confidence;
+  appliedLearnings?: Learning[];
 }): string {
   return formatCommentBody(comment);
 }
@@ -626,6 +712,7 @@ function formatCommentBody(comment: {
   aiAgentPrompt?: string;
   fingerprint?: string;
   confidence?: Confidence;
+  appliedLearnings?: Learning[];
 }): string {
   const parts: string[] = [];
 
@@ -668,6 +755,13 @@ function formatCommentBody(comment: {
 
   if (comment.aiAgentPrompt && comment.aiAgentPrompt.trim()) {
     parts.push(renderAiAgentPromptBlock(comment.aiAgentPrompt));
+  }
+
+  // Last of the reader-facing blocks, and collapsed: what's wrong, then how to
+  // fix it, then why this was raised at all. Provenance is the question a
+  // reader asks only once they disagree with the finding.
+  if (comment.appliedLearnings && comment.appliedLearnings.length > 0) {
+    parts.push(renderLearningsUsed(comment.appliedLearnings));
   }
 
   if (comment.fingerprint) {
@@ -791,6 +885,10 @@ export interface RawComment {
   suggestionLanguage?: string;
   aiAgentPrompt?: string;
   confidence?: string;
+  /** 1-based indices into the Repository Learnings the model was shown.
+   *  Deliberately `unknown`: models return strings, floats and out-of-range
+   *  numbers here, and resolveAppliedLearnings is where that is sorted out. */
+  learningsApplied?: unknown;
 }
 
 /**
@@ -807,6 +905,11 @@ export function buildReviewComment(
    *  whether a suggestion can be offered as committable; omitting it is safe
    *  and simply means the suggestion renders as a ```diff block. */
   source?: DiffLineInfo,
+  /** The Repository Learnings the model was shown, in the order it was shown
+   *  them, so `learningsApplied` indices resolve. Omitting it means the
+   *  finding renders with no provenance block — which is what every caller
+   *  that has no learnings to show should do. */
+  learnings?: Learning[],
 ): ReviewComment {
   const type = VALID_TYPES.includes(c.type as CommentType) ? (c.type as CommentType) : undefined;
   const severity = VALID_SEVERITIES.includes(c.severity as CommentSeverity) ? (c.severity as CommentSeverity) : undefined;
@@ -837,6 +940,7 @@ export function buildReviewComment(
     ? c.aiAgentPrompt
     : undefined;
   const confidence = VALID_CONFIDENCE.includes(c.confidence as Confidence) ? (c.confidence as Confidence) : "high";
+  const appliedLearnings = resolveAppliedLearnings(c.learningsApplied, learnings);
   const fingerprint = fingerprintFor(anchor.path, anchor.line, title || c.body!.slice(0, 80));
 
   return {
@@ -855,6 +959,7 @@ export function buildReviewComment(
       aiAgentPrompt,
       fingerprint,
       confidence,
+      appliedLearnings,
     }),
     type,
     severity,
@@ -866,11 +971,19 @@ export function buildReviewComment(
     aiAgentPrompt,
     fingerprint,
     confidence,
+    ...(appliedLearnings.length > 0 ? { appliedLearnings } : {}),
     ...(anchor.prLevel ? { prLevel: true } : {}),
   };
 }
 
-export function parseReviewResponse(raw: string, context: PRContext): ReviewResult {
+export function parseReviewResponse(
+  raw: string,
+  context: PRContext,
+  /** The Repository Learnings the model was shown, in the order the prompt
+   *  numbered them. Needed here because `learningsApplied` arrives as indices
+   *  into that list and nothing downstream can resolve them afterwards. */
+  learnings?: Learning[],
+): ReviewResult {
   const log = logger.child({ step: "parse" });
 
   const parsed = extractJsonObject(raw);
@@ -934,7 +1047,7 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
         // line, rather than letting it read as a finding the model scoped to a
         // file on purpose. See ReviewComment.outsideDiff.
         comments.push({
-          ...buildReviewComment(c, { path: c.path, line: 0, prLevel: true }),
+          ...buildReviewComment(c, { path: c.path, line: 0, prLevel: true }, undefined, learnings),
           outsideDiff: { claimedLine: null },
         });
         demotedCount++;
@@ -959,7 +1072,7 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
       if (anchor === null) {
         if (severity === "critical" || severity === "major") {
           comments.push({
-            ...buildReviewComment(c, { path: c.path, line: 0, prLevel: true }),
+            ...buildReviewComment(c, { path: c.path, line: 0, prLevel: true }, undefined, learnings),
             outsideDiff: { claimedLine: line },
           });
           demotedCount++;
@@ -981,7 +1094,7 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
       remappedCount++;
     }
 
-    comments.push(buildReviewComment(c, { path: c.path, line, prLevel: false }, info));
+    comments.push(buildReviewComment(c, { path: c.path, line, prLevel: false }, info, learnings));
   }
 
   // PR-level findings: the model's dedicated channel for issues not tied to a
@@ -1009,7 +1122,7 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
     const info = c.path ? diffInfoByFile.get(c.path) : undefined;
     if (!info) {
       if (c.path) log.info({ path: c.path }, "PR-level finding names a file outside the diff, keeping it body-level");
-      comments.push(buildReviewComment(c, { path: "", line: 0, prLevel: true }));
+      comments.push(buildReviewComment(c, { path: "", line: 0, prLevel: true }, undefined, learnings));
       prLevelKept++;
       continue;
     }
@@ -1024,12 +1137,12 @@ export function parseReviewResponse(raw: string, context: PRContext): ReviewResu
           : nearestAnchor(c.line, info)
         : null;
     if (line !== null) {
-      comments.push(buildReviewComment(c, { path: c.path!, line, prLevel: false }, info));
+      comments.push(buildReviewComment(c, { path: c.path!, line, prLevel: false }, info, learnings));
       prLevelPromoted++;
       continue;
     }
 
-    comments.push(buildReviewComment(c, { path: c.path!, line: 0, prLevel: true }));
+    comments.push(buildReviewComment(c, { path: c.path!, line: 0, prLevel: true }, undefined, learnings));
     prLevelScoped++;
     prLevelKept++;
   }

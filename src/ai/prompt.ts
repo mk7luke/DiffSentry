@@ -20,7 +20,8 @@ You MUST respond with valid JSON matching this schema:
       "suggestion": "OPTIONAL multi-line code fix. Provide the full replacement block (no fences).",
       "suggestionLanguage": "diff | suggestion",
       "aiAgentPrompt": "Imperative instruction to a coding agent. Reference symbols by name. Tell the agent WHAT to change and WHERE.",
-      "confidence": "high | medium | low"
+      "confidence": "high | medium | low",
+      "learningsApplied": "OPTIONAL array of Repository Learning numbers that shaped this finding. Omit when none did."
     }
   ],
   "prLevelComments": [
@@ -135,7 +136,7 @@ How to apply:
 - If a learning says a class of finding is "not relevant" / "ignore" / "we don't enforce X", DO NOT raise that finding again. Stay silent.
 - If a learning asserts a convention ("we always do X"), enforce it: flag code that violates it; approve code that follows it.
 - If a learning conflicts with your default profile guidance, the LEARNING WINS.
-- Never explain that you are following a learning — just apply it. The user already knows.`;
+- Never explain a learning in your prose. Instead, when a learning shaped a finding you DID raise, put its number in that finding's "learningsApplied" (e.g. [2]). Omit the field otherwise. A learning that kept you silent has no finding to report it on — say nothing.`;
   }
 
   return REVIEW_SYSTEM_BASE + instructions + tone + learningsBlock;
