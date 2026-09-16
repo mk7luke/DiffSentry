@@ -699,6 +699,8 @@ GitHub webhook
       ├── sticky-status.ts        📌 pinned status comment + sparkline renderer
       ├── pre-merge.ts            Pre-merge checks (embedded sibling block)
       ├── finishing-touches.ts    docstring/test/simplify/autofix codegen
+      ├── stacked-pr.ts           Delivery for the above: a commit on the PR
+      │                           head branch, or a branch + PR stacked on it
       ├── insights.ts             Risk Assessment, Test Coverage Signal,
       │                           confidence aggregate, reviewer-delta,
       │                           PR Split heuristic
@@ -734,6 +736,7 @@ GitHub webhook
 | `issue_comment` | `created` (on a PR) | `@bot` chat commands |
 | `issue_comment` | `created` (on an issue) | `@bot` issue commands (summary / plan / chat / pause / resume / learn) |
 | `issue_comment` | `edited` | Finishing-Touches checkbox click handler |
+| `pull_request_review` | `edited` | 🪄 Autofix checkbox click handler (the review body's own checkboxes) |
 | `pull_request_review_comment` | `created` | `@bot` chat commands on review threads |
 | `pull_request_review_thread` | `resolved` | Clear the stale `DiffSentry` commit status once every thread it opened is resolved; re-evaluate automatic release notes now that the last open thread may have closed |
 | `check_suite` | `completed` | Re-read every check on the head commit; post release notes if they have all passed, the review has finished green, no thread is unresolved, and `release_notes.auto` is on |

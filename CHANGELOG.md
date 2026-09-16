@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Every finishing touch can now be delivered as a **stacked PR** instead of a
+  commit. `✨ Finishing Touches` nests both choices under each of the four
+  touches — `Create stacked PR` / `Commit on current branch` for docstrings and
+  autofix, `Create PR with unit tests` / `Commit unit tests in branch <name>`
+  for tests, and the matching pair for simplify. The new PR's base is the
+  reviewed PR's **head branch**, so it stacks on the work under review rather
+  than racing it, and nothing is pushed to the head branch when that choice is
+  made. Typing the command still commits to the branch; `@diffsentry autofix
+  --stacked` (or `--pr`) opts in.
+  - **Action required for existing installs:** the App must be subscribed to
+    the **Pull request review** webhook event for the 🪄 Autofix checkboxes in
+    the review body to work. Events an App is not subscribed to are never
+    delivered.
+
 - Release notes can now post themselves. Set `release_notes.auto: true` in
   `.diffsentry.yaml` and DiffSentry drafts the same notes `@diffsentry
   release-notes` produces, once every check on the PR's head commit has passed,
@@ -128,6 +142,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     it, so every deployment carries an empty table and no data can be lost.
 
 ### Fixed
+
+- The review body's `Create a new PR with the fixes` checkbox did nothing. It
+  had been rendered on every review with findings since the block was added,
+  and its UUID appeared nowhere else in the codebase: there was no
+  `pulls.create` anywhere in the tree, and nothing read a review body at all,
+  because editing one raises `pull_request_review`/`edited` and only
+  `issue_comment`/`edited` was handled. Its companion, `Push a commit to this
+  branch (recommended)`, was equally inert. Both now work.
+
+- `Create PR with unit tests` pushed a commit to the head branch. It dispatched
+  correctly; the handler behind it simply did something other than what the
+  label said. It now opens the PR it promised, including on walkthroughs posted
+  before this change.
+
+- A finishing touch whose file writes were all refused — a protected branch, a
+  stale blob sha, a file too large — reported "No files needed updates", which
+  is what a clean no-op reports. Refused writes are now listed by path and
+  reason. So are a branch that could not be created, a head ref that could not
+  be read, and a `pulls.create` the App was not permitted to make; where a
+  branch was already pushed, the reply names it, because nothing is ever
+  deleted.
 
 - The legacy dashboard's markdown renderer now sanitizes with an allowlist
   (`sanitize-html`) instead of a regex blacklist. Markdown rendered on the
