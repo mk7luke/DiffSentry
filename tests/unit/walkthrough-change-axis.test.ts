@@ -73,3 +73,31 @@ describe("walkthrough **Change:** axis", () => {
     expect(md).not.toContain("**Priority:**");
   });
 });
+
+describe("table cell escaping", () => {
+  // CodeQL js/incomplete-sanitization, high severity. Pre-existing on main;
+  // surfaced when Wave 2 extracted cohortRow. Summaries are model-authored from
+  // the diff, so a PR can steer the model into emitting either character.
+  const withCohort = (label: string, summary: string) =>
+    formatWalkthroughInner(result({ cohorts: [{ label, files: ["a.ts"], summary }] }), CONFIG);
+
+  it("escapes a backslash before the pipe it precedes", () => {
+    // Escaping only the pipe turns "a\\|b" into "a\\\\|b" — an escaped backslash
+    // followed by a BARE pipe, which ends the table cell early.
+    const md = withCohort("L", "a\\|b");
+    expect(md).toContain("a\\\\\\|b");
+  });
+
+  it("escapes a lone pipe", () => {
+    expect(withCohort("L", "a|b")).toContain("a\\|b");
+  });
+
+  it("folds a newline so it cannot terminate the row", () => {
+    const md = withCohort("L", "one\ntwo");
+    expect(md).toContain("one two");
+  });
+
+  it("escapes the label, not only the summary", () => {
+    expect(withCohort("a|b", "s")).toContain("a\\|b");
+  });
+});

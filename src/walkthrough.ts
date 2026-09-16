@@ -35,11 +35,26 @@ function formatEffortLine(level: number, minutes?: number): string {
  *  (backlog row A13). The grouping above it is the change that matters. */
 const CHANGES_TABLE_HEADER = "|Layer / File(s)|Summary|\n|---|---|";
 
+/**
+ * Make model-authored prose safe to drop into a Markdown table cell.
+ *
+ * Escaping `|` alone is not enough: a backslash already in the text pairs with
+ * the one we add, so `a\|b` becomes `a\\|b` — an escaped backslash followed by a
+ * *bare* pipe, which ends the cell early. Escape the backslashes first, then the
+ * pipes. A cell also cannot hold a raw newline, so fold any line break into a
+ * space rather than letting it terminate the row.
+ *
+ * The text is derived from the diff, so it is attacker-influenceable: a PR can
+ * carry content that steers the model into emitting either character.
+ */
+function escapeTableCell(text: string): string {
+  return text.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\r?\n/g, " ").trim();
+}
+
 function cohortRow(c: { label: string; files: string[]; summary: string }): string {
   const files = c.files.map((f) => `\`${f}\``).join(", ");
-  const cell = `**${c.label}** <br> ${files}`;
-  const summary = c.summary.replace(/\|/g, "\\|");
-  return `|${cell}|${summary}|`;
+  const cell = `**${escapeTableCell(c.label)}** <br> ${files}`;
+  return `|${cell}|${escapeTableCell(c.summary)}|`;
 }
 
 /**
