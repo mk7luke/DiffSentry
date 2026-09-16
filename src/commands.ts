@@ -1,4 +1,4 @@
-import { ChatCommand } from "./types.js";
+import { ChatCommand, CodegenDelivery } from "./types.js";
 import { extractSlashCommand, SlashOptions, SlashSyntax } from "./slash-commands.js";
 
 /**
@@ -110,6 +110,40 @@ const PREFIX_COMMANDS = [
 ];
 
 /**
+ * Flags that choose where a code-generating command puts its edits.
+ *
+ * The four finishing touches can deliver to the PR's head branch or to a new
+ * branch opened as a stacked PR (src/stacked-pr.ts). The checkbox surface picks
+ * one for you; typing the command picks the head branch unless you say
+ * otherwise, because that is what these commands have always done and a flag
+ * is a cheaper thing to learn than a changed default.
+ */
+const STACKED_FLAGS = ["--stacked", "--stacked-pr", "--pr"];
+const BRANCH_FLAGS = ["--branch", "--commit"];
+
+function parseDelivery(lower: string): CodegenDelivery | undefined {
+  const words = lower.split(/\s+/);
+  if (words.some((w) => STACKED_FLAGS.includes(w))) return "stacked";
+  if (words.some((w) => BRANCH_FLAGS.includes(w))) return "branch";
+  return undefined;
+}
+
+/** Attach a delivery choice to a command that supports one, leaving the shared
+ *  COMMAND_MAP entries unmutated. */
+function withDelivery(command: ChatCommand, lower: string): ChatCommand {
+  if (
+    command.type !== "generate_docstrings" &&
+    command.type !== "generate_tests" &&
+    command.type !== "simplify" &&
+    command.type !== "autofix"
+  ) {
+    return command;
+  }
+  const delivery = parseDelivery(lower);
+  return delivery ? { ...command, delivery } : { ...command };
+}
+
+/**
  * Match command text (the phrase after `@bot` or after the slash) against the
  * command vocabulary. Returns null when nothing matches — callers decide what
  * an unmatched phrase means, which differs by addressing form.
@@ -124,10 +158,10 @@ function matchCommand(text: string): ChatCommand | null {
     return COMMAND_MAP["full review"];
   }
   if (lower.startsWith("generate docstrings") || lower.startsWith("generate docstring")) {
-    return { type: "generate_docstrings" };
+    return withDelivery({ type: "generate_docstrings" }, lower);
   }
   if (lower.startsWith("generate unit tests") || lower.startsWith("generate tests")) {
-    return { type: "generate_tests" };
+    return withDelivery({ type: "generate_tests" }, lower);
   }
 
   // Check learn/remember commands
@@ -152,7 +186,7 @@ function matchCommand(text: string): ChatCommand | null {
   // Check single-word commands
   const firstWord = lower.split(/\s/)[0];
   if (firstWord in COMMAND_MAP) {
-    return COMMAND_MAP[firstWord];
+    return withDelivery(COMMAND_MAP[firstWord], lower);
   }
 
   return null;
@@ -279,6 +313,7 @@ short form is a convenience that other bots on this repo may also claim.
 | \`/generate-tests\` | Generate unit tests and commit to branch |
 | \`/simplify\` | Simplify changed code and commit to branch |
 | \`/autofix\` | Apply fixes from review comments and commit to branch |
+| \`… --stacked\` | Any of the four above, delivered as a new PR stacked on this branch instead of a commit |
 | \`/tldr\` | One-paragraph TL;DR of the PR |
 | \`/tour\` | Suggested reading order with reasoning per file |
 | \`/ship\` | Pre-flight verdict — is this PR ready to merge? |

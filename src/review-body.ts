@@ -387,17 +387,33 @@ function renderBulkAiPrompt(comments: ReviewComment[]): string {
   ].join("\n");
 }
 
+/**
+ * The review body's autofix block. Both of its checkboxes route to the autofix
+ * command; they differ only in where the fixes land.
+ *
+ * The second one ("Create a new PR with the fixes") was rendered for months
+ * with nothing behind it: its UUID appeared nowhere else in `src/`, there was
+ * no `pulls.create` in the tree, and no handler read a review body at all. A
+ * user who ticked it got no fixes, no PR and no error. Both boxes now carry the
+ * routing the dispatcher reads (`src/webhook/dispatch.ts`, `pull_request_review`
+ * `edited`) and both destinations exist (`src/stacked-pr.ts`).
+ *
+ * The visible labels are byte-identical to the corpus
+ * (`tests/e2e/reference/2026-09/coderabbit/review-summary.md:110-111`) and are
+ * unchanged. `action`/`delivery` live in the HTML comment, which is where
+ * CodeRabbit keeps its own checkbox routing.
+ */
 function renderAutofixSection(): string {
-  const idCommit = randomUUID();
-  const idNewPr = randomUUID();
+  const box = (delivery: "branch" | "stacked", label: string) =>
+    `- [ ] <!-- ${JSON.stringify({ checkboxId: randomUUID(), action: "autofix", delivery })} --> ${label}`;
   return [
     `<details>`,
     `<summary>🪄 Autofix (Beta)</summary>`,
     "",
     "Fix all unresolved DiffSentry comments on this PR:",
     "",
-    `- [ ] <!-- {"checkboxId": "${idCommit}"} --> Push a commit to this branch (recommended)`,
-    `- [ ] <!-- {"checkboxId": "${idNewPr}"} --> Create a new PR with the fixes`,
+    box("branch", "Push a commit to this branch (recommended)"),
+    box("stacked", "Create a new PR with the fixes"),
     "",
     `</details>`,
   ].join("\n");

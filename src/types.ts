@@ -676,6 +676,11 @@ export interface LearningOrigin {
 }
 
 // ─── Chat Command ──────────────────────────────────────────────
+
+/** Where a code-generating command puts its edits. Mirrors `Delivery` in
+ *  src/stacked-pr.ts; declared here so types.ts stays leaf-level. */
+export type CodegenDelivery = "branch" | "stacked";
+
 export type ChatCommand =
   | { type: "review" }
   | { type: "full_review" }
@@ -686,10 +691,14 @@ export type ChatCommand =
   | { type: "configuration" }
   | { type: "summary" }
   | { type: "learn"; content: string }
-  | { type: "generate_docstrings" }
-  | { type: "generate_tests" }
-  | { type: "simplify" }
-  | { type: "autofix" }
+  // The four finishing touches. `delivery` says where the edits land: on the
+  // PR's head branch (the historical behaviour, and the default for a typed
+  // command) or on a new branch opened as a stacked PR into that head branch.
+  // See src/stacked-pr.ts. Omitted means "branch".
+  | { type: "generate_docstrings"; delivery?: CodegenDelivery }
+  | { type: "generate_tests"; delivery?: CodegenDelivery }
+  | { type: "simplify"; delivery?: CodegenDelivery }
+  | { type: "autofix"; delivery?: CodegenDelivery }
   | { type: "tldr" }
   | { type: "tour" }
   | { type: "ship" }

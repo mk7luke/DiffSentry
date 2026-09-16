@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Config, AIProvider, DiffBudgetConfig, FileChange, PRContext, PriorReviewContext, RepoConfig, ReviewComment } from "./types.js";
+import { Config, AIProvider, CodegenDelivery, DiffBudgetConfig, FileChange, PRContext, PriorReviewContext, RepoConfig, ReviewComment } from "./types.js";
 import { buildProvider, ProviderSpec } from "./ai/provider-factory.js";
 import { FailoverProvider } from "./ai/failover.js";
 import { isAiTimeoutError } from "./ai/timeout.js";
@@ -22,7 +22,7 @@ import { verifyFindings } from "./ai/verify.js";
 import { LearningsStore, synthesizeLearning, extractFindingMeta, formatFindingLocation, type FindingContext } from "./learnings.js";
 import { parseIssueReferences, fetchLinkedIssues, formatIssuesForWalkthrough } from "./issues.js";
 import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-merge.js";
-import { generateDocstrings, generateTests, simplifyCode, autofix } from "./finishing-touches.js";
+import { generateDocstrings, generateTests, simplifyCode, autofix, formatTouchReply } from "./finishing-touches.js";
 import { formatReviewBody, reconcileApproval, isVisiblyActionable, isQuietOverflow } from "./review-body.js";
 import { encodeState, encodeStateRef, extractState, replaceState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
 import { addressedCommitRange, renderAddressedNote, stampRaisedShas } from "./addressed-commits.js";
@@ -235,45 +235,92 @@ function tipsFooter(botName: string): string {
   return `\n\n---\n\n<sub>Comment \`@${botName} help\` to get the list of available commands and usage tips.</sub>`;
 }
 
-function finishingTouchesBlock(): string {
-  const id1 = randomUUID();
-  const id2 = randomUUID();
-  const id3 = randomUUID();
-  const id4 = randomUUID();
+/**
+ * The four finishing-touch checkboxes, each offering both destinations.
+ *
+ * Until now every touch offered exactly one: "Push … commit to this branch".
+ * CodeRabbit nests two under each — `Create stacked PR` / `Commit on current
+ * branch` for docstrings (9/15 walkthroughs), `Create PR with unit tests` /
+ * `Commit unit tests in branch \`<name>\`` for tests, `Create PR with
+ * simplified code` / `Commit simplified code in branch \`<name>\`` for
+ * simplify. Those visible strings are transcribed from the captured corpus
+ * (`tests/e2e/reference/2026-09/coderabbit/walkthrough.md:164`, `:171`,
+ * `:1667`) and must stay byte-identical to it.
+ *
+ * Autofix has no corpus finishing-touch form — CodeRabbit's autofix lives in
+ * the review body (`renderAutofixSection` in review-body.ts) — so it follows
+ * the docstrings shape, which is the corpus's generic pair.
+ *
+ * Routing lives in the HTML comment beside `checkboxId`, not in the label,
+ * because `Create stacked PR` now appears under two different touches and a
+ * label match could no longer tell them apart. CodeRabbit puts its own routing
+ * (`radioGroupId`) in exactly that place.
+ *
+ * `radioGroupId` is deliberately NOT emitted. GitHub renders no radio
+ * semantics for it, so the only thing that could honour it is our own
+ * dispatcher — which achieves the same result from `action`, by acting once
+ * per touch. Emitting a group id nothing reads would be one more affordance
+ * declared with nothing behind it, which is the defect this change exists to
+ * close.
+ */
+export function finishingTouchesBlock(headBranch: string): string {
+  const branchLabel = headBranch ? `\`${headBranch}\`` : "this branch";
+  const box = (action: string, delivery: "branch" | "stacked", label: string) =>
+    `- [ ] <!-- ${JSON.stringify({ checkboxId: randomUUID(), action, delivery })} -->   ${label}`;
+
+  const touch = (summary: string, action: string, stacked: string, branch: string) => [
+    "<details>",
+    `<summary>${summary}</summary>`,
+    "",
+    box(action, "stacked", stacked),
+    box(action, "branch", branch),
+    "",
+    "</details>",
+    "",
+  ];
+
   return [
     "<details>",
     "<summary>✨ Finishing Touches</summary>",
     "",
-    "<details>",
-    "<summary>🧪 Generate unit tests (beta)</summary>",
-    "",
-    `- [ ] <!-- {"checkboxId": "${id1}"} -->   Create PR with unit tests`,
-    "",
-    "</details>",
-    "",
-    "<details>",
-    "<summary>📝 Generate docstrings (beta)</summary>",
-    "",
-    `- [ ] <!-- {"checkboxId": "${id2}"} -->   Push docstring commit to this branch`,
-    "",
-    "</details>",
-    "",
-    "<details>",
-    "<summary>🧹 Simplify (beta)</summary>",
-    "",
-    `- [ ] <!-- {"checkboxId": "${id3}"} -->   Push simplification commit to this branch`,
-    "",
-    "</details>",
-    "",
-    "<details>",
-    "<summary>🪄 Autofix unresolved comments (beta)</summary>",
-    "",
-    `- [ ] <!-- {"checkboxId": "${id4}"} -->   Push autofix commit to this branch`,
-    "",
-    "</details>",
-    "",
+    ...touch(
+      "🧪 Generate unit tests (beta)",
+      "generate_tests",
+      "Create PR with unit tests",
+      `Commit unit tests in branch ${branchLabel}`,
+    ),
+    ...touch(
+      "📝 Generate docstrings (beta)",
+      "generate_docstrings",
+      "Create stacked PR",
+      "Commit on current branch",
+    ),
+    ...touch(
+      "🧹 Simplify (beta)",
+      "simplify",
+      "Create PR with simplified code",
+      `Commit simplified code in branch ${branchLabel}`,
+    ),
+    ...touch(
+      "🪄 Autofix unresolved comments (beta)",
+      "autofix",
+      "Create stacked PR",
+      "Commit on current branch",
+    ),
     "</details>",
   ].join("\n");
+}
+
+/**
+ * The "working on it" line for a finishing touch. Says the destination up
+ * front, because the two destinations differ in what they do to the head
+ * branch and the user should not have to wait for the receipt to find out
+ * which one they picked.
+ */
+function deliveryAck(what: string, delivery: CodegenDelivery | undefined): string {
+  return delivery === "stacked"
+    ? `${what}, to deliver as a stacked PR...`
+    : `${what}...`;
 }
 
 function actionsPerformed(action: string, note?: string): string {
@@ -2144,7 +2191,7 @@ export class Reviewer {
         // Finishing touches checkboxes
         walkthroughBody +=
           "\n\n<!-- finishing_touch_checkbox_start -->\n\n" +
-          finishingTouchesBlock() +
+          finishingTouchesBlock(context.headBranch) +
           "\n\n<!-- finishing_touch_checkbox_end -->";
 
         // Tips footer
@@ -2852,63 +2899,44 @@ export class Reviewer {
           break;
         }
 
+        // The four finishing touches. Each acknowledges, runs, then reports —
+        // and the report comes from one formatter (formatTouchReply) so no
+        // branch can drop a failure on the floor. A refused branch creation, a
+        // refused pulls.create and a refused file write each produce a message
+        // on the PR; the delivery itself never throws.
         case "generate_docstrings": {
-          await reply(
-            "Generating docstrings for changed files..."
-          );
+          await reply(deliveryAck("Generating docstrings for changed files", command.delivery));
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const result = await generateDocstrings(octokit, context, this.ai);
-          await reply(
-            result.filesChanged > 0
-              ? `Added docstrings to ${result.filesChanged} file(s). Commit: \`${result.commitSha?.slice(0, 7)}\``
-              : "No files needed docstring updates."
-          );
+          const result = await generateDocstrings(octokit, context, this.ai, undefined, command.delivery);
+          await reply(formatTouchReply("docstrings", result));
           break;
         }
 
         case "generate_tests": {
-          await reply(
-            "Generating unit tests for changed files..."
-          );
+          await reply(deliveryAck("Generating unit tests for changed files", command.delivery));
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const result = await generateTests(octokit, context, this.ai);
-          await reply(
-            result.filesChanged > 0
-              ? `Generated tests in ${result.filesChanged} file(s). Commit: \`${result.commitSha?.slice(0, 7)}\``
-              : "Could not generate tests for these changes."
-          );
+          const result = await generateTests(octokit, context, this.ai, undefined, command.delivery);
+          await reply(formatTouchReply("tests", result));
           break;
         }
 
         case "simplify": {
-          await reply(
-            "Analyzing changed code for simplification opportunities..."
-          );
+          await reply(deliveryAck("Analyzing changed code for simplification opportunities", command.delivery));
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const result = await simplifyCode(octokit, context, this.ai);
-          await reply(
-            result.filesChanged > 0
-              ? `Simplified ${result.filesChanged} file(s). Commit: \`${result.commitSha?.slice(0, 7)}\``
-              : "No simplification opportunities found."
-          );
+          const result = await simplifyCode(octokit, context, this.ai, undefined, command.delivery);
+          await reply(formatTouchReply("simplify", result));
           break;
         }
 
         case "autofix": {
-          await reply(
-            "Applying fixes from review comments..."
-          );
+          await reply(deliveryAck("Applying fixes from review comments", command.delivery));
           const context = await this.github.getPRContext(installationId, owner, repo, pullNumber);
           const octokit = await this.github.getInstallationOctokit(installationId);
-          const result = await autofix(octokit, context, this.ai);
-          await reply(
-            result.filesChanged > 0
-              ? `Applied fixes to ${result.filesChanged} file(s). Commit: \`${result.commitSha?.slice(0, 7)}\``
-              : "No actionable fixes found in review comments."
-          );
+          const result = await autofix(octokit, context, this.ai, undefined, command.delivery);
+          await reply(formatTouchReply("autofix", result));
           break;
         }
 

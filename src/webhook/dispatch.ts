@@ -7,6 +7,8 @@ import { addressesBot, SlashOptions } from "../slash-commands.js";
 import { resolvesToSlashCommand } from "../commands.js";
 import { isDiffSentryCheck } from "../checks-state.js";
 import { WALKTHROUGH_MARKER } from "../walkthrough.js";
+import { REVIEW_BODY_MARKER } from "../review-body.js";
+import { newlyCheckedTriggers, triggerCommandText } from "./checkbox.js";
 
 /**
  * Whether an automatic (webhook-triggered) review should be queued for a repo,
@@ -324,31 +326,72 @@ export async function dispatchWebhookEvent(
       return { status: 200, body: { status: "ignored" } };
     }
 
-    const triggers = [
-      { label: "Create PR with unit tests", action: "generate_tests" as const },
-      { label: "Push docstring commit to this branch", action: "generate_docstrings" as const },
-      { label: "Push simplification commit to this branch", action: "simplify" as const },
-      { label: "Push autofix commit to this branch", action: "autofix" as const },
-    ];
-    const newlyChecked: typeof triggers = [];
-    for (const t of triggers) {
-      const checkedNow = new RegExp(`-\\s*\\[x\\][^\\n]*${t.label.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}`).test(body);
-      const checkedBefore = new RegExp(`-\\s*\\[x\\][^\\n]*${t.label.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}`).test(prevBody);
-      if (checkedNow && !checkedBefore) newlyChecked.push(t);
-    }
+    const newlyChecked = newlyCheckedTriggers(body, prevBody);
 
     if (newlyChecked.length === 0) {
       return { status: 200, body: { status: "ignored" } };
     }
 
-    logger.info({ owner, repo, pr: issue.number, actions: newlyChecked.map((t) => t.action) }, "Finishing touches checkbox triggered");
+    logger.info(
+      { owner, repo, pr: issue.number, actions: newlyChecked.map((t) => `${t.action}:${t.delivery}`) },
+      "Finishing touches checkbox triggered",
+    );
 
     const commentId = comment.id;
     for (const t of newlyChecked) {
-      const fakeBody = `@${botName} ${t.action.replace(/_/g, " ")}`;
+      const fakeBody = `@${botName} ${triggerCommandText(t)}`;
       reviewer
         .handleComment(installationId, owner, repo, issue.number, fakeBody, commentId)
         .catch((err) => logger.error({ err, action: t.action }, "Finishing touches dispatch failed"));
+    }
+    return { status: 202, body: { status: "accepted", actions: newlyChecked.map((t) => t.action) } };
+  }
+
+  // ─── Review Body Edited (🪄 Autofix checkbox) ───
+  //
+  // The review body carries its own checkboxes, and editing it raises
+  // `pull_request_review` / `edited` rather than `issue_comment` / `edited`.
+  // Nothing handled that event, so both boxes in the 🪄 Autofix block were
+  // inert — ticking "Create a new PR with the fixes" produced no fixes, no PR
+  // and no message. Same author gate as the walkthrough path above: only a
+  // Bot-authored body carrying our own review marker is actionable, so pasting
+  // the marker into a human review cannot dispatch codegen against the branch.
+  if (event === "pull_request_review" && payload.action === "edited") {
+    const review = payload.review;
+    const pr = payload.pull_request;
+    const owner = payload.repository.owner.login;
+    const repo = payload.repository.name;
+    const installationId = payload.installation?.id;
+    if (!pr || !review || !installationId) {
+      return { status: 200, body: { status: "ignored" } };
+    }
+    if (review.user?.type !== "Bot") {
+      return { status: 200, body: { status: "ignored" } };
+    }
+
+    const body: string = review.body || "";
+    const prevBody: string = payload.changes?.body?.from || "";
+    if (!body.includes(REVIEW_BODY_MARKER)) {
+      return { status: 200, body: { status: "ignored" } };
+    }
+
+    const newlyChecked = newlyCheckedTriggers(body, prevBody);
+    if (newlyChecked.length === 0) {
+      return { status: 200, body: { status: "ignored" } };
+    }
+
+    logger.info(
+      { owner, repo, pr: pr.number, actions: newlyChecked.map((t) => `${t.action}:${t.delivery}`) },
+      "Review-body checkbox triggered",
+    );
+
+    for (const t of newlyChecked) {
+      const fakeBody = `@${botName} ${triggerCommandText(t)}`;
+      // `commentId` 0 with kind "issue" posts the receipt as a top-level PR
+      // comment — a review body has no reply thread of its own to answer in.
+      reviewer
+        .handleComment(installationId, owner, repo, pr.number, fakeBody, 0, "issue")
+        .catch((err) => logger.error({ err, action: t.action }, "Review-body checkbox dispatch failed"));
     }
     return { status: 202, body: { status: "accepted", actions: newlyChecked.map((t) => t.action) } };
   }
