@@ -22,6 +22,11 @@ describe("parseCheckResponse", () => {
     expect(parseCheckResponse('{"passed":false,"message":"x"}')).toEqual({ outcome: "failed", message: "x" });
   });
 
+  it("won't fail a check on a reply that gives no reason", () => {
+    expect(parseCheckResponse('{"outcome":"fail","message":"  "}').outcome).toBe("inconclusive");
+    expect(parseCheckResponse('{"passed":false}').outcome).toBe("inconclusive");
+  });
+
   it("treats an unreadable answer as inconclusive, not a silent pass", () => {
     expect(parseCheckResponse("sure, looks fine").outcome).toBe("inconclusive");
   });
@@ -89,6 +94,15 @@ describe("pre-merge status", () => {
 });
 
 describe("runPreMergeChecks", () => {
+  it("emits nothing for title/description checks set to off, even on a WIP title", async () => {
+    const results = await runPreMergeChecks(
+      { title: "WIP", description: "" } as PRContext,
+      { title: { mode: "off" }, description: { mode: "off" } },
+      async () => ({ outcome: "failed", message: "should not run" }),
+    );
+    expect(results).toEqual([]);
+  });
+
   it("passes the check name and maps outcomes onto results", async () => {
     const seen: string[] = [];
     const results = await runPreMergeChecks(

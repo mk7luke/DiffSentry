@@ -36,17 +36,27 @@ Never fail a check because something is not shown — that is "inconclusive". Ne
 Respond with JSON only: {"outcome": "pass" | "fail" | "inconclusive", "message": "one or two sentences"}`;
 }
 
-/** Parse the model's reply. Anything unreadable is inconclusive, never a silent pass. */
+/**
+ * Parse the model's reply. Anything unreadable is inconclusive, never a silent pass.
+ *
+ * A failure has to say why: a `fail` with no message has cited no evidence,
+ * and a check that can block a merge on nothing is the bug this module exists
+ * to prevent. Whether the cited evidence is *right* stays a model judgement.
+ */
 export function parseCheckResponse(raw: string): { outcome: CheckOutcome; message: string } {
   try {
     const parsed = JSON.parse(stripFences(raw));
-    const message = typeof parsed.message === "string" ? parsed.message : "";
+    const message = typeof parsed.message === "string" ? parsed.message.trim() : "";
+    const failed = (): { outcome: CheckOutcome; message: string } =>
+      message
+        ? { outcome: "failed", message }
+        : { outcome: "inconclusive", message: "The model reported a failure but gave no reason." };
     const o = typeof parsed.outcome === "string" ? parsed.outcome.toLowerCase() : undefined;
     if (o === "pass" || o === "passed") return { outcome: "passed", message };
-    if (o === "fail" || o === "failed") return { outcome: "failed", message };
+    if (o === "fail" || o === "failed") return failed();
     if (o === "inconclusive") return { outcome: "inconclusive", message };
     // Legacy shape: {"passed": bool}.
-    if (typeof parsed.passed === "boolean") return { outcome: parsed.passed ? "passed" : "failed", message };
+    if (typeof parsed.passed === "boolean") return parsed.passed ? { outcome: "passed", message } : failed();
   } catch {
     // fall through
   }
