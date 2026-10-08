@@ -111,7 +111,7 @@ export function renderShipCheck(input: {
   if (failingChecks.length > 0) {
     blockers.push(
       `${failingChecks.length} failing commit status check${failingChecks.length === 1 ? "" : "s"}: ${failingChecks
-        .map((s) => `\`${s.context}\``)
+        .map((s) => `\`${s.context}\`${s.description ? ` (${s.description})` : ""}`)
         .join(", ")}.`,
     );
   }

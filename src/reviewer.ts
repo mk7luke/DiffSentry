@@ -21,7 +21,7 @@ import {
 import { verifyFindings } from "./ai/verify.js";
 import { LearningsStore, synthesizeLearning, extractFindingMeta, formatFindingLocation, type FindingContext } from "./learnings.js";
 import { parseIssueReferences, fetchLinkedIssues, formatIssuesForWalkthrough } from "./issues.js";
-import { runPreMergeChecks, formatCheckResults, getOverallStatus } from "./pre-merge.js";
+import { runPreMergeChecks, formatCheckResults, getOverallStatus, describePreMergeStatus, buildCheckPrompt, parseCheckResponse } from "./pre-merge.js";
 import { generateDocstrings, generateTests, simplifyCode, autofix, formatTouchReply } from "./finishing-touches.js";
 import { formatReviewBody, reconcileApproval, isVisiblyActionable, isQuietOverflow } from "./review-body.js";
 import { encodeState, encodeStateRef, extractState, replaceState, isTrivialPatch, WalkthroughState } from "./walkthrough-state.js";
@@ -1765,29 +1765,36 @@ export class Reviewer {
 
       // Run pre-merge checks ahead of the walkthrough so the result block can
       // be embedded in the walkthrough comment as a sibling <details>.
+      //
+      // Checks judge the whole PR, not this push's slice: "is every new
+      // migration's revision id ≤ 32 chars" has to see the migration added three
+      // commits ago. Same full-set context the walkthrough uses, and the files
+      // the model can't see are named so it says "inconclusive" instead of
+      // failing a check it had no evidence for.
       let preMergeBlock = "";
       let preMergeStatus: "pass" | "warning" | "fail" | null = null;
+      let preMergeDescription = "";
       if (repoConfig.reviews?.pre_merge_checks) {
         try {
+          const checksContext = walkthroughContext;
+          const unavailableFiles = [
+            ...(context.ignoredFiles ?? []),
+            ...(context.cappedFiles ?? []),
+            ...filesIgnoredByPathFilter.map((f) => f.path),
+            ...(checksContext.diffBudget?.filesOmitted ?? []),
+          ];
           const checkResults = await runPreMergeChecks(
-            context,
+            checksContext,
             repoConfig.reviews.pre_merge_checks,
-            async (instruction, ctx) => {
-              const response = await this.ai.chat(
-                ctx,
-                `Pre-merge check: ${instruction}\n\nRespond with JSON: {"passed": true/false, "message": "reason"}`,
-              );
-              try {
-                const parsed = JSON.parse(stripFences(response));
-                return { passed: !!parsed.passed, message: parsed.message || "" };
-              } catch {
-                return { passed: true, message: "Could not evaluate" };
-              }
-            },
+            async (name, instruction) =>
+              parseCheckResponse(
+                await this.ai.chat(checksContext, buildCheckPrompt(name, instruction, unavailableFiles)),
+              ),
           );
           if (checkResults.length > 0) {
             preMergeBlock = formatCheckResults(checkResults);
             preMergeStatus = getOverallStatus(checkResults);
+            preMergeDescription = describePreMergeStatus(checkResults);
           }
         } catch (err) {
           log.warn({ err }, "Pre-merge checks failed");
@@ -2281,7 +2288,7 @@ export class Reviewer {
         await this.github.setCommitStatus(
           installationId, owner, repo, context.headSha,
           statusMap[preMergeStatus],
-          preMergeStatus === "fail" ? "Pre-merge checks failed" : "Pre-merge checks passed",
+          preMergeDescription,
           "DiffSentry / Pre-Merge", signal
         ).catch(() => {});
       }
