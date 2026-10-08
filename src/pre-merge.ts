@@ -133,9 +133,13 @@ export async function runPreMergeChecks(
   return results;
 }
 
-/** Keep a model-written message from breaking the markdown table it lands in. */
+/**
+ * Keep a model-written message or a configured check name from breaking the
+ * markdown table it lands in. Backslashes go first: otherwise `\|` becomes
+ * `\\|` — an escaped backslash followed by a bare pipe, which still splits the cell.
+ */
 function cell(text: string): string {
-  return text.replace(/\r?\n+/g, " ").replace(/\|/g, "\\|").trim();
+  return text.replace(/\r?\n+/g, " ").replace(/\\/g, "\\\\").replace(/\|/g, "\\|").trim();
 }
 
 /**
@@ -173,7 +177,7 @@ export function formatCheckResults(results: CheckResult[]): string {
     sections.push("|---|---|---|");
     for (const r of failed) {
       const status = r.mode === "warning" ? "⚠️ Warning" : "❌ Blocks merge";
-      sections.push(`| ${r.name} | ${status} | ${cell(r.message)} |`);
+      sections.push(`| ${cell(r.name)} | ${status} | ${cell(r.message)} |`);
     }
     sections.push("");
   }
@@ -185,7 +189,7 @@ export function formatCheckResults(results: CheckResult[]): string {
     sections.push("| Check name | Why |");
     sections.push("|---|---|");
     for (const r of inconclusive) {
-      sections.push(`| ${r.name} | ${cell(r.message)} |`);
+      sections.push(`| ${cell(r.name)} | ${cell(r.message)} |`);
     }
     sections.push("");
     sections.push(`</details>`);
@@ -199,7 +203,7 @@ export function formatCheckResults(results: CheckResult[]): string {
     sections.push("| Check name | Status | Explanation |");
     sections.push("|---|---|---|");
     for (const r of passed) {
-      sections.push(`| ${r.name} | ✅ Passed | ${cell(r.message)} |`);
+      sections.push(`| ${cell(r.name)} | ✅ Passed | ${cell(r.message)} |`);
     }
     sections.push("");
     sections.push(`</details>`);

@@ -80,6 +80,12 @@ describe("pre-merge status", () => {
     expect(body).toContain("Couldn't verify (1)");
     expect(body).toContain("| title | ⚠️ Warning | a \\| b c |");
   });
+
+  it("escapes backslashes before pipes, and escapes check names too", () => {
+    const body = formatCheckResults([{ name: "odd|name", mode: "error", outcome: "failed", message: "x \\| y" }]);
+    // message `x \| y` → `x \\\| y`: escaped backslash, then escaped pipe.
+    expect(body).toContain("| odd\\|name | ❌ Blocks merge | x \\\\\\| y |");
+  });
 });
 
 describe("runPreMergeChecks", () => {
