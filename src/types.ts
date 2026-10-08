@@ -747,9 +747,12 @@ export interface CustomCheck {
   instructions: string;
 }
 
+/** `inconclusive` = the check applies but its evidence wasn't visible. Never fails the status. */
+export type CheckOutcome = "passed" | "failed" | "inconclusive";
+
 export interface CheckResult {
   name: string;
   mode: CheckMode;
-  passed: boolean;
+  outcome: CheckOutcome;
   message: string;
 }
