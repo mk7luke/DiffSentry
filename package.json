@@ -46,7 +46,7 @@
     "fixture:open": "tsx scripts/fixture-open-pr.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.133.0",
+    "@anthropic-ai/sdk": "^1.3.0",
     "@octokit/auth-app": "^8.3.1",
     "@octokit/rest": "^22.0.1",
     "better-sqlite3": "^13.0.3",
