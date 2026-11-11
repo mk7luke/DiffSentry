@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TOOLS, dispatch, createApiClient, type ApiClient } from "../../src/mcp/server.js";
 
 // Captures what the server writes to stdout — which is the protocol channel and
@@ -121,6 +121,43 @@ describe("mcp tool arguments", () => {
     expect(requests[0]).toMatchObject({ method: "POST", body: { mode: "incremental" } });
     await tool("request_review").run({ repo: "acme/app", number: 3, mode: "full" }, fakeApi({}));
     expect(requests[1].body).toMatchObject({ mode: "full" });
+  });
+});
+
+// `main` answers requests in arrival order, so an unbounded fetch blocks every
+// MCP request queued behind it, not just its own.
+describe("mcp request deadline", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it("passes an abort signal to every outbound request", async () => {
+    let seen: RequestInit | undefined;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      seen = init;
+      return new Response('{"data":{}}', { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+    const client = createApiClient({ DIFFSENTRY_URL: "https://x", DIFFSENTRY_TOKEN: "dsk_x" });
+    await client.request("GET", "/repos");
+    expect(seen?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("turns a timed-out request into a readable tool error", async () => {
+    globalThis.fetch = (async () => {
+      const err = new Error("The operation was aborted due to timeout");
+      err.name = "TimeoutError";
+      throw err;
+    }) as unknown as typeof fetch;
+    const client = createApiClient({ DIFFSENTRY_URL: "https://x", DIFFSENTRY_TOKEN: "dsk_x" });
+    await dispatch(
+      { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "list_repos", arguments: {} } },
+      client,
+    );
+    const result = sent[0].result as { isError: boolean; content: Array<{ text: string }> };
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/timed out after 30s/);
+    expect(result.content[0].text).toContain("DIFFSENTRY_URL");
   });
 });
 

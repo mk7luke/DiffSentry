@@ -76,28 +76,39 @@ export function applyReactionFeedback(opts: {
   // Logins per fingerprint, so the triage row records who actually reacted
   // rather than an anonymous "reaction".
   const byFingerprint = new Map<string, { accepted: boolean; who: string[] }>();
+  // Disagreement latches for the whole pass. A fingerprint usually has more
+  // than two threads — the same finding fires on every file that trips it — so
+  // forgetting a conflict after handling it lets a third, agreeing thread
+  // resurrect a verdict two maintainers had already contradicted.
+  const conflicted = new Set<string>();
+
+  const retire = (fingerprint: string): void => {
+    conflicted.add(fingerprint);
+    byFingerprint.delete(fingerprint);
+    dismissed.delete(fingerprint);
+    affirmed.delete(fingerprint);
+  };
 
   for (const t of opts.threads) {
-    if (!t.fingerprint) continue;
+    if (!t.fingerprint || conflicted.has(t.fingerprint)) continue;
     const down = t.down.filter((l) => !isSelf(l, opts.botName));
     const up = t.up.filter((l) => !isSelf(l, opts.botName));
+    // Both reactions on one thread is the same disagreement as two threads
+    // pulling opposite ways, and binds the fingerprint just as hard.
     if (down.length > 0 && up.length > 0) {
       logger.debug({ fp: t.fingerprint, path: t.path }, "Reaction feedback split 👍/👎; leaving triage untouched");
+      retire(t.fingerprint);
       continue;
     }
     if (down.length === 0 && up.length === 0) continue;
 
     const accepted = up.length > 0;
-    (accepted ? affirmed : dismissed).add(t.fingerprint);
-    // Earlier threads win on a repeat fingerprint only if they agree; a later
-    // disagreement is the split case above, handled per-thread.
     const prior = byFingerprint.get(t.fingerprint);
     if (prior && prior.accepted !== accepted) {
-      byFingerprint.delete(t.fingerprint);
-      dismissed.delete(t.fingerprint);
-      affirmed.delete(t.fingerprint);
+      retire(t.fingerprint);
       continue;
     }
+    (accepted ? affirmed : dismissed).add(t.fingerprint);
     byFingerprint.set(t.fingerprint, {
       accepted,
       who: [...new Set([...(prior?.who ?? []), ...(accepted ? up : down)])],

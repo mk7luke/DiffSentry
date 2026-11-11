@@ -21,6 +21,17 @@
  *   DIFFSENTRY_URL=https://your-instance DIFFSENTRY_TOKEN=dsk_... node dist/mcp/server.js
  */
 
+/**
+ * Per-request deadline on the outbound HTTP call.
+ *
+ * `main` answers requests in arrival order, so an unbounded fetch does not just
+ * hang its own tool call — it blocks every MCP request queued behind it, for as
+ * long as the socket stays open. Generous rather than tight: `search_findings`
+ * against a large database is legitimately slow, and a timeout that fires on
+ * healthy work is worse than none.
+ */
+const REQUEST_TIMEOUT_MS = 30_000;
+
 /** Versions of the MCP spec this server is known to speak. */
 const SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const DEFAULT_PROTOCOL = SUPPORTED_PROTOCOLS[0];
@@ -58,15 +69,34 @@ export class ApiClient {
    */
   async request(method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> {
     const url = `${this.baseUrl}/api/v1${path}`;
-    const res = await fetch(url, {
-      method,
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        Accept: "application/json",
-        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method,
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          Accept: "application/json",
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        // `AbortSignal.timeout` over a hand-rolled controller: there is no timer
+        // left to clear, so no path through this function can leak one.
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch (err) {
+      // The agent reads this string and decides whether to retry, so name the
+      // cause rather than surfacing a bare "The operation was aborted".
+      if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+        throw new Error(
+          `${method} ${path} timed out after ${REQUEST_TIMEOUT_MS / 1000}s — is DIFFSENTRY_URL reachable from here?`,
+          { cause: err },
+        );
+      }
+      throw new Error(
+        `${method} ${path} could not reach ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
     const text = await res.text();
     let parsed: unknown = text;
     try {

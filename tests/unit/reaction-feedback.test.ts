@@ -71,6 +71,49 @@ describe("reaction feedback", () => {
     expect(bulkTriageFindings).not.toHaveBeenCalled();
   });
 
+  // The repair for a real review finding: a fingerprint usually has more than
+  // two threads, and forgetting a conflict after handling it let a third,
+  // agreeing thread resurrect a verdict two maintainers had contradicted.
+  it("keeps a fingerprint conflicted once a third thread agrees with the first", () => {
+    const out = applyReactionFeedback({
+      ...base,
+      threads: [
+        { fingerprint: "deadbeef", path: "src/a.ts", down: ["luke"], up: [] },
+        { fingerprint: "deadbeef", path: "src/b.ts", down: [], up: ["sam"] },
+        { fingerprint: "deadbeef", path: "src/c.ts", down: ["luke"], up: [] },
+      ],
+    });
+    expect(out.dismissed.size).toBe(0);
+    expect(out.affirmed.size).toBe(0);
+    expect(bulkTriageFindings).not.toHaveBeenCalled();
+  });
+
+  // A split thread binds the fingerprint just as hard as two opposed threads.
+  it("lets a split thread conflict the fingerprint for later clean threads", () => {
+    const out = applyReactionFeedback({
+      ...base,
+      threads: [
+        { fingerprint: "deadbeef", path: "src/a.ts", down: ["luke"], up: ["sam"] },
+        { fingerprint: "deadbeef", path: "src/b.ts", down: ["luke"], up: [] },
+      ],
+    });
+    expect(out.dismissed.size).toBe(0);
+    expect(bulkTriageFindings).not.toHaveBeenCalled();
+  });
+
+  // Conflict is per fingerprint, not global — an unrelated finding still applies.
+  it("does not let one conflicted fingerprint block another", () => {
+    const out = applyReactionFeedback({
+      ...base,
+      threads: [
+        { fingerprint: "deadbeef", path: "src/a.ts", down: ["luke"], up: ["sam"] },
+        { fingerprint: "cafe1234", path: "src/b.ts", down: ["luke"], up: [] },
+      ],
+    });
+    expect([...out.dismissed]).toEqual(["cafe1234"]);
+    expect(bulkTriageFindings).toHaveBeenCalledTimes(1);
+  });
+
   // GraphQL spells our own login `diffsentry`, REST spells it `diffsentry[bot]`.
   // Either way it is us, and our own reaction is not feedback.
   it("ignores our own reactions in both login spellings", () => {

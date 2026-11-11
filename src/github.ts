@@ -443,6 +443,17 @@ export function countBlockingThreads(threads: any[], botLogin: string): number {
   return n;
 }
 
+/**
+ * The slice of GitHub's GraphQL reaction shape `collectFindingFeedback` reads.
+ * Declared rather than cast: it doubles as the written record of that query's
+ * contract, which is the one part of the method nothing else can check.
+ * `reactors` is a union (User | Bot | …) and only `login` is taken from it.
+ */
+interface ReactionGroup {
+  content?: string;
+  reactors?: { nodes?: Array<{ login?: string }> };
+}
+
 export class GitHubClient {
   private config: Config;
 
@@ -1839,11 +1850,12 @@ export class GitHubClient {
           const head = thread.comments?.nodes?.[0];
           const fingerprint = parseThreadFingerprint(head?.body ?? "");
           if (!fingerprint) continue;
+          const groups: ReactionGroup[] = head?.reactionGroups ?? [];
           const logins = (content: string): string[] =>
-            ((head?.reactionGroups ?? []) as any[])
+            groups
               .filter((g) => g.content === content)
-              .flatMap((g) => (g.reactors?.nodes ?? []) as any[])
-              .map((n) => (typeof n?.login === "string" ? n.login : ""))
+              .flatMap((g) => g.reactors?.nodes ?? [])
+              .map((n) => (typeof n.login === "string" ? n.login : ""))
               .filter(Boolean);
           const down = logins("THUMBS_DOWN");
           const up = logins("THUMBS_UP");
