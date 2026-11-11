@@ -80,7 +80,7 @@ async function main() {
   const app = express();
   app.use("/api/v1", createApiRouter({ learningsDir, replayWebhook }));
   app.use(express.static(webDist));
-  app.get("*", (req, res, next) => {
+  app.get("/{*splat}", (req, res, next) => {
     if (req.path.startsWith("/api")) return next();
     res.sendFile(path.join(webDist, "index.html"), (err) => err && next());
   });

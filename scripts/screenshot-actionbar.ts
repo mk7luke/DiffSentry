@@ -83,7 +83,7 @@ async function main() {
   );
   const webDist = path.join(__dirname, "..", "web", "dist");
   app.use(express.static(webDist));
-  app.get("*", (req, res, next) => {
+  app.get("/{*splat}", (req, res, next) => {
     if (req.path.startsWith("/api")) return next();
     res.sendFile(path.join(webDist, "index.html"), (err) => err && next());
   });
