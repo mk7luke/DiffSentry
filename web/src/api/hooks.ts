@@ -30,6 +30,7 @@ import type {
   MeResponse,
   NotificationsResponse,
   PatternsResponse,
+  ScorecardResponse,
   PRDetailResponse,
   PRDiffResponse,
   RecurringResponse,
@@ -271,6 +272,14 @@ export function usePatterns() {
   return useQuery({
     queryKey: ["patterns"],
     queryFn: () => apiGet<PatternsResponse>("/patterns"),
+  });
+}
+
+export function useScorecard(days: number) {
+  return useQuery({
+    queryKey: ["analytics", "scorecard", days],
+    queryFn: () => apiGet<ScorecardResponse>("/analytics/scorecard", { days }),
+    placeholderData: (prev) => prev,
   });
 }
 

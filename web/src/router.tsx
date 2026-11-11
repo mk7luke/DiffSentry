@@ -15,6 +15,7 @@ import { FeedPage } from "./pages/Feed";
 import { TriageModePage } from "./pages/TriageMode";
 import { RecurringPage } from "./pages/Recurring";
 import { PatternsPage } from "./pages/Patterns";
+import { ScorecardPage } from "./pages/Scorecard";
 import { CostPage } from "./pages/Cost";
 import { RulesPage } from "./pages/Rules";
 import { LeaderboardPage } from "./pages/Leaderboard";
@@ -88,6 +89,7 @@ export const router = createBrowserRouter(
       { path: "/findings/triage", element: <TriageModePage /> },
       { path: "/findings/recurring", element: <RecurringPage /> },
       { path: "/patterns", element: <PatternsPage /> },
+      { path: "/scorecard", element: <ScorecardPage /> },
       { path: "/cost", element: <CostPage /> },
       { path: "/rules", element: <RulesPage /> },
       { path: "/leaderboard", element: <LeaderboardPage /> },
