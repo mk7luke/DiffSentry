@@ -10,7 +10,7 @@ import { WALKTHROUGH_MARKER, formatWalkthrough, formatWalkthroughInner, wrapWalk
 import { parseCommand, formatHelpMessage, formatConfigMessage, formatUnknownCommandMessage } from "./commands.js";
 import type { SlashOptions } from "./slash-commands.js";
 import { parseIssueCommand, formatIssueHelpMessage } from "./issue-commands.js";
-import { buildIssueSummaryInstruction, buildIssuePlanInstruction } from "./ai/prompt.js";
+import { buildIssueSummaryInstruction, buildIssuePlanInstruction, buildReviewPrompt } from "./ai/prompt.js";
 import {
   synthesizeReviewSummary,
   buildReviewComment,
@@ -40,6 +40,7 @@ import {
   renderAutoReleaseNotes,
 } from "./auto-release-notes.js";
 import { recordRepo, recordPR, recordReview, recordFindings, recordPatternHits, recordIssue, recordIssueAction, getSuppressedFingerprints, listCustomRulesForRepo, deleteReviewJob, getWalkthroughState, saveWalkthroughState } from "./storage/dao.js";
+import { applyReactionFeedback } from "./feedback.js";
 import { runSafetyScanners } from "./safety-scanner.js";
 import { runPatternChecks } from "./pattern-checks.js";
 import { runStaticAnalysis, resolveCheckoutDir, dedupeStaticFindings } from "./static-analysis.js";
@@ -53,6 +54,7 @@ import { isPauseAll, resolveProfileOverride, resolveMaxFilesOverride } from "./s
 import { reviewQueue, type ReviewHandle } from "./realtime/queue.js";
 import { buildGraphContext } from "./graph-context.js";
 import { applyDiffBudget, resolveDiffBudget } from "./ai/diff-budget.js";
+import { primaryModelId, readCachedReview, reviewCacheKey, writeCachedReview } from "./ai/review-cache.js";
 
 /** Map a PR chat command to the cost-attribution kind for its AI calls. */
 function costKindForCommand(type: string): string {
@@ -1688,12 +1690,48 @@ export class Reviewer {
         ? { ...context, files: allReviewableFiles, diffBudget: wholePRBudget }
         : context;
 
+      // Review result cache. Cross-review dedup already stops the same finding
+      // being POSTED twice; it has never stopped it being PAID for twice,
+      // because the model call happens long before dedup sees a fingerprint. A
+      // rebase, a force-push back to a tree we already reviewed, a
+      // revert-and-reapply, a retried pass and an unchanged `full review` all
+      // land on the same key here. The walkthrough is deliberately not cached:
+      // it is one call against the whole PR, not per-finding work, and it is
+      // what a reader looks at first.
+      const cacheModel = primaryModelId(this.config);
+      const cachePrompt = buildReviewPrompt(context, repoConfig, knowledgeLearnings);
+      const cacheKey = reviewCacheKey({
+        model: cacheModel,
+        system: cachePrompt.system,
+        user: cachePrompt.user,
+        // Both the raw patch and the budget-truncated one a large PR actually
+        // sends; substitution is by literal match, so passing both is harmless.
+        patches: [
+          ...context.files.map((f) => ({ text: f.patch ?? "", digest: patchHash(f.filename, f.patch ?? "") })),
+          ...(context.diffBudget?.files ?? []).map((b) => ({ text: b.patch, digest: patchHash(b.filename, b.patch) })),
+        ],
+      });
+      const cachedReview = readCachedReview(cacheKey);
+      if (cachedReview) {
+        log.info(
+          { key: cacheKey.slice(0, 12), comments: cachedReview.comments.length },
+          "Review served from cache — skipping the model call",
+        );
+      }
+
       const [reviewResult, walkthroughResult] = await Promise.all([
-        this.ai.review(context, repoConfig, knowledgeLearnings),
+        cachedReview ?? this.ai.review(context, repoConfig, knowledgeLearnings),
         walkthroughEnabled || summaryEnabled
           ? this.ai.generateWalkthrough(walkthroughContext, repoConfig)
           : Promise.resolve(null),
       ]);
+
+      // Written before anything downstream mutates the result: the cache must
+      // hold what the model said, not what this pass went on to filter.
+      // A failover answer is skipped so a row always means the primary model.
+      if (!cachedReview && reviewResult.servedBy !== "backup") {
+        writeCachedReview({ cacheKey, model: cacheModel, context, result: reviewResult });
+      }
 
       // Stash per-file fan-in / impact-radius counts on the review result so
       // downstream passes (e.g. severity calibration) can weight findings in
@@ -2358,26 +2396,45 @@ export class Reviewer {
         if (dropped > 0) log.info({ dropped }, "Suppressed re-worded PR-level repeats");
       }
 
+      // Reaction feedback. A 👎 on one of our inline findings is a maintainer
+      // telling us about THAT finding, so it suppresses unconditionally — unlike
+      // the command-center triage read below, which is a housekeeping state an
+      // operator opts into. Both land in the same set because the filter is the
+      // same; only the authority differs. Best-effort: a failed read returns an
+      // empty set and the pass behaves exactly as it did before reactions were
+      // read at all.
+      const suppressed = new Set<string>();
+      try {
+        const threads = await this.github.collectFindingFeedback(installationId, owner, repo, pullNumber, signal);
+        const feedback = applyReactionFeedback({
+          owner, repo, number: pullNumber, botName: this.config.botName, threads,
+        });
+        for (const fp of feedback.dismissed) suppressed.add(fp);
+      } catch (err) {
+        log.warn({ err }, "Reaction feedback pass failed; continuing");
+      }
+
       // Opt-in: suppress findings whose fingerprint a human has dismissed (or
       // currently snoozed) in the command center. Off by default — gated on
       // DIFFSENTRY_SUPPRESS_DISMISSED so triage data never silently changes
       // review output unless an operator explicitly turns it on. The read
       // no-ops gracefully (empty set) when persistence is disabled.
       if (process.env.DIFFSENTRY_SUPPRESS_DISMISSED === "1") {
-        const suppressed = getSuppressedFingerprints();
-        if (suppressed.size > 0) {
-          const before = reviewResult.comments.length;
-          reviewResult.comments = reviewResult.comments.filter((c) => {
-            const fp = c.fingerprint;
-            if (fp && suppressed.has(fp)) {
-              log.debug({ fp, path: c.path, line: c.line }, "Suppressing dismissed/snoozed finding (triage feedback)");
-              return false;
-            }
-            return true;
-          });
-          const dropped = before - reviewResult.comments.length;
-          if (dropped > 0) log.info({ dropped }, "Suppressed findings via triage feedback");
-        }
+        for (const fp of getSuppressedFingerprints()) suppressed.add(fp);
+      }
+
+      if (suppressed.size > 0) {
+        const before = reviewResult.comments.length;
+        reviewResult.comments = reviewResult.comments.filter((c) => {
+          const fp = c.fingerprint;
+          if (fp && suppressed.has(fp)) {
+            log.debug({ fp, path: c.path, line: c.line }, "Suppressing dismissed/snoozed finding (triage feedback)");
+            return false;
+          }
+          return true;
+        });
+        const dropped = before - reviewResult.comments.length;
+        if (dropped > 0) log.info({ dropped }, "Suppressed findings via triage/reaction feedback");
       }
 
       // Quiet profile: hold everything but critical/major out of the inline

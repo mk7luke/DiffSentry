@@ -417,6 +417,38 @@ CREATE TABLE IF NOT EXISTS impact_shares (
 CREATE INDEX IF NOT EXISTS idx_impact_shares_hash ON impact_shares(share_hash);
 `;
 
+/**
+ * Migration 9 — review result cache. One row per (model, prompt) pair whose
+ * patches have been whitespace-normalized, so the same code reviewed twice
+ * costs one model call. A rebase, a force-push that restores an earlier tree,
+ * a revert-and-reapply and a `@bot full review` re-run all land on the same key.
+ *
+ * `cache_key` is the primary key and already a SHA-256 of everything that can
+ * change the answer (see src/ai/review-cache.ts) — nothing about the PR needs
+ * to participate in the lookup. The owner/repo/number/model columns are
+ * recorded for the operator view only: they say which PR first paid for a row,
+ * never which PRs may read it.
+ *
+ * Nothing here is authoritative. The table can be emptied at any time and the
+ * only consequence is paying for the next review again.
+ *
+ * Strictly additive (one new table) — same rules as every other migration.
+ */
+const SCHEMA_V9 = `
+CREATE TABLE IF NOT EXISTS ai_review_cache (
+  cache_key TEXT PRIMARY KEY,
+  owner TEXT,
+  repo TEXT,
+  number INTEGER,
+  model TEXT,
+  result_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  hits INTEGER NOT NULL DEFAULT 0,
+  last_hit_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ai_review_cache_created ON ai_review_cache(created_at);
+`;
+
 export interface Migration {
   version: number;
   name: string;
@@ -511,6 +543,7 @@ DROP INDEX IF EXISTS idx_saved_views_owner;
 DROP TABLE IF EXISTS saved_views;
 `,
   },
+  { version: 9, name: "ai_review_cache", sql: SCHEMA_V9 },
 ];
 
 /** Highest version this binary knows how to migrate to. */
