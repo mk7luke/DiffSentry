@@ -90,6 +90,7 @@ Everything below documents DiffSentry in full. Jump to a section:
 
 - [What it does](#what-it-does)
 - [Public demo / sandbox mode](#public-demo--sandbox-mode)
+- [MCP server — DiffSentry inside your coding agent](#mcp-server--diffsentry-inside-your-coding-agent)
 - [Setup](#setup)
 - [Per-repo configuration](#per-repo-configuration)
 - [End-to-end test harness](#end-to-end-test-harness)
@@ -268,6 +269,14 @@ cost surprises).
   filters and a recurring-fingerprint group view.
 - **Pattern analytics** at `/dashboard/patterns` — per-(repo, rule) 30-day +
   all-time hit counts to spot noisy rules.
+- **Scorecard** at `/scorecard` in the command-center SPA — pattern analytics
+  answers "which rules fire?"; this answers the question a noisy reviewer
+  actually loses trust over: *were they right?* Per repo / source / severity it
+  shows what was raised, confirmed, dismissed, snoozed and still unjudged, plus
+  what the review cache has saved. A confirmed-rate is withheld below five
+  judgements — a percentage off three samples reads as authority and isn't one —
+  and the unjudged column is shown beside every rate so the size of the gap is
+  never hidden.
 - **Operator settings** at `/dashboard/settings` — runtime + storage health +
   a live warn/error log tail captured via an in-process pino ring buffer.
 - **Guided first-run diagnostics** at `/settings/diagnostics` in the
@@ -284,6 +293,23 @@ cost surprises).
   installed repo so the dashboard isn't empty on first run.
 
 ### Quality of life
+- **👎 retires a finding** — react 👎 to one of DiffSentry's inline comments and
+  the next review stops raising it, across every PR it fires on; 👍 confirms it.
+  Replying already teaches a learning, but it costs a sentence and a model call;
+  a reaction costs two clicks. A thread carrying both reactions is left alone —
+  two maintainers disagreeing is not a mandate. Outcomes land in the triage data
+  behind the [Scorecard](#web-dashboard-read-only-optional).
+- **Review result cache** — reviewing a branch that hasn't changed costs one
+  model call, not two: a retried pass, a duplicate trigger, and `@bot review` /
+  `@bot full review` run twice over the same tree all hit it. Keyed on the model
+  plus the whole prompt with each patch whitespace-normalized, so a rebase that
+  only moves `@@` line numbers doesn't break the key, while any real change — to
+  the code, the config, the learnings or the review instructions themselves —
+  misses. **An incremental pass after a force-push usually still misses**: it
+  recomputes its changed-file set against a commit the rebase destroyed, so the
+  prompt differs even though the tree doesn't. A full review of the same tree
+  hits. On by default, 14-day retention; `DIFFSENTRY_REVIEW_CACHE=0` turns it
+  off.
 - **Confidence-tagged findings** — AI marks each finding `high` / `medium` / `low`;
   uncertain ones render with a `🤔` blockquote so reviewers can triage.
 - **Whitespace-insensitive fingerprints** — comments survive re-indenting and
@@ -314,6 +340,45 @@ read-only demo** of the real UI backed by bundled sample data.
 
 **Disabling it.** Security-conscious operators can turn the demo off entirely
 with **`DISABLE_DEMO=1`**, after which `/demo` returns `404`.
+
+## MCP server — DiffSentry inside your coding agent
+
+The platform API could always hand a coding agent the findings on a PR; getting
+them there meant a human copying a `curl` response into a prompt. `dist/mcp/server.js`
+speaks that same API over **MCP**, so Claude Code, Cursor or any MCP client can
+ask for them directly — read the findings, fix them, ask for a re-review.
+
+**Four tools:** `list_repos`, `get_pr_findings`, `search_findings`,
+`request_review`.
+
+**Configure it** with the instance URL and an API token minted under **API
+tokens** in the dashboard. A `read` token can do the first three; `request_review`
+needs the `review` scope.
+
+```json
+{
+  "mcpServers": {
+    "diffsentry": {
+      "command": "node",
+      "args": ["/path/to/DiffSentry/dist/mcp/server.js"],
+      "env": {
+        "DIFFSENTRY_URL": "https://diffsentry.example.com",
+        "DIFFSENTRY_TOKEN": "dsk_..."
+      }
+    }
+  }
+}
+```
+
+It is a **client of the HTTP API, not a second way into the database**: it holds
+no DB handle, mints nothing, and can do exactly what its token's scopes allow —
+so the authorization story stays in one place. Run it per developer with their
+own token rather than as a shared service.
+
+Two notes if you are packaging it yourself: the process speaks JSON-RPC on
+**stdout**, so it must be started with `node` directly and never through
+`npm run` (which prints its own banner there and corrupts the stream); and it
+needs `npm run build` first, like every other `dist/` entrypoint.
 
 ## Setup
 
@@ -795,6 +860,7 @@ GitHub webhook
 | `DASHBOARD_INSTANCE_NAME` | No | `DiffSentry` | Default instance name (sidebar wordmark + tab title). An admin can override it live in Settings → Branding. |
 | `DASHBOARD_ACCENT_COLOR` | No | `#5a8dff` | Default brand accent (hex `#rgb`/`#rrggbb`) the whole UI derives its accent from. Overridable live by an admin. |
 | `DIFFSENTRY_SUPPRESS_DISMISSED` | No | | Set to `1` so new reviews drop findings whose fingerprint was dismissed or is currently snoozed via triage. Off by default — triage never changes review output unless enabled. |
+| `DIFFSENTRY_REVIEW_CACHE` | No | on | Set to `0` to disable the review result cache (see [Quality of life](#quality-of-life)). A 👎 reaction suppresses its finding regardless of `DIFFSENTRY_SUPPRESS_DISMISSED` — it is feedback on that finding, not a triage preference. |
 | `DASHBOARD_CONFIG_PR_BRANCH_PREFIX` | No | `diffsentry/config` | Branch-name prefix used when an admin edits `.diffsentry.yaml` from the dashboard and chooses "open a PR". |
 | `IMPACT_MINUTES_PER_FINDING` | No | `15` | Reviewer-minutes-saved-per-finding heuristic for the Impact report's time-saved estimate. The only estimated figure on that page; all other numbers are counted from the raw tables. |
 

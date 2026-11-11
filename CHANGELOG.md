@@ -9,6 +9,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A 👎 reaction now retires a finding.** React 👎 to one of DiffSentry's
+  inline comments and the next review stops raising it — across every PR that
+  finding class fires on, not just this one; 👍 confirms it. Replying to a
+  finding already taught a learning, but it costs a sentence and a model call,
+  and the cheapest signal a maintainer can give was being thrown away. The
+  reactions are read once per review pass, because GitHub sends Apps no
+  `reaction` webhook and a pass is exactly when the answer is needed. A thread
+  carrying both reactions is left untouched, as is a fingerprint two threads
+  disagree about: taking a side there would retire a whole finding class on a
+  coin flip. Outcomes are written as ordinary triage state, so the command
+  center shows them beside dashboard dismissals — but a 👎 suppresses regardless
+  of `DIFFSENTRY_SUPPRESS_DISMISSED`, which gates a housekeeping preference,
+  while a reaction is feedback about that finding.
+
+- **The same diff is no longer reviewed twice at full price.** Cross-review
+  dedup has always stopped a repeat finding being *posted* twice; it never
+  stopped it being *paid* for twice, because the model call happens long before
+  dedup sees a fingerprint. Results are now cached for 14 days, so reviewing a
+  tree that has already been reviewed — a retried pass after a provider blip, a
+  duplicate trigger, `@bot review` or `@bot full review` run twice over the same
+  commit — costs one call between them rather than two.
+
+  Worth being precise about what this does *not* buy, because the obvious claim
+  is wrong: an **incremental** pass after a force-push generally still misses.
+  Its changed-file set is recomputed against the commit the rebase destroyed, so
+  the prompt differs even when the tree is byte-identical. A full review of that
+  same tree hits. The hit rate on a busy repository has not been measured.
+
+  The key is the model id plus the entire prompt with each
+  patch replaced by its whitespace-normalized hash: a rebase that only moves
+  `@@` line numbers still hits, while a change to the code, the repo config, the
+  learnings, the profile or the review instructions themselves misses — including
+  a future prompt edit nothing had to remember to account for. A parse failure
+  is never cached (a provider having a bad day is not a property of the diff),
+  nor is a failover answer, so a cached row always means the primary model.
+  On by default; `DIFFSENTRY_REVIEW_CACHE=0` turns it off. New schema migration
+  9; the table is discardable at any time.
+
+- **A Scorecard screen at `/scorecard`.** Pattern analytics answers "which rules
+  fire?". This answers the question a noisy reviewer actually loses trust over —
+  *were they right?* Per repo / source / severity it shows what was raised,
+  confirmed, dismissed, snoozed and still unjudged, plus what the review cache
+  has saved. The confirmed-rate is withheld below five judgements, and the
+  unjudged count sits beside every rate: on most repositories nearly everything
+  is unjudged, and a scorecard that hid that would be worse than none.
+
+- **An MCP server, so the findings reach the agent that has to fix them.**
+  `node dist/mcp/server.js` speaks the existing platform API over MCP (stdio),
+  giving Claude Code, Cursor or any MCP client four tools — `list_repos`,
+  `get_pr_findings`, `search_findings`, `request_review` — in place of copying a
+  `curl` response into a prompt. It is a client of the HTTP API rather than a
+  second way into the database: no DB handle, nothing minted, and exactly the
+  reach its bearer token's scopes allow, so authorization stays in one place.
+  Point it at an instance with `DIFFSENTRY_URL` and a token from the dashboard's
+  API tokens screen. The protocol is implemented directly — it is JSON-RPC over
+  newline-delimited stdio and four tools, and a dependency would be larger than
+  the thing it implements.
+
 - Every finishing touch can now be delivered as a **stacked PR** instead of a
   commit. `✨ Finishing Touches` nests both choices under each of the four
   touches — `Create stacked PR` / `Commit on current branch` for docstrings and
