@@ -55,7 +55,7 @@ async function main() {
 
   const webDist = path.join(process.cwd(), "web", "dist");
   app.use(express.static(webDist));
-  app.get("*", (_req, res) => res.sendFile(path.join(webDist, "index.html")));
+  app.get("/{*splat}", (_req, res) => res.sendFile(path.join(webDist, "index.html")));
 
   const server = app.listen(0);
   const port = (server.address() as { port: number }).port;

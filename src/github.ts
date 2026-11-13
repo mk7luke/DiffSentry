@@ -4,6 +4,7 @@ import { Config, FileChange, PRContext, ReviewComment, ReviewResult, IssueContex
 import { logger } from "./logger.js";
 import { isFileLevelFinding, REVIEW_BODY_MARKER } from "./review-body.js";
 import { injectSummaryIntoPRBody } from "./walkthrough.js";
+import type { ThreadFeedback } from "./feedback.js";
 import {
   parseThreadSeverity,
   parseThreadFingerprint,
@@ -440,6 +441,17 @@ export function countBlockingThreads(threads: any[], botLogin: string): number {
     n++;
   }
   return n;
+}
+
+/**
+ * The slice of GitHub's GraphQL reaction shape `collectFindingFeedback` reads.
+ * Declared rather than cast: it doubles as the written record of that query's
+ * contract, which is the one part of the method nothing else can check.
+ * `reactors` is a union (User | Bot | …) and only `login` is taken from it.
+ */
+interface ReactionGroup {
+  content?: string;
+  reactors?: { nodes?: Array<{ login?: string }> };
 }
 
 export class GitHubClient {
@@ -1775,6 +1787,89 @@ export class GitHubClient {
       cursor = block.pageInfo.endCursor;
     }
     return all;
+  }
+
+  /**
+   * Reactions on the head comment of each of our unresolved review threads.
+   *
+   * Deliberately its own query rather than extra fields on
+   * `fetchAllReviewThreads`: a wrong field name there would fail the fetch that
+   * thread resolution and the sticky verdict both depend on, and reaction
+   * feedback is a nice-to-have that must never cost us those. Failure here
+   * returns [] and the review proceeds exactly as it did before.
+   *
+   * `reactors` (not the deprecated `users`) is the current connection, and it
+   * is a union — a Bot and a User both have a `login`, so both are read and
+   * `src/feedback.ts` filters our own out. Resolved threads are skipped: a 👎
+   * on a finding someone already closed is history, not an instruction.
+   */
+  async collectFindingFeedback(
+    installationId: number,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    signal?: AbortSignal,
+  ): Promise<ThreadFeedback[]> {
+    const log = logger.child({ owner, repo, pr: pullNumber });
+    const botLogin = `${this.config.botName}[bot]`.toLowerCase();
+    const query = `
+      query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $pr) {
+            reviewThreads(first: 100, after: $cursor) {
+              pageInfo { hasNextPage endCursor }
+              nodes {
+                isResolved
+                path
+                comments(first: 1) {
+                  nodes {
+                    body
+                    author { login __typename }
+                    reactionGroups {
+                      content
+                      reactors(first: 20) { nodes { __typename ... on User { login } ... on Bot { login } } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+    try {
+      const octokit = await this.getInstallationOctokit(installationId, signal);
+      const out: ThreadFeedback[] = [];
+      let cursor: string | null = null;
+      while (true) {
+        const result: any = await octokit.graphql(query, { owner, repo, pr: pullNumber, cursor });
+        const block = result.repository.pullRequest.reviewThreads;
+        for (const thread of block.nodes ?? []) {
+          if (thread.isResolved) continue;
+          if (!isOurBotThread(thread, botLogin)) continue;
+          const head = thread.comments?.nodes?.[0];
+          const fingerprint = parseThreadFingerprint(head?.body ?? "");
+          if (!fingerprint) continue;
+          const groups: ReactionGroup[] = head?.reactionGroups ?? [];
+          const logins = (content: string): string[] =>
+            groups
+              .filter((g) => g.content === content)
+              .flatMap((g) => g.reactors?.nodes ?? [])
+              .map((n) => (typeof n.login === "string" ? n.login : ""))
+              .filter(Boolean);
+          const down = logins("THUMBS_DOWN");
+          const up = logins("THUMBS_UP");
+          if (down.length === 0 && up.length === 0) continue;
+          out.push({ fingerprint, path: thread.path ?? null, down, up });
+        }
+        if (!block.pageInfo?.hasNextPage) break;
+        cursor = block.pageInfo.endCursor;
+      }
+      return out;
+    } catch (err) {
+      log.warn({ err }, "Failed to read reaction feedback; continuing without it");
+      return [];
+    }
   }
 
   /**

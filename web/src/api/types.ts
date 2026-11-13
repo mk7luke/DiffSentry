@@ -359,6 +359,33 @@ export interface PRDiffResponse {
   findings: PRFindingRow[];
 }
 
+// ─── Review quality scorecard ───────────────────────────────────────
+
+export interface ScorecardRow {
+  owner: string;
+  repo: string;
+  source: string;
+  severity: string;
+  total: number;
+  accepted: number;
+  dismissed: number;
+  snoozed: number;
+  untriaged: number;
+}
+
+/** Rows, hits and age of the review result cache. */
+export interface ReviewCacheStats {
+  rows: number;
+  hits: number;
+  oldest: string | null;
+}
+
+export interface ScorecardResponse {
+  days: number;
+  rows: ScorecardRow[];
+  cache: ReviewCacheStats;
+}
+
 export interface PatternsResponse {
   rules: PatternRuleRow[];
 }

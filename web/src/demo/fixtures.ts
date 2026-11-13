@@ -563,6 +563,8 @@ function match(p: string): unknown {
       return demoCost();
     case "/analytics/authors":
       return { days: 30, authors: [], series: [] };
+    case "/analytics/scorecard":
+      return demoScorecard();
     case "/analytics/trends":
       return { days: 30, activity: OVERVIEW_ACTIVITY, riskDistribution: [], hotPaths: REPO_DETAIL.hotPaths, hotPathSeries: [] };
     // Admin-only endpoints the viewer UI never links to — empty but valid.
@@ -588,6 +590,21 @@ function match(p: string): unknown {
   if (AUTHOR_RE.test(p)) return { author: "jordan-lee", days: 30, stat: null, series: [], hotPaths: [], prs: [] };
   // Unknown endpoint — empty object keeps the UI from throwing.
   return {};
+}
+
+// Enough judged findings for the rate column to render — an all-zero scorecard
+// would show the page working while teaching the reader nothing.
+function demoScorecard() {
+  return {
+    days: 90,
+    rows: [
+      { owner: OWNER, repo: HERO_REPO, source: "ai", severity: "major", total: 48, accepted: 31, dismissed: 6, snoozed: 2, untriaged: 9 },
+      { owner: OWNER, repo: HERO_REPO, source: "ai", severity: "minor", total: 73, accepted: 18, dismissed: 21, snoozed: 0, untriaged: 34 },
+      { owner: OWNER, repo: HERO_REPO, source: "safety", severity: "critical", total: 7, accepted: 7, dismissed: 0, snoozed: 0, untriaged: 0 },
+      { owner: OWNER, repo: HERO_REPO, source: "builtin", severity: "minor", total: 26, accepted: 4, dismissed: 14, snoozed: 1, untriaged: 7 },
+    ],
+    cache: { rows: 34, hits: 11, oldest: iso(days(12)) },
+  };
 }
 
 function demoCost() {

@@ -20,6 +20,7 @@ import {
   bulkTriageFindings,
   getFindingCoords,
   getFindingIdsByFingerprint,
+  reviewCacheStats,
   type FindingCoords,
 } from "../storage/dao.js";
 import {
@@ -72,6 +73,7 @@ import {
   getRecentIssues,
   getRecentPRsWithReviews,
   getRepoOverview,
+  getReviewScorecard,
   getRiskDistribution,
   getRoleOverrides,
   getSparkline,
@@ -811,6 +813,21 @@ export function createApiRouter(deps: ApiDeps): express.Router {
     const days = Number.isFinite(n) ? n : dflt;
     return Math.min(Math.max(days, 1), 365);
   };
+
+  // Finding outcomes: what humans did about what we raised, per repo / source /
+  // severity. Reported raw (accepted / dismissed / snoozed / untriaged) rather
+  // than as a precision score — see getReviewScorecard. `cache` reports what the
+  // review cache has saved, which belongs on the same screen: both answer "is
+  // this reviewer worth what it costs?".
+  router.get("/analytics/scorecard", (req, res) => {
+    try {
+      const days = parseDays(req, 90);
+      sendData(res, { days, rows: getReviewScorecard(days), cache: reviewCacheStats() });
+    } catch (err) {
+      logger.error({ err }, "api /analytics/scorecard failed");
+      sendError(res, 500, "internal", "Failed to load the review scorecard.");
+    }
+  });
 
   // Per-author leaderboard + daily sparkline series.
   router.get("/analytics/authors", (req, res) => {

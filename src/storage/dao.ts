@@ -2216,3 +2216,102 @@ export function releaseWebhookDelivery(claim: WebhookDeliveryClaim): boolean {
   }
 }
 
+
+// ─── AI review cache (migration 9) ──────────────────────────────
+//
+// Pure cost optimisation: every read may miss and every write may be dropped
+// without changing what DiffSentry posts. The key is computed in
+// src/ai/review-cache.ts, which owns the policy; this layer only stores bytes.
+
+export interface CachedReviewRow {
+  resultJson: string;
+  createdAt: string;
+  hits: number;
+}
+
+/**
+ * Look up a cached review by key, ignoring rows older than `maxAgeIso`.
+ * Bumps the hit counter on a hit — the operator view uses it to show what the
+ * cache has actually saved, and a hit is never on the latency-critical path
+ * (it replaces a model call that takes seconds).
+ */
+export function readReviewCache(cacheKey: string, maxAgeIso: string): CachedReviewRow | null {
+  const db = openDatabase();
+  if (!db || !cacheKey) return null;
+  try {
+    const row = db
+      .prepare(
+        `SELECT result_json AS resultJson, created_at AS createdAt, hits
+         FROM ai_review_cache WHERE cache_key = ? AND created_at >= ?`,
+      )
+      .get(cacheKey, maxAgeIso) as CachedReviewRow | undefined;
+    if (!row) return null;
+    db.prepare(`UPDATE ai_review_cache SET hits = hits + 1, last_hit_at = ? WHERE cache_key = ?`).run(
+      new Date().toISOString(),
+      cacheKey,
+    );
+    return row;
+  } catch (err) {
+    logger.debug({ err }, "dao.readReviewCache failed");
+    return null;
+  }
+}
+
+/**
+ * Store a review result. `INSERT OR REPLACE` rather than `OR IGNORE`: a repeat
+ * write means the row expired and was re-earned, and the fresh `created_at` is
+ * what keeps it alive. Pruning is folded in here so retention needs no
+ * scheduler — the table only grows on a write, so a write is the only moment it
+ * can need trimming.
+ */
+export function writeReviewCache(opts: {
+  cacheKey: string;
+  owner: string;
+  repo: string;
+  number: number;
+  model: string;
+  resultJson: string;
+  maxAgeIso: string;
+}): boolean {
+  const db = openDatabase();
+  if (!db || !opts.cacheKey) return false;
+  try {
+    db.prepare(
+      `INSERT OR REPLACE INTO ai_review_cache
+         (cache_key, owner, repo, number, model, result_json, created_at, hits, last_hit_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
+    ).run(
+      opts.cacheKey,
+      opts.owner,
+      opts.repo,
+      opts.number,
+      opts.model,
+      opts.resultJson,
+      new Date().toISOString(),
+    );
+    db.prepare(`DELETE FROM ai_review_cache WHERE created_at < ?`).run(opts.maxAgeIso);
+    return true;
+  } catch (err) {
+    logger.debug({ err }, "dao.writeReviewCache failed");
+    return false;
+  }
+}
+
+/** Rows, hits and age span of the cache — the operator-facing summary. */
+export function reviewCacheStats(): { rows: number; hits: number; oldest: string | null } {
+  const db = openDatabase();
+  if (!db) return { rows: 0, hits: 0, oldest: null };
+  try {
+    const row = db
+      .prepare(
+        // `rows` is a SQLite keyword (window frames) — alias around it.
+        `SELECT COUNT(*) AS row_count, COALESCE(SUM(hits), 0) AS hit_count, MIN(created_at) AS oldest
+         FROM ai_review_cache`,
+      )
+      .get() as { row_count: number; hit_count: number; oldest: string | null };
+    return { rows: row.row_count ?? 0, hits: row.hit_count ?? 0, oldest: row.oldest ?? null };
+  } catch (err) {
+    logger.debug({ err }, "dao.reviewCacheStats failed");
+    return { rows: 0, hits: 0, oldest: null };
+  }
+}

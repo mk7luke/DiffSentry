@@ -45,6 +45,7 @@ baseline is not re-run), and applies migration 2 onward. No data is touched.
 | 6       | `walkthrough_state` | Server-side walkthrough state persistence (`walkthrough_state`).           |
 | 7       | `impact_shares`  | Shareable impact-report links (`impact_shares`).                              |
 | 8       | `drop_saved_views` | Drops the never-used `saved_views` table (created by v2, written to by nothing). |
+| 9       | `ai_review_cache` | Review result cache keyed by model + normalized prompt (`ai_review_cache`). Discardable — see [`src/ai/review-cache.ts`](../src/ai/review-cache.ts). |
 
 ## Adding a migration
 

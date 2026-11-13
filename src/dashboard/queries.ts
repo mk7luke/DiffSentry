@@ -785,6 +785,80 @@ export function getPatternRules(limit = 100): PatternRuleRow[] {
     .all(thirty, limit) as PatternRuleRow[];
 }
 
+// ─── Review quality scorecard ──────────────────────────────────────
+
+/**
+ * One (repo, source, severity) bucket of findings with what humans did about
+ * them. Pattern analytics answers "which rules fire?"; this answers the
+ * question a noisy reviewer actually loses trust over — "were they right?"
+ */
+export interface ScorecardRow {
+  owner: string;
+  repo: string;
+  /** 'ai' | 'safety' | 'builtin' | 'custom' | 'eslint' | 'tsc' | 'semgrep'. */
+  source: string;
+  severity: string;
+  total: number;
+  /** Explicitly confirmed by a human (accepted = 1), reaction 👍 included. */
+  accepted: number;
+  /** Explicitly dismissed (accepted = 0), reaction 👎 included. */
+  dismissed: number;
+  /** Currently snoozed — a human deferred rather than judged. */
+  snoozed: number;
+  /** Nobody has judged these either way. */
+  untriaged: number;
+}
+
+/**
+ * Finding outcomes per repo / source / severity over the last `days`.
+ *
+ * `accepted` and `dismissed` are the only two judgements in the data, so they
+ * are the only two reported; precision is deliberately left to the caller to
+ * compute, because `accepted / (accepted + dismissed)` off a handful of triaged
+ * findings is a number that reads as authority and isn't one. `untriaged` is
+ * returned beside them so a reader can see how much of the picture is missing —
+ * on most repos it is nearly all of it, and a scorecard that hid that would be
+ * worse than none.
+ *
+ * Snoozed is counted by the live clock, so a lapsed snooze falls back into
+ * `untriaged` on its own rather than needing a sweep.
+ */
+export function getReviewScorecard(days = 90, limit = 500): ScorecardRow[] {
+  const db = openDatabase();
+  if (!db) return [];
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const now = new Date().toISOString();
+  try {
+    return db
+      .prepare(
+        `SELECT rv.owner,
+                rv.repo,
+                COALESCE(fi.source, 'ai')      AS source,
+                COALESCE(fi.severity, 'minor') AS severity,
+                COUNT(*)                                                      AS total,
+                SUM(CASE WHEN fi.accepted = 1 THEN 1 ELSE 0 END)              AS accepted,
+                SUM(CASE WHEN fi.accepted = 0 THEN 1 ELSE 0 END)              AS dismissed,
+                SUM(CASE WHEN fi.accepted IS NULL
+                          AND fi.snoozed_until IS NOT NULL
+                          AND fi.snoozed_until > ? THEN 1 ELSE 0 END)         AS snoozed,
+                SUM(CASE WHEN fi.accepted IS NULL
+                          AND (fi.snoozed_until IS NULL
+                               OR fi.snoozed_until <= ?) THEN 1 ELSE 0 END)   AS untriaged
+         FROM findings fi
+         JOIN reviews rv ON rv.id = fi.review_id
+         WHERE rv.created_at >= ?
+         GROUP BY rv.owner, rv.repo, source, severity
+         ORDER BY total DESC
+         LIMIT ?`,
+      )
+      .all(now, now, since, limit) as ScorecardRow[];
+  } catch (err) {
+    // The triage columns arrive in migration 2; a v1 database has none of them.
+    logger.debug({ err }, "queries.getReviewScorecard failed");
+    return [];
+  }
+}
+
 // ─── Custom rules + their hit-counts ───────────────────────────────
 
 /** A custom_rules row augmented with its lifetime / recent pattern-hit counts. */
